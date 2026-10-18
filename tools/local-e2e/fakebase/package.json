@@ -1,0 +1,8 @@
+{
+  "name": "kok-fakebase",
+  "private": true,
+  "type": "module",
+  "description": "로컬 시험용 가짜 Supabase(Auth·PostgREST·Storage) + 가짜 Claude API",
+  "scripts": { "start": "node server.mjs" },
+  "dependencies": { "pg": "^8.13.0" }
+}

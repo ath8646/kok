@@ -1,0 +1,344 @@
+'use client';
+// 복습 문제 한 개: 풀기 → 채점 → 해설 → 평가 고르기
+import { useEffect, useRef, useState } from 'react';
+import type { Rating } from '@/lib/grading';
+import { RichText } from './RichText';
+import { Button, Chip, cx, inputClass, Spinner } from './ui';
+import { pageLabel } from './NoteView';
+
+export type ReviewQuestion = {
+  id: string;
+  type: 'mcq' | 'ox' | 'cloze' | 'short';
+  prompt: string;
+  choices: string[] | null;
+  answer: number | boolean | string;
+  accepted: string[];
+  explanation: string;
+  pages: number[];
+  key_point_id: string | null;
+  note_id: string | null;
+  subject_id: string;
+  created_by: 'ai' | 'user';
+};
+
+export type GradeOutcome = {
+  correct: boolean;
+  partial?: boolean;
+  feedback?: string;
+  missing?: string[];
+  aiUsed?: boolean;
+};
+
+const TYPE_LABEL = { mcq: '객관식', ox: 'OX', cloze: '빈칸', short: '단답' } as const;
+const RATING_LABEL: Record<Rating, string> = { 1: '다시', 2: '어려움', 3: '알맞음', 4: '쉬움' };
+
+export function answerText(q: ReviewQuestion): string {
+  if (q.type === 'mcq') return q.choices?.[Number(q.answer)] ?? '';
+  if (q.type === 'ox') return q.answer ? 'O (맞다)' : 'X (틀리다)';
+  return String(q.answer ?? '');
+}
+
+function Prompt({ q }: { q: ReviewQuestion }) {
+  if (q.type !== 'cloze') return <RichText text={q.prompt} />;
+  const parts = q.prompt.split(/(_{2,}|\(\s*\)|\[\s*\])/);
+  return (
+    <>
+      {parts.map((p, i) =>
+        /^(_{2,}|\(\s*\)|\[\s*\])$/.test(p) ? (
+          <span key={i} className="mx-1 inline-block min-w-16 border-b-[3px] border-accent align-baseline">
+            &nbsp;
+          </span>
+        ) : (
+          <RichText key={i} text={p} />
+        ),
+      )}
+    </>
+  );
+}
+
+export function QuestionCard({
+  q,
+  sourceKind,
+  subjectName,
+  onSubmit,
+  autoRate,
+  onNext,
+  onAppeal,
+  onShowVisual,
+  onReport,
+  index,
+  total,
+}: {
+  q: ReviewQuestion;
+  sourceKind?: string;
+  subjectName?: string;
+  onSubmit: (given: number | boolean | string | null, ms: number) => Promise<GradeOutcome>;
+  autoRate: (correct: boolean, ms: number) => Rating;
+  onNext: (r: { rating: Rating; correct: boolean; given: string; ms: number }) => void;
+  onAppeal?: (given: string) => Promise<void>;
+  onShowVisual?: () => void;
+  onReport?: () => void;
+  index?: number;
+  total?: number;
+}) {
+  // 문제마다 새로 만들어진다 (부모가 key 로 문제 id 를 준다)
+  const started = useRef(0);
+  const [text, setText] = useState('');
+  const [given, setGiven] = useState<number | boolean | string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [outcome, setOutcome] = useState<GradeOutcome | null>(null);
+  const [ms, setMs] = useState(0);
+  const [rating, setRating] = useState<Rating>(3);
+  const [appealed, setAppealed] = useState(false);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    started.current = Date.now();
+    if (q.type === 'cloze' || q.type === 'short') {
+      const t = setTimeout(() => inputRef.current?.focus(), 50);
+      return () => clearTimeout(t);
+    }
+  }, [q.id, q.type]);
+
+  const submit = async (value: number | boolean | string | null) => {
+    if (busy || outcome) return;
+    const spent = Date.now() - started.current;
+    setGiven(value);
+    setMs(spent);
+    setBusy(true);
+    try {
+      const res = await onSubmit(value, spent);
+      setOutcome(res);
+      setRating(res.correct && res.partial ? 2 : autoRate(res.correct, spent));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const givenText =
+    given === null ? '(모르겠어요)' : q.type === 'mcq' ? (q.choices?.[Number(given)] ?? '') : q.type === 'ox' ? (given ? 'O' : 'X') : String(given);
+
+  // 키보드: 객관식 1~4, OX 는 O/X, 채점 뒤 Enter 는 다음
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const tag = (e.target as HTMLElement | null)?.tagName;
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
+      if (outcome) {
+        if (e.key === 'Enter') {
+          e.preventDefault();
+          onNext({ rating, correct: outcome.correct, given: givenText, ms });
+        } else if (['1', '2', '3', '4'].includes(e.key)) {
+          setRating(Number(e.key) as Rating);
+        }
+        return;
+      }
+      if (q.type === 'mcq' && /^[1-6]$/.test(e.key)) {
+        const i = Number(e.key) - 1;
+        if (q.choices && i < q.choices.length) submit(i);
+      } else if (q.type === 'ox') {
+        if (e.key.toLowerCase() === 'o') submit(true);
+        if (e.key.toLowerCase() === 'x') submit(false);
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  });
+
+  return (
+    <div className="grid gap-4">
+      <div className="flex flex-wrap items-center gap-2 text-sm text-muted">
+        {typeof index === 'number' && total ? (
+          <span className="font-semibold text-ink">
+            {index + 1} / {total}
+          </span>
+        ) : null}
+        <Chip>{TYPE_LABEL[q.type]}</Chip>
+        {subjectName ? <Chip tone="accent">{subjectName}</Chip> : null}
+        {q.created_by === 'ai' ? <Chip>AI</Chip> : <Chip tone="ok">내가 만듦</Chip>}
+      </div>
+
+      <div className="rounded-3xl border border-line bg-surface p-5 shadow-[0_2px_0_var(--shadow)]">
+        <p className="text-[19px] font-semibold leading-relaxed">
+          <Prompt q={q} />
+        </p>
+
+        {/* 풀기 */}
+        {q.type === 'mcq' && q.choices ? (
+          <div className="mt-4 grid gap-2">
+            {q.choices.map((c, i) => {
+              const picked = given === i;
+              const right = outcome && Number(q.answer) === i;
+              const wrong = outcome && picked && !right;
+              return (
+                <button
+                  key={i}
+                  type="button"
+                  disabled={!!outcome || busy}
+                  onClick={() => submit(i)}
+                  className={cx(
+                    'flex items-start gap-3 rounded-2xl border-2 px-4 py-3 text-left text-[16px] transition-colors',
+                    right ? 'border-ok bg-ok-soft' : wrong ? 'border-bad bg-bad-soft' : 'border-line bg-surface hover:border-accent',
+                    outcome && !right && !wrong ? 'opacity-60' : '',
+                  )}
+                >
+                  <span className="mt-0.5 grid h-6 w-6 shrink-0 place-items-center rounded-full border border-line text-xs font-bold">{i + 1}</span>
+                  <span className="min-w-0">
+                    <RichText text={c} />
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+        ) : null}
+
+        {q.type === 'ox' ? (
+          <div className="mt-4 grid grid-cols-2 gap-3">
+            {[true, false].map((v) => {
+              const picked = given === v;
+              const right = outcome && Boolean(q.answer) === v;
+              const wrong = outcome && picked && !right;
+              return (
+                <button
+                  key={String(v)}
+                  type="button"
+                  disabled={!!outcome || busy}
+                  onClick={() => submit(v)}
+                  aria-label={v ? 'O 맞다' : 'X 틀리다'}
+                  className={cx(
+                    'rounded-2xl border-2 py-6 font-display text-4xl transition-colors',
+                    right ? 'border-ok bg-ok-soft text-ok' : wrong ? 'border-bad bg-bad-soft text-bad' : 'border-line bg-surface hover:border-accent',
+                  )}
+                >
+                  {v ? 'O' : 'X'}
+                </button>
+              );
+            })}
+          </div>
+        ) : null}
+
+        {q.type === 'cloze' || q.type === 'short' ? (
+          <form
+            className="mt-4 flex gap-2"
+            onSubmit={(e) => {
+              e.preventDefault();
+              if (text.trim()) submit(text.trim());
+            }}
+          >
+            <input
+              ref={inputRef}
+              aria-label="답"
+              className={inputClass}
+              value={outcome ? String(given ?? '') : text}
+              disabled={!!outcome || busy}
+              maxLength={200}
+              placeholder="답을 적어 주세요"
+              autoComplete="off"
+              autoCapitalize="off"
+              onChange={(e) => setText(e.target.value)}
+            />
+            {!outcome ? (
+              <Button type="submit" busy={busy} disabled={!text.trim()}>
+                확인
+              </Button>
+            ) : null}
+          </form>
+        ) : null}
+
+        {!outcome && !busy ? (
+          <button type="button" onClick={() => submit(null)} className="mt-3 text-sm font-semibold text-muted underline-offset-4 hover:underline">
+            모르겠어요
+          </button>
+        ) : null}
+        {busy && !outcome ? (
+          <p className="mt-3 flex items-center gap-2 text-sm text-muted">
+            <Spinner /> 채점하는 중…
+          </p>
+        ) : null}
+      </div>
+
+      {/* 채점 결과 */}
+      {outcome ? (
+        <div className={cx('grid gap-3 rounded-3xl border-2 p-5', outcome.correct ? 'border-ok bg-ok-soft' : 'border-bad bg-bad-soft')} role="status">
+          <p className={cx('font-display text-2xl', outcome.correct ? 'text-ok' : 'text-bad')}>
+            {outcome.correct ? (outcome.partial ? '거의 맞았어요!' : '맞았어요!') : '아쉬워요'}
+          </p>
+          {!outcome.correct || q.type === 'short' || q.type === 'cloze' ? (
+            <p className="text-[15px]">
+              <b>정답</b> <RichText text={answerText(q)} />
+              {q.type !== 'mcq' && q.type !== 'ox' ? <span className="text-muted"> · 내 답 {givenText}</span> : null}
+            </p>
+          ) : null}
+          {outcome.feedback ? (
+            <p className="text-sm">
+              <Chip>AI 채점</Chip> {outcome.feedback}
+            </p>
+          ) : null}
+          {q.explanation ? (
+            <p className="text-[15px] leading-relaxed">
+              <RichText text={q.explanation} />
+            </p>
+          ) : null}
+          <div className="flex flex-wrap items-center gap-2">
+            {q.pages.length && sourceKind && sourceKind !== 'text' ? (
+              <span className="text-xs text-muted">
+                출처{' '}
+                {q.pages
+                  .slice(0, 4)
+                  .map((p) => pageLabel(sourceKind, p))
+                  .join(', ')}
+              </span>
+            ) : null}
+            {onShowVisual ? (
+              <Button size="sm" variant="secondary" onClick={onShowVisual}>
+                그림으로 보기
+              </Button>
+            ) : null}
+            {!outcome.correct && onAppeal && (q.type === 'short' || q.type === 'cloze') && given !== null && !appealed ? (
+              <Button
+                size="sm"
+                variant="secondary"
+                onClick={async () => {
+                  await onAppeal(String(given));
+                  setAppealed(true);
+                  setOutcome({ ...outcome, correct: true, feedback: '내 답을 정답으로 넣었어요.' });
+                  setRating(3);
+                }}
+              >
+                내 답도 맞아요
+              </Button>
+            ) : null}
+            {onReport ? (
+              <button type="button" onClick={onReport} className="ml-auto text-sm font-semibold text-muted underline-offset-4 hover:underline">
+                이상해요
+              </button>
+            ) : null}
+          </div>
+
+          <div className="grid gap-2 border-t border-black/10 pt-3 dark:border-white/10">
+            <p className="text-xs text-muted">다음 복습 날짜를 정하는 평가예요. 자동으로 골랐고, 바꿔도 돼요.</p>
+            <div className="grid grid-cols-4 gap-1.5" role="radiogroup" aria-label="평가">
+              {([1, 2, 3, 4] as Rating[]).map((r) => (
+                <button
+                  key={r}
+                  type="button"
+                  role="radio"
+                  aria-checked={rating === r}
+                  onClick={() => setRating(r)}
+                  className={cx(
+                    'rounded-xl border-2 py-2 text-sm font-semibold',
+                    rating === r ? 'border-ink bg-ink text-surface' : 'border-line bg-surface text-ink',
+                  )}
+                >
+                  {RATING_LABEL[r]}
+                </button>
+              ))}
+            </div>
+            <Button size="lg" variant="ink" onClick={() => onNext({ rating, correct: outcome.correct, given: givenText, ms })}>
+              다음
+            </Button>
+          </div>
+        </div>
+      ) : null}
+    </div>
+  );
+}

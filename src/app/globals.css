@@ -1,0 +1,160 @@
+@import 'tailwindcss';
+
+/* 콕 디자인: 모눈 공책 바탕 + 파란 펜 + 형광펜 노랑 */
+:root {
+  --bg: #f2f5f9;
+  --grid: rgba(36, 86, 232, 0.05);
+  --surface: #ffffff;
+  --surface-2: #f6f8fc;
+  --ink: #18212e;
+  --muted: #566378;
+  --line: #d6deea;
+  --accent: #2456e8;
+  --accent-soft: #e8eeff;
+  --accent-ink: #ffffff;
+  --hl: #ffd93d;
+  --hl-ink: #3a2e00;
+  --ok: #138a55;
+  --ok-soft: #e2f4eb;
+  --bad: #cc3535;
+  --bad-soft: #fcebeb;
+  --warn: #b26a00;
+  --warn-soft: #fff3dc;
+  --shadow: rgba(24, 33, 46, 0.08);
+  --b1: #2456e8;
+  --b2: #e8590c;
+  --b3: #0f9d6a;
+  --b4: #1f3b8a;
+  --b5: #d6336c;
+  --b6: #7048e8;
+  --b7: #0c8599;
+  --b8: #a67c00;
+  color-scheme: light;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0e131a;
+    --grid: rgba(122, 156, 255, 0.045);
+    --surface: #161d27;
+    --surface-2: #1b2431;
+    --ink: #e7ecf4;
+    --muted: #9da9bc;
+    --line: #2c3748;
+    --accent: #7c9dff;
+    --accent-soft: #1d2846;
+    --accent-ink: #0e131a;
+    --hl: #edcb3a;
+    --hl-ink: #241c00;
+    --ok: #3bc488;
+    --ok-soft: #12322a;
+    --bad: #ff7a7a;
+    --bad-soft: #3b1d21;
+    --warn: #f0b44c;
+    --warn-soft: #33270f;
+    --shadow: rgba(0, 0, 0, 0.35);
+    --b1: #7c9dff;
+    --b2: #ff9b5e;
+    --b3: #45d39a;
+    --b4: #9db4ff;
+    --b5: #ff7aa8;
+    --b6: #b19cff;
+    --b7: #4fd1e3;
+    --b8: #e6c35c;
+    color-scheme: dark;
+  }
+}
+
+@theme inline {
+  --color-bg: var(--bg);
+  --color-surface: var(--surface);
+  --color-surface-2: var(--surface-2);
+  --color-ink: var(--ink);
+  --color-muted: var(--muted);
+  --color-line: var(--line);
+  --color-accent: var(--accent);
+  --color-accent-soft: var(--accent-soft);
+  --color-accent-ink: var(--accent-ink);
+  --color-hl: var(--hl);
+  --color-hl-ink: var(--hl-ink);
+  --color-ok: var(--ok);
+  --color-ok-soft: var(--ok-soft);
+  --color-bad: var(--bad);
+  --color-bad-soft: var(--bad-soft);
+  --color-warn: var(--warn);
+  --color-warn-soft: var(--warn-soft);
+  --font-display: 'Jua', 'Apple SD Gothic Neo', 'Malgun Gothic', 'Noto Sans KR', sans-serif;
+  --font-sans: 'Pretendard Variable', 'Pretendard', 'Apple SD Gothic Neo', 'Malgun Gothic', 'Noto Sans KR', system-ui, sans-serif;
+  --font-mono: ui-monospace, 'SFMono-Regular', Menlo, Consolas, monospace;
+}
+
+html,
+body {
+  min-height: 100%;
+}
+
+body {
+  background-color: var(--bg);
+  background-image: linear-gradient(var(--grid) 1px, transparent 1px), linear-gradient(90deg, var(--grid) 1px, transparent 1px);
+  background-size: 24px 24px;
+  color: var(--ink);
+  font-family: var(--font-sans);
+  line-height: 1.6;
+  -webkit-tap-highlight-color: transparent;
+  -webkit-text-size-adjust: 100%;
+}
+
+/* 형광펜 밑줄 */
+.hl-mark {
+  background: linear-gradient(transparent 58%, var(--hl) 58%);
+  padding: 0 0.15em;
+}
+
+.focus-ring:focus-visible,
+button:focus-visible,
+a:focus-visible,
+input:focus-visible,
+textarea:focus-visible,
+select:focus-visible {
+  outline: 3px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* 마인드맵 펼치기 움직임 */
+@keyframes kok-pop {
+  from {
+    opacity: 0;
+    transform: scale(0.92);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+.mm-step {
+  animation: kok-pop 0.35s ease both;
+  transform-box: fill-box;
+  transform-origin: center;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    transition-duration: 0.001ms !important;
+  }
+}
+
+/* KaTeX 글자 크기 */
+.katex {
+  font-size: 1.05em;
+}
+
+/* 한 줄짜리 grid 는 내용이 넓어도 화면 밖으로 밀어내지 않게 (마인드맵·표가 가로 스크롤 상자 안에 머물도록).
+   grid-cols-* 를 쓴 곳은 utilities 층이 이겨서 그대로다. */
+@layer base {
+  .grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}

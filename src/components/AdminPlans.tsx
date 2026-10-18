@@ -126,8 +126,21 @@ function toBody(f: PlanForm): { body: Record<string, unknown> } | { error: strin
   return { body: out };
 }
 
-/** refreshKey: 바뀌면 플랜 목록(쓰는 사람 수)을 다시 읽는다 (사용자 목록에서 테스트 플랜을 끝냈을 때) */
-export function AdminPlans({ limits, onChanged, refreshKey = 0 }: { limits: Limits; onChanged?: () => void; refreshKey?: number }) {
+/**
+ * refreshKey: 바뀌면 플랜 목록(쓰는 사람 수)을 다시 읽는다 (사용자 목록에서 테스트 플랜을 끝냈을 때)
+ * planFlags: DB 에 자료 더하기·테마 칸이 있는지 (없으면 그 두 스위치를 끈다)
+ */
+export function AdminPlans({
+  limits,
+  onChanged,
+  refreshKey = 0,
+  planFlags = true,
+}: {
+  limits: Limits;
+  onChanged?: () => void;
+  refreshKey?: number;
+  planFlags?: boolean;
+}) {
   const toast = useToast();
   const [plans, setPlans] = useState<PlanRow[] | null>(null);
   const [schemaHint, setSchemaHint] = useState<string | null>(null);
@@ -197,9 +210,11 @@ export function AdminPlans({ limits, onChanged, refreshKey = 0 }: { limits: Limi
     }
     setBusy('plan');
     try {
-      if (form.id) await api(`/api/admin/plans/${form.id}`, { method: 'PATCH', body: JSON.stringify(v.body) });
-      else await api('/api/admin/plans', { method: 'POST', body: JSON.stringify(v.body) });
-      toast(form.id ? '플랜을 고쳤어요.' : `'${form.name.trim()}' 플랜을 만들었어요. 이제 코드를 만들어 나눠 주세요.`, 'ok');
+      const r = form.id
+        ? await api<{ warning?: string }>(`/api/admin/plans/${form.id}`, { method: 'PATCH', body: JSON.stringify(v.body) })
+        : await api<{ warning?: string }>('/api/admin/plans', { method: 'POST', body: JSON.stringify(v.body) });
+      if (r.warning) toast(r.warning, 'bad');
+      else toast(form.id ? '플랜을 고쳤어요.' : `'${form.name.trim()}' 플랜을 만들었어요. 이제 코드를 만들어 나눠 주세요.`, 'ok');
       setForm(null);
       await loadPlans();
       onChanged?.();
@@ -473,8 +488,21 @@ export function AdminPlans({ limits, onChanged, refreshKey = 0 }: { limits: Limi
               참고: 무료는 하루 ⚡ {fmt(limits.freeDaily)}, Pro는 한 달 ⚡ {fmt(limits.proMonthly)} (하루 최대 ⚡ {fmt(limits.proDaily)})예요.
             </p>
             <Toggle id="plan-careful" label="꼼꼼 모델 쓰기" checked={form.careful} onChange={(v) => setForm({ ...form, careful: v })} />
-            <Toggle id="plan-append" label="노트에 자료 더하기 (버전)" checked={form.canAppend} onChange={(v) => setForm({ ...form, canAppend: v })} />
-            <Toggle id="plan-theme" label="테마 쓰기" checked={form.canTheme} onChange={(v) => setForm({ ...form, canTheme: v })} />
+            <Toggle
+              id="plan-append"
+              label="노트에 자료 더하기 (버전)"
+              checked={planFlags && form.canAppend}
+              disabled={!planFlags}
+              onChange={(v) => setForm({ ...form, canAppend: v })}
+            />
+            <Toggle
+              id="plan-theme"
+              label="테마 쓰기"
+              checked={planFlags && form.canTheme}
+              disabled={!planFlags}
+              onChange={(v) => setForm({ ...form, canTheme: v })}
+            />
+            {!planFlags ? <p className="text-xs text-muted">자료 더하기·테마는 Supabase 에서 schema.sql 을 다시 실행하면 켤 수 있어요.</p> : null}
             <input
               aria-label="메모"
               className={inputClass}

@@ -26,6 +26,12 @@ pg.types.setTypeParser(1700, (v) => Number(v));
 pg.types.setTypeParser(20, (v) => Number(v));
 // date 는 문자열 그대로
 pg.types.setTypeParser(1082, (v) => v);
+// timestamptz 는 PostgREST 처럼 마이크로초까지 ISO 글자로 ("2026-10-18T03:00:00.123456+00:00").
+// JS Date 로 바꾸면 밀리초에서 잘려, 읽은 updated_at 그대로 고치는(eq) 검사가 실제와 다르게 동작한다
+pg.types.setTypeParser(1184, (v) => {
+  const m = /^(\d{4}-\d{2}-\d{2}) (\d{2}:\d{2}:\d{2}(?:\.\d+)?)([+-]\d{2})(?::?(\d{2}))?$/.exec(v);
+  return m ? `${m[1]}T${m[2]}${m[3]}:${m[4] ?? '00'}` : v;
+});
 
 const stats = { messages: 0, tasks: {}, maxDocBytes: 0, docs: 0 };
 let failTask = process.env.FAKE_FAIL_TASK || '';
@@ -612,12 +618,16 @@ async function handleAuth(req, res, url, auth) {
 }
 
 // ------------------------------------------------------------------ Claude (가짜)
+/** 자료 글에 '표시:이름' 이 있으면 정리 노트에 남긴다 (자료 더하기 시험에서 어느 자료가 합쳐졌는지 본다) */
+const MARK = /표시:([^\s".,<]+)/g;
+
 function fakeNote(text) {
   const title = /광합성/.test(text) ? '광합성' : '시험 자료';
+  const marks = [...new Set([...text.matchAll(MARK)].map((m) => m[1]))];
   return {
     title,
     unit: '2. 식물과 에너지',
-    summary: '식물은 빛 에너지로 $CO_2$와 물을 포도당과 산소로 바꾸는 광합성을 한다.',
+    summary: '식물은 빛 에너지로 $CO_2$와 물을 포도당과 산소로 바꾸는 광합성을 한다.' + marks.map((m) => ` 표시:${m}`).join(''),
     key_points: [
       { id: 'k1', title: '광합성의 재료', explanation: '광합성에는 물과 이산화탄소가 필요하다. 물은 뿌리, 이산화탄소는 기공으로 들어온다.', why: '재료와 결과물을 바꿔 묻는 문제가 자주 나온다.', importance: 'high', pages: [1] },
       { id: 'k2', title: '광합성 장소: 엽록체', explanation: '광합성은 잎의 엽록체에서 일어난다. 엽록체에는 엽록소가 있다.', why: '세포 소기관 이름을 헷갈리기 쉽다.', importance: 'high', pages: [2] },
@@ -671,17 +681,32 @@ function fakeVisual(prompt) {
   };
 }
 
-/** 노트에 자료를 더할 때: 지금 노트에 새 개념(k5) 하나가 붙은 노트 */
+/**
+ * 노트에 자료를 더할 때: 받은 지금 노트(<note>)에 새 자료의 개념을 붙인다.
+ * 새 자료(<new_parts>)에 '표시:이름' 이 있으면 '표시 이름' 개념을, 없으면 '광합성과 호흡' 개념을 붙인다
+ */
 function fakeMerged(textOf) {
-  const n = fakeNote(textOf);
-  return {
-    ...n,
-    summary: '식물은 광합성으로 양분을 만들고, 호흡으로 그 양분에서 에너지를 꺼내 쓴다.',
-    key_points: [
-      ...n.key_points,
-      { id: 'k5', title: '광합성과 호흡', explanation: '호흡은 포도당을 분해해 에너지를 얻는 과정으로, 밤낮없이 일어난다.', why: '광합성과 비교하는 문제가 나온다.', importance: 'high', pages: [] },
-    ],
-  };
+  const section = (tag) => (textOf.match(new RegExp(`<${tag}>\\n([\\s\\S]*?)\\n</${tag}>`)) || [])[1] || '';
+  let base = null;
+  try {
+    base = JSON.parse(section('note'));
+  } catch {
+    base = null;
+  }
+  const n = base && Array.isArray(base.key_points) ? { ...fakeNote(textOf), ...base } : fakeNote(textOf);
+  const kps = [...n.key_points];
+  const nextId = () => `k${Math.max(0, ...kps.map((k) => Number(String(k.id).replace(/\D/g, '')) || 0)) + 1}`;
+  const marks = [...new Set([...section('new_parts').matchAll(MARK)].map((m) => m[1]))];
+  if (!marks.length) {
+    if (!kps.some((k) => k.title === '광합성과 호흡')) {
+      kps.push({ id: nextId(), title: '광합성과 호흡', explanation: '호흡은 포도당을 분해해 에너지를 얻는 과정으로, 밤낮없이 일어난다.', why: '광합성과 비교하는 문제가 나온다.', importance: 'high', pages: [] });
+    }
+    return { ...n, summary: '식물은 광합성으로 양분을 만들고, 호흡으로 그 양분에서 에너지를 꺼내 쓴다.', key_points: kps };
+  }
+  for (const m of marks) {
+    if (!kps.some((k) => k.title === `표시 ${m}`)) kps.push({ id: nextId(), title: `표시 ${m}`, explanation: `${m} 자료에서 더한 내용이에요.`, why: '', importance: 'medium', pages: [] });
+  }
+  return { ...n, key_points: kps };
 }
 
 /** 더한 자료(k5)로만 만든 새 문제 */

@@ -20,6 +20,8 @@ function getClient(): Anthropic {
 export type ContentPart = Anthropic.Messages.ContentBlockParam;
 
 export class AiCallError extends Error {
+  /** 답이 최대 길이(max_tokens)에 닿아 잘렸다 */
+  truncated = false;
   constructor(
     public kind: 'retryable' | 'refusal' | 'bad_output' | 'fatal',
     message: string,
@@ -105,6 +107,7 @@ export async function callJson(req: JsonCall): Promise<JsonResult> {
   }
   if (res.stop_reason === 'max_tokens') {
     const err = new AiCallError('bad_output', 'AI 답이 너무 길어서 잘렸어요.');
+    err.truncated = true;
     (err as AiCallError & { usage?: Usage }).usage = usage;
     throw err;
   }

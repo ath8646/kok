@@ -4,7 +4,7 @@ import { z } from 'zod';
 import { assertSameOrigin, assertUuid, readJson, requireAccount } from '@/lib/server/auth';
 import { getAppSettings } from '@/lib/server/account';
 import { UserFacingError, errorResponse } from '@/lib/server/errors';
-import { loadOwnedNote, noteForPrompt } from '@/lib/server/notes';
+import { assertNoAppendRunning, assertSameVersion, loadOwnedNote, noteForPrompt, updateNoteBody } from '@/lib/server/notes';
 import { runTask } from '@/lib/server/tasks';
 import { cleanMindmap, maxNodesFor } from '@/lib/server/pipeline';
 import { textBlock } from '@/lib/server/claude';
@@ -16,6 +16,8 @@ export const maxDuration = 150;
 const Preview = z.object({ action: z.literal('preview'), want: z.enum(['table', 'timeline']).optional() });
 const Apply = z.object({
   action: z.literal('apply'),
+  /** 미리보기를 만든 노트 버전 (그사이 버전이 바뀌었으면 넣지 않는다) */
+  version: z.number().int().min(1).optional(),
   recommended: z.enum(['mindmap', 'table', 'timeline']).optional(),
   mindmap: zMindmap.optional(),
   table: zTable.nullable().optional(),
@@ -46,6 +48,8 @@ export async function POST(req: NextRequest, ctx: RouteContext<'/api/notes/[id]/
     const apply = Apply.safeParse(body);
     if (apply.success) {
       const a = apply.data;
+      assertSameVersion(note, a.version);
+      await assertNoAppendRunning(admin, note.source_id);
       checkSizes(a.mindmap, a.table, a.timeline);
       const rows: Array<{ user_id: string; note_id: string; type: string; spec: unknown }> = [];
       if (a.mindmap) rows.push({ user_id: acc.userId, note_id: note.id, type: 'mindmap', spec: a.mindmap });
@@ -56,17 +60,16 @@ export async function POST(req: NextRequest, ctx: RouteContext<'/api/notes/[id]/
         if (error) throw error;
       }
       if (a.recommended) {
-        const { error } = await admin
-          .from('notes')
-          .update({ body: { ...note.raw, recommended: a.recommended } })
-          .eq('id', note.id);
-        if (error) throw error;
+        const recommended = a.recommended;
+        await updateNoteBody(admin, note.id, acc.userId, (cur) => ({ ...cur.raw, recommended }));
       }
       return Response.json({ ok: true });
     }
 
     const preview = Preview.safeParse(body);
     if (!preview.success) throw new UserFacingError('bad_body', '보낸 내용이 올바르지 않아요.', 400);
+    // 자료를 더하는 동안에는 적용할 수 없으니 에너지를 쓰기 전에 알려 준다
+    await assertNoAppendRunning(admin, note.source_id);
 
     const app = await getAppSettings(admin);
     const v = acc.settings.visual;
@@ -110,6 +113,7 @@ export async function POST(req: NextRequest, ctx: RouteContext<'/api/notes/[id]/
     }
     return Response.json({
       ok: true,
+      version: note.version,
       preview: {
         recommended: visual.recommended,
         mindmap,

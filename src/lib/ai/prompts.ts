@@ -72,12 +72,12 @@ export function mergePrompt(parts: number): string {
 }
 
 /** 노트에 자료를 더할 때: 지금 노트(<note>)에 새 자료의 정리(<new_parts>)를 합친다 */
-export function appendMergePrompt(parts: number): string {
+export function appendMergePrompt(parts: number, maxKeyPoints = 9): string {
   return [
     `The study note in <note> is the student's current note. The JSON in <new_parts> holds study notes made from new material the student added to it (${parts} part${parts > 1 ? 's' : ''}).`,
     'Merge the new material into the current note and return one study note with the same fields.',
     "- Keep the current note's structure, wording and key point order where you can. Add the new material where it fits, as new key points or inside existing ones.",
-    '- Keep at most 9 key points, merging duplicates. Existing key points keep their ids ("k1", "k2", ...); new key points get the next unused ids. Update every key_point_id in pitfalls and examples to match.',
+    `- Keep every key point of the current note; merge two only if they say the same thing. Use at most ${maxKeyPoints} key points in total, so put new material inside existing key points when there is no room. Existing key points keep their ids ("k1", "k2", ...); new key points get the next unused ids. Update every key_point_id in pitfalls and examples to match.`,
     '- Keep the page numbers of the current note. Page numbers in <new_parts> belong to the new material, so use [] as pages for anything that comes only from it.',
     '- Merge terms, formulas, pitfalls and examples, dropping duplicates.',
     '- title: keep the current title unless the new material changes the topic. unit: the unit or chapter the note covers, at most 20 characters. summary: one sentence for the whole note.',

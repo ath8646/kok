@@ -423,6 +423,8 @@ alter table public.sources add column if not exists parent_id uuid references pu
 create index if not exists sources_parent_idx on public.sources (parent_id) where parent_id is not null;
 
 alter table public.notes add column if not exists current_version int not null default 1;
+-- 지금까지 만든 가장 큰 버전 번호. 버전을 지워도 번호를 다시 쓰지 않는다 (같은 번호가 다른 내용을 가리키지 않게)
+alter table public.notes add column if not exists version_seq int not null default 0;
 
 create table if not exists public.note_versions (
   id uuid primary key default gen_random_uuid(),
@@ -446,9 +448,17 @@ drop trigger if exists note_versions_touch on public.note_versions;
 create trigger note_versions_touch before update on public.note_versions
   for each row execute function public.kok_touch_updated_at();
 
+-- version_seq 가 생기기 전에 만든 버전 번호도 다시 쓰지 않게 채운다 (모자란 노트만 한 번 바뀐다)
+update public.notes n
+   set version_seq = v.top
+  from (select note_id, max(number) as top from public.note_versions group by note_id) v
+ where v.note_id = n.id and n.version_seq < v.top;
+
 -- 문제 상태 hidden: 지금 쓰는 버전에 없는 문제 (그 버전으로 바꾸면 돌아온다). 복습에는 active 만 나온다
 alter table public.questions drop constraint if exists questions_status_check;
 alter table public.questions add constraint questions_status_check check (status in ('active', 'suspended', 'hidden'));
+-- 쉬게 한 문제(suspended)가 숨겨지면 여기에 남긴다: 그 문제가 있는 버전으로 돌아오면 다시 '쉬는 중'이 된다
+alter table public.questions add column if not exists rested_hidden boolean not null default false;
 
 -- ---------------------------------------------------------------------
 -- chat_messages: 노트 채팅 (노트마다 저장, 쓰기는 서버만)
@@ -697,9 +707,16 @@ create policy "visuals: update own" on public.visuals
 drop policy if exists "note_versions: read own" on public.note_versions;
 create policy "note_versions: read own" on public.note_versions
   for select to authenticated using (user_id = (select auth.uid()));
+-- 지난 버전만 고칠 수 있다. 지금 버전의 행은 다음에 버전을 바꿀 때 노트로 다시 채워지므로 고쳐도 남지 않는다
+-- (다른 기기에서 그 버전을 지금 버전으로 바꾼 뒤 예전 화면에서 고친 경우: 0행이 바뀌고 화면이 다시 읽는다)
 drop policy if exists "note_versions: update own" on public.note_versions;
 create policy "note_versions: update own" on public.note_versions
-  for update to authenticated using (user_id = (select auth.uid())) with check (user_id = (select auth.uid()));
+  for update to authenticated
+  using (
+    user_id = (select auth.uid())
+    and not exists (select 1 from public.notes n where n.id = note_versions.note_id and n.current_version = note_versions.number)
+  )
+  with check (user_id = (select auth.uid()));
 
 -- chat_messages
 drop policy if exists "chat: read own" on public.chat_messages;
@@ -947,7 +964,7 @@ begin
   end if;
   update public.sources
      set status = 'queued', error = null, locked_until = null,
-         draft = coalesce(draft, '{}'::jsonb) || '{"attempts": 0}'::jsonb
+         draft = coalesce(draft, '{}'::jsonb) || '{"attempts": 0, "remerged": 0}'::jsonb
    where id = s.id;
   return jsonb_build_object('result', 'ok', 'need', v_need);
 end;
@@ -1069,7 +1086,7 @@ as $$
 $$;
 
 -- 문제 여러 개 넣기 (카드도 같이). p_replace 면 잠그지 않고 고치지 않은 AI 문제를 먼저 지운다.
--- 지난 버전에 들어 있는 문제는 지우지 않고 숨긴다 (그 버전으로 돌아가면 다시 나온다)
+-- 지난 버전에 들어 있는 문제는 지우지 않고 숨긴다 (그 버전으로 돌아가면 다시 나온다. 쉬게 한 문제는 다시 '쉬는 중')
 create or replace function public.kok_add_questions(p_note uuid, p_questions jsonb, p_replace boolean)
 returns int
 language plpgsql
@@ -1087,7 +1104,7 @@ begin
     raise exception 'note_not_found';
   end if;
   if p_replace then
-    update public.questions q set status = 'hidden'
+    update public.questions q set status = 'hidden', rested_hidden = (q.status = 'suspended')
      where q.note_id = n.id and q.created_by = 'ai' and q.locked = false and q.edited = false and q.status <> 'hidden'
        and exists (select 1 from public.note_versions v
                     where v.note_id = n.id and v.number <> n.current_version and q.id = any(v.question_ids));
@@ -1207,10 +1224,42 @@ begin
 end;
 $$;
 
+-- 자료를 더할 때 합치는 바탕이 된 노트의 지문: 정리 내용(보기 설정·추천 그림 빼고)과 마인드맵.
+-- 합친 뒤에 노트가 바뀌었는지(다른 버전으로 바뀜, 학생이 고침) 알아본다. 같은 내용이면 같은 값이다
+create or replace function public.kok_note_base(p_note uuid)
+returns text
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select md5(
+    coalesce((select (n.body - 'view' - 'recommended')::text from public.notes n where n.id = p_note), '')
+    || '|' ||
+    coalesce((select v.spec::text from public.visuals v where v.note_id = p_note and v.type = 'mindmap'), '')
+  );
+$$;
+
+-- 합칠 때 읽을 노트: 내용과 그 지문을 한 번에 (사이에 바뀌지 않게)
+create or replace function public.kok_note_for_merge(p_source uuid)
+returns jsonb
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select jsonb_build_object('id', n.id, 'body', n.body, 'base', public.kok_note_base(n.id))
+    from public.notes n where n.source_id = p_source;
+$$;
+
 -- 더한 자료의 정리를 마치면: 지금 버전을 저장하고, 합친 노트를 새 버전으로 만들어 지금 버전으로 쓴다.
--- 기존 문제와 복습 기록은 그대로 두고 새 문제만 더한다
+-- 기존 문제와 복습 기록은 그대로 두고 새 문제만 더한다. 새 버전 번호는 지운 번호도 다시 쓰지 않는다.
+-- p_base: 합칠 때 쓴 노트의 지문(kok_note_base). 그 뒤에 노트가 바뀌었으면(실패한 자료를 나중에 다시 하기 등)
+-- 저장하지 않고 'stale_base' 를 낸다. 서버가 지금 노트에 다시 합친다
+drop function if exists public.kok_finalize_append(uuid, jsonb, jsonb, jsonb, timestamptz);
+drop function if exists public.kok_finalize_append(uuid, jsonb, jsonb, jsonb, timestamptz, int);
 create or replace function public.kok_finalize_append(
-  p_child uuid, p_note jsonb, p_visuals jsonb, p_questions jsonb, p_expire timestamptz
+  p_child uuid, p_note jsonb, p_visuals jsonb, p_questions jsonb, p_expire timestamptz, p_base text default null
 )
 returns int
 language plpgsql
@@ -1234,14 +1283,19 @@ begin
   if not found then
     raise exception 'note_not_found';
   end if;
+  -- 그림 행도 잠근다: 지문을 확인한 뒤 지금 버전을 저장하기 전에 그림을 고치면 어느 버전에도 남지 않으니까
+  perform 1 from public.visuals where note_id = n.id for update;
+  if p_base is not null and public.kok_note_base(n.id) <> p_base then
+    raise exception 'stale_base';
+  end if;
 
   perform public.kok_note_snapshot(n.id);
-  select coalesce(max(number), 0) + 1 into v_no from public.note_versions where note_id = n.id;
+  select greatest(coalesce(max(number), 0), n.version_seq, n.current_version) + 1 into v_no from public.note_versions where note_id = n.id;
   select materials into v_materials from public.note_versions where note_id = n.id and number = n.current_version;
   v_materials := coalesce(v_materials, '[]'::jsonb)
     || jsonb_build_array(jsonb_build_object('source_id', c.id, 'kind', c.kind, 'title', c.title, 'page_count', c.page_count));
 
-  update public.notes set body = p_note, current_version = v_no where id = n.id;
+  update public.notes set body = p_note, current_version = v_no, version_seq = v_no where id = n.id;
   delete from public.visuals where note_id = n.id;
   for v in select * from jsonb_array_elements(coalesce(p_visuals, '[]'::jsonb)) loop
     insert into public.visuals (user_id, note_id, type, spec) values (n.user_id, n.id, v->>'type', v->'spec');
@@ -1264,7 +1318,7 @@ end;
 $$;
 
 -- 버전 바꾸기: 지금 노트를 저장하고, 고른 버전의 정리·그림을 꺼내고, 그 버전에 없는 문제는 숨긴다(hidden).
--- 내가 쉬게 한 문제(suspended)는 그대로 둔다
+-- 쉬게 한 문제(suspended)도 그 버전에 없으면 숨기고(rested_hidden), 돌아오면 다시 '쉬는 중'으로 둔다
 create or replace function public.kok_switch_version(p_note uuid, p_user uuid, p_number int)
 returns int
 language plpgsql
@@ -1299,9 +1353,9 @@ begin
   for v in select * from jsonb_array_elements(coalesce(t.visuals, '[]'::jsonb)) loop
     insert into public.visuals (user_id, note_id, type, spec) values (n.user_id, n.id, v->>'type', v->'spec');
   end loop;
-  update public.questions set status = 'hidden'
-   where note_id = n.id and status = 'active' and not (id = any(t.question_ids));
-  update public.questions set status = 'active'
+  update public.questions set status = 'hidden', rested_hidden = (status = 'suspended')
+   where note_id = n.id and status in ('active', 'suspended') and not (id = any(t.question_ids));
+  update public.questions set status = case when rested_hidden then 'suspended' else 'active' end, rested_hidden = false
    where note_id = n.id and status = 'hidden' and id = any(t.question_ids);
   return p_number;
 end;
@@ -1330,6 +1384,11 @@ begin
   if not exists (select 1 from public.note_versions where note_id = n.id and number = p_number) then
     raise exception 'version_not_found';
   end if;
+  -- 지운 번호를 다시 쓰지 않게, 지우기 전에 지금까지 쓴 가장 큰 번호를 남긴다 (version_seq 가 생기기 전에 만든 버전도)
+  update public.notes
+     set version_seq = greatest(version_seq, current_version, (select max(number) from public.note_versions where note_id = n.id))
+   where id = n.id
+     and version_seq < greatest(current_version, (select max(number) from public.note_versions where note_id = n.id));
   select max(number) into v_other from public.note_versions where note_id = n.id and number <> p_number;
   if v_other is null then
     raise exception 'last_version';
@@ -1381,12 +1440,16 @@ grant execute on function public.kok_my_study_days(int) to authenticated;
 revoke execute on function public.kok_add_questions(uuid, jsonb, boolean) from public, anon, authenticated;
 revoke execute on function public.kok_finalize_source(uuid, text, jsonb, jsonb, jsonb, timestamptz) from public, anon, authenticated;
 revoke execute on function public.kok_note_snapshot(uuid) from public, anon, authenticated;
-revoke execute on function public.kok_finalize_append(uuid, jsonb, jsonb, jsonb, timestamptz) from public, anon, authenticated;
+revoke execute on function public.kok_finalize_append(uuid, jsonb, jsonb, jsonb, timestamptz, text) from public, anon, authenticated;
+revoke execute on function public.kok_note_base(uuid) from public, anon, authenticated;
+revoke execute on function public.kok_note_for_merge(uuid) from public, anon, authenticated;
 revoke execute on function public.kok_switch_version(uuid, uuid, int) from public, anon, authenticated;
 revoke execute on function public.kok_delete_version(uuid, uuid, int) from public, anon, authenticated;
 grant execute on function public.kok_add_questions(uuid, jsonb, boolean) to service_role;
 grant execute on function public.kok_note_snapshot(uuid) to service_role;
-grant execute on function public.kok_finalize_append(uuid, jsonb, jsonb, jsonb, timestamptz) to service_role;
+grant execute on function public.kok_finalize_append(uuid, jsonb, jsonb, jsonb, timestamptz, text) to service_role;
+grant execute on function public.kok_note_base(uuid) to service_role;
+grant execute on function public.kok_note_for_merge(uuid) to service_role;
 grant execute on function public.kok_switch_version(uuid, uuid, int) to service_role;
 grant execute on function public.kok_delete_version(uuid, uuid, int) to service_role;
 grant execute on function public.kok_finalize_source(uuid, text, jsonb, jsonb, jsonb, timestamptz) to service_role;

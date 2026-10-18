@@ -479,6 +479,8 @@ async def main():
         await page.goto(BASE + "/add")
         await page.wait_for_url(re.compile(r"/library"))
         await expect(page.get_by_role("dialog", name="자료 넣기")).to_be_visible()
+        # 입력칸에 커서가 들어간 뒤(= Esc 를 듣기 시작한 뒤)에 누른다
+        await expect(page.get_by_role("dialog", name="자료 넣기").locator("textarea")).to_be_focused()
         await page.keyboard.press("Escape")
         await expect(page.get_by_role("dialog", name="자료 넣기")).to_be_hidden()
 
@@ -878,6 +880,179 @@ async def main():
         await sheet.get_by_role("button", name="취소").click()
         await expect(sheet).to_be_hidden()
         assert await page.get_by_label("넣는 중인 자료").count() == 0, "nothing is added without confirming"
+        await ctx.close()
+
+        # ---------------- 고친 버그: 실패한 자료 다시 하기, 예전 탭, 쉬는 문제, 긴 채팅, 노트마다 줄
+        student_id = USERS["student"][0]
+        # 앞 단계에서 AI 를 많이 불러서 하루 에너지·1분 요청 한도에 걸리지 않게 비운다
+        psql(f"delete from public.energy_ledger where user_id = '{student_id}'; delete from public.rate_hits where user_id = '{student_id}'")
+        kp_titles = lambda: psql(
+            f"select coalesce(string_agg(k->>'title', '|'), '') from public.notes n, jsonb_array_elements(n.body->'key_points') k where n.source_id = '{note_sid}'"
+        )
+        cur_version = lambda: int(psql(f"select current_version from public.notes where source_id = '{note_sid}'"))
+        child_of = lambda prefix: psql(f"select id from public.sources where parent_id = '{note_sid}' and text_content like '{prefix}%'")
+
+        async def wait_db(page, sql, want, timeout=120):
+            t0 = time.time()
+            while time.time() - t0 < timeout:
+                if psql(sql) == want:
+                    return True
+                await page.wait_for_timeout(700)
+            return False
+
+        step("a failed addition retried after another one merges into the newest version")
+        ctx, page = await new_ctx(browser, "student")
+        await page.goto(BASE + f"/notes/{note_sid}?tab=original")
+        assert await wait_ready(page)
+        add = page.get_by_role("region", name="이 노트에 자료 더하기")
+        v_start = cur_version()
+        urllib.request.urlopen("http://localhost:54321/__fail?task=quiz")
+        try:
+            await add.get_by_label("더할 내용").fill("B 자료예요. 표시:베타 직렬 회로와 병렬 회로를 정리해 보자.")
+            await add.get_by_role("button", name="글 더하기").click()
+            await expect(page.get_by_text("자료를 더하지 못했어요")).to_be_visible(timeout=120000)
+        finally:
+            urllib.request.urlopen("http://localhost:54321/__fail?task=")
+        b_id = child_of("B 자료예요")
+        assert psql(f"select status from public.sources where id = '{b_id}'") == "error"
+        assert cur_version() == v_start, "a failed addition makes no version"
+        # B 가 멈춘 사이 C 를 더해 새 버전이 생긴다
+        await add.get_by_label("더할 내용").fill("C 자료예요. 표시:감마 전류와 전압의 관계를 정리해 보자.")
+        await add.get_by_role("button", name="글 더하기").click()
+        assert await wait_db(page, f"select status from public.sources where parent_id = '{note_sid}' and text_content like 'C 자료예요%'", "ready")
+        v_c = cur_version()
+        assert v_c != v_start and "표시 감마" in kp_titles() and "표시 베타" not in kp_titles(), kp_titles()
+        await expect(page.get_by_text("자료를 더하지 못했어요")).to_be_visible()
+        await shot(page, "50-append-failed", full=False)
+        # B 를 다시 하면 B 를 합쳐 둔 옛 버전이 아니라 지금 버전(C 까지 든 것)에 다시 합친다
+        await page.get_by_role("region", name="노트에 더하는 자료").get_by_role("button", name="다시 하기").click()
+        assert await wait_db(page, f"select status from public.sources where id = '{b_id}'", "ready")
+        titles = kp_titles()
+        assert "표시 감마" in titles and "표시 베타" in titles, titles
+        v_b = cur_version()
+        assert v_b not in (v_start, v_c), (v_start, v_c, v_b)
+        mats = psql(
+            f"select string_agg(m->>'source_id', ',') from public.note_versions v join public.notes n on n.id = v.note_id, jsonb_array_elements(v.materials) m "
+            f"where n.source_id = '{note_sid}' and v.number = {v_b}"
+        )
+        assert b_id in mats and child_of("C 자료예요") in mats, mats
+        await page.get_by_role("tab", name="정리").click()
+        await expect(page.get_by_role("heading", name=re.compile("표시 베타"))).to_be_visible(timeout=15000)
+        await expect(page.get_by_role("heading", name=re.compile("표시 감마"))).to_be_visible()
+
+        step("an old tab cannot overwrite a newer version, and a rested question stays rested")
+        # 지금 버전에만 있는 문제 하나를 쉬게 한다
+        only_cur = psql(
+            f"select q.id from public.questions q join public.notes n on n.id = q.note_id where n.source_id = '{note_sid}' and q.status = 'active' "
+            f"and not exists (select 1 from public.note_versions v where v.note_id = n.id and v.number <> n.current_version and q.id = any(v.question_ids)) "
+            f"order by q.created_at desc limit 1"
+        )
+        assert only_cur, "a question only in the current version"
+        psql(f"update public.questions set status = 'suspended' where id = '{only_cur}'")
+        page2 = await ctx.new_page()
+        await page2.goto(BASE + f"/notes/{note_sid}?tab=original")
+        assert await wait_ready(page2)
+        versions2 = page2.get_by_role("region", name="버전 기록")
+        await versions2.locator("li").filter(has_text=f"버전 {v_c} ·").get_by_role("button", name="열기").click()
+        await expect(page2.get_by_text("지난 버전을 보고 있어요")).to_be_visible()
+        page2.once("dialog", lambda d: d.accept())
+        await page2.get_by_role("button", name="이 버전 쓰기").first.click()
+        await expect(page2.get_by_text(f"지금 버전을 바꿨어요 (버전 {v_c}).")).to_be_visible()
+        assert cur_version() == v_c
+        assert psql(f"select status || ',' || rested_hidden::text from public.questions where id = '{only_cur}'") == "hidden,true"
+        # 첫 탭은 아직 예전(버전 {v_b}) 화면이다: 여기서 고쳐도 지금 버전을 덮어쓰지 않는다
+        summary_before = psql(f"select body->>'summary' from public.notes where source_id = '{note_sid}'")
+        await page.get_by_role("button", name="요약 고치기").click()
+        await page.get_by_label("요약").fill("예전 탭에서 고친 요약이에요.")
+        await page.get_by_role("button", name="저장", exact=True).first.click()
+        await expect(page.get_by_text("그사이 다른 곳에서 노트가 바뀌어서 방금 고친 것은 저장하지 못했어요.")).to_be_visible(timeout=10000)
+        await page.wait_for_timeout(600)
+        assert psql(f"select body->>'summary' from public.notes where source_id = '{note_sid}'") == summary_before
+        assert psql(f"select count(*) from public.note_versions v join public.notes n on n.id = v.note_id where n.source_id = '{note_sid}' and v.body->>'summary' = '예전 탭에서 고친 요약이에요.'") == "0"
+        await shot(page, "51-stale-tab", full=False)
+        # 새로 불러온 화면은 지금 버전이라 고칠 수 있다
+        await expect(page.get_by_text(f"버전 {v_c}").first).to_be_visible(timeout=10000)
+        # 같은 버전이어도 다른 탭에서 먼저 고쳤으면 덮어쓰지 않는다
+        await page.wait_for_timeout(4500)  # 앞 알림이 사라지고 같은 알림이 다시 뜰 수 있게
+        await page2.goto(BASE + f"/notes/{note_sid}")
+        assert await wait_ready(page2)
+        await page2.get_by_role("button", name="요약 고치기").click()
+        await page2.get_by_label("요약").fill("다른 탭에서 먼저 고친 요약이에요.")
+        await page2.get_by_role("button", name="저장", exact=True).first.click()
+        await expect(page2.get_by_text("다른 탭에서 먼저 고친 요약이에요.")).to_be_visible()
+        await page2.wait_for_timeout(800)
+        assert psql(f"select body->>'summary' from public.notes where source_id = '{note_sid}'") == "다른 탭에서 먼저 고친 요약이에요."
+        await page.get_by_role("button", name="요약 고치기").click()
+        await page.get_by_label("요약").fill("늦게 고친 요약이에요.")
+        await page.get_by_role("button", name="저장", exact=True).first.click()
+        await expect(page.get_by_text("그사이 다른 곳에서 노트가 바뀌어서 방금 고친 것은 저장하지 못했어요.")).to_be_visible(timeout=10000)
+        await page.wait_for_timeout(600)
+        assert psql(f"select body->>'summary' from public.notes where source_id = '{note_sid}'") == "다른 탭에서 먼저 고친 요약이에요."
+        await expect(page.get_by_text("다른 탭에서 먼저 고친 요약이에요.")).to_be_visible(timeout=10000)
+        # 쉬게 한 문제는 그 버전으로 돌아와도 쉬는 중이다 (복습에 다시 나오지 않는다)
+        await page2.goto(BASE + f"/notes/{note_sid}?tab=original")
+        assert await wait_ready(page2)
+        await versions2.locator("li").filter(has_text=f"버전 {v_b} ·").get_by_role("button", name="열기").click()
+        page2.once("dialog", lambda d: d.accept())
+        await page2.get_by_role("button", name="이 버전 쓰기").first.click()
+        await expect(page2.get_by_text(f"지금 버전을 바꿨어요 (버전 {v_b}).")).to_be_visible()
+        assert psql(f"select status || ',' || rested_hidden::text from public.questions where id = '{only_cur}'") == "suspended,false"
+        await page2.close()
+
+        step("note chat opens at the newest messages even with a long history")
+        note_id = psql(f"select id from public.notes where source_id = '{note_sid}'")
+        psql(
+            f"insert into public.chat_messages (user_id, note_id, role, content, created_at) "
+            f"select '{student_id}', '{note_id}', case when i % 2 = 0 then 'assistant' else 'user' end, '긴 대화 ' || i, now() + make_interval(secs => i) "
+            f"from generate_series(1, 230) i"
+        )
+        await page.goto(BASE + f"/notes/{note_sid}")
+        assert await wait_ready(page)
+        await page.get_by_role("button", name="노트에게 물어보기").click()
+        chat = page.get_by_role("dialog", name="노트에게 물어보기")
+        await expect(chat.get_by_text("긴 대화 230", exact=True)).to_be_visible()
+        await expect(chat.get_by_text("긴 대화 31", exact=True)).to_be_visible()
+        assert await chat.get_by_text("긴 대화 30", exact=True).count() == 0, "only the newest 200 are shown"
+        await page.keyboard.press("Escape")
+        psql(f"delete from public.chat_messages where note_id = '{note_id}' and content like '긴 대화 %'")
+
+        step("material waiting for its note does not hold up other uploads")
+        # 이 노트에 더하는 자료가 정리 중인 것처럼 둔다 (서버가 가져가지 않게 잠가 둔다)
+        blocker = str(uuid.uuid4())
+        sub_id = psql(f"select subject_id from public.sources where id = '{note_sid}'")
+        psql(
+            f"insert into public.sources (id, user_id, subject_id, kind, title, status, step, parent_id, locked_until) "
+            f"values ('{blocker}', '{student_id}', '{sub_id}', 'text', '막는 자료', 'processing', 'organize', '{note_sid}', now() + interval '1 hour')"
+        )
+        await page.goto(BASE + f"/notes/{note_sid}?tab=original")
+        assert await wait_ready(page)
+        add = page.get_by_role("region", name="이 노트에 자료 더하기")
+        await add.get_by_label("더할 내용").fill("D 자료예요. 표시:델타 저항과 전류의 관계를 정리해 보자.")
+        await add.get_by_role("button", name="글 더하기").click()
+        queue = page.get_by_label("넣는 중인 자료")
+        await expect(queue.get_by_text("이 노트에 먼저 더하는 자료가 끝나면 시작해요")).to_be_visible(timeout=20000)
+        # 자료를 더하는 동안에는 정리·그림을 고칠 수 없다 (합치는 바탕이 바뀌지 않게)
+        await page.get_by_role("tab", name="정리").click()
+        await expect(page.get_by_text("한 줄 요약")).to_be_visible()
+        assert await page.get_by_role("button", name="요약 고치기").count() == 0, "note editing is locked while adding material"
+        await page.get_by_role("tab", name="그림").click()
+        await expect(page.get_by_role("button", name="고치기", exact=True)).to_be_disabled()
+        await expect(page.get_by_text("이 노트에 자료를 더하는 중이에요. 끝나면 고칠 수 있어요.").first).to_be_visible()
+        # 화면을 새로 열지 않고 자료함으로 옮겨 + 버튼으로 새 자료를 넣는다: 앞 줄을 기다리지 않고 바로 시작한다
+        await page.get_by_role("link", name="자료함으로").first.click()
+        await page.wait_for_url(LIBRARY_SUBJECT)
+        await page.get_by_role("button", name="자료 넣기", exact=True).click()
+        composer = page.get_by_role("dialog", name="자료 넣기")
+        await composer.get_by_label("공부한 내용").fill("E 자료예요. 노트에 더하는 자료를 기다리지 않고 바로 정리를 시작하는지 보는 글이에요.")
+        await composer.get_by_label("공부한 내용").press("Enter")
+        assert await wait_db(page, "select count(*) from public.sources where parent_id is null and text_content like 'E 자료예요%'", "1", timeout=30)
+        await expect(queue.get_by_text("이 노트에 먼저 더하는 자료가 끝나면 시작해요")).to_be_visible()
+        assert child_of("D 자료예요") == "", "the addition still waits for the earlier one"
+        await shot(page, "52-queue-per-note", full=False)
+        # 앞 자료가 끝나면 기다리던 자료도 더한다
+        psql(f"delete from public.sources where id = '{blocker}'")
+        assert await wait_db(page, f"select status from public.sources where parent_id = '{note_sid}' and text_content like 'D 자료예요%'", "ready")
+        assert "표시 델타" in kp_titles(), kp_titles()
         await ctx.close()
 
         step("free users cannot add material to a note")

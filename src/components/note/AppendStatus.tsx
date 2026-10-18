@@ -81,7 +81,7 @@ export function AppendStatus({ kids, onChanged }: { kids: ChildSource[]; onChang
                 </div>
               </div>
             ) : (
-              <p className="pl-[52px] text-xs text-muted">끝나면 새 버전이 돼요. 그동안 고친 내용은 지금 버전에 남아요.</p>
+              <p className="pl-[52px] text-xs text-muted">끝나면 새 버전이 돼요. 그동안 정리·그림은 고칠 수 없어요.</p>
             )}
           </div>
         );

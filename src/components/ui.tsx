@@ -569,12 +569,24 @@ export function Segmented<T extends string | number>({
   );
 }
 
-export function Toggle({ checked, onChange, label, id }: { checked: boolean; onChange: (v: boolean) => void; label: string; id?: string }) {
+export function Toggle({
+  checked,
+  onChange,
+  label,
+  id,
+  disabled = false,
+}: {
+  checked: boolean;
+  onChange: (v: boolean) => void;
+  label: string;
+  id?: string;
+  disabled?: boolean;
+}) {
   return (
-    <label className="flex cursor-pointer items-center justify-between gap-4 py-1" htmlFor={id}>
+    <label className={cx('flex items-center justify-between gap-4 py-1', disabled ? 'cursor-not-allowed opacity-50' : 'cursor-pointer')} htmlFor={id}>
       <span className="text-[15px]">{label}</span>
       <span className="relative inline-flex">
-        <input id={id} type="checkbox" className="peer sr-only" checked={checked} onChange={(e) => onChange(e.target.checked)} />
+        <input id={id} type="checkbox" className="peer sr-only" checked={checked} disabled={disabled} onChange={(e) => onChange(e.target.checked)} />
         <span className="h-7 w-12 rounded-full bg-surface-3 transition-colors peer-checked:bg-fab peer-focus-visible:outline peer-focus-visible:outline-3 peer-focus-visible:outline-accent" />
         <span className="absolute left-1 top-1 h-5 w-5 rounded-full bg-white shadow transition-transform duration-200 peer-checked:translate-x-5" />
       </span>

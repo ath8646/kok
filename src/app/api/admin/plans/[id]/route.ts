@@ -3,7 +3,7 @@
 import type { NextRequest } from 'next/server';
 import { assertSameOrigin, assertUuid, readJson, requireAccount } from '@/lib/server/auth';
 import { UserFacingError, errorResponse } from '@/lib/server/errors';
-import { PlanBody, planRow, schemaMissing } from '../shared';
+import { PlanBody, savePlan, schemaMissing } from '../shared';
 
 export async function PATCH(req: NextRequest, ctx: RouteContext<'/api/admin/plans/[id]'>) {
   try {
@@ -13,10 +13,9 @@ export async function PATCH(req: NextRequest, ctx: RouteContext<'/api/admin/plan
     const { admin } = await requireAccount({ admin: true });
     const parsed = PlanBody.safeParse(await readJson(req, 5_000));
     if (!parsed.success) throw new UserFacingError('bad_body', parsed.error.issues[0]?.message ?? '값이 올바르지 않아요.', 400);
-    const { data, error } = await admin.from('custom_plans').update(planRow(parsed.data)).eq('id', id).select('*').maybeSingle();
-    if (error) throw schemaMissing(error) ?? error;
-    if (!data) throw new UserFacingError('not_found', '플랜을 찾을 수 없어요.', 404);
-    return Response.json({ ok: true, plan: data });
+    const { plan, warning } = await savePlan(parsed.data, (row) => admin.from('custom_plans').update(row).eq('id', id).select('*').maybeSingle());
+    if (!plan) throw new UserFacingError('not_found', '플랜을 찾을 수 없어요.', 404);
+    return Response.json({ ok: true, plan, warning });
   } catch (e) {
     return errorResponse(e);
   }

@@ -27,8 +27,12 @@ export const PlanBody = z.object({
 });
 export type PlanInput = z.infer<typeof PlanBody>;
 
-/** 화면에서 받은 값 → custom_plans 행 */
-export function planRow(b: PlanInput) {
+/**
+ * 화면에서 받은 값 → custom_plans 행.
+ * 자료 더하기·테마 칸(can_append·can_theme)은 schema.sql 을 다시 실행한 DB 에만 있어서, 없으면(planFlags=false) 빼고 저장한다.
+ * 칸이 있는지는 먼저 넣어 보고 '칸이 없다' 오류가 나면 안다 (savePlan)
+ */
+export function planRow(b: PlanInput, planFlags: boolean) {
   return {
     name: b.name,
     energy_total: b.energyTotal,
@@ -38,14 +42,41 @@ export function planRow(b: PlanInput) {
     text_chars: b.textChars,
     file_mb: b.fileMb,
     careful: b.careful,
-    can_append: b.canAppend,
-    can_theme: b.canTheme,
+    ...(planFlags ? { can_append: b.canAppend, can_theme: b.canTheme } : {}),
     note: b.note || null,
   };
 }
 
 /** 표·칸·함수가 없다는 오류 (Postgres 42P01·42703·42883, PostgREST PGRST202·PGRST204·PGRST205) */
 const MISSING_CODES = new Set(['42P01', '42703', '42883', 'PGRST202', 'PGRST204', 'PGRST205']);
+
+export const FLAGS_WARNING = '자료 더하기·테마 칸이 아직 없어서 그 둘은 저장하지 않았어요. Supabase 에서 schema.sql 을 다시 실행해 주세요.';
+
+/** 자료 더하기·테마 칸만 없다는 오류인지 */
+export function flagsMissing(error: { code?: string; message?: string }): boolean {
+  const msg = error.message ?? '';
+  return /can_append|can_theme/.test(msg) && (MISSING_CODES.has(error.code ?? '') || /does not exist|schema cache/i.test(msg));
+}
+
+type Saved = { data: Record<string, unknown> | null; error: { code?: string; message?: string } | null };
+
+/**
+ * 플랜 저장: 자료 더하기·테마 칸까지 넣어 보고, 그 칸이 없는 DB 면 빼고 다시 저장한다.
+ * (기능 확인 기억(1분)에 기대지 않는다: schema.sql 을 막 다시 실행했어도 바로 저장된다)
+ */
+export async function savePlan(
+  b: PlanInput,
+  write: (row: ReturnType<typeof planRow>) => PromiseLike<Saved>,
+): Promise<{ plan: Record<string, unknown> | null; warning?: string }> {
+  let r = await write(planRow(b, true));
+  let warning: string | undefined;
+  if (r.error && flagsMissing(r.error)) {
+    r = await write(planRow(b, false));
+    if (!r.error && (b.canAppend || b.canTheme)) warning = FLAGS_WARNING;
+  }
+  if (r.error) throw schemaMissing(r.error) ?? r.error;
+  return { plan: r.data, warning };
+}
 
 /**
  * DB 에 테스트 플랜 표·칸이 아직 없으면 (schema.sql 을 다시 실행하지 않았으면) 알아듣기 쉽게.

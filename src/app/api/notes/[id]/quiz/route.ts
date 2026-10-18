@@ -5,7 +5,7 @@ import { z } from 'zod';
 import { assertSameOrigin, assertUuid, readJson, requireAccount } from '@/lib/server/auth';
 import { getAppSettings } from '@/lib/server/account';
 import { UserFacingError, errorResponse } from '@/lib/server/errors';
-import { loadOwnedNote, noteForPrompt } from '@/lib/server/notes';
+import { assertSameVersion, loadOwnedNote, noteForPrompt } from '@/lib/server/notes';
 import { runTask } from '@/lib/server/tasks';
 import { textBlock } from '@/lib/server/claude';
 import { checkPrompt, quizPrompt, wrap } from '@/lib/ai/prompts';
@@ -16,7 +16,12 @@ import { normalizeAnswer } from '@/lib/grading';
 export const maxDuration = 300;
 
 const Preview = z.object({ action: z.literal('preview') });
-const Apply = z.object({ action: z.literal('apply'), questions: z.array(z.unknown()).max(40) });
+const Apply = z.object({
+  action: z.literal('apply'),
+  questions: z.array(z.unknown()).max(40),
+  /** 미리보기를 만든 노트 버전 (그사이 버전이 바뀌었으면 바꾸지 않는다) */
+  version: z.number().int().min(1).optional(),
+});
 
 export async function POST(req: NextRequest, ctx: RouteContext<'/api/notes/[id]/quiz'>) {
   try {
@@ -29,6 +34,7 @@ export async function POST(req: NextRequest, ctx: RouteContext<'/api/notes/[id]/
 
     const apply = Apply.safeParse(body);
     if (apply.success) {
+      assertSameVersion(note, apply.data.version);
       const rows = apply.data.questions
         .map((q) => zQuestionRowInput.safeParse(q))
         .filter((r) => r.success)
@@ -42,11 +48,13 @@ export async function POST(req: NextRequest, ctx: RouteContext<'/api/notes/[id]/
     if (!Preview.safeParse(body).success) throw new UserFacingError('bad_body', '보낸 내용이 올바르지 않아요.', 400);
 
     const app = await getAppSettings(admin);
+    // 지금 버전의 문제만 센다 (다른 버전에만 있는 숨긴 문제는 바뀌지 않는다)
     const { data: existing, error: qErr } = await admin
       .from('questions')
       .select('id, prompt, created_by, locked, edited')
       .eq('note_id', note.id)
-      .eq('user_id', acc.userId);
+      .eq('user_id', acc.userId)
+      .neq('status', 'hidden');
     if (qErr) throw qErr;
     const kept = (existing ?? []).filter((q) => q.locked || q.edited || q.created_by === 'user');
     const replaceCount = (existing ?? []).length - kept.length;
@@ -116,7 +124,7 @@ export async function POST(req: NextRequest, ctx: RouteContext<'/api/notes/[id]/
         console.warn('[kok] quiz check skipped', e instanceof UserFacingError ? e.code : e);
       }
     }
-    return Response.json({ ok: true, preview: rows, replaceCount, keptCount: kept.length });
+    return Response.json({ ok: true, preview: rows, replaceCount, keptCount: kept.length, version: note.version });
   } catch (e) {
     return errorResponse(e);
   }

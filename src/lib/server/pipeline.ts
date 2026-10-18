@@ -20,6 +20,7 @@ import {
   type VisualResult,
 } from '@/lib/ai/schemas';
 import { appendMergePrompt, checkPrompt, mergePrompt, organizePrompt, quizPrompt, visualPrompt, wrap, type MaterialMeta } from '@/lib/ai/prompts';
+import { growthOfParts, keepFromCurrent, mergeFits, noteForMerge, remergeState, MERGE_OUT_TOKENS, NOTE_TOO_LONG } from '@/lib/append-merge';
 import { modelForTier, type AiTask, type UserSettings } from '@/lib/settings';
 import { planChunks, slicePdf, splitPdfBySize, splitText, PdfError } from '@/lib/pdf';
 import { getAccount, getAppSettings, charge, refundSource, type Account, type AppSettings } from './account';
@@ -128,11 +129,11 @@ async function ai(ctx: Ctx, task: AiTask, content: ContentPart[], schema: Record
   }
 }
 
-/** 노트 번호(k1, k2 …)가 비었거나 겹치면 고친다 */
-export function normalizeNote(note: Note): Note {
+/** 노트 번호(k1, k2 …)가 비었거나 겹치면 고친다. 개념은 maxKeyPoints 개까지 */
+export function normalizeNote(note: Note, maxKeyPoints = 9): Note {
   const seen = new Set<string>();
   const remap = new Map<string, string>();
-  const key_points = note.key_points.slice(0, 9).map((kp, i) => {
+  const key_points = note.key_points.slice(0, maxKeyPoints).map((kp, i) => {
     let id = (kp.id || '').trim();
     if (!id || seen.has(id)) id = `k${i + 1}`;
     while (seen.has(id)) id = `${id}x`;
@@ -264,23 +265,57 @@ async function stepMerge(ctx: Ctx): Promise<Partial<SourceRow>> {
   return { partials: [], step: 'visual', progress: 66, draft: { ...ctx.src.draft, note, attempts: 0 } };
 }
 
-/** 노트에 더하는 자료: 지금 노트에 새 자료의 정리를 합친다 (기존 개념 번호는 그대로) */
+const NOTE_GONE = '자료를 더할 노트를 찾을 수 없어요. 노트가 지워졌을 수 있어요.';
+
+/** schema.sql 을 다시 실행하기 전의 DB 에는 함수(또는 함수의 새 인자)가 없다 */
+function missingFunction(error: { code?: string; message?: string }): boolean {
+  return error.code === 'PGRST202' || error.code === '42883' || /Could not find the function|function .* does not exist/i.test(error.message ?? '');
+}
+
+/** 합칠 노트와 그 지문(kok_note_base). 지문 함수가 없는 DB 면 지문은 null (예전처럼 확인하지 않는다) */
+async function readMergeBase(ctx: Ctx): Promise<{ id: string; body: unknown; base: string | null }> {
+  const { data, error } = await ctx.admin.rpc('kok_note_for_merge', { p_source: ctx.src.parent_id });
+  if (!error) {
+    const r = data as { id?: string; body?: unknown; base?: string } | null;
+    if (!r?.id) throw new UserFacingError('not_found', NOTE_GONE, 404);
+    return { id: r.id, body: r.body, base: typeof r.base === 'string' ? r.base : null };
+  }
+  if (!missingFunction(error)) throw error;
+  const { data: n, error: nErr } = await ctx.admin.from('notes').select('id, body').eq('source_id', ctx.src.parent_id).maybeSingle();
+  if (nErr) throw nErr;
+  if (!n) throw new UserFacingError('not_found', NOTE_GONE, 404);
+  return { id: n.id, body: n.body, base: null };
+}
+
+/**
+ * 노트에 더하는 자료: 지금 노트에 새 자료의 정리를 합친다 (기존 개념 번호는 그대로).
+ * 합칠 때 쓴 노트의 지문(base)을 남겨, 끝내기 전에 노트가 바뀌었으면 지금 노트에 다시 합친다
+ */
 async function stepAppendMerge(ctx: Ctx, parts: Note[]): Promise<Partial<SourceRow>> {
-  const { data: n, error } = await ctx.admin.from('notes').select('id, body').eq('source_id', ctx.src.parent_id).maybeSingle();
-  if (error) throw error;
-  if (!n) throw new UserFacingError('not_found', '자료를 더할 노트를 찾을 수 없어요. 노트가 지워졌을 수 있어요.', 404);
+  const n = await readMergeBase(ctx);
   const current = zNote.parse(n.body ?? {});
-  const content = [
-    textBlock(wrap('note', noteForPrompt(current))),
-    textBlock(wrap('new_parts', JSON.stringify(parts))),
-    textBlock(appendMergePrompt(parts.length)),
-  ];
-  const json = await ai(ctx, 'merge', content, noteJsonSchema, 8000);
-  const merged = normalizeNote(zNote.parse(json));
-  // 별표한 개념은 그대로 별표
-  const starred = new Set(current.key_points.filter((k) => k.starred).map((k) => k.id));
-  const note = { ...merged, key_points: merged.key_points.map((k) => (starred.has(k.id) ? { ...k, starred: true } : k)) };
-  return { partials: [], step: 'visual', progress: 66, draft: { ...ctx.src.draft, note, newParts: parts, parentNoteId: n.id, attempts: 0 } };
+  // 지금 노트는 자르지 않고 모두 보낸다 (잘라 보내면 긴 설명이 잘린 채 새 버전에 남는다)
+  const full = noteForMerge(current);
+  const partsJson = JSON.stringify(parts);
+  // 합친 노트가 답 길이에 들어가지 않을 노트는 AI 를 부르기 전에 막는다
+  if (!full || !mergeFits(full, growthOfParts(partsJson))) throw new UserFacingError('note_too_long', NOTE_TOO_LONG, 400);
+  const maxKeyPoints = Math.max(9, current.key_points.length);
+  const content = [textBlock(wrap('note', full)), textBlock(wrap('new_parts', partsJson)), textBlock(appendMergePrompt(parts.length, maxKeyPoints))];
+  let json: unknown;
+  try {
+    json = await ai(ctx, 'merge', content, noteJsonSchema, MERGE_OUT_TOKENS);
+  } catch (e) {
+    // 합친 노트가 답 길이 한도를 넘었다: 다시 해도 같으니 바로 알려 준다
+    if (e instanceof AiCallError && e.truncated) throw new UserFacingError('note_too_long', NOTE_TOO_LONG, 400);
+    throw e;
+  }
+  // 지금 노트의 개념 수보다 줄이지 않는다 (내가 더한 개념이 잘리지 않게)
+  const merged = normalizeNote(zNote.parse(json), maxKeyPoints);
+  const note = keepFromCurrent(current, merged, parts);
+  // base 는 늘 적는다 (지문 함수가 없는 DB 면 null: 확인하지 않는다)
+  const draft: Record<string, unknown> = { ...ctx.src.draft, note, newParts: parts, parentNoteId: n.id, base: n.base, attempts: 0 };
+  delete draft.baseVersion;
+  return { partials: [], step: 'visual', progress: 66, draft };
 }
 
 /** 노트에 더하는 자료면 그 노트 번호 */
@@ -288,18 +323,52 @@ function parentNoteId(ctx: Ctx): string | null {
   return ctx.src.parent_id && typeof ctx.src.draft.parentNoteId === 'string' ? ctx.src.draft.parentNoteId : null;
 }
 
+/**
+ * 노트에 더하는 자료: 합칠 때 쓴 노트가 지금 노트와 다른지 (지문을 비교한다).
+ * 정리하는 동안에는 버전을 바꾸거나 노트를 고칠 수 없지만, 실패해 멈춘 사이에는 다른 자료를 더하거나 버전을 바꾸거나 고칠 수 있다.
+ */
+async function baseIsStale(ctx: Ctx): Promise<boolean> {
+  const pid = parentNoteId(ctx);
+  if (!pid) return false;
+  const remerged = Number(ctx.src.draft.remerged ?? 0);
+  // 지문을 적기 전(이 기능 전)에 합쳐 둔 자료: 한 번은 지금 노트에 다시 합친다
+  if (!('base' in ctx.src.draft)) return remerged === 0;
+  const base = ctx.src.draft.base;
+  const { data, error } = await ctx.admin.rpc('kok_note_base', { p_note: pid });
+  if (error) {
+    // 지문 함수가 없는 DB (schema.sql 을 다시 실행하기 전): 예전처럼 확인하지 않는다
+    if (missingFunction(error)) return false;
+    throw error;
+  }
+  if (data === null || data === undefined) throw new UserFacingError('not_found', NOTE_GONE, 404);
+  // 지문 함수가 생기기 전에 합쳐 둔 자료(base 가 null): 그사이 노트가 바뀌었는지 알 수 없으니 한 번은 지금 노트에 다시 합친다
+  if (typeof base !== 'string') return remerged === 0;
+  return data !== base;
+}
+
+/** 합치기 단계로 돌아가 지금 버전에 다시 합친다 (새 자료의 정리는 그대로 쓴다) */
+function remergePatch(src: Pick<SourceRow, 'draft'>): Partial<SourceRow> {
+  const patch = remergeState(src.draft);
+  // 일어나지 않아야 한다 (정리하는 동안에는 버전이 바뀌지 않는다). 끝없이 다시 하지 않게 멈춘다
+  if (!patch) throw new UserFacingError('append_conflict', '노트가 계속 바뀌어서 자료를 더하지 못했어요. "다시 하기"를 눌러 주세요.', 409);
+  return patch;
+}
+
 async function stepVisual(ctx: Ctx): Promise<Partial<SourceRow>> {
+  if (await baseIsStale(ctx)) return remergePatch(ctx.src);
   const note = zNote.parse(ctx.src.draft.note);
   const v = ctx.settings.visual;
   const maxNodes = maxNodesFor(v.depth);
   const content = [textBlock(wrap('note', noteForPrompt(note)))];
-  // 노트에 더할 때는 지금 마인드맵에서 학생이 고친 노드를 그대로 둔다
+  // 노트에 더할 때는 지금 마인드맵에서 학생이 고친 노드와 가운데 이름을 그대로 둔다
   let locked: Mindmap['nodes'] = [];
+  let rootLabel: string | null = null;
   const pid = parentNoteId(ctx);
   if (pid) {
     const { data: cur } = await ctx.admin.from('visuals').select('spec').eq('note_id', pid).eq('type', 'mindmap').maybeSingle();
     const parsed = cur ? zMindmap.safeParse(cur.spec) : null;
     locked = parsed?.success ? parsed.data.nodes.filter((x) => x.edited).slice(0, 60) : [];
+    rootLabel = parsed?.success && parsed.data.root_edited ? parsed.data.root_label : null;
     if (locked.length) {
       content.push(
         textBlock(
@@ -315,10 +384,15 @@ async function stepVisual(ctx: Ctx): Promise<Partial<SourceRow>> {
   const json = await ai(ctx, 'visual', content, visualJsonSchema, 4000);
   const visual = zVisualResult.parse(json);
   visual.mindmap = cleanMindmap(visual.mindmap, maxNodes, locked);
+  if (rootLabel !== null) {
+    visual.mindmap.root_label = rootLabel;
+    visual.mindmap.root_edited = true;
+  }
   return { step: 'quiz', progress: 76, draft: { ...ctx.src.draft, visual, attempts: 0 } };
 }
 
 async function stepQuiz(ctx: Ctx): Promise<Partial<SourceRow>> {
+  if (await baseIsStale(ctx)) return remergePatch(ctx.src);
   const note = zNote.parse(ctx.src.draft.note);
   const q = ctx.settings.quiz;
   const pid = parentNoteId(ctx);
@@ -346,7 +420,20 @@ async function stepQuiz(ctx: Ctx): Promise<Partial<SourceRow>> {
   return { step: 'check', progress: 88, draft: { ...ctx.src.draft, questions: rows, attempts: 0 } };
 }
 
-async function stepCheckAndFinish(ctx: Ctx): Promise<'done'> {
+/** 더한 자료 마무리. 합칠 때 쓴 노트가 지금 노트가 아니면 'stale' (저장하지 않는다) */
+async function finalizeAppend(ctx: Ctx, args: { p_note: unknown; p_visuals: unknown; p_questions: unknown; p_expire: string | null }): Promise<'ok' | 'stale'> {
+  const base = typeof ctx.src.draft.base === 'string' ? ctx.src.draft.base : null;
+  const params = { p_child: ctx.src.id, ...args };
+  let { error } = await ctx.admin.rpc('kok_finalize_append', { ...params, p_base: base });
+  // 예전 DB: 지문 인자가 없는 함수로 (그 DB 는 지문 함수도 없어서 base 가 늘 null 이다)
+  if (error && missingFunction(error)) ({ error } = await ctx.admin.rpc('kok_finalize_append', params));
+  if (error && /stale_base/.test(error.message ?? '')) return 'stale';
+  if (error) throw error;
+  return 'ok';
+}
+
+async function stepCheckAndFinish(ctx: Ctx): Promise<'done' | Partial<SourceRow>> {
+  if (await baseIsStale(ctx)) return remergePatch(ctx.src);
   const note = zNote.parse(ctx.src.draft.note);
   const visual = zVisualResult.parse(ctx.src.draft.visual) as VisualResult;
   const questions = (ctx.src.draft.questions as ReturnType<typeof toQuestionRow>[] | undefined)?.filter(Boolean) ?? [];
@@ -392,17 +479,20 @@ async function stepCheckAndFinish(ctx: Ctx): Promise<'done'> {
     const title = typeof parts[0]?.title === 'string' ? parts[0].title.trim().slice(0, 120) : '';
     if (title) await ctx.admin.from('sources').update({ title }).eq('id', ctx.src.id).eq('title', '');
   }
-  const { error } = pid
-    ? await ctx.admin.rpc('kok_finalize_append', { p_child: ctx.src.id, p_note: noteBody, p_visuals: visuals, p_questions: kept, p_expire: expire })
-    : await ctx.admin.rpc('kok_finalize_source', {
-        p_source: ctx.src.id,
-        p_title: note.title || ctx.src.title,
-        p_note: noteBody,
-        p_visuals: visuals,
-        p_questions: kept,
-        p_expire: expire,
-      });
-  if (error) throw error;
+  if (pid) {
+    // 검사하는 동안 버전이 바뀌었으면(일어나지 않아야 한다) 저장하지 않고 지금 버전에 다시 합친다
+    if ((await finalizeAppend(ctx, { p_note: noteBody, p_visuals: visuals, p_questions: kept, p_expire: expire })) === 'stale') return remergePatch(ctx.src);
+  } else {
+    const { error } = await ctx.admin.rpc('kok_finalize_source', {
+      p_source: ctx.src.id,
+      p_title: note.title || ctx.src.title,
+      p_note: noteBody,
+      p_visuals: visuals,
+      p_questions: kept,
+      p_expire: expire,
+    });
+    if (error) throw error;
+  }
   // 큰 PDF 를 나눈 조각은 정리가 끝나면 필요 없다 (원본은 '원본' 탭에서 보도록 남긴다)
   const parts = pdfPartsOf(ctx.src);
   if (parts) {
@@ -482,9 +572,12 @@ export async function runOneStep(sourceId: string): Promise<StepOutcome> {
       case 'quiz':
         patch = await stepQuiz(ctx);
         break;
-      case 'check':
-        await stepCheckAndFinish(ctx);
-        return 'done';
+      case 'check': {
+        const r = await stepCheckAndFinish(ctx);
+        if (r === 'done') return 'done';
+        patch = r;
+        break;
+      }
       default:
         await release(admin, src.id, { status: 'ready', progress: 100 });
         return 'done';

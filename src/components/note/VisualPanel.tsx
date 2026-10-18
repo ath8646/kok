@@ -9,13 +9,21 @@ import { clientModel } from '@/lib/client-model';
 import { sb } from '@/lib/data';
 import { MindMap, type RecallResult } from '../MindMap';
 import { TableView, TimelineView } from '../VisualViews';
-import { Button, Chip, Segmented, Sheet, api, useToast } from '../ui';
+import { ApiError, Button, Chip, Segmented, Sheet, api, useToast } from '../ui';
 
 export type Visuals = { mindmap?: Mindmap; table?: TableSpec; timeline?: TimelineSpec };
 export type VisualType = 'mindmap' | 'table' | 'timeline';
 export type NoteView = { type?: VisualType; layout?: 'radial' | 'right' | 'down' };
 
-type Preview = { recommended: VisualType; mindmap: Mindmap; table: TableSpec | null; timeline: TimelineSpec | null; want?: 'table' | 'timeline' };
+type Preview = {
+  recommended: VisualType;
+  mindmap: Mindmap;
+  table: TableSpec | null;
+  timeline: TimelineSpec | null;
+  want?: 'table' | 'timeline';
+  /** 미리보기를 만든 노트 버전 (적용할 때 그사이 바뀌었는지 서버가 본다) */
+  version?: number | null;
+};
 
 const TYPE_LABEL: Record<VisualType, string> = { mindmap: '마인드맵', table: '표', timeline: '연표' };
 
@@ -44,6 +52,7 @@ export function VisualPanel({
   onOpen,
   saveSpec,
   aiLocked,
+  editLocked,
   compact = false,
 }: {
   me: MeResponse;
@@ -59,17 +68,23 @@ export function VisualPanel({
   onReport?: () => void;
   /** 한눈에 보기에서 누르면 그림 탭으로 */
   onOpen?: () => void;
-  /** 고친 그림 저장을 바꾼다 (지난 버전 보기: 그 버전에 저장). 없으면 지금 노트의 그림에 저장 */
-  saveSpec?: (t: VisualType, spec: Mindmap | TableSpec | TimelineSpec) => Promise<boolean>;
-  /** AI 로 다시 그리기를 막을 때 그 까닭 (지난 버전 보기) */
+  /**
+   * 고친 그림 저장을 바꾼다 (지난 버전 보기: 그 버전에 저장). 없으면 지금 노트의 그림에 저장.
+   * 'stale': 그사이 버전이 바뀌어 저장하지 않았다 (알리고 새로 읽는 것은 부른 쪽이 한다)
+   */
+  saveSpec?: (t: VisualType, spec: Mindmap | TableSpec | TimelineSpec) => Promise<boolean | 'stale'>;
+  /** AI 로 다시 그리기를 막을 때 그 까닭 (지난 버전 보기, 자료를 더하는 중) */
   aiLocked?: string;
+  /** 고치기를 막을 때 그 까닭 (자료를 더하는 중) */
+  editLocked?: string;
   compact?: boolean;
 }) {
   const toast = useToast();
   const settings = me.settings.visual;
   const [type, setType] = useState<VisualType>(() => pickType(visuals, settings, subjectId, recommended, view));
   const [hide, setHide] = useState(settings.hideMode === 'on' && !compact);
-  const [edit, setEdit] = useState(false);
+  const [editOn, setEdit] = useState(false);
+  const edit = editOn && !editLocked;
   const [local, setLocal] = useState<Visuals>(visuals);
   const [saving, setSaving] = useState<'idle' | 'saving' | 'saved'>('idle');
   const [preview, setPreview] = useState<Preview | null>(null);
@@ -90,7 +105,8 @@ export function VisualPanel({
     setLocal((v) => ({ ...v, [t]: spec }));
     setSaving('saving');
     const ok = saveSpec ? await saveSpec(t, spec) : !(await sb().from('visuals').update({ spec }).eq('note_id', noteId).eq('type', t)).error;
-    if (!ok) {
+    if (ok === 'stale') setSaving('idle');
+    else if (!ok) {
       setSaving('idle');
       toast('저장하지 못했어요.', 'bad');
     } else setSaving('saved');
@@ -99,12 +115,15 @@ export function VisualPanel({
   const regenerate = async (want?: 'table' | 'timeline') => {
     setBusy(want ? `${TYPE_LABEL[want]} 만드는 중…` : '다시 그리는 중…');
     try {
-      const r = await api<{ preview: Preview }>(`/api/notes/${noteId}/visual`, { method: 'POST', body: JSON.stringify({ action: 'preview', want }) });
+      const r = await api<{ preview: Preview; version?: number | null }>(`/api/notes/${noteId}/visual`, {
+        method: 'POST',
+        body: JSON.stringify({ action: 'preview', want }),
+      });
       if (want && !r.preview[want]) {
         toast(`이 노트로는 ${TYPE_LABEL[want]}를 만들기 어려워요.`);
         return;
       }
-      setPreview({ ...r.preview, want });
+      setPreview({ ...r.preview, want, version: r.version ?? null });
     } catch (e) {
       toast((e as Error).message, 'bad');
     } finally {
@@ -116,9 +135,10 @@ export function VisualPanel({
     if (!preview) return;
     setBusy('적용하는 중…');
     try {
+      const version = preview.version ?? undefined;
       const body = preview.want
-        ? { action: 'apply', [preview.want]: preview[preview.want] }
-        : { action: 'apply', mindmap: preview.mindmap, table: preview.table, timeline: preview.timeline, recommended: preview.recommended };
+        ? { action: 'apply', version, [preview.want]: preview[preview.want] }
+        : { action: 'apply', version, mindmap: preview.mindmap, table: preview.table, timeline: preview.timeline, recommended: preview.recommended };
       await api(`/api/notes/${noteId}/visual`, { method: 'POST', body: JSON.stringify(body) });
       if (preview.want) {
         setType(preview.want);
@@ -129,6 +149,11 @@ export function VisualPanel({
       onSaved();
     } catch (e) {
       toast((e as Error).message, 'bad');
+      // 그사이 노트가 다른 버전으로 바뀌었다: 미리보기를 닫고 새 버전을 불러온다
+      if (e instanceof ApiError && e.code === 'stale_version') {
+        setPreview(null);
+        onSaved();
+      }
     } finally {
       setBusy(null);
     }
@@ -201,6 +226,8 @@ export function VisualPanel({
           <Button
             size="sm"
             variant={edit ? 'ink' : 'secondary'}
+            disabled={!!editLocked}
+            title={editLocked}
             onClick={() => {
               setEdit((x) => !x);
               setHide(false);
@@ -273,6 +300,7 @@ export function VisualPanel({
         </div>
       </Sheet>
       {busy ? <p className="text-sm text-muted">{busy}</p> : null}
+      {editLocked && !compact ? <p className="text-sm text-muted">{editLocked}</p> : null}
       {hide ? <p className="text-sm text-muted">가려진 가지를 눌러 떠올려 보고, 기억났는지 골라요. 헷갈린 개념의 문제는 오늘 복습에 넣어요.</p> : null}
 
       {current === 'mindmap' && local.mindmap ? (

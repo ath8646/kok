@@ -560,11 +560,13 @@ declare
   parent uuid := gen_random_uuid();
   child uuid := gen_random_uuid();
   child2 uuid := gen_random_uuid();
+  child3 uuid := gen_random_uuid();
   nid uuid;
   q_old uuid;
   q_new uuid;
   r jsonb;
   v int;
+  base text;
 begin
   select id into sub from public.subjects where user_id = a limit 1;
   r := public.kok_create_source(jsonb_build_object('id', parent, 'user_id', a, 'subject_id', sub, 'kind', 'text', 'text_content', '처음 글'),
@@ -610,6 +612,30 @@ begin
   if (select count(*) from public.questions where note_id = nid and status = 'active') <> 2 then raise exception 'v2 = old + new questions'; end if;
   if (select array_length(question_ids, 1) from public.note_versions where note_id = nid and number = 2) <> 2 then raise exception 'v2 question list'; end if;
 
+  -- 합친 뒤에 노트가 바뀌었으면 저장하지 않는다
+  -- (예: 자료 B 가 실패한 사이 다른 자료로 새 버전이 생겼는데, B 는 옛 노트에 합쳐 둔 채로 다시 하기)
+  base := public.kok_note_base(nid);
+  if (public.kok_note_for_merge(parent))->>'base' <> base then raise exception 'merge read should carry the same base'; end if;
+  -- 보기 설정·추천 그림만 바뀌면 지문은 그대로
+  update public.notes set body = body || '{"view":{"layout":"down"},"recommended":"table"}'::jsonb where id = nid;
+  if public.kok_note_base(nid) <> base then raise exception 'view settings must not change the base'; end if;
+  -- 내용이나 마인드맵이 바뀌면 달라진다
+  update public.visuals set spec = '{"root_label":"고친 가운데","nodes":[]}'::jsonb where note_id = nid and type = 'mindmap';
+  if public.kok_note_base(nid) = base then raise exception 'mind map edits must change the base'; end if;
+  update public.visuals set spec = '{"root_label":"합침","nodes":[]}'::jsonb where note_id = nid and type = 'mindmap';
+  if public.kok_note_base(nid) <> base then raise exception 'base should come back with the same content'; end if;
+  insert into public.sources (id, user_id, subject_id, kind, title, status, parent_id) values (child2, a, sub, 'text', '', 'processing', parent);
+  begin
+    perform public.kok_finalize_append(child2, '{"summary":"옛 노트에 합친 노트"}'::jsonb, '[]'::jsonb, '[]'::jsonb, null, md5('예전 노트'));
+    raise exception 'finalize on an old note should fail';
+  exception when raise_exception then
+    if sqlerrm <> 'stale_base' then raise; end if;
+  end;
+  if (select body->>'summary' from public.notes where id = nid) <> '합친 노트' then raise exception 'stale finalize must not change the note'; end if;
+  if (select count(*) from public.note_versions where note_id = nid) <> 2 then raise exception 'stale finalize must not add a version'; end if;
+  if (select status from public.sources where id = child2) <> 'processing' then raise exception 'stale finalize must not finish the material'; end if;
+  delete from public.sources where id = child2;
+
   -- 버전 1로 바꾸면 새 문제는 숨고, 노트·그림도 버전 1로
   perform public.kok_switch_version(nid, a, 1);
   if (select status from public.questions where id = q_new) <> 'hidden' then raise exception 'new question should hide'; end if;
@@ -624,19 +650,34 @@ begin
   if (select status from public.questions where id = q_new) <> 'active' then raise exception 'new question back in v2'; end if;
   if (select status from public.questions where id = q_old) <> 'suspended' then raise exception 'suspended should stay suspended'; end if;
   if (select body->>'summary' from public.notes where id = nid) <> '합친 노트' then raise exception 'v2 note back'; end if;
+  -- 쉬게 한 문제가 그 버전에 없으면 숨었다가, 돌아오면 다시 쉬는 중 (복습에 다시 나오지 않는다)
+  update public.questions set status = 'suspended' where id = q_new;
+  perform public.kok_switch_version(nid, a, 1);
+  if (select status from public.questions where id = q_new) <> 'hidden' then raise exception 'rested question not in v1 should hide'; end if;
+  if not (select rested_hidden from public.questions where id = q_new) then raise exception 'hidden rested question should remember it'; end if;
+  if (select array_length(question_ids, 1) from public.note_versions where note_id = nid and number = 2) <> 2 then raise exception 'v2 keeps its rested question'; end if;
+  perform public.kok_switch_version(nid, a, 2);
+  if (select status from public.questions where id = q_new) <> 'suspended' then raise exception 'rested question should come back rested'; end if;
+  if (select rested_hidden from public.questions where id = q_new) then raise exception 'rested_hidden should clear when shown'; end if;
+  update public.questions set status = 'active' where id = q_new;
 
   -- 문제 다시 만들기는 다른 버전의 문제(hidden)를 지우지 않는다
   perform public.kok_switch_version(nid, a, 1);
   perform public.kok_add_questions(nid, '[{"type":"ox","prompt":"다시 만든 문제","answer":true}]'::jsonb, true);
   if not exists (select 1 from public.questions where id = q_new) then raise exception 'hidden question must survive regenerate'; end if;
-  -- 버전 2에도 있는 문제는 지우지 않고 숨긴다
+  -- 버전 2에도 있는 문제는 지우지 않고 숨긴다 (쉬게 한 문제였으면 그것도 기억한다)
   if (select status from public.questions where id = q_old) is distinct from 'hidden' then raise exception 'question shared with v2 should hide on regenerate'; end if;
+  if not (select rested_hidden from public.questions where id = q_old) then raise exception 'regenerate should remember the rested question'; end if;
   perform public.kok_switch_version(nid, a, 2);
-  if (select status from public.questions where id = q_old) <> 'active' then raise exception 'shared question should come back in v2'; end if;
+  if (select status from public.questions where id = q_old) <> 'suspended' then raise exception 'shared rested question should come back rested in v2'; end if;
+  if (select status from public.questions where id = q_new) <> 'active' then raise exception 'v2 question should come back active'; end if;
   if exists (select 1 from public.questions where note_id = nid and prompt = '다시 만든 문제' and status <> 'hidden') then raise exception 'v1-only question should hide in v2'; end if;
 
+  -- version_seq 가 생기기 전에 만든 버전처럼 (0): 지우기가 먼저 가장 큰 번호를 남겨서 다음 버전이 지운 번호를 다시 쓰지 않는다
+  update public.notes set version_seq = 0 where id = nid;
   -- 지금 버전(2)을 지우면 버전 1로 바뀌고, 버전 2에만 있던 문제와 더한 자료가 지워진다
   r := public.kok_delete_version(nid, a, 2);
+  if (select version_seq from public.notes where id = nid) <> 2 then raise exception 'delete should keep the largest number used'; end if;
   if (r->>'current')::int <> 1 then raise exception 'current after delete: %', r; end if;
   if exists (select 1 from public.questions where id = q_new) then raise exception 'v2-only question should be deleted'; end if;
   if exists (select 1 from public.sources where id = child) then raise exception 'unused added material should be deleted'; end if;
@@ -653,6 +694,20 @@ begin
   exception when raise_exception then
     if sqlerrm <> 'note_not_found' then raise; end if;
   end;
+  -- 지금 노트(버전 1)에 합치면 새 버전이 된다. 지운 번호(2)는 다시 쓰지 않는다: 3
+  r := public.kok_create_source(jsonb_build_object('id', child3, 'user_id', a, 'subject_id', sub, 'kind', 'text',
+        'text_content', '또 더한 글', 'parent_id', parent), null, now() - interval '1 day', null, now() - interval '30 days', null);
+  if r->>'result' <> 'ok' then raise exception 'child3 create: %', r; end if;
+  v := public.kok_finalize_append(child3, '{"summary":"다시 합친 노트"}'::jsonb, '[]'::jsonb, '[]'::jsonb, null, public.kok_note_base(nid));
+  if v <> 3 then raise exception 'deleted version numbers must not be reused, got %', v; end if;
+  if (select version_seq from public.notes where id = nid) <> 3 then raise exception 'version_seq should be 3'; end if;
+  -- 다시 하기는 다시 합친 횟수도 처음으로
+  insert into public.sources (id, user_id, subject_id, kind, title, status, parent_id, draft)
+    values (child2, a, sub, 'text', '', 'error', parent, '{"remerged": 3, "attempts": 2}'::jsonb);
+  r := public.kok_retry_source(child2, a, null, now() - interval '1 day', null, now() - interval '30 days', null);
+  if r->>'result' <> 'ok' then raise exception 'retry: %', r; end if;
+  if (select draft->>'remerged' from public.sources where id = child2) <> '0' then raise exception 'retry should reset remerged'; end if;
+  delete from public.sources where id = child2;
   perform set_config('kok.v_note', nid::text, false);
 end $$;
 reset role;
@@ -663,9 +718,24 @@ insert into public.chat_messages (user_id, note_id, role, content)
 set role authenticated;
 select set_config('request.jwt.claim.sub', '11111111-1111-1111-1111-111111111111', false);
 do $$ begin
-  if (select count(*) from public.note_versions where note_id = current_setting('kok.v_note')::uuid) <> 1 then raise exception 'A sees own version'; end if;
-  update public.note_versions set body = '{"summary":"고친 버전"}'::jsonb where note_id = current_setting('kok.v_note')::uuid;
-  if (select body->>'summary' from public.note_versions where note_id = current_setting('kok.v_note')::uuid) <> '고친 버전' then raise exception 'version edit'; end if;
+  if (select count(*) from public.note_versions where note_id = current_setting('kok.v_note')::uuid) <> 2 then raise exception 'A sees own versions'; end if;
+  update public.note_versions set body = '{"summary":"고친 버전"}'::jsonb where note_id = current_setting('kok.v_note')::uuid and number = 1;
+  if (select body->>'summary' from public.note_versions where note_id = current_setting('kok.v_note')::uuid and number = 1) <> '고친 버전' then raise exception 'version edit'; end if;
+  -- 지금 버전의 행은 고쳐지지 않는다 (다른 기기에서 그 버전을 지금 버전으로 바꾼 뒤의 예전 화면)
+  update public.note_versions set body = '{"summary":"지금 버전 행 고침"}'::jsonb where note_id = current_setting('kok.v_note')::uuid and number = 3;
+  if (select body->>'summary' from public.note_versions where note_id = current_setting('kok.v_note')::uuid and number = 3) <> '다시 합친 노트' then
+    raise exception 'current version row must not change';
+  end if;
+  begin
+    update public.notes set version_seq = 1;
+    raise exception 'version_seq update should be denied';
+  exception when insufficient_privilege then null;
+  end;
+  begin
+    perform public.kok_note_base(current_setting('kok.v_note')::uuid);
+    raise exception 'note base should be server only';
+  exception when insufficient_privilege then null;
+  end;
   begin
     update public.note_versions set number = 9;
     raise exception 'version number update should be denied';
@@ -699,7 +769,7 @@ end $$;
 select set_config('request.jwt.claim.sub', '11111111-1111-1111-1111-111111111111', false);
 do $$ begin
   if (select count(*) from public.chat_messages) <> 1 then raise exception 'B must not delete A chat'; end if;
-  if (select body->>'summary' from public.note_versions where note_id = current_setting('kok.v_note')::uuid) <> '고친 버전' then raise exception 'B must not edit A version'; end if;
+  if (select body->>'summary' from public.note_versions where note_id = current_setting('kok.v_note')::uuid and number = 1) <> '고친 버전' then raise exception 'B must not edit A version'; end if;
   delete from public.chat_messages;
   if (select count(*) from public.chat_messages) <> 0 then raise exception 'A can clear own chat'; end if;
 end $$;

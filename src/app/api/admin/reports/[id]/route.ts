@@ -2,6 +2,7 @@
 import type { NextRequest } from 'next/server';
 import { z } from 'zod';
 import { assertSameOrigin, readJson, requireAccount } from '@/lib/server/auth';
+import { getFeatures } from '@/lib/server/account';
 import { UserFacingError, errorResponse } from '@/lib/server/errors';
 
 const Body = z.object({ status: z.enum(['resolved', 'dismissed', 'open']), suspendQuestion: z.boolean().optional() });
@@ -23,7 +24,13 @@ export async function PATCH(req: NextRequest, ctx: RouteContext<'/api/admin/repo
       .eq('id', rid);
     if (error) throw error;
     if (parsed.data.suspendQuestion && rep.target_type === 'question' && rep.target_id) {
-      await admin.from('questions').update({ status: 'suspended' }).eq('id', rep.target_id);
+      if ((await getFeatures(admin)).restedHidden) {
+        // 지금 버전에 없는 문제(hidden)는 숨긴 채로 두고, 그 버전으로 돌아오면 '쉬는 중'이 되게 한다
+        await admin.from('questions').update({ status: 'suspended' }).eq('id', rep.target_id).neq('status', 'hidden');
+        await admin.from('questions').update({ rested_hidden: true }).eq('id', rep.target_id).eq('status', 'hidden');
+      } else {
+        await admin.from('questions').update({ status: 'suspended' }).eq('id', rep.target_id);
+      }
     }
     return Response.json({ ok: true });
   } catch (e) {

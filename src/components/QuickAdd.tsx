@@ -29,7 +29,7 @@ type Job =
   | { kind: 'pdf'; file: File; title: string }
   | { kind: 'image'; files: File[]; title: string };
 
-type Status = 'waiting' | 'preparing' | 'slot' | 'busy' | 'uploading' | 'starting' | 'done' | 'error';
+type Status = 'waiting' | 'preparing' | 'slot' | 'appendWait' | 'busy' | 'uploading' | 'starting' | 'done' | 'error';
 
 /** 노트 화면: 끌어다 놓기·붙여 넣기를 이 노트에 더한다 (Pro) */
 export type NoteTarget = {
@@ -151,6 +151,8 @@ function statusText(it: Item): string {
       return it.job.kind === 'image' ? `사진 줄이는 중 ${it.done}/${it.total}` : it.job.kind === 'pdf' ? 'PDF 확인하는 중' : '준비하는 중';
     case 'slot':
       return '정리 중인 자료가 끝나면 시작해요';
+    case 'appendWait':
+      return '이 노트에 먼저 더하는 자료가 끝나면 시작해요';
     case 'busy':
       return '요청이 많아서 잠깐 기다려요';
     case 'uploading':
@@ -274,7 +276,7 @@ export function QuickAddProvider({
           busy = null;
         }
         if (busy === 0) return;
-        update(key, { status: 'slot' });
+        update(key, { status: 'appendWait' });
       }
       throw new Error('노트에 더하는 자료가 오래 끝나지 않아요. 잠시 뒤에 다시 해 주세요.');
     },
@@ -434,20 +436,45 @@ export function QuickAddProvider({
     [update, remove, waitForSlot, waitForAppend, prepare, upload, create, refreshMe],
   );
 
+  /**
+   * 노트에 더하는 자료는 노트마다 따로 줄을 세운다: 한 노트에는 하나씩 더해야 해서 앞 자료가 끝날 때까지 기다리는데,
+   * 그동안 다른 자료(새 노트, 다른 노트에 더하기)는 막지 않고 올린다.
+   */
+  const appendChains = useRef(new Set<string>());
+  const runAppendChain = useCallback(
+    (parentId: string) => {
+      if (appendChains.current.has(parentId)) return;
+      appendChains.current.add(parentId);
+      (async () => {
+        try {
+          for (;;) {
+            const next = itemsRef.current.find((i) => i.status === 'waiting' && i.parentId === parentId);
+            if (!next) break;
+            await runItem(next);
+          }
+        } finally {
+          appendChains.current.delete(parentId);
+        }
+      })();
+    },
+    [runItem],
+  );
+
   const running = useRef(false);
   const pump = useCallback(async () => {
+    for (const it of itemsRef.current) if (it.status === 'waiting' && it.parentId) runAppendChain(it.parentId);
     if (running.current) return;
     running.current = true;
     try {
       for (;;) {
-        const next = itemsRef.current.find((i) => i.status === 'waiting');
+        const next = itemsRef.current.find((i) => i.status === 'waiting' && !i.parentId);
         if (!next) break;
         await runItem(next);
       }
     } finally {
       running.current = false;
     }
-  }, [runItem]);
+  }, [runItem, runAppendChain]);
 
   const enqueue = useCallback(
     (jobs: Job[], subjectId: string, into?: { parentId: string; noteTitle: string }) => {

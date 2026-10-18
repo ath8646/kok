@@ -120,8 +120,12 @@ export async function getAccount(admin: SupabaseClient, userId: string, email?: 
 export type Features = {
   /** 노트 버전·자료 더하기 (note_versions, sources.parent_id) */
   versions: boolean;
+  /** 숨긴 문제가 쉬던 문제였는지 기억하기 (questions.rested_hidden) */
+  restedHidden: boolean;
   /** 노트 채팅 (chat_messages) */
   chat: boolean;
+  /** 테스트 플랜마다 자료 더하기·테마 켜기 (custom_plans.can_append·can_theme) */
+  planFlags: boolean;
 };
 
 let featuresCache: { at: number; value: Features } | null = null;
@@ -132,12 +136,14 @@ let featuresCache: { at: number; value: Features } | null = null;
  */
 export async function getFeatures(admin: SupabaseClient): Promise<Features> {
   if (featuresCache && Date.now() - featuresCache.at < 60_000) return featuresCache.value;
-  const [v, p, c] = await Promise.all([
+  const [v, p, r, c, f] = await Promise.all([
     admin.from('note_versions').select('id').limit(1),
     admin.from('sources').select('parent_id').limit(1),
+    admin.from('questions').select('rested_hidden').limit(1),
     admin.from('chat_messages').select('id').limit(1),
+    admin.from('custom_plans').select('can_append, can_theme').limit(1),
   ]);
-  const value: Features = { versions: !v.error && !p.error, chat: !c.error };
+  const value: Features = { versions: !v.error && !p.error, restedHidden: !r.error, chat: !c.error, planFlags: !f.error };
   featuresCache = { at: Date.now(), value };
   return value;
 }

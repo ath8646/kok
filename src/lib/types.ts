@@ -19,7 +19,7 @@ export type MeResponse = {
   /** 테마를 쓸 수 있는지 (Pro 기능) */
   canTheme: boolean;
   /** DB 에 새 표가 있는지 (schema.sql 을 다시 실행하기 전에는 false) */
-  features: { versions: boolean; chat: boolean };
+  features: { versions: boolean; restedHidden: boolean; chat: boolean; planFlags: boolean };
   consented: boolean;
   settings: UserSettings;
   energy: {
@@ -92,6 +92,8 @@ export type QuestionRow = {
   edited: boolean;
   /** hidden: 지금 쓰는 노트 버전에 없는 문제 (그 버전으로 바꾸면 돌아온다) */
   status: 'active' | 'suspended' | 'hidden';
+  /** 숨긴 문제가 숨기 전에 쉬는 중이었는지 (그 버전으로 돌아오면 다시 쉬는 중) */
+  rested_hidden?: boolean;
   created_at: string;
 };
 

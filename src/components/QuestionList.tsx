@@ -96,7 +96,7 @@ export function QuestionList({
                   {q.created_by === 'ai' ? <Chip>AI</Chip> : <Chip tone="ok">내가 만듦</Chip>}
                   {q.locked ? <Chip tone="hl">🔒 잠금</Chip> : null}
                   {q.edited ? <Chip tone="accent">고침</Chip> : null}
-                  {q.status === 'suspended' ? <Chip tone="warn">쉬는 중</Chip> : null}
+                  {q.status === 'suspended' || (q.status === 'hidden' && q.rested_hidden) ? <Chip tone="warn">쉬는 중</Chip> : null}
                   {q.status === 'hidden' ? <Chip>지금 버전엔 없음</Chip> : null}
                   {c && c.wrong_count > 0 ? <Chip tone="bad">틀림 {c.wrong_count}</Chip> : null}
                 </span>

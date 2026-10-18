@@ -17,6 +17,8 @@ import type { ModelTier } from '@/lib/settings';
 const CHAT_ICON = 'M4 5.5h16v10H9l-5 4zM8 9.5h8M8 12.5h5';
 const TIER_LABEL: Record<ModelTier, string> = { fast: '빠름', careful: '꼼꼼', admin: '최고' };
 const SUGGESTIONS = ['핵심만 3줄로 정리해 줘', '제일 헷갈리기 쉬운 부분을 쉽게 설명해 줘', '시험에 나올 만한 걸 알려 줘'];
+/** 창을 열 때 보여 주는 대화 수 (가장 최근 것부터) */
+const CHAT_SHOWN = 200;
 
 function answerText(q: ChatQuestion): string {
   if (q.type === 'mcq') return q.choices?.[Number(q.answer)] ?? '';
@@ -62,17 +64,22 @@ export function NoteChat({
   const [kb, setKb] = useState<{ height: number; top: number } | null>(null);
 
   const load = useCallback(async () => {
+    // 가장 최근 200개 (오래된 것부터 보이게 뒤집는다)
     const { data, error } = await sb()
       .from('chat_messages')
       .select('id, role, content, model, energy, proposal, created_at')
       .eq('note_id', noteId)
-      .order('created_at')
-      .limit(200);
+      .order('created_at', { ascending: false })
+      .order('id', { ascending: false })
+      .limit(CHAT_SHOWN);
     if (error) {
       setMessages([]);
       return;
     }
-    setMessages((data ?? []) as ChatMessage[]);
+    const rows = ((data ?? []) as ChatMessage[]).reverse();
+    // 가장 오래된 쪽이 잘렸으면 질문 없이 남은 답부터 시작하지 않게 한다
+    if (rows.length >= CHAT_SHOWN) while (rows[0]?.role === 'assistant') rows.shift();
+    setMessages(rows);
   }, [noteId]);
 
   const show = () => {

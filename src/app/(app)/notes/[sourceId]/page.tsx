@@ -40,9 +40,11 @@ import { VERSION_LIST_COLS, removalPlan, toVersionRow, type ChildSource, type Ve
 
 type Tab = 'note' | 'visual' | 'questions' | 'original';
 type SourceFull = SourceRowWithUnit & { text_content: string | null; parent_id?: string | null };
-type NoteRow = { id: string; title: string; subject_id: string; body: Record<string, unknown>; current_version?: number };
+type NoteRow = { id: string; title: string; subject_id: string; body: Record<string, unknown>; updated_at: string; current_version?: number };
 /** 지난 버전: 그 버전 행에 저장된 정리·그림·문제 목록 */
-type OldDoc = { number: number; title: string; body: Record<string, unknown>; visuals: Visuals; questionIds: string[] };
+type OldDoc = { number: number; title: string; body: Record<string, unknown>; visuals: Visuals; questionIds: string[]; updatedAt: string };
+/** 저장할 때 '읽은 그대로인지' 확인하는 표 (행 번호와 그때의 updated_at) */
+type RowToken = { id: string; updatedAt: string };
 
 const TABS: Array<{ id: Tab; label: string }> = [
   { id: 'note', label: '정리' },
@@ -55,11 +57,16 @@ const Q_COLS =
   'id, note_id, subject_id, key_point_id, type, prompt, choices, answer, accepted, explanation, difficulty, pages, created_by, locked, edited, status, created_at';
 const CHILD_COLS = `${SOURCE_COLS}, text_content, parent_id`;
 const VISUAL_TYPES: VisualType[] = ['mindmap', 'table', 'timeline'];
+const STALE_LIVE = '그사이 다른 곳에서 노트가 바뀌어서 방금 고친 것은 저장하지 못했어요. 새로 불러왔어요.';
+const STALE_OLD = '이 버전이 그사이 다른 곳에서 바뀌어서 저장하지 못했어요. 새로 불러왔어요.';
+const APPEND_LOCK = '이 노트에 자료를 더하는 중이에요. 끝나면 고칠 수 있어요.';
 
 type Bundle = {
   source: SourceFull | null;
   note: NoteRow | null;
   visuals: Visuals;
+  /** 그림 행마다 번호와 updated_at: 그사이 바뀐 그림(다른 탭, 새 버전)은 덮어쓰지 않는다 */
+  visualRows: Partial<Record<VisualType, RowToken>>;
   /** 이 노트의 문제 모두 (지금 버전에 없는 숨긴 문제도: 지난 버전 보기에 쓴다) */
   questions: QuestionRow[];
   cards: Map<string, CardInfo>;
@@ -81,8 +88,8 @@ function toVisuals(rows: Array<{ type: string; spec: unknown }>): Visuals {
   return visuals;
 }
 
-async function fetchBundle(sourceId: string, versionsOn: boolean): Promise<Bundle> {
-  const empty: Bundle = { source: null, note: null, visuals: {}, questions: [], cards: new Map(), subject: null, versions: [] };
+async function fetchBundle(sourceId: string, versionsOn: boolean, restedOn: boolean): Promise<Bundle> {
+  const empty: Bundle = { source: null, note: null, visuals: {}, visualRows: {}, questions: [], cards: new Map(), subject: null, versions: [] };
   const { data: s } = await sb()
     .from('sources')
     .select(`${SOURCE_COLS}, text_content${versionsOn ? ', parent_id' : ''}`)
@@ -92,20 +99,25 @@ async function fetchBundle(sourceId: string, versionsOn: boolean): Promise<Bundl
   if (!source || source.status !== 'ready' || source.parent_id) return { ...empty, source };
   const { data: n } = await sb()
     .from('notes')
-    .select(`id, title, subject_id, body${versionsOn ? ', current_version' : ''}`)
+    .select(`id, title, subject_id, body, updated_at${versionsOn ? ', current_version' : ''}`)
     .eq('source_id', sourceId)
     .maybeSingle();
   if (!n) return { ...empty, source };
   const note = n as unknown as NoteRow;
   const [{ data: vs }, { data: qs }, { data: subj }, vr] = await Promise.all([
-    sb().from('visuals').select('type, spec').eq('note_id', note.id),
-    sb().from('questions').select(Q_COLS).eq('note_id', note.id).order('created_at').order('id'),
+    sb().from('visuals').select('id, type, spec, updated_at').eq('note_id', note.id),
+    sb()
+      .from('questions')
+      .select(restedOn ? `${Q_COLS}, rested_hidden` : Q_COLS)
+      .eq('note_id', note.id)
+      .order('created_at')
+      .order('id'),
     sb().from('subjects').select('id, name, color, exam_date, position, created_at').eq('id', note.subject_id).maybeSingle(),
     versionsOn
       ? sb().from('note_versions').select(VERSION_LIST_COLS).eq('note_id', note.id).order('number')
       : Promise.resolve({ data: [] as Record<string, unknown>[] }),
   ]);
-  const questions = (qs ?? []) as QuestionRow[];
+  const questions = (qs ?? []) as unknown as QuestionRow[];
   let cards = new Map<string, CardInfo>();
   for (let i = 0; i < questions.length; i += 200) {
     const { data: cs } = await sb()
@@ -117,10 +129,14 @@ async function fetchBundle(sourceId: string, versionsOn: boolean): Promise<Bundl
       );
     cards = new Map([...cards, ...(cs ?? []).map((c) => [c.question_id as string, c as unknown as CardInfo] as const)]);
   }
+  const visualRows = (vs ?? []) as Array<{ id: string; type: string; spec: unknown; updated_at: string }>;
   return {
     source,
     note,
-    visuals: toVisuals((vs ?? []) as Array<{ type: string; spec: unknown }>),
+    visuals: toVisuals(visualRows),
+    visualRows: Object.fromEntries(
+      visualRows.filter((r) => VISUAL_TYPES.includes(r.type as VisualType)).map((r) => [r.type, { id: r.id, updatedAt: r.updated_at }]),
+    ),
     questions,
     cards,
     subject: (subj as SubjectRow) ?? null,
@@ -137,7 +153,7 @@ async function fetchKids(parentId: string): Promise<ChildSource[]> {
 async function fetchOldDoc(noteId: string, number: number): Promise<OldDoc | null> {
   const { data } = await sb()
     .from('note_versions')
-    .select('number, title, body, visuals, question_ids')
+    .select('number, title, body, visuals, question_ids, updated_at')
     .eq('note_id', noteId)
     .eq('number', number)
     .maybeSingle();
@@ -148,6 +164,7 @@ async function fetchOldDoc(noteId: string, number: number): Promise<OldDoc | nul
     body: (data.body ?? {}) as Record<string, unknown>,
     visuals: toVisuals(Array.isArray(data.visuals) ? (data.visuals as Array<{ type: string; spec: unknown }>) : []),
     questionIds: Array.isArray(data.question_ids) ? data.question_ids.map(String) : [],
+    updatedAt: String(data.updated_at),
   };
 }
 
@@ -169,6 +186,7 @@ export default function NotePage() {
   const router = useRouter();
   const toast = useToast();
   const versionsOn = !!me?.features.versions;
+  const restedOn = !!me?.features.restedHidden;
   const chatOn = !!me?.features.chat;
   const canAppend = !!me?.canAppend;
   const [bundle, setBundle] = useState<Bundle | null | undefined>(undefined);
@@ -191,12 +209,32 @@ export default function NotePage() {
   const [kidsTick, setKidsTick] = useState(0);
   const [verBusy, setVerBusy] = useState<string | null>(null);
   const reload = useCallback(() => setTick((v) => v + 1), []);
+  // 저장할 때 '읽은 그대로인지' 확인하는 값 (노트·그림 행·지난 버전 행의 updated_at). 저장하면 새 값으로 바꾼다
+  const noteToken = useRef<string | null>(null);
+  const visualTokens = useRef<Partial<Record<VisualType, RowToken>>>({});
+  // 지난 버전은 번호마다 따로 (다른 버전을 열어도 줄 서 있던 저장이 자기 버전의 값으로 확인하게)
+  const oldTokens = useRef<Map<number, string>>(new Map());
+  // 저장이 시작·끝날 때마다 늘어나는 수와 진행 중인 저장 수: 읽는 사이에 저장이 끼어들면 읽은 것을 버리고 다시 읽는다
+  // (저장보다 먼저 읽은 옛 내용·옛 확인 값으로 화면과 다음 저장을 되돌리지 않게)
+  const saveGen = useRef(0);
+  const savesPending = useRef(0);
+  const saveChain = useRef<Promise<unknown>>(Promise.resolve());
+  /** 읽기 시작할 때의 저장 상태 → 읽은 것을 써도 되는지 (안 되면 저장이 끝난 뒤 다시 읽는다) */
+  const freshSince = useCallback((gen: number): boolean => {
+    if (saveGen.current === gen && savesPending.current === 0) return true;
+    saveChain.current.then(() => setTick((t) => t + 1));
+    return false;
+  }, []);
 
   useEffect(() => {
     let alive = true;
-    fetchBundle(sourceId, versionsOn)
+    const gen = saveGen.current;
+    fetchBundle(sourceId, versionsOn, restedOn)
       .then((b) => {
-        if (alive) setBundle(b);
+        if (!alive || !freshSince(gen)) return;
+        noteToken.current = b.note?.updated_at ?? null;
+        visualTokens.current = b.visualRows;
+        setBundle(b);
       })
       .catch(() => {
         if (alive) setBundle((cur) => cur ?? null);
@@ -204,7 +242,7 @@ export default function NotePage() {
     return () => {
       alive = false;
     };
-  }, [sourceId, tick, versionsOn]);
+  }, [sourceId, tick, versionsOn, restedOn, freshSince]);
 
   const source = bundle === undefined ? undefined : (bundle?.source ?? null);
   const note = bundle?.note ?? null;
@@ -272,10 +310,13 @@ export default function NotePage() {
   useEffect(() => {
     if (!showOld || !noteId || viewing === null) return;
     let alive = true;
+    const gen = saveGen.current;
     fetchOldDoc(noteId, viewing).then((d) => {
-      if (!alive) return;
-      if (d) setOldDoc(d);
-      else {
+      if (!alive || !freshSince(gen)) return;
+      if (d) {
+        oldTokens.current.set(d.number, d.updatedAt);
+        setOldDoc(d);
+      } else {
         toast('그 버전을 찾을 수 없어요.', 'bad');
         setViewing(null);
         setViewParam(null);
@@ -284,7 +325,7 @@ export default function NotePage() {
     return () => {
       alive = false;
     };
-  }, [showOld, noteId, viewing, tick, toast]);
+  }, [showOld, noteId, viewing, tick, toast, freshSince]);
   const old = showOld && oldDoc && oldDoc.number === viewing ? oldDoc : null;
 
   // + 버튼·끌어다 놓기는 이 노트의 과목에 넣고, 노트 화면에서는 이 노트에 더한다 (Pro)
@@ -326,36 +367,126 @@ export default function NotePage() {
   const keyPoints = useMemo(() => (body?.key_points ?? []).map((k) => ({ id: k.id, title: k.title })), [body]);
   const noteChars = useMemo(() => (note ? JSON.stringify(note.body).length : 0), [note]);
 
+  // 예전 화면에서 고쳐서 저장되지 않았을 때 (다른 탭·기기에서 자료를 더했거나 버전을 바꿈): 알려 주고 새로 읽는다
+  const staleAt = useRef(0);
+  const staleReload = useCallback(
+    (message: string) => {
+      if (Date.now() - staleAt.current > 4000) {
+        staleAt.current = Date.now();
+        toast(message, 'bad');
+      }
+      reload();
+    },
+    [toast, reload],
+  );
+
+  // 저장은 한 줄로 세운다: 앞 저장이 받은 새 updated_at 으로 다음 저장을 확인한다 (빨리 여러 번 눌러도)
+  const queued = <T,>(fn: () => Promise<T>): Promise<T> => {
+    saveGen.current++;
+    savesPending.current++;
+    const done = () => {
+      saveGen.current++;
+      savesPending.current--;
+    };
+    const p = saveChain.current.then(fn, fn).finally(done);
+    saveChain.current = p.catch(() => undefined);
+    return p;
+  };
+
+  /** 지난 버전 행 고치기. 읽은 뒤에 바뀌었으면(지금 버전으로 씀, 지움, 다른 탭에서 고침) 저장하지 않는다 */
+  const saveOld = async (number: number, patch: Record<string, unknown>): Promise<boolean | 'stale'> => {
+    if (!note) return false;
+    // 그 버전을 읽은 값이 없으면 확인할 수 없으니 저장하지 않고 새로 읽는다
+    const tok = oldTokens.current.get(number);
+    if (!tok) {
+      staleReload(STALE_OLD);
+      return 'stale';
+    }
+    const { data, error } = await sb()
+      .from('note_versions')
+      .update(patch)
+      .eq('note_id', note.id)
+      .eq('number', number)
+      .eq('updated_at', tok)
+      .select('updated_at');
+    if (error) return false;
+    const row = data?.[0];
+    if (!row) {
+      oldTokens.current.delete(number);
+      staleReload(STALE_OLD);
+      return 'stale';
+    }
+    oldTokens.current.set(number, String(row.updated_at));
+    return true;
+  };
+
   const saveBody = async (next: Record<string, unknown>) => {
     if (!note) return;
+    // 자료를 더하는 동안에는 지금 버전을 고치지 않는다 (열려 있던 고치기 칸에서 저장해도)
+    if (!old && appendRunning) {
+      toast(APPEND_LOCK, 'bad');
+      return;
+    }
     if (old) {
-      setOldDoc((d) => (d && d.number === old.number ? { ...d, body: next } : d));
-      const { error } = await sb().from('note_versions').update({ body: next }).eq('note_id', note.id).eq('number', old.number);
-      if (error) toast('저장하지 못했어요.', 'bad');
+      const number = old.number;
+      setOldDoc((d) => (d && d.number === number ? { ...d, body: next } : d));
+      const r = await queued(() => saveOld(number, { body: next }));
+      if (r === false) toast('저장하지 못했어요.', 'bad');
       return;
     }
     setBundle((b) => (b && b.note ? { ...b, note: { ...b.note, body: next } } : b));
-    const { error } = await sb().from('notes').update({ body: next }).eq('id', note.id);
-    if (error) toast('저장하지 못했어요.', 'bad');
+    // 읽은 노트 그대로일 때만 저장한다 (예전 화면이 합친 새 버전이나 다른 탭에서 고친 것을 덮어쓰지 않게)
+    await queued(async () => {
+      let q = sb().from('notes').update({ body: next }).eq('id', note.id);
+      if (noteToken.current) q = q.eq('updated_at', noteToken.current);
+      const { data, error } = await q.select('updated_at');
+      if (error) return toast('저장하지 못했어요.', 'bad');
+      const row = data?.[0];
+      if (!row) return staleReload(STALE_LIVE);
+      noteToken.current = String(row.updated_at);
+    });
+  };
+
+  /** 지금 버전의 그림 저장: 읽은 그림 행 그대로일 때만 (새 버전이면 행이 새로 생겨 0행) */
+  const saveLiveVisual = async (t: VisualType, spec: Mindmap | TableSpec | TimelineSpec): Promise<boolean | 'stale'> => {
+    // 자료를 더하는 동안에는 지금 버전의 그림을 고치지 않는다 (알리고 새로 읽어 고친 것을 되돌린다)
+    if (appendRunning) {
+      staleReload(APPEND_LOCK);
+      return 'stale';
+    }
+    return queued(async () => {
+      const tok = visualTokens.current[t];
+      if (!note || !tok) return false;
+      const { data, error } = await sb().from('visuals').update({ spec }).eq('id', tok.id).eq('updated_at', tok.updatedAt).select('updated_at');
+      if (error) return false;
+      const row = data?.[0];
+      if (!row) {
+        staleReload(STALE_LIVE);
+        return 'stale';
+      }
+      visualTokens.current = { ...visualTokens.current, [t]: { id: tok.id, updatedAt: String(row.updated_at) } };
+      return true;
+    });
   };
 
   /** 지난 버전의 그림 저장 (그 버전 행의 visuals 를 통째로 바꾼다) */
-  const saveOldVisual = async (t: VisualType, spec: Mindmap | TableSpec | TimelineSpec): Promise<boolean> => {
+  const saveOldVisual = async (t: VisualType, spec: Mindmap | TableSpec | TimelineSpec): Promise<boolean | 'stale'> => {
     if (!note || !old) return false;
+    const number = old.number;
     const next: Visuals = { ...old.visuals, [t]: spec };
     const rows = VISUAL_TYPES.filter((k) => next[k]).map((k) => ({ type: k, spec: next[k] }));
-    const { error } = await sb().from('note_versions').update({ visuals: rows }).eq('note_id', note.id).eq('number', old.number);
-    if (error) return false;
-    setOldDoc((d) => (d && d.number === old.number ? { ...d, visuals: next } : d));
-    return true;
+    const r = await queued(() => saveOld(number, { visuals: rows }));
+    if (r === true) setOldDoc((d) => (d && d.number === number ? { ...d, visuals: next } : d));
+    return r;
   };
 
   /** 지난 버전의 문제 목록 바꾸기 */
   const setOldQuestionIds = async (ids: string[]): Promise<boolean> => {
     if (!note || !old) return false;
-    const { error } = await sb().from('note_versions').update({ question_ids: ids }).eq('note_id', note.id).eq('number', old.number);
-    if (error) return false;
-    setOldDoc((d) => (d && d.number === old.number ? { ...d, questionIds: ids } : d));
+    const number = old.number;
+    const r = await queued(() => saveOld(number, { question_ids: ids }));
+    if (r !== true) return false;
+    setOldDoc((d) => (d && d.number === number ? { ...d, questionIds: ids } : d));
     return true;
   };
 
@@ -368,7 +499,14 @@ export default function NotePage() {
             return {
               label: '이 버전에서 빼기',
               confirm: '이 문제를 지금 버전에서 뺄까요? 다른 버전에는 그대로 남아요.',
-              run: async () => !(await sb().from('questions').update({ status: 'hidden' }).eq('id', q.id)).error,
+              // 쉬는 중이던 문제는 그것도 기억해 둔다 (그 버전으로 돌아오면 다시 쉬는 중)
+              run: async () =>
+                !(
+                  await sb()
+                    .from('questions')
+                    .update({ status: 'hidden', ...(restedOn ? { rested_hidden: q.status === 'suspended' } : {}) })
+                    .eq('id', q.id)
+                ).error,
             };
           }
           if (plan === 'unlist') {
@@ -479,7 +617,10 @@ export default function NotePage() {
   }
 
   const loadingOld = showOld && !old;
-  const aiLocked = old ? '지난 버전에서는 AI로 다시 만들 수 없어요. 이 버전을 쓰면 할 수 있어요.' : undefined;
+  // 자료를 더하는 동안에는 지금 노트의 정리·그림을 고치지 않는다 (합치는 바탕이 바뀌면 처음부터 다시 합쳐야 해서)
+  const appendRunning = versionsOn && kidsActive && !old;
+  const aiLocked = old ? '지난 버전에서는 AI로 다시 만들 수 없어요. 이 버전을 쓰면 할 수 있어요.' : appendRunning ? APPEND_LOCK : undefined;
+  const editLocked = appendRunning ? APPEND_LOCK : undefined;
 
   return (
     <div className="grid gap-4">
@@ -578,8 +719,9 @@ export default function NotePage() {
                         highlightKeyPoint={kp}
                         onSaved={reload}
                         onOpen={() => setTab('visual')}
-                        saveSpec={old ? saveOldVisual : undefined}
+                        saveSpec={old ? saveOldVisual : saveLiveVisual}
                         aiLocked={aiLocked}
+                        editLocked={editLocked}
                       />
                       <button type="button" className="mt-2 text-sm font-semibold text-accent" onClick={() => setTab('visual')}>
                         그림 크게 보기·고치기 →
@@ -592,7 +734,7 @@ export default function NotePage() {
                 key={old ? `v${old.number}` : 'live'}
                 note={body}
                 kind={source.kind}
-                editable
+                editable={!appendRunning}
                 onChange={(next) => saveBody({ ...raw, ...next })}
                 highlightKeyPoint={kp}
                 onSelectKeyPoint={setKp}
@@ -624,8 +766,9 @@ export default function NotePage() {
               onSaved={reload}
               onViewChange={(v) => saveBody({ ...raw, view: v })}
               onReport={() => setReporting(true)}
-              saveSpec={old ? saveOldVisual : undefined}
+              saveSpec={old ? saveOldVisual : saveLiveVisual}
               aiLocked={aiLocked}
+              editLocked={editLocked}
             />
           ) : null}
 

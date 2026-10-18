@@ -81,6 +81,12 @@ export function NoteView({
   onOpenPage?: (page: number) => void;
 }) {
   const [editing, setEditing] = useState<string | null>(null);
+  // 고칠 수 없게 되면(자료를 더하기 시작함 등) 열려 있던 고치기 칸을 닫는다
+  const [wasEditable, setWasEditable] = useState(editable);
+  if (wasEditable !== editable) {
+    setWasEditable(editable);
+    if (!editable) setEditing(null);
+  }
   const [showChanges, setShowChanges] = useState(false);
   const save = (next: NoteBody) => {
     onChange?.(next);

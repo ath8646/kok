@@ -13,7 +13,7 @@ import {
   type CustomPlan,
 } from '@/lib/plans';
 import { DEFAULT_LIMITS, MAX_FILE_MB } from '@/lib/settings';
-import { schemaMissing } from '@/app/api/admin/plans/shared';
+import { FLAGS_WARNING, PlanBody, planRow, savePlan, schemaMissing } from '@/app/api/admin/plans/shared';
 
 const NOW = Date.parse('2026-10-18T03:00:00Z');
 const later = new Date(NOW + 7 * 86_400_000).toISOString();
@@ -132,6 +132,49 @@ describe('테스트 플랜 판단', () => {
     expect(refillText(plan, 'day')).toBe('내일 다시 채워져요.');
     expect(refillText(plan, 'period')).toBe("'베타' 플랜 에너지는 기간 동안 다시 채워지지 않아요. 플랜은 10월 25일까지예요.");
     expect(refillText({ kind: 'pro', name: 'Pro', until: null }, 'period')).toBe('다음 달 다시 채워져요.');
+  });
+});
+
+describe('테스트 플랜 저장 값', () => {
+  const body = PlanBody.parse({
+    name: '베타',
+    energyTotal: 500,
+    energyDaily: null,
+    pdfPages: 80,
+    images: 12,
+    textChars: 50000,
+    fileMb: 50,
+    careful: true,
+    canAppend: true,
+    canTheme: false,
+  });
+  it('자료 더하기·테마 칸이 있는 DB 에는 같이 저장한다', () => {
+    expect(planRow(body, true)).toMatchObject({ can_append: true, can_theme: false, careful: true, energy_total: 500 });
+  });
+  it('칸이 없다는 오류가 나면 그 칸을 빼고 다시 저장하고 알려 준다', async () => {
+    const rows: Array<Record<string, unknown>> = [];
+    const r = await savePlan(body, async (row) => {
+      rows.push(row);
+      return 'can_append' in row
+        ? { data: null, error: { code: 'PGRST204', message: "Could not find the 'can_append' column of 'custom_plans' in the schema cache" } }
+        : { data: { id: 'p1', ...row }, error: null };
+    });
+    expect(rows).toHaveLength(2);
+    expect(rows[1]).not.toHaveProperty('can_append');
+    expect(r.plan).toMatchObject({ id: 'p1', name: '베타' });
+    expect(r.warning).toBe(FLAGS_WARNING);
+    // 칸이 있으면 한 번에 저장하고 알림도 없다
+    const once = await savePlan(body, async (row) => ({ data: { id: 'p2', ...row }, error: null }));
+    expect(once.warning).toBeUndefined();
+    expect(once.plan).toMatchObject({ can_append: true });
+    // 다른 오류는 그대로 낸다
+    await expect(savePlan(body, async () => ({ data: null, error: { code: '23514', message: 'check violation' } }))).rejects.toMatchObject({ code: '23514' });
+  });
+  it('schema.sql 을 다시 실행하기 전(칸이 없음)에는 그 칸을 빼고 저장한다', () => {
+    const row = planRow(body, false);
+    expect(row).not.toHaveProperty('can_append');
+    expect(row).not.toHaveProperty('can_theme');
+    expect(row).toMatchObject({ name: '베타', careful: true });
   });
 });
 

@@ -6,7 +6,7 @@ import { useMe } from '@/components/AppShell';
 import { MindMap } from '@/components/MindMap';
 import { QuestionCard, type GradeOutcome, type ReviewQuestion } from '@/components/QuestionCard';
 import { ReportSheet } from '@/components/QuestionList';
-import { Button, Card, EmptyState, LargeHeader, LinkButton, Segmented, Sheet, api, useToast } from '@/components/ui';
+import { Button, Card, EmptyState, LargeHeader, LinkButton, Segmented, Sheet, api, cx, useToast } from '@/components/ui';
 import { fetchPlanData, fetchQuestionsByIds, fetchStudyDays, sb, type PlanData } from '@/lib/data';
 import { autoGrade, autoRating, type Rating } from '@/lib/grading';
 import { pickToday, streakInfo } from '@/lib/review-plan';
@@ -123,6 +123,8 @@ export default function ReviewPage() {
   const [visual, setVisual] = useState<{ spec: Mindmap; kp: string | null } | null>(null);
   const [reportQ, setReportQ] = useState<QuestionRow | null>(null);
   const [streak, setStreak] = useState(0);
+  // 끝 화면에서 '조금 더 하기'로 돌아온 횟수: 그때는 탭을 바꿀 때처럼 고르는 화면이 살짝 떠오른다
+  const [round, setRound] = useState(0);
   const saves = useRef<SaveState>({ seq: 0, chains: new Map(), failedCards: new Map(), failedLogs: [] });
   const subjectNames = useMemo(() => new Map((plan?.subjects ?? []).map((s) => [s.id, s.name])), [plan]);
   const reviewSettings = me?.settings.review;
@@ -138,6 +140,7 @@ export default function ReviewPage() {
   /** 버튼에서 다시 고를 때 (미리 풀기, 조금 더 하기) */
   const rebuild = (practiceAhead: boolean) => {
     if (!reviewSettings) return;
+    if (phase === 'end') setRound((r) => r + 1);
     setPhase('loading');
     fetchQueue(mode, practiceAhead, reviewSettings)
       .then(applyQueue)
@@ -275,48 +278,59 @@ export default function ReviewPage() {
   };
 
   // ------------------------------------------------------------ 화면
-  if (phase === 'loading')
-    return (
-      <div className="grid gap-3">
-        <LargeHeader title={MODE_TITLE[mode.kind]} subtitle=" " />
-        <div className="kok-card kok-shimmer h-56" />
-      </div>
-    );
-
-  if (phase === 'start') {
+  if (phase === 'loading' || phase === 'start') {
+    // 불러오는 동안과 다 불러온 뒤가 같은 틀이라 제목은 그대로 있고, 부제와 카드 안의 글만 바뀐다
+    const ready = phase === 'start';
     const n = queue.length;
+    const subtitleText = n ? `${n}문제가 준비됐어요` : '지금은 풀 문제가 없어요';
+    const subtitle = ready ? (
+      <span key={subtitleText} className="kok-swap">
+        {subtitleText}
+      </span>
+    ) : (
+      // 읽는 동안에도 부제 줄 높이를 지켜서, 다 읽었을 때 제목이 위로 튀지 않게 한다
+      <span className="kok-skel inline-block h-6 align-top" aria-hidden="true">
+        <span className="kok-bone mt-[7px] h-2.5 w-32 max-w-full" />
+      </span>
+    );
     return (
-      <div className="grid gap-3">
-        <LargeHeader title={MODE_TITLE[mode.kind]} subtitle={n ? `${n}문제가 준비됐어요` : '지금은 풀 문제가 없어요'} />
-        {n === 0 ? (
-          <EmptyState
-            title={mode.kind === 'today' ? '오늘 할 일 끝! 🎉' : '풀 문제가 없어요'}
-            body={
-              mode.kind === 'today'
-                ? '잊어버리기 직전이 되면 다시 나와요. 오늘은 푹 쉬어요.'
-                : mode.kind === 'subject'
-                  ? '이 과목은 오늘 복습할 문제가 없어요.'
-                  : '조건에 맞는 문제가 없어요.'
-            }
-            action={
-              mode.kind === 'subject' && !ahead ? (
-                <Button
-                  variant="secondary"
-                  onClick={() => {
-                    setAhead(true);
-                    rebuild(true);
-                  }}
-                >
-                  미리 풀어 보기
-                </Button>
-              ) : (
-                <LinkButton href="/home">홈으로</LinkButton>
-              )
-            }
-          />
+      <div key={round} className={cx('grid gap-3', round > 0 && 'kok-page')}>
+        <LargeHeader title={MODE_TITLE[mode.kind]} subtitle={subtitle} />
+        {!ready ? (
+          <StartSkeleton />
+        ) : n === 0 ? (
+          // 자리 표시와 모양이 달라서 카드째 살짝 번지며 나타난다
+          <div className="kok-fill">
+            <EmptyState
+              title={mode.kind === 'today' ? '오늘 할 일 끝! 🎉' : '풀 문제가 없어요'}
+              body={
+                mode.kind === 'today'
+                  ? '잊어버리기 직전이 되면 다시 나와요. 오늘은 푹 쉬어요.'
+                  : mode.kind === 'subject'
+                    ? '이 과목은 오늘 복습할 문제가 없어요.'
+                    : '조건에 맞는 문제가 없어요.'
+              }
+              action={
+                mode.kind === 'subject' && !ahead ? (
+                  <Button
+                    variant="secondary"
+                    onClick={() => {
+                      setAhead(true);
+                      rebuild(true);
+                    }}
+                  >
+                    미리 풀어 보기
+                  </Button>
+                ) : (
+                  <LinkButton href="/home">홈으로</LinkButton>
+                )
+              }
+            />
+          </div>
         ) : (
-          <Card className="kok-rise grid gap-4 p-5">
-            <div className="grid gap-2">
+          // 자리 표시와 같은 크기의 카드는 그 자리에 두고, 안의 글만 번지며 나타난다
+          <Card className="grid gap-4 p-5">
+            <div className="kok-fill grid gap-2">
               <span className="text-sm font-semibold">세션 길이</span>
               <Segmented
                 label="세션 길이"
@@ -329,9 +343,13 @@ export default function ReviewPage() {
                 ]}
               />
             </div>
-            <p className="text-sm text-muted">집중 모드: 한 화면에 한 문제만 보이고, 메뉴와 알림은 숨겨요. 시간이 끝나면 멈춰요.</p>
+            <p className="kok-fill text-sm text-muted" style={{ ['--i' as string]: 1 }}>
+              집중 모드: 한 화면에 한 문제만 보이고, 메뉴와 알림은 숨겨요. 시간이 끝나면 멈춰요.
+            </p>
             <Button
               size="lg"
+              className="kok-fill"
+              style={{ ['--i' as string]: 2 }}
               onClick={() => {
                 setStartedAt(Date.now());
                 setNow(Date.now());
@@ -359,17 +377,27 @@ export default function ReviewPage() {
             pickToday(plan.cards, plan.planSubjects, { dailyMax: settings.dailyMax, doneToday: plan.doneToday + total, interleave: false }).length - total,
           )
         : 0;
+    // 끝 화면은 위에서부터 차례로 살짝 번지며 나타난다
     return (
       <div className="grid gap-4 pb-4 pt-[calc(28px+env(safe-area-inset-top))] md:pt-10">
-        <div className="kok-rise text-center">
+        <div className="kok-fill text-center">
           <p className="text-5xl" aria-hidden="true">
             {total && right / total >= 0.8 ? '🎉' : '👏'}
           </p>
           <h1 className="mt-2 font-display text-3xl">{total ? '오늘 할 일 끝!' : '다음에 또 만나요'}</h1>
-          {streak ? <p className="mt-1 text-muted">연속 {streak}일째 공부했어요.</p> : null}
+          {/* 연속 기록은 저장이 끝난 뒤에 읽어서 조금 늦게 온다: 줄을 미리 잡아 두어 아래가 밀리지 않게 하고, 그 자리에서 번진다 */}
+          <p className="mt-1 text-muted">
+            {streak ? (
+              <span key={streak} className="kok-swap">
+                연속 {streak}일째 공부했어요.
+              </span>
+            ) : (
+              '\u00a0'
+            )}
+          </p>
         </div>
         {total ? (
-          <Card className="kok-rise grid grid-cols-3 gap-2 text-center" style={{ ['--i' as string]: 1 }}>
+          <Card className="kok-fill grid grid-cols-3 gap-2 text-center" style={{ ['--i' as string]: 1 }}>
             <div>
               <p className="font-display text-3xl">{total}</p>
               <p className="text-sm text-muted">푼 문제</p>
@@ -385,16 +413,18 @@ export default function ReviewPage() {
           </Card>
         ) : null}
         {enteredWrong || graduated ? (
-          <p className="text-center text-sm text-muted">
+          <p className="kok-fill text-center text-sm text-muted" style={{ ['--i' as string]: 2 }}>
             {enteredWrong ? `오답노트에 ${enteredWrong}문제를 담았어요. ` : ''}
             {graduated ? `${graduated}문제가 오답노트를 졸업했어요.` : ''}
           </p>
         ) : null}
-        <LinkButton href="/home" size="lg" variant="ink">
-          홈으로
-        </LinkButton>
+        <div className="kok-fill grid" style={{ ['--i' as string]: 3 }}>
+          <LinkButton href="/home" size="lg" variant="ink">
+            홈으로
+          </LinkButton>
+        </div>
         {remaining > 0 ? (
-          <p className="text-center text-sm text-muted">
+          <p className="kok-fill text-center text-sm text-muted" style={{ ['--i' as string]: 4 }}>
             오늘 남은 복습 {remaining}문제는 나중에 해도 괜찮아요.{' '}
             <button type="button" className="font-semibold underline" onClick={() => rebuild(false)}>
               조금 더 하기
@@ -449,6 +479,31 @@ export default function ReviewPage() {
         {visual ? <MindMap spec={visual.spec} settings={me.settings.visual} highlightKeyPoint={visual.kp} /> : null}
       </Sheet>
       <ReportSheet q={reportQ} onClose={() => setReportQ(null)} onChanged={() => {}} />
+    </div>
+  );
+}
+
+/** 시작 카드를 읽는 동안: 실제 카드와 같은 모양·크기 (세션 길이, 안내 글, 시작 버튼) */
+function StartSkeleton() {
+  return (
+    <div className="kok-card kok-skel kok-shimmer grid gap-4 p-5" aria-busy="true">
+      <span className="sr-only">복습을 불러오는 중이에요</span>
+      <div className="grid gap-2" aria-hidden="true">
+        <span className="flex h-5 items-center">
+          <span className="kok-bone h-3 w-16" />
+        </span>
+        <span className="kok-bone h-10 w-full" />
+      </div>
+      {/* 안내 글: 폰에서는 두 줄, 넓은 화면에서는 한 줄. 두 줄의 너비 합(+사이)이 실제 글 한 줄 너비(약 456px)와 같아서 같은 화면 너비에서 줄이 바뀐다 */}
+      <div className="flex flex-wrap gap-x-2" aria-hidden="true">
+        <span className="flex h-5 w-[290px] max-w-full items-center">
+          <span className="kok-bone h-2.5 w-full" />
+        </span>
+        <span className="flex h-5 w-[158px] max-w-full items-center">
+          <span className="kok-bone h-2.5 w-full" />
+        </span>
+      </div>
+      <span className="kok-bone h-[52px] w-full" aria-hidden="true" />
     </div>
   );
 }

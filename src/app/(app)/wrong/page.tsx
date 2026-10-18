@@ -3,7 +3,7 @@
 import Link from 'next/link';
 import { useEffect, useState } from 'react';
 import { QuestionPreview } from '@/components/QuestionList';
-import { Button, Card, Chip, EmptyState, ICONS, Icon, LargeHeader, LinkButton, SectionTitle, buttonClass, useToast } from '@/components/ui';
+import { Button, Card, Chip, EmptyState, ICONS, Icon, LargeHeader, LinkButton, SectionTitle, buttonClass, cx, useToast } from '@/components/ui';
 import { fetchImportance, fetchPlanData, fetchQuestionsByIds, sb } from '@/lib/data';
 import { weakConcepts, type WeakConcept } from '@/lib/review-plan';
 import type { QuestionRow } from '@/lib/types';
@@ -62,14 +62,28 @@ export default function WrongPage() {
     };
   }, [toast]);
 
+  const subtitleText = items.length ? `틀린 문제 ${items.length}개 · 3번 연속 맞히면 졸업해요` : '틀린 문제가 모이는 곳이에요';
+  const subtitle = loading ? (
+    // 읽는 동안에도 부제 줄 높이를 지켜서, 다 읽었을 때 제목이 위로 튀지 않게 한다
+    <span className="kok-skel inline-block h-6 align-top" aria-hidden="true">
+      <span className="kok-bone mt-[7px] h-2.5 w-52 max-w-full" />
+    </span>
+  ) : (
+    <span key={subtitleText} className="kok-swap">
+      {subtitleText}
+    </span>
+  );
+  // 틀린 문제 카드가 번지는 순서 (약점 개념 카드 다음)
+  const itemsFrom = weak.length ? weak.length + 2 : 1;
+
   return (
     <div className="grid gap-3">
       <LargeHeader
         title="오답노트"
-        subtitle={loading ? ' ' : items.length ? `틀린 문제 ${items.length}개 · 3번 연속 맞히면 졸업해요` : '틀린 문제가 모이는 곳이에요'}
+        subtitle={subtitle}
         actions={
           items.length ? (
-            <LinkButton href="/review?mode=wrong" size="sm" className="mr-1">
+            <LinkButton href="/review?mode=wrong" size="sm" className="kok-fill mr-1">
               전부 다시 풀기
             </LinkButton>
           ) : null
@@ -77,37 +91,39 @@ export default function WrongPage() {
       />
 
       {loading ? (
-        <div className="grid gap-2">
-          {[0, 1, 2].map((i) => (
-            <div key={i} className="kok-card kok-shimmer h-24" />
-          ))}
-        </div>
+        <WrongSkeleton />
       ) : !items.length ? (
-        <EmptyState
-          icon={<Icon d={ICONS.check} size={34} strokeWidth={2.2} />}
-          title="오답노트가 비어 있어요"
-          body="틀린 문제가 생기면 여기에 모여요."
-          action={<LinkButton href="/home">홈으로</LinkButton>}
-        />
+        // 자리 표시와 모양이 달라서 카드째 살짝 번지며 나타난다
+        <div className="kok-fill">
+          <EmptyState
+            icon={<Icon d={ICONS.check} size={34} strokeWidth={2.2} />}
+            title="오답노트가 비어 있어요"
+            body="틀린 문제가 생기면 여기에 모여요."
+            action={<LinkButton href="/home">홈으로</LinkButton>}
+          />
+        </div>
       ) : (
+        // 자리 표시와 같은 모양의 카드는 그 자리에 두고, 안의 글만 위에서부터 차례로 번지며 나타난다
         <>
           {weak.length ? (
             <>
-              <SectionTitle>약점 개념 {weak.length}개</SectionTitle>
+              <SectionTitle>
+                <span className="kok-fill block">약점 개념 {weak.length}개</span>
+              </SectionTitle>
               <div className="grid gap-2">
                 {weak.map((w, i) => {
                   const n = notes.get(w.note_id);
                   const t = titles.get(w.note_id)?.get(w.key_point_id)?.title ?? w.key_point_id;
                   return (
-                    <Card key={`${w.note_id}:${w.key_point_id}`} className="kok-rise grid gap-2" style={{ ['--i' as string]: i }}>
-                      <div className="flex flex-wrap items-center justify-between gap-2">
+                    <Card key={`${w.note_id}:${w.key_point_id}`} className="grid gap-2" style={{ ['--i' as string]: i + 1 }}>
+                      <div className="kok-fill flex flex-wrap items-center justify-between gap-2">
                         <div className="min-w-0">
                           <p className="truncate font-bold">{t}</p>
                           <p className="truncate text-sm text-muted">{n?.title ?? '노트'}</p>
                         </div>
                         <Chip tone="bad">틀린 문제 {w.count}</Chip>
                       </div>
-                      <div className="flex flex-wrap gap-2">
+                      <div className="kok-fill flex flex-wrap gap-2">
                         <LinkButton size="sm" href={`/review?kp=${w.note_id}:${w.key_point_id}`}>
                           이 개념 풀기
                         </LinkButton>
@@ -129,21 +145,30 @@ export default function WrongPage() {
             </>
           ) : null}
 
-          <SectionTitle>틀린 문제 {items.length}개</SectionTitle>
+          <SectionTitle>
+            <span className="kok-fill block" style={{ ['--i' as string]: itemsFrom - 1 }}>
+              틀린 문제 {items.length}개
+            </span>
+          </SectionTitle>
           <div className="grid gap-2">
             {items.map(({ q, lapses }, i) => (
-              <Card key={q.id} className="kok-rise grid gap-2" style={{ ['--i' as string]: i }}>
+              <Card key={q.id} className="grid gap-2" style={{ ['--i' as string]: itemsFrom + i }}>
                 <button
                   type="button"
-                  className="flex items-start gap-2 text-left"
+                  className="kok-fill flex items-start gap-2 text-left"
                   onClick={() => setOpen(open === q.id ? null : q.id)}
                   aria-expanded={open === q.id}
                 >
                   <span className="line-clamp-2 min-w-0 flex-1 font-semibold">{q.prompt}</span>
                   <Chip tone="bad">{lapses}번 틀림</Chip>
                 </button>
-                {open === q.id ? <QuestionPreview q={q} /> : null}
-                <div className="flex justify-end">
+                {open === q.id ? (
+                  // 펼친 답은 바로 (늦추지 않고) 살짝 번지며 나타난다
+                  <div className="kok-fill" style={{ ['--i' as string]: 0 }}>
+                    <QuestionPreview q={q} />
+                  </div>
+                ) : null}
+                <div className="kok-fill flex justify-end">
                   <Button
                     size="sm"
                     variant="ghost"
@@ -164,6 +189,82 @@ export default function WrongPage() {
           </div>
         </>
       )}
+    </div>
+  );
+}
+
+/** 오답노트를 읽는 동안: 실제 목록과 같은 모양·크기 (약점 개념 카드 둘, 틀린 문제 카드 둘) */
+function WrongSkeleton() {
+  return (
+    <div className="kok-skel grid gap-3" aria-busy="true">
+      <span className="sr-only">오답을 불러오는 중이에요</span>
+      <SectionBone width="w-24" />
+      <div className="grid gap-2" aria-hidden="true">
+        <WeakCardBone title="w-28" />
+        <WeakCardBone title="w-36" />
+      </div>
+      <SectionBone width="w-24" />
+      <div className="grid gap-2" aria-hidden="true">
+        <WrongCardBone lines={2} />
+        <WrongCardBone lines={1} />
+      </div>
+    </div>
+  );
+}
+
+/** 구역 제목 자리 (SectionTitle 과 같은 여백·높이) */
+function SectionBone({ width }: { width: string }) {
+  return (
+    <div className="mb-1 mt-5 flex h-7 items-center px-1" aria-hidden="true">
+      <span className={cx('kok-bone h-3.5', width)} />
+    </div>
+  );
+}
+
+/** 약점 개념 카드 자리: 개념·노트 이름, 틀린 수, 버튼 셋 (버튼과 같은 너비라 같은 화면 너비에서 줄이 바뀐다) */
+function WeakCardBone({ title }: { title: string }) {
+  return (
+    <div className="kok-card kok-shimmer grid gap-2 p-4">
+      <div className="flex items-center justify-between gap-2">
+        <div className="grid">
+          <span className="flex h-[25.6px] items-center">
+            <span className={cx('kok-bone h-3', title)} />
+          </span>
+          <span className="flex h-5 items-center">
+            <span className="kok-bone h-2.5 w-12" />
+          </span>
+        </div>
+        <span className="kok-bone h-5 w-[74px]" />
+      </div>
+      <div className="flex flex-wrap gap-2">
+        <span className="kok-bone h-8 w-[95px]" />
+        <span className="kok-bone h-8 w-[104px]" />
+        <span className="kok-bone h-8 w-32" />
+      </div>
+    </div>
+  );
+}
+
+/** 틀린 문제 카드 자리: 문제 글(한두 줄), 틀린 횟수, 빼기 버튼 */
+function WrongCardBone({ lines }: { lines: 1 | 2 }) {
+  return (
+    <div className="kok-card kok-shimmer grid gap-2 p-4">
+      <div className="flex items-start gap-2">
+        <div className="grid min-w-0 flex-1">
+          <span className="flex h-[25.6px] items-center">
+            <span className={cx('kok-bone h-3', lines === 2 ? 'w-full' : 'w-[70%]')} />
+          </span>
+          {lines === 2 ? (
+            <span className="flex h-[25.6px] items-center">
+              <span className="kok-bone h-3 w-[45%]" />
+            </span>
+          ) : null}
+        </div>
+        <span className="kok-bone h-5 w-[62px]" />
+      </div>
+      <div className="flex h-8 items-center justify-end">
+        <span className="kok-bone mr-3.5 h-2.5 w-24" />
+      </div>
     </div>
   );
 }

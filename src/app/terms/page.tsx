@@ -1,5 +1,6 @@
 import type { Metadata } from 'next';
 import { LegalPage, Sec } from '@/components/LegalPage';
+import { APPLE_LOGIN } from '@/lib/login';
 
 export const metadata: Metadata = { title: '이용약관' };
 
@@ -11,7 +12,7 @@ export default function TermsPage() {
       </Sec>
       <Sec title="2. 가입과 계정">
         <ul className="list-disc pl-5">
-          <li>구글 계정으로 가입하고, 약관·개인정보처리방침·AI 사용 안내에 동의하면 쓸 수 있어요.</li>
+          <li>{APPLE_LOGIN ? '구글 계정이나 Apple 계정' : '구글 계정'}으로 가입하고, 약관·개인정보처리방침·AI 사용 안내에 동의하면 쓸 수 있어요.</li>
           <li>닉네임은 실명이 아니어도 돼요. 다른 사람을 흉내 내거나 불쾌한 닉네임은 쓸 수 없어요.</li>
           <li>계정은 본인만 써야 하고, 다른 사람에게 빌려주거나 팔 수 없어요.</li>
         </ul>

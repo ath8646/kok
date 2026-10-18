@@ -34,7 +34,7 @@ src/
   app/                 화면과 API (route.ts)
     (app)/             로그인한 뒤 화면: home, library, notes, review, wrong, questions, settings, plan, admin, welcome (add 는 자료함으로 보내기만)
     api/               서버 API: sources(자료 처리), notes(그림·문제 다시 만들기), grade, coupon, account, admin, cron, internal
-    auth/callback/     구글 로그인에서 돌아오는 곳
+    auth/callback/     구글·Apple 로그인에서 돌아오는 곳
   components/          화면 조각 (QuickAdd: + 버튼·끌어다 놓기, LibraryView: 자료함, MindMap, NoteView, QuestionCard …)
   lib/
     ai/                요금표·에너지, 프롬프트, JSON 스키마
@@ -60,8 +60,16 @@ Vercel → Settings → Environment Variables 에만 넣어요. 이 저장소는
 | `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` | Supabase publishable key (`sb_publishable_…`) |
 | `SUPABASE_SECRET_KEY` | Supabase secret key (`sb_secret_…`) — 비밀 |
 | `ANTHROPIC_API_KEY` | Claude API 키 — 비밀 |
-| `ADMIN_EMAILS` | 관리자 구글 이메일 (쉼표로 여러 개) |
+| `ADMIN_EMAILS` | 관리자 구글 이메일 (쉼표로 여러 개). 구글로 로그인한 계정만 관리자가 돼요 (Apple 로그인은 안 돼요) |
 | `CRON_SECRET` | 매일 청소 작업 보호 (아무 영어·숫자 32자 이상) — 비밀. 없으면 청소가 돌지 않아요 |
+| `NEXT_PUBLIC_APPLE_LOGIN` | `1` 이면 첫 화면에 "Apple로 계속하기" 버튼이 보여요. 비워 두면 버튼이 없어요. 빌드할 때 정해지니 바꾸면 다시 배포해요 (공개돼도 괜찮아요) |
+
+### Apple 로그인 켜기 (선택)
+
+1. Apple Developer Program(유료, 해마다)에서 App ID(Sign in with Apple 켜기), Services ID, 키(`.p8`)를 만들어요. Services ID 의 Return URL 은 `https://<프로젝트-ref>.supabase.co/auth/v1/callback` 이에요.
+2. Supabase → Authentication → Sign In / Providers → Apple 을 켜고, Client IDs 에 Services ID, Secret Key (for OAuth) 에 `.p8` 로 만든 JWT 를 넣어요.
+3. 위 순서를 다 마친 뒤 Vercel 에 `NEXT_PUBLIC_APPLE_LOGIN=1` 을 넣고 다시 배포해요.
+4. **Secret Key(JWT)는 6개월마다 끝나요.** 끝나기 전에 `.p8` 로 새로 만들어 넣어요. 안 하면 Apple 로그인이 멈춰요. `.p8` 파일은 저장소에 절대 넣지 않아요.
 
 ## 처음 설치
 

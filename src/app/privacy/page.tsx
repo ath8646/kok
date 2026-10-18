@@ -22,7 +22,14 @@ export default async function PrivacyPage() {
             </thead>
             <tbody>
               <tr className="border-b border-line align-top">
-                <td className="py-2 pr-3">구글 계정 이메일, 계정 식별 번호</td>
+                <td className="py-2 pr-3">구글로 로그인하면: 구글 계정 이메일, 이름, 프로필 사진 주소, 계정 식별 번호</td>
+                <td className="py-2 pr-3">로그인, 계정 구분, 문의 답변</td>
+              </tr>
+              <tr className="border-b border-line align-top">
+                <td className="py-2 pr-3">
+                  Apple로 로그인하면: Apple이 알려 주는 이메일(&lsquo;나의 이메일 가리기&rsquo;를 고르면 Apple이 만든 전달용 주소), 계정 식별 번호, 처음
+                  로그인할 때 보내기로 고른 이름
+                </td>
                 <td className="py-2 pr-3">로그인, 계정 구분, 문의 답변</td>
               </tr>
               <tr className="border-b border-line align-top">
@@ -48,7 +55,7 @@ export default async function PrivacyPage() {
             </tbody>
           </table>
         </div>
-        <p>실명, 생일, 학교, 전화번호는 모으지 않아요.</p>
+        <p>콕은 실명, 생일, 학교, 전화번호를 따로 묻지 않아요. 구글·Apple이 보낸 이름은 로그인 정보에만 남고, 화면에는 직접 정한 닉네임만 보여요.</p>
       </Sec>
 
       <Sec title="2. 보관 기간과 지우기">
@@ -79,7 +86,10 @@ export default async function PrivacyPage() {
             처리되고 정해진 기간이 지나면 지워져요.
           </li>
           <li>
-            <b>Google LLC</b> (미국) · 구글 로그인 · 로그인할 때
+            <b>Google LLC</b> (미국) · 구글 로그인 · 구글로 로그인할 때
+          </li>
+          <li>
+            <b>Apple Inc.</b> (미국) · Apple 로그인 · Apple로 로그인할 때
           </li>
         </ul>
         <p>이 밖의 곳에 개인정보를 팔거나 넘기지 않아요. 법에 따른 요청이 있을 때만 예외로 해요.</p>

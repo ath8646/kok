@@ -41,6 +41,8 @@ export type MeResponse = {
   };
   notice: { active: boolean; text: string };
   aiEnabled: boolean;
+  /** 테마 배경 그림을 AI 로 그릴 수 있는지 (Cloudflare 설정) */
+  themePictures: boolean;
   plan: { pdfPages: number; images: number; textChars: number; fileMb: number; fileDays: number | null };
   usdPerEnergy: number;
   models: { fast: string; careful: string; adminTest: string };

@@ -810,7 +810,9 @@ async function handleCloudflare(req, res, url) {
   if (!/\/ai\/run\/@cf\/black-forest-labs\/flux-1-schnell$/.test(url.pathname)) return send(res, 404, { success: false, errors: [{ code: 7003, message: 'No route' }] });
   const body = JSON.parse((await readBody(req)).toString() || '{}');
   stats.cfPrompts = [...(stats.cfPrompts || []), String(body.prompt || '').slice(0, 80)].slice(-5);
-  if (cfMode === 'quota') return send(res, 429, { success: false, errors: [{ code: 4006, message: 'you have used up your daily free allocation of 10,000 neurons' }] });
+  // 실제 Cloudflare 와 같은 번호: 3036 = 오늘 무료 몫을 다 씀, 3040 = 잠깐 바쁨
+  if (cfMode === 'quota') return send(res, 429, { success: false, errors: [{ code: 3036, message: 'Account limited: you have used up your daily free allocation of 10,000 neurons' }] });
+  if (cfMode === 'busy') return send(res, 429, { success: false, errors: [{ code: 3040, message: 'Capacity temporarily exceeded, please try again.' }] });
   if (cfMode === 'fail') return send(res, 500, { success: false, errors: [{ code: 7000, message: 'internal error' }] });
   await new Promise((r) => setTimeout(r, 200));
   return send(res, 200, { success: true, errors: [], messages: [], result: { image: TINY_JPEG } });

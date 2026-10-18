@@ -209,7 +209,7 @@ async def main():
         await page.goto(BASE + "/")
         await expect(page.get_by_role("button", name="구글로 시작하기")).to_be_visible()
         # 카카오 버튼 (NEXT_PUBLIC_KAKAO_LOGIN=1 로 빌드). Apple 은 꺼져 있다
-        await expect(page.get_by_role("button", name="카카오로 계속하기")).to_be_visible()
+        await expect(page.get_by_role("button", name="카카오 로그인")).to_be_visible()
         assert await page.get_by_role("button", name="Apple로 계속하기").count() == 0
         await shot(page, "01-landing-phone")
         await no_hscroll(page, "landing")
@@ -1255,6 +1255,12 @@ async def main():
         assert sql(f"select kind || ' ' || coalesce(prompt, '') from public.theme_images where id = '{ai_image}'").startswith("ai soft watercolor"), "AI picture row"
         ai_theme = sql(f"select id from public.user_themes where user_id = '{student_id}' order by created_at desc limit 1")
         await wait_saved({"light": f"custom:{ai_theme}", "dark": f"custom:{ai_theme}", "font": "round", "paper": "dots"})
+        # AI 가 그린 그림은 표시해 둔다 (설명 없이 다시 그리기), 사진은 무엇이 그려졌는지 몰라 글자가 잘 보이게 0.7 넘게 덮는다
+        assert sql(f"select spec->'image'->>'ai' from public.user_themes where id = '{ai_theme}'") == "true"
+        assert float(await css_var(page, "--theme-dim")) >= 0.7, await css_var(page, "--theme-dim")
+        # 화살표로 테마 고르기 (지금 고른 칸만 Tab 으로 들어가고, → 로 다음 칸)
+        ai_radio = page.get_by_role("radiogroup", name="테마", exact=True).get_by_role("radio", checked=True)
+        assert await ai_radio.get_attribute("tabindex") == "0"
         # 어두울 때 바탕: AI 가 밝은 색을 보내도 서버가 어둡게 맞춘다
         await brightness.get_by_role("radio", name="어둡게").click()
         await expect(page.locator("html")).to_have_attribute("data-mode", "dark")
@@ -1282,6 +1288,15 @@ async def main():
         await wait_js(page, "getComputedStyle(document.documentElement).getPropertyValue('--theme-image').includes('data:image/svg+xml')")
         await expect(page.locator("html")).to_have_attribute("data-bg", "1")
         assert sql(f"select count(*) from public.theme_images where user_id = '{student_id}'") == "1", "no picture for the pattern theme"
+        # Cloudflare 가 오늘 몫을 다 썼다고 하면 오늘은 더 부르지 않는다 (서비스 전체 수를 채운다)
+        assert sql("select n from public.app_counters where kind = 'cf_image'") == "150"
+        # 그림을 그릴 수 없는 날에는 '다시 그리기'가 AI(에너지)를 부르기 전에 알려 준다
+        ledger_before = sql(f"select count(*) from public.energy_ledger where user_id = '{student_id}'")
+        r = await page.request.post(BASE + f"/api/themes/{ai_theme}/image", headers={"origin": BASE}, data={"prompt": "푸른 바다"})
+        assert r.status == 429, (r.status, await r.text())
+        assert "몫" in (await r.json())["message"]
+        assert sql(f"select count(*) from public.energy_ledger where user_id = '{student_id}'") == ledger_before, "no energy for a refused picture"
+        sql("update public.app_counters set n = 2 where kind = 'cf_image'")
 
         step("themes (Pro): edit a theme — name, pattern, photo — then delete it")
         editor = page.get_by_role("dialog", name="테마 고치기")
@@ -1361,6 +1376,14 @@ async def main():
         assert "<circle" in clean, clean
         r = await page.request.get(BASE + "/api/themes/images/00000000-0000-4000-8000-000000000000")
         assert r.status == 404, r.status
+        # 그림 주소는 로그인한 사람(쿠키)마다 따로 기억한다 (같은 기기의 다음 사람에게 보이지 않게)
+        r = await page.request.get(BASE + f"/api/themes/images/{ai_image}", max_redirects=0)
+        assert r.status == 302 and "cookie" in (r.headers.get("vary") or "").lower(), (r.status, r.headers)
+        # 다른 곳에서 먼저 바뀐 테마는 덮어쓰지 않는다
+        r = await page.request.patch(BASE + f"/api/themes/{made['id']}", headers={"origin": BASE}, data={"name": "옛 화면", "updatedAt": "2000-01-01T00:00:00+00:00"})
+        assert r.status == 409, (r.status, await r.text())
+        r = await page.request.patch(BASE + f"/api/themes/{made['id']}", headers={"origin": BASE}, data={"name": "새 이름", "updatedAt": made["updated_at"]})
+        assert r.ok, (r.status, await r.text())
         r = await page.request.post(BASE + "/api/themes/images", headers={"origin": BASE, "content-type": "image/jpeg"}, data=b"<svg onload=alert(1)>")
         assert r.status == 400, r.status
         actx, apage = await new_ctx(browser, "admin")
@@ -1371,15 +1394,25 @@ async def main():
         r = await apage.request.patch(BASE + f"/api/themes/{made['id']}", headers={"origin": BASE}, data={"name": "뺏기"})
         assert r.status == 404, r.status
         await apage.request.delete(BASE + f"/api/themes/{made['id']}", headers={"origin": BASE})
-        assert sql(f"select name from public.user_themes where id = '{made['id']}'") == "무늬 시험"
+        assert sql(f"select name from public.user_themes where id = '{made['id']}'") == "새 이름"
         r = await apage.request.post(BASE + "/api/themes", headers={"origin": "https://evil.example"}, data={"name": "x", "spec": spec})
         assert r.status == 403, r.status
         await actx.close()
         await ctx.close()
+        other_id = USERS["other"][0]
+        sql(f"insert into public.user_themes (user_id, name, spec) values ('{other_id}', 'Pro 때 테마', '{json.dumps(spec)}'::jsonb)")
         octx, opage = await new_ctx(browser, "other")
         await opage.goto(BASE + "/settings#theme")
         await expect(opage.get_by_role("radiogroup", name="테마", exact=True).get_by_role("radio", name="바다", exact=True)).to_be_disabled()
+        await expect(opage.get_by_role("radiogroup", name="화면 밝기").get_by_role("radio", name="어둡게")).to_be_disabled()
         assert await opage.evaluate("document.documentElement.hasAttribute('data-mode') || !!document.getElementById('kok-theme')") is False
+        # Pro 가 끝나도 내 테마는 보이고 지울 수 있다 (고치기는 없다)
+        await expect(opage.get_by_role("listitem").get_by_text("Pro 때 테마", exact=True)).to_be_visible()
+        await expect(opage.get_by_role("button", name="고치기", exact=True)).to_have_count(0)
+        opage.once("dialog", lambda d: asyncio.ensure_future(d.accept()))
+        await opage.get_by_role("button", name="지우기", exact=True).click()
+        await expect(opage.get_by_text("Pro 때 테마", exact=True)).to_have_count(0)
+        assert sql(f"select count(*) from public.user_themes where user_id = '{other_id}'") == "0"
         r = await opage.request.post(BASE + "/api/themes", headers={"origin": BASE}, data={"name": "x", "spec": spec})
         assert r.status == 403, r.status
         r = await opage.request.post(BASE + "/api/themes/generate", headers={"origin": BASE}, data={"prompt": "비 오는 날", "image": True})

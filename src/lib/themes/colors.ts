@@ -148,10 +148,11 @@ export type TokenMap = Record<CoreToken, string>;
 
 /**
  * 바탕·카드·포인트 색에서 화면에 쓰는 색 칸(--bg, --surface …)을 모두 만든다.
- * 글자(포인트 글자 포함)는 바탕·카드·연한 포인트 바탕 위에서 명암비 4.5 이상, 버튼 글자도 4.5 이상,
- * + 버튼 아이콘은 3 이상이 되게 맞춘다.
+ * 글자(포인트 글자 포함)는 바탕·카드·연한 포인트 바탕 위에서 명암비 4.5 이상(본문 글자는 7 이상), 버튼 글자도 4.5 이상,
+ * + 버튼은 아이콘과 바탕 모두 3 이상이 되게 맞춘다.
+ * backdrops: 배경 그림이 있을 때 화면 바탕 대신 글자 밑에 올 수 있는 색들 (src/lib/themes/backdrop.ts). 여기서도 4.5 이상.
  */
-export function deriveTokens(p: Palette, mode: Mode): TokenMap {
+export function deriveTokens(p: Palette, mode: Mode, backdrops: string[] = []): TokenMap {
   const light = mode === 'light';
   const base = INK[mode];
   const { bg, surface } = p;
@@ -159,18 +160,19 @@ export function deriveTokens(p: Palette, mode: Mode): TokenMap {
   const surface3 = mix(surface, base.ink, light ? 0.1 : 0.12);
   const line = mix(surface, base.ink, light ? 0.11 : 0.09);
   const raised = light ? surface : mix(surface, base.ink, 0.16);
-  const ink = ensureContrast(base.ink, [bg, surface, surface2], 7, mode);
-  const muted = ensureContrast(base.muted, [bg, surface, surface2], 4.5, mode);
+  const ink = ensureContrast(ensureContrast(base.ink, [bg, surface, surface2], 7, mode), backdrops, 4.5, mode);
+  const muted = ensureContrast(base.muted, [bg, surface, surface2, ...backdrops], 4.5, mode);
   const softRaw = mix(surface, p.accent, light ? 0.1 : 0.2);
-  // 글자로 쓰는 포인트 색: 바탕·카드·연한 포인트 바탕 모두에서 4.5 이상
-  const accent = ensureContrast(p.accent, [bg, surface, softRaw], 4.5, mode);
+  // 글자로 쓰는 포인트 색: 바탕·카드·연한 포인트 바탕(·그림 위) 모두에서 4.5 이상
+  const accent = ensureContrast(p.accent, [bg, surface, softRaw, ...backdrops], 4.5, mode);
   const accentSoft = softRaw;
   // 버튼: 포인트 색 바탕 위 글자가 4.5 이상 (안 되면 포인트 색을 더 진하게·밝게)
   let accentInk = onColor(accent);
   const button = contrast(accentInk, accent) >= 4.5 ? accent : ensureContrast(accent, [accentInk], 4.5, mode);
   accentInk = onColor(button);
-  // + 버튼은 고른 색 그대로가 예쁘다: 아이콘이 3 이상으로 보이면 그대로, 아니면 글자용 포인트 색
-  const fab = contrast(onColor(p.accent), p.accent) >= 3 ? p.accent : button;
+  // + 버튼은 고른 색 그대로가 예쁘다: 아이콘이 3 이상이고 바탕(·그림 위)과도 3 이상 차이 나면 그대로, 아니면 글자용 포인트 색
+  const fabOk = (c: string) => contrast(onColor(c), c) >= 3 && [bg, ...backdrops].every((b) => contrast(c, b) >= 3);
+  const fab = fabOk(p.accent) ? p.accent : button;
   return {
     '--bg': bg,
     '--surface': surface,

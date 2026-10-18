@@ -28,7 +28,8 @@ const zPalette = z.object({ bg: zColor, surface: zColor, accent: zColor });
 
 export const zThemeImage = z.discriminatedUnion('kind', [
   // 올리거나 AI 가 그린 그림 (theme_images 의 번호)
-  z.object({ kind: z.literal('file'), id: z.string().regex(UUID) }),
+  // ai: AI 가 그린 그림이면 true (설명 없이 '다시 그리기'를 할 수 있다)
+  z.object({ kind: z.literal('file'), id: z.string().regex(UUID), ai: z.boolean().optional() }),
   // 반복 무늬 (깨끗하게 다시 만든 SVG)
   z.object({
     kind: z.literal('pattern'),

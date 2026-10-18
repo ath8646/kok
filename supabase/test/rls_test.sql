@@ -859,5 +859,20 @@ begin
   if taken <> array[b || '/b.jpg'] then raise exception 'all sweep took %', taken; end if;
   if (select count(*) from public.theme_images) <> 2 then raise exception 'two images should stay'; end if;
 end $$;
+-- 테마는 한 사람 20개까지 (서버가 넣어도 DB 가 막는다)
+do $$
+declare
+  a uuid := '11111111-1111-1111-1111-111111111111';
+begin
+  insert into public.user_themes (user_id, name, spec)
+    select a, 't' || g, '{}'::jsonb from generate_series(1, 20 - (select count(*)::int from public.user_themes where user_id = a)) g;
+  begin
+    insert into public.user_themes (user_id, name, spec) values (a, '넘침', '{}'::jsonb);
+    raise exception 'theme 21 should be refused';
+  exception when others then
+    if sqlerrm <> 'kok_theme_limit' then raise; end if;
+  end;
+  if (select count(*) from public.user_themes where user_id = a) <> 20 then raise exception 'A should have 20 themes'; end if;
+end $$;
 
 select 'ALL RLS TESTS PASSED' as result;

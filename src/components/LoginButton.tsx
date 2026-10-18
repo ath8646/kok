@@ -45,8 +45,8 @@ export function LoginButton({
     }
   };
 
-  // 버튼은 크기·모양이 같다 (Apple 안내: 다른 로그인 버튼보다 작지 않게)
-  const cls = 'w-full min-w-64 shadow-[0_8px_24px_var(--shadow-strong)]';
+  // 버튼은 크기·모양이 같다 (Apple 안내: 다른 로그인 버튼보다 작지 않게). 모서리는 카카오 안내(12px)에 모두 맞춘다
+  const cls = 'w-full min-w-64 rounded-xl! shadow-[0_8px_24px_var(--shadow-strong)]';
   return (
     <div className="grid justify-items-center gap-2">
       <div className="grid gap-2.5">
@@ -55,9 +55,10 @@ export function LoginButton({
           {label}
         </Button>
         {KAKAO_LOGIN ? (
-          // 카카오 로고는 그리지 않고 글자만 (카카오 안내의 노란 버튼 색)
+          // 카카오 로그인 디자인 안내: 노란 바탕(#FEE500), 공식 말풍선 심볼, 글자 '카카오 로그인'(검정 85%, 기기 기본 글꼴), 모서리 12px
           <Button size={size} variant="kakao" busy={busy === 'kakao'} disabled={busy !== null} className={cls} onClick={() => signIn('kakao')}>
-            카카오로 계속하기
+            <KakaoSymbol />
+            <span className="[font-family:system-ui,-apple-system,'Apple_SD_Gothic_Neo','Malgun_Gothic',sans-serif]">카카오 로그인</span>
           </Button>
         ) : null}
         {APPLE_LOGIN ? (
@@ -82,6 +83,21 @@ function GoogleLogo() {
       <path fill="#FF3D00" d="M6.3 14.7l6.6 4.8C14.7 15.1 19 12 24 12c3.1 0 5.8 1.2 7.9 3.1l5.7-5.7C34.1 6.1 29.3 4 24 4 16.3 4 9.7 8.3 6.3 14.7z" />
       <path fill="#4CAF50" d="M24 44c5.2 0 9.9-2 13.4-5.2l-6.2-5.2C29.2 35.1 26.7 36 24 36c-5.2 0-9.6-3.3-11.3-8l-6.5 5C9.5 39.6 16.2 44 24 44z" />
       <path fill="#1976D2" d="M43.6 20.5H42V20H24v8h11.3c-.8 2.2-2.2 4.2-4.1 5.6l6.2 5.2C37 39.2 44 34 44 24c0-1.3-.1-2.4-.4-3.5z" />
+    </svg>
+  );
+}
+
+/**
+ * 카카오 말풍선 심볼: 카카오 디벨로퍼스 [도구] > [리소스 다운로드] > [카카오 로그인] 의 공식 파일(kakao_login_light.svg)에 든 모양 그대로.
+ * 카카오 안내에 따라 모양·비율·색을 바꾸지 않는다 (둘레만 잘라 썼다).
+ */
+function KakaoSymbol() {
+  return (
+    <svg aria-hidden="true" width="18" height="18" viewBox="13 13.5 22 22">
+      <path
+        fill="#191919"
+        d="M24.0014 14C17.9241 14 13 18.0219 13 22.9825C13 26.1711 15.0368 28.9728 18.1057 30.5656L17.0681 34.5677C17.0295 34.6871 17.0598 34.8151 17.1424 34.9033C17.2029 34.9659 17.2855 35 17.3653 35C17.4341 35 17.5029 34.9772 17.5607 34.9289L22.0196 31.8171C22.661 31.911 23.3215 31.9622 23.9986 31.9622C30.0732 31.9622 35 27.9403 35 22.9797C35 18.0191 30.0759 14 24.0014 14Z"
+      />
     </svg>
   );
 }

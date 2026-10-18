@@ -3,7 +3,8 @@
 // <html> 에는 data-mode·data-font·data-paper·data-bg 를 붙인다.
 // 다음에 열 때 기본 색이 잠깐 보이지 않게 브라우저에도 적어 두고, layout 의 작은 글(THEME_BOOT)이 그리기 전에 먼저 붙인다.
 import { THEME_COLORS, type ThemeColor, type ThemeFont, type ThemeMode, type ThemePaper, type UserSettings } from './settings';
-import { deriveTokens, type Mode } from './themes/colors';
+import type { Mode } from './themes/colors';
+import { specLook } from './themes/backdrop';
 import { themeCss, type ModeLook } from './themes/css';
 import { BASE_TOKENS, presetTokens } from './themes/presets';
 import { readSpec, type ThemeSpec } from './themes/spec';
@@ -105,7 +106,8 @@ export function lookFor(ref: string, mode: Mode): ModeLook {
   const id = customId(ref);
   if (id) {
     const spec = known.get(id)?.spec;
-    if (spec) return { tokens: deriveTokens(spec[mode], mode), image: spec.image, dim: spec.dim };
+    // 그림이 있으면 글자가 잘 보이게 덮는 정도와 글자 색을 맞춘다 (themes/backdrop.ts)
+    if (spec) return specLook(spec, mode);
     return { tokens: presetTokens('default', mode), image: null, dim: DEFAULT_DIM };
   }
   const color = ref.slice('preset:'.length) as ThemeColor;
@@ -143,11 +145,17 @@ export function applyTheme(t: Theme | null, opts: { allowMissing?: boolean } = {
   if (typeof document === 'undefined') return false;
   const d = document.documentElement;
   const set = (name: string, v: string | null) => (v ? d.setAttribute(name, v) : d.removeAttribute(name));
-  if (t && missingCustomIds(t).length && !opts.allowMissing) return false;
+  // 화면 밝기·글꼴·종이는 내가 만든 테마를 읽지 못해도 바로 붙인다
+  set('data-mode', t && t.mode !== 'system' ? t.mode : null);
+  set('data-font', t && t.font !== 'default' ? t.font : null);
+  set('data-paper', t && t.paper !== 'none' ? t.paper : null);
+  if (t) loadThemeFont(t.font);
+  if (t && missingCustomIds(t).length && !opts.allowMissing) {
+    // 색은 읽은 뒤에 (그동안은 THEME_BOOT 가 붙인 지난번 색 그대로)
+    bumpTheme();
+    return false;
+  }
   const r = t ? resolveTheme(t) : null;
-  set('data-mode', r && r.mode !== 'system' ? r.mode : null);
-  set('data-font', r && r.font !== 'default' ? r.font : null);
-  set('data-paper', r && r.paper !== 'none' ? r.paper : null);
   const bg = !!r && (!!r.light.image || !!r.dark.image);
   set('data-bg', bg ? '1' : null);
   // 예전 방식의 속성은 지운다
@@ -163,7 +171,6 @@ export function applyTheme(t: Theme | null, opts: { allowMissing?: boolean } = {
     if (style.textContent !== css) style.textContent = css;
   } else style?.remove();
   setThemeColorMeta(r && (!r.plain || r.mode !== 'system') ? r : null);
-  if (r) loadThemeFont(r.font);
   bumpTheme();
   try {
     if (r && (css || r.mode !== 'system' || r.font !== 'default' || r.paper !== 'none')) {

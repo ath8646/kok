@@ -1,6 +1,6 @@
 'use client';
 // 설정 > 테마 (Pro): 화면 밝기, 밝을 때·어두울 때 테마, 내가 만든 테마(AI로 만들기·직접 만들기·고치기), 글꼴, 종이 무늬
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import type { MeResponse } from '@/lib/types';
 import { THEME_COLORS, THEME_FONTS, THEME_MODES, THEME_PAPERS, type ThemeColor, type ThemeFont, type ThemeMode, type ThemePaper } from '@/lib/settings';
 import {
@@ -9,6 +9,7 @@ import {
   THEME_MODE_INFO,
   THEME_PAPER_INFO,
   applyTheme,
+  currentMode,
   customId,
   forgetCustomTheme,
   knownCustomTheme,
@@ -17,7 +18,8 @@ import {
   type CustomTheme,
   type Theme,
 } from '@/lib/theme';
-import { deriveTokens, fitPalette, mix, type Mode, type Palette } from '@/lib/themes/colors';
+import { fitPalette, mix, type Mode, type Palette } from '@/lib/themes/colors';
+import { specLook } from '@/lib/themes/backdrop';
 import { BASE_TOKENS } from '@/lib/themes/presets';
 import { readSpec, MAX_THEMES, THEME_NAME_MAX, type ThemeImage, type ThemeSpec } from '@/lib/themes/spec';
 import { imageCss } from '@/lib/themes/css';
@@ -26,14 +28,17 @@ import { estimateSmallTask } from '@/lib/ai/models';
 import { clientModel } from '@/lib/client-model';
 import { shrinkImage } from '@/lib/image';
 import { sb } from '@/lib/data';
-import { ApiError, Button, Chip, Field, ICONS, Icon, LinkButton, Segmented, Sheet, Toggle, api, cx, inputClass, useToast } from './ui';
+import { ApiError, Button, Chip, Field, ICONS, Icon, LinkButton, Segmented, Sheet, Toggle, api, cx, inputClass, radioKeys, useToast } from './ui';
 
-type Ready = { id: string; name: string; spec: ThemeSpec };
+/** user_themes 행 (updated_at: 고칠 때 '읽은 그대로인지' 확인한다) */
+type ThemeRow = CustomTheme & { updated_at?: string | null };
+type Ready = { id: string; name: string; spec: ThemeSpec; updatedAt: string | null };
 
 const MODES: Mode[] = ['light', 'dark'];
 const MODE_LABEL: Record<Mode, string> = { light: '밝을 때', dark: '어두울 때' };
 const basePalette = (m: Mode): Palette => ({ bg: BASE_TOKENS[m]['--bg'], surface: BASE_TOKENS[m]['--surface'], accent: BASE_TOKENS[m]['--accent'] });
-const DIM_IMAGE = 0.55;
+// 덮는 정도 기본값 (서버 DIM_IMAGE·DIM_PATTERN 과 같게). 사진은 무엇이 그려졌는지 몰라서 진하게 덮는다
+const DIM_IMAGE = 0.8;
 const DIM_PATTERN = 0.3;
 const PATTERN_LABEL: Record<CodePattern, string> = { dots: '물방울', grid: '모눈', waves: '물결', diagonal: '빗금', confetti: '색종이', petals: '꽃잎' };
 const EXAMPLES = ['비 오는 날 카페', '벚꽃 핀 봄 교정', '밤하늘 별빛', '민트 초코', '바닷가 여름 방학'];
@@ -55,14 +60,16 @@ function customOption(t: Ready): Option {
   return { ref: `custom:${t.id}`, label: t.name, light: t.spec.light.accent, dark: t.spec.dark.accent, image: !!t.spec.image };
 }
 
-function toReady(rows: CustomTheme[]): Ready[] {
+function toReady(rows: ThemeRow[]): Ready[] {
   const out: Ready[] = [];
   for (const r of rows) {
     const spec = readSpec(r.spec);
-    if (spec) out.push({ id: r.id, name: r.name, spec });
+    if (spec) out.push({ id: r.id, name: r.name, spec, updatedAt: r.updated_at ?? null });
   }
   return out;
 }
+
+const PRO_ONLY = '테마는 Pro에서 쓸 수 있어요.';
 
 export function ThemeSettings({ me, theme, onChange }: { me: MeResponse; theme: Theme; onChange: (patch: Partial<Theme>) => void }) {
   const toast = useToast();
@@ -72,14 +79,20 @@ export function ThemeSettings({ me, theme, onChange }: { me: MeResponse; theme: 
   const [separate, setSeparate] = useState(() => themeRef(theme, 'light') !== themeRef(theme, 'dark'));
   const [editing, setEditing] = useState<Ready | 'new' | null>(null);
   const [making, setMaking] = useState(false);
-
-  // 내가 만든 테마 읽기 (고른 테마를 바로 화면에 붙일 수 있게 theme.ts 에도 기억한다)
+  // 시간이 걸리는 일(AI 만들기·그리기)이 끝난 뒤에도 그때의 옛 값이 아니라 지금 값을 쓰게
+  const latest = useRef({ theme, separate, onChange });
   useEffect(() => {
-    if (!themesOn || !canTheme) return;
+    latest.current = { theme, separate, onChange };
+  });
+
+  // 내가 만든 테마 읽기 (고른 테마를 바로 화면에 붙일 수 있게 theme.ts 에도 기억한다).
+  // Pro 가 끝나도 읽는다: 고칠 수는 없지만 지울 수 있게
+  useEffect(() => {
+    if (!themesOn) return;
     let alive = true;
     sb()
       .from('user_themes')
-      .select('id, name, spec')
+      .select('id, name, spec, updated_at')
       .order('created_at')
       .then(({ data, error }) => {
         if (!alive) return;
@@ -87,30 +100,36 @@ export function ThemeSettings({ me, theme, onChange }: { me: MeResponse; theme: 
           setCustoms([]);
           return;
         }
-        const rows = (data ?? []) as CustomTheme[];
+        const rows = (data ?? []) as ThemeRow[];
         rememberCustomThemes(rows);
         setCustoms(toReady(rows));
       });
     return () => {
       alive = false;
     };
-  }, [themesOn, canTheme]);
+  }, [themesOn]);
 
   const options = useMemo(() => [...presetOptions(), ...(customs ?? []).map(customOption)], [customs]);
   const lightRef = themeRef(theme, 'light');
   const darkRef = themeRef(theme, 'dark');
 
-  /** 테마 고르기: 둘 다 같게 또는 한 모드만. 내가 만든 테마가 글꼴·종이를 골라 두었으면 같이 바꾼다 */
+  /** 테마 고르기: 둘 다 같게 또는 한 모드만. 내가 만든 테마를 새로 고르면 그 테마의 글꼴·종이로도 바꾼다 */
   const pick = (which: Mode | 'both', ref: string) => {
-    if (!canTheme) return toast('테마는 Pro에서 쓸 수 있어요.');
+    if (!canTheme) return toast(PRO_ONLY);
+    const t = latest.current.theme;
+    const now = { light: themeRef(t, 'light'), dark: themeRef(t, 'dark') };
+    const fresh = which === 'both' ? now.light !== ref || now.dark !== ref : now[which] !== ref;
     const patch: Partial<Theme> = which === 'both' ? { light: ref, dark: ref } : { [which]: ref };
     // 예전 한 가지 테마 색도 맞춰 둔다 (예전 화면이 읽어도 비슷하게)
     if (which === 'both' && ref.startsWith('preset:')) patch.color = ref.slice('preset:'.length) as ThemeColor;
-    const id = customId(ref);
-    const spec = id ? knownCustomTheme(id)?.spec : null;
-    if (spec?.font) patch.font = spec.font;
-    if (spec?.paper) patch.paper = spec.paper;
-    onChange(patch);
+    // 이미 쓰는 테마를 다시 고를 때는 내가 따로 고른 글꼴·종이를 되돌리지 않는다
+    if (fresh) {
+      const id = customId(ref);
+      const spec = id ? knownCustomTheme(id)?.spec : null;
+      if (spec?.font) patch.font = spec.font;
+      if (spec?.paper) patch.paper = spec.paper;
+    }
+    latest.current.onChange(patch);
   };
 
   const setSeparateMode = (on: boolean) => {
@@ -120,7 +139,7 @@ export function ThemeSettings({ me, theme, onChange }: { me: MeResponse; theme: 
   };
 
   /** 만들거나 고친 테마를 목록·화면에 반영 (지금 쓰는 테마면 바로 다시 붙인다) */
-  const saved = (row: CustomTheme) => {
+  const saved = (row: ThemeRow) => {
     rememberCustomThemes([row]);
     const ready = toReady([row])[0];
     if (!ready) return;
@@ -128,19 +147,35 @@ export function ThemeSettings({ me, theme, onChange }: { me: MeResponse; theme: 
       const list = cur ?? [];
       return list.some((t) => t.id === ready.id) ? list.map((t) => (t.id === ready.id ? ready : t)) : [...list, ready];
     });
-    if (customId(lightRef) === ready.id || customId(darkRef) === ready.id) applyTheme(theme, { allowMissing: true });
+    const t = latest.current.theme;
+    if (customId(themeRef(t, 'light')) === ready.id || customId(themeRef(t, 'dark')) === ready.id) applyTheme(t, { allowMissing: true });
   };
 
   const removed = (id: string) => {
     forgetCustomTheme(id);
     setCustoms((cur) => (cur ?? []).filter((t) => t.id !== id));
+    // Pro 가 끝났으면 설정은 그대로 둔다 (다시 Pro 가 되면 없는 테마는 기본 색으로 보인다)
+    if (!canTheme) return;
+    const t = latest.current.theme;
     const patch: Partial<Theme> = {};
-    if (customId(lightRef) === id) patch.light = 'preset:default';
-    if (customId(darkRef) === id) patch.dark = 'preset:default';
-    if (Object.keys(patch).length) onChange(patch);
+    if (customId(themeRef(t, 'light')) === id) patch.light = 'preset:default';
+    if (customId(themeRef(t, 'dark')) === id) patch.dark = 'preset:default';
+    if (Object.keys(patch).length) latest.current.onChange(patch);
+  };
+
+  const removeTheme = async (t: Ready) => {
+    if (!confirm(`'${t.name}'를 지울까요?`)) return;
+    try {
+      await api(`/api/themes/${t.id}`, { method: 'DELETE' });
+      toast('테마를 지웠어요.');
+      removed(t.id);
+    } catch (e) {
+      toast((e as Error).message, 'bad');
+    }
   };
 
   const est = Math.round(estimateSmallTask(clientModel(me, 'fast'), me.usdPerEnergy, 900, 900) * 10) / 10;
+  const showMine = themesOn && (canTheme || (customs?.length ?? 0) > 0);
 
   return (
     <div className="grid gap-5">
@@ -154,12 +189,13 @@ export function ThemeSettings({ me, theme, onChange }: { me: MeResponse; theme: 
       ) : null}
 
       <Field label="화면 밝기">
-        <div className={cx(!canTheme && 'pointer-events-none opacity-50')}>
+        <div>
           <Segmented<ThemeMode>
             label="화면 밝기"
             value={theme.mode}
+            disabled={!canTheme}
             options={THEME_MODES.map((m) => ({ value: m, label: THEME_MODE_INFO[m].label }))}
-            onChange={(m) => (canTheme ? onChange({ mode: m }) : toast('테마는 Pro에서 쓸 수 있어요.'))}
+            onChange={(m) => (canTheme ? latest.current.onChange({ mode: m }) : toast(PRO_ONLY))}
           />
         </div>
       </Field>
@@ -184,26 +220,30 @@ export function ThemeSettings({ me, theme, onChange }: { me: MeResponse; theme: 
         )}
       </div>
 
-      {themesOn ? (
+      {showMine ? (
         <Field label={`내 테마 ${customs ? `(${customs.length}/${MAX_THEMES})` : ''}`}>
           <div className="grid gap-2">
-            <div className="flex flex-wrap gap-2">
-              <Button size="sm" disabled={!canTheme || !me.aiEnabled || (customs?.length ?? 0) >= MAX_THEMES} onClick={() => setMaking(true)}>
-                <Icon d={ICONS.sparkle} size={16} />
-                AI로 만들기 ⚡{est}
-              </Button>
-              <Button size="sm" variant="secondary" disabled={!canTheme || (customs?.length ?? 0) >= MAX_THEMES} onClick={() => setEditing('new')}>
-                <Icon d={ICONS.plus} size={16} strokeWidth={2.4} />
-                직접 만들기
-              </Button>
-            </div>
-            {customs === null && canTheme ? (
+            {canTheme ? (
+              <div className="flex flex-wrap gap-2">
+                <Button size="sm" disabled={!me.aiEnabled || (customs?.length ?? 0) >= MAX_THEMES} onClick={() => setMaking(true)}>
+                  <Icon d={ICONS.sparkle} size={16} />
+                  AI로 만들기 ⚡{est}
+                </Button>
+                <Button size="sm" variant="secondary" disabled={(customs?.length ?? 0) >= MAX_THEMES} onClick={() => setEditing('new')}>
+                  <Icon d={ICONS.plus} size={16} strokeWidth={2.4} />
+                  직접 만들기
+                </Button>
+              </div>
+            ) : (
+              <p className="text-sm text-muted">Pro가 끝나서 테마를 고칠 수는 없어요. 안 쓰는 테마는 지울 수 있어요.</p>
+            )}
+            {customs === null ? (
               <div className="kok-skel grid gap-2" aria-busy="true">
                 <span className="kok-bone h-16 w-full rounded-2xl" />
               </div>
-            ) : (customs ?? []).length ? (
+            ) : customs.length ? (
               <ul className="grid gap-2">
-                {(customs ?? []).map((t) => (
+                {customs.map((t) => (
                   <li key={t.id} className="kok-fill flex items-center gap-3 rounded-2xl border border-line p-2.5">
                     <ThemeThumb spec={t.spec} />
                     <span className="min-w-0 flex-1">
@@ -213,24 +253,30 @@ export function ThemeSettings({ me, theme, onChange }: { me: MeResponse; theme: 
                         {t.spec.image ? (t.spec.image.kind === 'pattern' ? '무늬' : '배경 그림') : '색만'}
                       </span>
                     </span>
-                    <Button size="sm" variant="ghost" disabled={!canTheme} onClick={() => setEditing(t)}>
-                      고치기
-                    </Button>
+                    {canTheme ? (
+                      <Button size="sm" variant="ghost" onClick={() => setEditing(t)}>
+                        고치기
+                      </Button>
+                    ) : (
+                      <Button size="sm" variant="ghost" className="text-bad" onClick={() => removeTheme(t)}>
+                        지우기
+                      </Button>
+                    )}
                   </li>
                 ))}
               </ul>
-            ) : canTheme ? (
+            ) : (
               <p className="text-sm text-muted">&lsquo;비 오는 날 카페&rsquo;처럼 느낌을 적으면 AI가 색과 배경 그림을 골라 줘요.</p>
-            ) : null}
+            )}
           </div>
         </Field>
-      ) : me.isAdmin ? (
+      ) : !themesOn && me.isAdmin ? (
         <p className="text-xs text-muted">Supabase에서 schema.sql을 다시 실행하면 내 테마(AI 테마·배경 그림)를 만들 수 있어요.</p>
       ) : null}
 
       <Field label="글꼴">
         <div className="grid grid-cols-2 gap-2 sm:grid-cols-4" role="radiogroup" aria-label="테마 글꼴">
-          {THEME_FONTS.map((f) => {
+          {THEME_FONTS.map((f, i) => {
             const info = THEME_FONT_INFO[f];
             const on = theme.font === f;
             return (
@@ -240,7 +286,9 @@ export function ThemeSettings({ me, theme, onChange }: { me: MeResponse; theme: 
                 role="radio"
                 aria-checked={on}
                 disabled={!canTheme}
-                onClick={() => onChange({ font: f as ThemeFont })}
+                tabIndex={on ? 0 : -1}
+                onKeyDown={(e) => radioKeys(e, i, THEME_FONTS.length, (n) => latest.current.onChange({ font: THEME_FONTS[n] as ThemeFont }))}
+                onClick={() => latest.current.onChange({ font: f as ThemeFont })}
                 className={cx(
                   'press grid gap-0.5 rounded-2xl border-2 px-3 py-2.5 text-left disabled:cursor-not-allowed disabled:opacity-50',
                   on ? 'border-accent bg-accent-soft' : 'border-line hover:bg-surface-2',
@@ -257,7 +305,7 @@ export function ThemeSettings({ me, theme, onChange }: { me: MeResponse; theme: 
       </Field>
       <Field label="노트 종이 무늬">
         <div className="grid grid-cols-4 gap-2" role="radiogroup" aria-label="노트 종이 무늬">
-          {THEME_PAPERS.map((p) => {
+          {THEME_PAPERS.map((p, i) => {
             const on = theme.paper === p;
             return (
               <button
@@ -266,7 +314,9 @@ export function ThemeSettings({ me, theme, onChange }: { me: MeResponse; theme: 
                 role="radio"
                 aria-checked={on}
                 disabled={!canTheme}
-                onClick={() => onChange({ paper: p as ThemePaper })}
+                tabIndex={on ? 0 : -1}
+                onKeyDown={(e) => radioKeys(e, i, THEME_PAPERS.length, (n) => latest.current.onChange({ paper: THEME_PAPERS[n] as ThemePaper }))}
+                onClick={() => latest.current.onChange({ paper: p as ThemePaper })}
                 className={cx(
                   'press grid gap-1.5 rounded-2xl p-1.5 text-xs font-semibold disabled:cursor-not-allowed disabled:opacity-50',
                   on ? 'bg-surface-2 text-ink' : 'text-muted hover:bg-surface-2',
@@ -287,6 +337,7 @@ export function ThemeSettings({ me, theme, onChange }: { me: MeResponse; theme: 
       <ThemeMaker
         open={making}
         est={est}
+        pictures={me.themePictures}
         onClose={() => setMaking(false)}
         onMade={(row, message) => {
           setMaking(false);
@@ -303,7 +354,13 @@ export function ThemeSettings({ me, theme, onChange }: { me: MeResponse; theme: 
         onClose={() => setEditing(null)}
         onSaved={(row, apply) => {
           saved(row);
-          if (apply) pick(separate ? 'light' : 'both', `custom:${row.id}`);
+          if (!apply) return;
+          const ref = `custom:${row.id}`;
+          const t = latest.current.theme;
+          // 이미 쓰는 테마면 밝을 때·어두울 때 자리는 그대로 (saved 가 새 색을 바로 붙였다)
+          if (themeRef(t, 'light') === ref || themeRef(t, 'dark') === ref) return;
+          // 따로 고르는 중이면 지금 보이는 쪽(밝게·어둡게)에 쓴다
+          pick(latest.current.separate ? currentMode() : 'both', ref);
         }}
         onDeleted={(id) => {
           setEditing(null);
@@ -314,7 +371,7 @@ export function ThemeSettings({ me, theme, onChange }: { me: MeResponse; theme: 
   );
 }
 
-/** 테마 고르는 칸 (기본 테마 + 내가 만든 테마) */
+/** 테마 고르는 칸 (기본 테마 + 내가 만든 테마). 화살표로도 고른다 */
 function OptionGrid({
   label,
   options,
@@ -330,9 +387,13 @@ function OptionGrid({
   disabled: boolean;
   onPick: (ref: string) => void;
 }) {
+  const index = Math.max(
+    0,
+    options.findIndex((o) => o.ref === selected),
+  );
   return (
     <div className="grid grid-cols-4 gap-1.5 sm:grid-cols-6" role="radiogroup" aria-label={label}>
-      {options.map((o) => {
+      {options.map((o, i) => {
         const on = o.ref === selected;
         const fill = mode === 'light' ? o.light : mode === 'dark' ? o.dark : `linear-gradient(135deg, ${o.light} 0 50%, ${o.dark} 50% 100%)`;
         return (
@@ -342,6 +403,8 @@ function OptionGrid({
             role="radio"
             aria-checked={on}
             disabled={disabled}
+            tabIndex={i === index ? 0 : -1}
+            onKeyDown={(e) => radioKeys(e, i, options.length, (n) => onPick(options[n].ref))}
             onClick={() => onPick(o.ref)}
             className={cx(
               'press grid justify-items-center gap-1.5 rounded-2xl px-1 py-2 text-xs font-semibold disabled:cursor-not-allowed disabled:opacity-50',
@@ -394,9 +457,10 @@ function ThemeThumb({ spec }: { spec: ThemeSpec }) {
   );
 }
 
-/** 테마 미리보기: 작은 화면 (바탕·그림·카드·글자·버튼) */
+/** 테마 미리보기: 작은 화면 (바탕·그림·카드·글자·버튼). 글자 색과 덮는 정도는 실제 화면과 같은 계산(specLook) */
 function ThemePreview({ spec, mode }: { spec: ThemeSpec; mode: Mode }) {
-  const t = deriveTokens(spec[mode], mode);
+  const look = specLook(spec, mode);
+  const t = look.tokens;
   const vars = Object.fromEntries(Object.entries(t)) as React.CSSProperties;
   return (
     <div className="relative overflow-hidden rounded-2xl ring-1 ring-line" style={{ ...vars, background: t['--bg'] }}>
@@ -412,7 +476,7 @@ function ThemePreview({ spec, mode }: { spec: ThemeSpec; mode: Mode }) {
             }}
             aria-hidden="true"
           />
-          <div className="absolute inset-0" style={{ background: t['--bg'], opacity: spec.dim }} aria-hidden="true" />
+          <div className="absolute inset-0" style={{ background: t['--bg'], opacity: look.dim }} aria-hidden="true" />
         </>
       ) : null}
       <div className="relative grid gap-2 p-3">
@@ -451,13 +515,15 @@ function ThemeEditor({
   me: MeResponse;
   target: Ready | 'new' | null;
   onClose: () => void;
-  onSaved: (row: CustomTheme, apply: boolean) => void;
+  onSaved: (row: ThemeRow, apply: boolean) => void;
   onDeleted: (id: string) => void;
 }) {
   const toast = useToast();
   const [id, setId] = useState<string | null>(target && target !== 'new' ? target.id : null);
   const [name, setName] = useState(target && target !== 'new' ? target.name : '');
   const [spec, setSpec] = useState<ThemeSpec>(target && target !== 'new' ? target.spec : newSpec());
+  // 마지막으로 읽거나 저장한 테마의 updated_at (다른 곳에서 바뀌었으면 덮어쓰지 않게 서버가 확인한다)
+  const [updatedAt, setUpdatedAt] = useState<string | null>(target && target !== 'new' ? target.updatedAt : null);
   const [kind, setKind] = useState<'none' | 'file' | 'ai' | 'pattern'>(() => {
     const img = target && target !== 'new' ? target.spec.image : null;
     return !img ? 'none' : img.kind === 'pattern' ? 'pattern' : 'file';
@@ -465,19 +531,28 @@ function ThemeEditor({
   const [busy, setBusy] = useState<string | null>(null);
   const [aiText, setAiText] = useState('');
   const aiEst = Math.round(estimateSmallTask(clientModel(me, 'fast'), me.usdPerEnergy, 500, 150) * 10) / 10;
+  // 설명 없이 '다시 그리기'는 AI 가 그린 그림일 때만 (그 그림의 설명으로 다시 그린다)
+  const canRedraw = spec.image?.kind === 'file' && spec.image.ai === true;
+  // 실제 화면에서 덮는 정도 (글자가 잘 보이게 고른 값보다 올라갈 수 있다)
+  const realDims = MODES.map((m) => specLook(spec, m).dim);
+  const raised = !!spec.image && realDims.some((d) => d > spec.dim + 0.005);
 
   const setColor = (m: Mode, k: keyof Palette, v: string) => setSpec((s) => ({ ...s, [m]: fitPalette({ ...s[m], [k]: v }, m, basePalette(m)) }));
   const setImage = (image: ThemeImage | null, dim?: number) => setSpec((s) => ({ ...s, image, dim: dim ?? s.dim }));
 
   /** 저장 (새 테마면 만든다). 저장한 행 */
-  const save = async (next: ThemeSpec = spec): Promise<CustomTheme | null> => {
+  const save = async (next: ThemeSpec = spec): Promise<ThemeRow | null> => {
     const label = name.trim() || '내 테마';
     try {
       const r = id
-        ? await api<{ theme: CustomTheme }>(`/api/themes/${id}`, { method: 'PATCH', body: JSON.stringify({ name: label, spec: next }) })
-        : await api<{ theme: CustomTheme }>('/api/themes', { method: 'POST', body: JSON.stringify({ name: label, spec: next }) });
+        ? await api<{ theme: ThemeRow }>(`/api/themes/${id}`, {
+            method: 'PATCH',
+            body: JSON.stringify({ name: label, spec: next, ...(updatedAt ? { updatedAt } : {}) }),
+          })
+        : await api<{ theme: ThemeRow }>('/api/themes', { method: 'POST', body: JSON.stringify({ name: label, spec: next }) });
       setId(r.theme.id);
       setName(r.theme.name);
+      setUpdatedAt(r.theme.updated_at ?? null);
       return r.theme;
     } catch (e) {
       toast((e as Error).message, 'bad');
@@ -493,7 +568,7 @@ function ThemeEditor({
       const res = await fetch('/api/themes/images', { method: 'POST', headers: { 'content-type': 'image/jpeg' }, body: blob });
       const body = (await res.json().catch(() => null)) as { id?: string; message?: string } | null;
       if (!res.ok || !body?.id) throw new Error(body?.message ?? '사진을 올리지 못했어요.');
-      setImage({ kind: 'file', id: body.id }, DIM_IMAGE);
+      setImage({ kind: 'file', id: body.id }, Math.max(spec.dim, DIM_IMAGE));
       setKind('file');
     } catch (e) {
       toast((e as Error).message, 'bad');
@@ -505,16 +580,18 @@ function ThemeEditor({
   const drawAi = async () => {
     setBusy('AI가 그림을 그리는 중… (30초쯤)');
     try {
-      // 그림은 저장한 테마에 그린다 (새 테마면 먼저 저장)
+      // 그림은 저장한 테마에 그린다 (새 테마면 먼저 저장하고 목록에도 바로 넣는다: 그리기가 실패해도 테마가 보이게)
       const row = await save();
       if (!row) return;
-      const r = await api<{ theme: CustomTheme; note: string | null }>(`/api/themes/${row.id}/image`, {
+      onSaved(row, false);
+      const r = await api<{ theme: ThemeRow; note: string | null }>(`/api/themes/${row.id}/image`, {
         method: 'POST',
         body: JSON.stringify(aiText.trim() ? { prompt: aiText.trim() } : {}),
       });
       const ready = toReady([r.theme])[0];
       if (ready) {
         setSpec(ready.spec);
+        setUpdatedAt(ready.updatedAt);
         setKind(ready.spec.image?.kind === 'pattern' ? 'pattern' : 'file');
       }
       onSaved(r.theme, false);
@@ -528,10 +605,17 @@ function ThemeEditor({
   };
 
   const open = target !== null;
+  const kinds: Array<{ value: 'none' | 'file' | 'ai' | 'pattern'; label: string }> = [
+    { value: 'none', label: '없음' },
+    { value: 'file', label: '사진' },
+    ...(me.themePictures ? [{ value: 'ai' as const, label: 'AI 그림' }] : []),
+    { value: 'pattern', label: '무늬' },
+  ];
   return (
     <Sheet
       open={open}
-      onClose={onClose}
+      // 그리거나 올리는 중에는 닫지 않는다 (끝난 뒤 옛 화면 값으로 테마를 다시 붙이지 않게)
+      onClose={busy ? () => {} : onClose}
       title={id ? '테마 고치기' : '새 테마'}
       footer={
         <div className="flex flex-wrap gap-2">
@@ -550,7 +634,7 @@ function ThemeEditor({
           >
             저장하고 쓰기
           </Button>
-          <Button variant="ghost" onClick={onClose}>
+          <Button variant="ghost" disabled={!!busy} onClick={onClose}>
             닫기
           </Button>
           {id ? (
@@ -624,12 +708,7 @@ function ThemeEditor({
               <Segmented<'none' | 'file' | 'ai' | 'pattern'>
                 label="배경 그림"
                 value={kind}
-                options={[
-                  { value: 'none', label: '없음' },
-                  { value: 'file', label: '사진' },
-                  { value: 'ai', label: 'AI 그림' },
-                  { value: 'pattern', label: '무늬' },
-                ]}
+                options={kinds}
                 onChange={(k) => {
                   setKind(k);
                   if (k === 'none') setImage(null);
@@ -653,7 +732,7 @@ function ThemeEditor({
                     className={cx(inputClass, 'min-h-20')}
                     maxLength={200}
                     value={aiText}
-                    placeholder={spec.image?.kind === 'file' ? '비우고 누르면 지금 그림을 다시 그려요' : '예: 창밖에 비가 내리는 조용한 카페'}
+                    placeholder={canRedraw ? '비우고 누르면 지금 그림을 다시 그려요' : '예: 창밖에 비가 내리는 조용한 카페'}
                     aria-label="AI 그림 설명"
                     onChange={(e) => setAiText(e.target.value)}
                   />
@@ -662,10 +741,10 @@ function ThemeEditor({
                     variant="secondary"
                     className="justify-self-start"
                     busy={busy?.startsWith('AI') ?? false}
-                    disabled={!!busy || !me.aiEnabled}
+                    disabled={!!busy || !me.aiEnabled || (!aiText.trim() && !canRedraw)}
                     onClick={drawAi}
                   >
-                    {aiText.trim() ? `그리기 ⚡${aiEst}` : '다시 그리기'}
+                    {aiText.trim() || !canRedraw ? `그리기 ⚡${aiEst}` : '다시 그리기'}
                   </Button>
                   <p className="text-xs text-muted">사람·글자·캐릭터 없이 풍경·무늬로 그려요. 하루에 몇 번까지만 그릴 수 있어요.</p>
                 </div>
@@ -695,7 +774,11 @@ function ThemeEditor({
                   })}
                 </div>
               ) : null}
-              {busy && busy !== '저장하는 중…' ? <p className="text-sm text-muted">{busy}</p> : null}
+              {busy && busy !== '저장하는 중…' ? (
+                <p className="text-sm text-muted" role="status" aria-live="polite">
+                  {busy}
+                </p>
+              ) : null}
               {spec.image ? (
                 <label className="grid gap-1 text-sm">
                   <span className="flex justify-between text-muted">
@@ -704,13 +787,18 @@ function ThemeEditor({
                   </span>
                   <input
                     type="range"
-                    min={20}
+                    min={spec.image.kind === 'file' ? 70 : 20}
                     max={92}
                     step={1}
                     value={Math.round(spec.dim * 100)}
                     aria-label="그림 위를 덮는 정도"
                     onChange={(e) => setSpec((s) => ({ ...s, dim: Number(e.target.value) / 100 }))}
                   />
+                  {raised ? (
+                    <span className="text-xs text-muted">
+                      글자가 잘 보이게 {MODES.map((m, i) => `${MODE_LABEL[m]} ${Math.round(realDims[i] * 100)}%`).join(', ')}로 덮어요.
+                    </span>
+                  ) : null}
                 </label>
               ) : null}
             </div>
@@ -729,7 +817,20 @@ function ThemeEditor({
 }
 
 /** AI 로 테마 만들기 */
-function ThemeMaker({ open, est, onClose, onMade }: { open: boolean; est: number; onClose: () => void; onMade: (row: CustomTheme, message: string) => void }) {
+function ThemeMaker({
+  open,
+  est,
+  pictures,
+  onClose,
+  onMade,
+}: {
+  open: boolean;
+  est: number;
+  /** Cloudflare 로 그림을 그릴 수 있는지 (없으면 AI 가 무늬를 그린다) */
+  pictures: boolean;
+  onClose: () => void;
+  onMade: (row: ThemeRow, message: string) => void;
+}) {
   const toast = useToast();
   const [text, setText] = useState('');
   const [image, setImage] = useState(true);
@@ -738,7 +839,7 @@ function ThemeMaker({ open, est, onClose, onMade }: { open: boolean; est: number
     if (text.trim().length < 2) return toast('어떤 느낌인지 두 글자 이상 적어 주세요.');
     setBusy(true);
     try {
-      const r = await api<{ theme: CustomTheme; summary: string; note: string | null }>('/api/themes/generate', {
+      const r = await api<{ theme: ThemeRow; summary: string; note: string | null }>('/api/themes/generate', {
         method: 'POST',
         body: JSON.stringify({ prompt: text.trim(), image }),
       });
@@ -750,6 +851,7 @@ function ThemeMaker({ open, est, onClose, onMade }: { open: boolean; est: number
       setBusy(false);
     }
   };
+  const what = pictures ? '배경 그림' : '배경 무늬';
   return (
     <Sheet
       open={open}
@@ -785,9 +887,9 @@ function ThemeMaker({ open, est, onClose, onMade }: { open: boolean; est: number
             </button>
           ))}
         </div>
-        <Toggle label="배경 그림도 그리기" checked={image} onChange={setImage} disabled={busy} />
-        <p className="text-xs text-muted">
-          밝을 때·어두울 때 색, 글꼴, 노트 종이{image ? ', 배경 그림' : ''}을 골라 줘요. 글자가 잘 보이게 색은 조금 바뀔 수 있어요.
+        <Toggle label={`${what}도 그리기`} checked={image} onChange={setImage} disabled={busy} />
+        <p className="text-xs text-muted" role="status" aria-live="polite">
+          밝을 때·어두울 때 색, 글꼴, 노트 종이{image ? `, ${what}` : ''}을 골라 줘요. 글자가 잘 보이게 색은 조금 바뀔 수 있어요.
           {busy ? ' 만드는 중이에요… (그림까지 30초쯤)' : ''}
         </p>
         {busy ? <Chip tone="accent">만드는 중…</Chip> : null}

@@ -3,7 +3,9 @@ import { contrast, deriveTokens, fitPalette, normalizeHex, CORE_TOKENS, type Mod
 import { BASE_TOKENS, presetTokens } from '@/lib/themes/presets';
 import { readSpec, zThemeSpec } from '@/lib/themes/spec';
 import { imageCss, themeCss } from '@/lib/themes/css';
-import { CODE_PATTERNS, codePatternSvg, sanitizePatternSvg } from '@/lib/themes/pattern';
+import { CODE_PATTERNS, codePatternSvg, patternInks, sanitizePatternSvg } from '@/lib/themes/pattern';
+import { backdropColors, imageInks, specLook } from '@/lib/themes/backdrop';
+import { classifyCfError } from '@/lib/themes/cf-errors';
 import { sniffImage } from '@/lib/themes/image-sniff';
 import { THEME_COLORS } from '@/lib/settings';
 import { customIds, lookFor, rememberCustomThemes, resolveTheme, themeRef, type Theme } from '@/lib/theme';
@@ -224,5 +226,99 @@ describe('밝을 때·어두울 때 테마 고르기', () => {
     expect(r.light.tokens['--accent']).toBe('#1a5fc2');
     expect(r.plain).toBe(false);
     expect(resolveTheme({ ...base, color: 'default' }).plain).toBe(true);
+  });
+});
+
+describe('배경 그림 위에서도 글자가 잘 보인다', () => {
+  const check = (spec: Parameters<typeof specLook>[0], label: string) => {
+    for (const mode of MODES) {
+      const look = specLook(spec, mode);
+      const t = look.tokens;
+      const backs = backdropColors(imageInks(spec.image), t['--bg'], look.dim);
+      expect(look.dim, `${label} ${mode} dim`).toBeGreaterThanOrEqual(spec.dim - 1e-9);
+      expect(look.dim, `${label} ${mode} dim max`).toBeLessThanOrEqual(0.92);
+      for (const b of backs) {
+        expect(contrast(t['--ink'], b), `${label} ${mode} ink on ${b}`).toBeGreaterThanOrEqual(4.5);
+        expect(contrast(t['--muted'], b), `${label} ${mode} muted on ${b}`).toBeGreaterThanOrEqual(4.5);
+        expect(contrast(t['--accent'], b), `${label} ${mode} accent on ${b}`).toBeGreaterThanOrEqual(4.5);
+        expect(contrast(t['--fab'], b), `${label} ${mode} fab on ${b}`).toBeGreaterThanOrEqual(3);
+      }
+      // 그림이 없는 곳(바탕·카드)에서도 그대로
+      for (const bg of [t['--bg'], t['--surface']]) {
+        expect(contrast(t['--ink'], bg)).toBeGreaterThanOrEqual(7);
+        expect(contrast(t['--muted'], bg)).toBeGreaterThanOrEqual(4.5);
+        expect(contrast(t['--accent'], bg)).toBeGreaterThanOrEqual(4.5);
+      }
+      expect(contrast(t['--fab'], t['--bg']), `${label} ${mode} fab on bg`).toBeGreaterThanOrEqual(3);
+      expect(contrast(t['--accent-ink'], t['--accent'])).toBeGreaterThanOrEqual(4.5);
+    }
+  };
+
+  it('사진·AI 그림(검정·흰색 어느 쪽이든)은 덮는 정도를 올리고 글자 색을 맞춘다', () => {
+    for (let i = 0; i < 200; i++) {
+      const spec = readSpec({
+        light: { bg: randomHex(i), surface: randomHex(i + 1), accent: randomHex(i + 2) },
+        dark: { bg: randomHex(i + 3), surface: randomHex(i + 4), accent: randomHex(i + 5) },
+        image: { kind: 'file', id: '0f8fad5b-d9cb-469f-a165-70867728950e' },
+        dim: 0.2 + (i % 8) * 0.1 > 0.92 ? 0.92 : 0.2 + (i % 8) * 0.1,
+      })!;
+      check(spec, `file ${i}`);
+      // 사진은 적어도 0.7 은 덮는다
+      for (const mode of MODES) expect(specLook(spec, mode).dim).toBeGreaterThanOrEqual(0.7);
+    }
+  });
+
+  it('무늬는 실제로 칠하는 색만큼만 덮는다 (옅은 무늬는 그대로, 진한 무늬는 더 덮는다)', () => {
+    const light = readSpec({
+      light: { bg: '#f3f3f6', surface: '#ffffff', accent: '#b84c08' },
+      dark: { bg: '#000000', surface: '#17171a', accent: '#ff9b45' },
+      image: { kind: 'pattern', svg: codePatternSvg('dots', '#b84c08', '#e8b48a', 3) },
+      dim: 0.3,
+    })!;
+    check(light, 'code dots');
+    expect(specLook(light, 'light').dim).toBeLessThan(0.7);
+    const heavy = readSpec({
+      light: { bg: '#f3f3f6', surface: '#ffffff', accent: '#b84c08' },
+      dark: { bg: '#000000', surface: '#17171a', accent: '#ff9b45' },
+      // fill 이 없으면 검정으로 칠해진다
+      image: { kind: 'pattern', svg: '<svg><rect x="0" y="0" width="100" height="100"/><circle cx="50" cy="50" r="20" fill="#ffffff"/></svg>' },
+      dim: 0.2,
+    })!;
+    check(heavy, 'heavy');
+    expect(specLook(heavy, 'light').dim).toBeGreaterThan(0.6);
+    for (let i = 0; i < 120; i++) {
+      const a = randomHex(i + 7);
+      const b = randomHex(i + 8);
+      const spec = readSpec({
+        light: { bg: randomHex(i), surface: randomHex(i + 1), accent: randomHex(i + 2) },
+        dark: { bg: randomHex(i + 3), surface: randomHex(i + 4), accent: randomHex(i + 5) },
+        image: { kind: 'pattern', svg: codePatternSvg(CODE_PATTERNS[i % CODE_PATTERNS.length], a, b, i + 1) },
+        dim: 0.2 + (i % 5) * 0.1,
+      })!;
+      check(spec, `pattern ${i}`);
+    }
+  });
+
+  it('무늬 색 읽기: 물려받기·진하기 곱하기·선은 안을 칠하지 않음', () => {
+    const inks = patternInks(
+      '<svg><g fill="#112233" opacity="0.5"><circle cx="1" cy="1" r="1" fill-opacity="0.5"/><g opacity="0.5"><rect width="1" height="1" fill="#abc"/></g></g>' +
+        '<line x1="0" y1="0" x2="1" y2="1" stroke="#ff0000" opacity="0.2"/><path d="M0 0L1 1" fill="none" stroke="#00ff00" stroke-width="0"/></svg>',
+    );
+    const by = Object.fromEntries(inks.map((k) => [k.color, k.alpha]));
+    expect(by['#112233']).toBeCloseTo(0.25);
+    expect(by['#aabbcc']).toBeCloseTo(0.25);
+    expect(by['#ff0000']).toBeCloseTo(0.2);
+    expect(by['#000000']).toBeUndefined();
+    expect(by['#00ff00']).toBeUndefined();
+  });
+});
+
+describe('Cloudflare 오류 나누기', () => {
+  it('3036 은 오늘 몫을 다 씀, 3040(잠깐 바쁨)과 그 밖은 실패', () => {
+    expect(classifyCfError({ errors: [{ code: 3036, message: 'Account limited' }] })).toBe('quota');
+    expect(classifyCfError({ errors: [{ message: 'you have used up your daily free allocation of 10,000 neurons' }] })).toBe('quota');
+    expect(classifyCfError({ errors: [{ code: 3040, message: 'Capacity temporarily exceeded, please try again.' }] })).toBe('failed');
+    expect(classifyCfError({ errors: [{ code: 3007, message: 'Timeout' }] })).toBe('failed');
+    expect(classifyCfError(null)).toBe('failed');
   });
 });

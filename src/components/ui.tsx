@@ -540,28 +540,59 @@ export function Field({ label, hint, children, htmlFor }: { label: string; hint?
 export const inputClass =
   'w-full min-w-0 rounded-2xl border-2 border-transparent bg-surface-2 px-4 py-2.5 text-[15px] text-ink placeholder:text-muted/80 transition-colors focus:border-accent focus:bg-surface focus:outline-none';
 
+/**
+ * 라디오 묶음의 키보드: ←↑ 앞, →↓ 다음, Home 처음, End 끝. 고르고 그 칸으로 초점을 옮긴다.
+ * 쓰는 곳: role="radiogroup" 안의 role="radio" 버튼 (고른 것만 tabIndex 0)
+ */
+export function radioKeys(e: React.KeyboardEvent<HTMLElement>, index: number, count: number, select: (i: number) => void) {
+  const k = e.key;
+  const to =
+    k === 'ArrowRight' || k === 'ArrowDown' ? index + 1 : k === 'ArrowLeft' || k === 'ArrowUp' ? index - 1 : k === 'Home' ? 0 : k === 'End' ? count - 1 : null;
+  if (to === null || count < 1) return;
+  e.preventDefault();
+  const n = (to + count) % count;
+  select(n);
+  const radios = e.currentTarget.closest('[role="radiogroup"]')?.querySelectorAll<HTMLElement>('[role="radio"]');
+  radios?.[n]?.focus();
+}
+
 export function Segmented<T extends string | number>({
   value,
   options,
   onChange,
   label,
+  disabled = false,
 }: {
   value: T;
   options: Array<{ value: T; label: string }>;
   onChange: (v: T) => void;
   label?: string;
+  disabled?: boolean;
 }) {
+  const index = Math.max(
+    0,
+    options.findIndex((o) => o.value === value),
+  );
   return (
-    <div className="inline-flex flex-wrap gap-1 rounded-full bg-surface-2 p-1" role="radiogroup" aria-label={label}>
-      {options.map((o) => (
+    <div
+      className={cx('inline-flex flex-wrap gap-1 rounded-full bg-surface-2 p-1', disabled && 'opacity-50')}
+      role="radiogroup"
+      aria-label={label}
+      aria-disabled={disabled || undefined}
+    >
+      {options.map((o, i) => (
         <button
           key={String(o.value)}
           type="button"
           role="radio"
           aria-checked={o.value === value}
+          disabled={disabled}
+          // 화살표로 고르기 (라디오처럼 한 번에 한 칸만 Tab 으로 들어간다)
+          tabIndex={i === index ? 0 : -1}
+          onKeyDown={(e) => radioKeys(e, i, options.length, (n) => onChange(options[n].value))}
           onClick={() => onChange(o.value)}
           className={cx(
-            'press rounded-full px-3.5 py-1.5 text-sm font-semibold transition-colors',
+            'press rounded-full px-3.5 py-1.5 text-sm font-semibold transition-colors disabled:cursor-not-allowed',
             o.value === value ? 'bg-raised text-ink shadow-sm' : 'text-muted hover:text-ink',
           )}
         >

@@ -543,6 +543,27 @@ drop trigger if exists user_themes_touch on public.user_themes;
 create trigger user_themes_touch before update on public.user_themes
   for each row execute function public.kok_touch_updated_at();
 
+-- 한 사람 테마는 20개까지 (서버가 넣을 때도: 동시에 여러 번 보내도 넘지 않게 한 사람씩 줄을 세운다)
+create or replace function public.kok_guard_user_themes()
+returns trigger
+language plpgsql
+set search_path = public
+as $$
+declare
+  n int;
+begin
+  perform pg_advisory_xact_lock(hashtext('kok_themes:' || new.user_id::text));
+  select count(*) into n from public.user_themes where user_id = new.user_id;
+  if n >= 20 then
+    raise exception 'kok_theme_limit' using errcode = 'P0001';
+  end if;
+  return new;
+end;
+$$;
+drop trigger if exists user_themes_guard on public.user_themes;
+create trigger user_themes_guard before insert on public.user_themes
+  for each row execute function public.kok_guard_user_themes();
+
 -- 배경 그림 파일 ('theme-images' 버킷의 내id/그림id.확장자). 올린 것(upload)과 AI 가 그린 것(ai)
 create table if not exists public.theme_images (
   id uuid primary key default gen_random_uuid(),

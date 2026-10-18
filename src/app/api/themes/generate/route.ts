@@ -8,17 +8,20 @@ import { getAppSettings } from '@/lib/server/account';
 import { UserFacingError, errorResponse } from '@/lib/server/errors';
 import { runTaskFull } from '@/lib/server/tasks';
 import { textBlock } from '@/lib/server/claude';
-import { cloudflareReady } from '@/lib/server/cloudflare';
 import {
   AI_THEMES_PER_DAY,
   DIM_IMAGE,
   DIM_PATTERN,
   assertThemeRoom,
+  dailyLeft,
   fallbackPattern,
-  hitDaily,
   imageFailNote,
   makeAiImage,
+  pictureRoom,
+  recordHit,
   requireThemes,
+  themeInsertError,
+  type PictureRoom,
 } from '@/lib/server/themes';
 import { THEME_SYSTEM, themeDesignPrompt, wrap } from '@/lib/ai/prompts';
 import { themeJsonSchema, zThemeAi } from '@/lib/ai/schemas';
@@ -46,11 +49,15 @@ export async function POST(req: NextRequest) {
     if (!parsed.success) throw new UserFacingError('bad_body', parsed.error.issues[0]?.message ?? '보낸 내용이 올바르지 않아요.', 400);
     const { prompt, image } = parsed.data;
     await assertThemeRoom(admin, acc.userId);
-    await hitDaily(admin, acc.userId, 'theme_ai', AI_THEMES_PER_DAY, `AI 테마는 하루 ${AI_THEMES_PER_DAY}개까지 만들 수 있어요. 내일 다시 해 주세요.`);
+    // 하루 한도: 지금은 남았는지만 보고, 다 만든 뒤에 하나 쓴다 (AI 를 쉬거나 에너지가 모자라 거절되면 쓰지 않게)
+    if (!(await dailyLeft(admin, acc.userId, 'theme_ai', AI_THEMES_PER_DAY))) {
+      throw new UserFacingError('daily_limit', `AI 테마는 하루 ${AI_THEMES_PER_DAY}개까지 만들 수 있어요. 내일 다시 해 주세요.`, 429);
+    }
     const app = await getAppSettings(admin);
 
-    // Cloudflare 를 못 쓰면 처음부터 AI 에게 무늬도 그려 달라고 한다 (한 번만 부르게)
-    const wantPattern = image && !cloudflareReady();
+    // 그림을 그릴 수 없으면(Cloudflare 설정 안 함·내 하루 몫·오늘 전체 몫) 처음부터 AI 에게 무늬도 그려 달라고 한다 (한 번만 부르게)
+    const room: PictureRoom = image ? await pictureRoom(admin, acc.userId) : 'ok';
+    const wantPattern = image && room !== 'ok';
     const res = await runTaskFull(admin, acc, app, {
       task: 'theme',
       effortOf: 'theme',
@@ -62,6 +69,7 @@ export async function POST(req: NextRequest) {
       outTokens: wantPattern ? 2200 : 500,
       timeoutMs: 50_000,
     });
+    await recordHit(admin, acc.userId, 'theme_ai');
     const ai = zThemeAi.parse(res.json);
     const light = fitPalette(ai.light, 'light', base('light'));
     const dark = fitPalette(ai.dark, 'dark', base('dark'));
@@ -71,8 +79,9 @@ export async function POST(req: NextRequest) {
     let dim = DIM_IMAGE;
     let note: string | null = null;
     if (image) {
-      const made = ai.image_prompt.trim() ? await makeAiImage(admin, acc, ai.image_prompt) : { fail: 'failed' as const };
-      if ('id' in made) img = { kind: 'file', id: made.id };
+      const made: Awaited<ReturnType<typeof makeAiImage>> =
+        room !== 'ok' ? { fail: room } : ai.image_prompt.trim() ? await makeAiImage(admin, acc, ai.image_prompt) : { fail: 'failed' };
+      if ('id' in made) img = { kind: 'file', id: made.id, ai: true };
       else {
         const svg = ai.pattern_svg ? sanitizePatternSvg(ai.pattern_svg) : null;
         img = svg ? { kind: 'pattern', svg } : fallbackPattern({ light }, prompt);
@@ -88,7 +97,7 @@ export async function POST(req: NextRequest) {
       .insert({ user_id: acc.userId, name, spec })
       .select('id, name, spec, created_at, updated_at')
       .single();
-    if (error) throw error;
+    if (error) throw themeInsertError(error);
     return Response.json({ ok: true, theme: data, summary: ai.summary.slice(0, 200), note, energy: res.energy });
   } catch (e) {
     return errorResponse(e);

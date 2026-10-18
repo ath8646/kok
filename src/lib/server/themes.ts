@@ -2,7 +2,7 @@
 import 'server-only';
 import { randomUUID } from 'node:crypto';
 import type { SupabaseClient } from '@supabase/supabase-js';
-import type { Account } from './account';
+import type { Account, AppSettings } from './account';
 import { getFeatures } from './account';
 import { UserFacingError } from './errors';
 import { cloudflareReady, generateImage, ImageGenError } from './cloudflare';
@@ -23,9 +23,11 @@ export const AI_IMAGES_PER_DAY = 10;
 export const UPLOADS_PER_DAY = 20;
 /** 하루 한도 (서비스 전체): Cloudflare 무료 몫(하루 10,000 뉴런 ≈ 그림 170장) 안에서 */
 export const CF_IMAGES_PER_DAY = 150;
-/** 덮기 정도 기본값: 사진·AI 그림은 조금 진하게, 무늬는 옅게 */
-export const DIM_IMAGE = 0.55;
+/** 덮기 정도 기본값: 사진·AI 그림은 진하게, 무늬는 옅게 (화면은 글자가 잘 보이게 더 올릴 수 있다: themes/backdrop.ts) */
+export const DIM_IMAGE = 0.8;
 export const DIM_PATTERN = 0.3;
+/** 테마 만들기·고치기 횟수 (한 사람, 1시간) */
+export const THEME_WRITES_PER_HOUR = 120;
 
 const SCHEMA_OUTDATED = '테마를 만들려면 관리자가 Supabase 에서 schema.sql 을 다시 실행해야 해요.';
 
@@ -35,11 +37,77 @@ export async function requireThemes(admin: SupabaseClient, acc: Account): Promis
   if (!acc.canTheme) throw new UserFacingError('pro_only', '테마는 Pro 기능이에요.', 403);
 }
 
-/** 하루 한도 (24시간 안 횟수) */
+/** 하루 한도 (24시간 안 횟수): 하나 쓰고, 다 썼으면 오류 */
 export async function hitDaily(admin: SupabaseClient, userId: string, kind: string, max: number, message: string): Promise<void> {
-  const { data, error } = await admin.rpc('kok_hit_rate', { p_user: userId, p_max: max, p_window_seconds: 86400, p_kind: kind });
+  await hitRate(admin, userId, kind, max, 86400, message);
+}
+
+export async function hitRate(admin: SupabaseClient, userId: string, kind: string, max: number, windowSeconds: number, message: string): Promise<void> {
+  const { data, error } = await admin.rpc('kok_hit_rate', { p_user: userId, p_max: max, p_window_seconds: windowSeconds, p_kind: kind });
   if (error) throw error;
   if (data === false) throw new UserFacingError('daily_limit', message, 429);
+}
+
+/** 하루 한도가 남았는지만 본다 (쓰지 않는다: AI 를 부르기 전에 미리 막을 때) */
+export async function dailyLeft(admin: SupabaseClient, userId: string, kind: string, max: number): Promise<boolean> {
+  const { count, error } = await admin
+    .from('rate_hits')
+    .select('user_id', { count: 'exact', head: true })
+    .eq('user_id', userId)
+    .eq('kind', kind)
+    .gte('at', new Date(Date.now() - 86400_000).toISOString());
+  if (error) throw error;
+  return (count ?? 0) < max;
+}
+
+/** 다 끝난 뒤에 하루 한도를 하나 쓴다 (AI 가 거절하거나 실패하면 쓰지 않게) */
+export async function recordHit(admin: SupabaseClient, userId: string, kind: string): Promise<void> {
+  const { error } = await admin.from('rate_hits').insert({ user_id: userId, kind });
+  if (error) console.warn('[kok] rate hit not recorded', error.message);
+}
+
+const utcDay = () => new Date().toISOString().slice(0, 10);
+
+/** 서비스 전체 오늘 AI 그림 몫이 남았는지 (쓰지 않는다) */
+async function serviceRoomLeft(admin: SupabaseClient): Promise<boolean> {
+  const { data, error } = await admin.from('app_counters').select('n').eq('day', utcDay()).eq('kind', 'cf_image').maybeSingle();
+  if (error) throw error;
+  return Number(data?.n ?? 0) < CF_IMAGES_PER_DAY;
+}
+
+/** Cloudflare 가 오늘 몫을 다 썼다고 하면 오늘은 더 부르지 않게 채워 둔다 */
+async function fillServiceRoom(admin: SupabaseClient): Promise<void> {
+  const { error } = await admin.from('app_counters').upsert({ day: utcDay(), kind: 'cf_image', n: CF_IMAGES_PER_DAY }, { onConflict: 'day,kind' });
+  if (error) console.warn('[kok] cf counter not filled', error.message);
+}
+
+export type PictureRoom = 'ok' | 'not_configured' | 'mine' | 'quota';
+
+/** 지금 AI 그림을 그릴 수 있는지 (몫을 쓰지 않고 본다) */
+export async function pictureRoom(admin: SupabaseClient, userId: string): Promise<PictureRoom> {
+  if (!cloudflareReady()) return 'not_configured';
+  if (!(await dailyLeft(admin, userId, 'theme_image', AI_IMAGES_PER_DAY))) return 'mine';
+  if (!(await serviceRoomLeft(admin))) return 'quota';
+  return 'ok';
+}
+
+/** AI 그림(Cloudflare, 에너지 없음)도 관리자가 AI 를 쉬게 했거나 막힌 계정이면 그리지 않는다 */
+export function assertPicturesAllowed(acc: Account, app: AppSettings): void {
+  if (acc.banned) throw new UserFacingError('banned', '이 계정은 AI 기능을 쓸 수 없어요. 관리자에게 문의해 주세요.', 403);
+  if (!app.aiEnabled && !acc.isAdmin) throw new UserFacingError('ai_paused', '지금은 AI 기능을 잠깐 쉬고 있어요.', 503);
+}
+
+/** 테마 행을 넣다가 DB 가 한도(20개)를 넘는다고 하면 알아듣는 말로 */
+export function themeInsertError(error: { message?: string }): Error {
+  if (/kok_theme_limit/.test(error.message ?? '')) {
+    return new UserFacingError('too_many_themes', `테마는 ${MAX_THEMES}개까지 만들 수 있어요. 안 쓰는 테마를 지워 주세요.`, 400);
+  }
+  return error as Error;
+}
+
+/** 테마 만들기·고치기 횟수 제한 */
+export async function hitThemeWrites(admin: SupabaseClient, userId: string): Promise<void> {
+  await hitRate(admin, userId, 'theme_write', THEME_WRITES_PER_HOUR, 3600, '테마를 너무 자주 바꿨어요. 잠시 뒤에 다시 해 주세요.');
 }
 
 export async function assertThemeRoom(admin: SupabaseClient, userId: string): Promise<void> {
@@ -57,13 +125,17 @@ export async function assertOwnImage(admin: SupabaseClient, userId: string, imag
 }
 
 /** 내 테마 하나 (없거나 남의 것이면 404) */
-export async function loadOwnTheme(admin: SupabaseClient, userId: string, id: string): Promise<{ id: string; name: string; spec: ThemeSpec }> {
-  const { data, error } = await admin.from('user_themes').select('id, user_id, name, spec').eq('id', id).maybeSingle();
+export async function loadOwnTheme(
+  admin: SupabaseClient,
+  userId: string,
+  id: string,
+): Promise<{ id: string; name: string; spec: ThemeSpec; updatedAt: string }> {
+  const { data, error } = await admin.from('user_themes').select('id, user_id, name, spec, updated_at').eq('id', id).maybeSingle();
   if (error) throw error;
   if (!data || data.user_id !== userId) throw new UserFacingError('not_found', '테마를 찾을 수 없어요.', 404);
   const spec = readSpec(data.spec);
   if (!spec) throw new UserFacingError('bad_theme', '테마 모양이 이상해요. 지우고 다시 만들어 주세요.', 400);
-  return { id: data.id as string, name: data.name as string, spec };
+  return { id: data.id as string, name: data.name as string, spec, updatedAt: data.updated_at as string };
 }
 
 const EXT: Record<string, string> = { 'image/jpeg': 'jpg', 'image/png': 'png', 'image/webp': 'webp' };
@@ -127,7 +199,7 @@ export type AiImageResult = { image: ThemeImage; dim: number; note: string | nul
  * AI 배경 그림: Cloudflare(무료 몫 안에서) → 실패하면 null (부르는 쪽이 무늬로 바꾼다).
  * 한 사람 하루 한도는 그림을 실제로 그릴 때만 센다.
  */
-export type ImageFail = 'not_configured' | 'quota' | 'mine' | 'refused' | 'failed';
+export type ImageFail = 'not_configured' | 'quota' | 'mine' | 'refused' | 'full' | 'failed';
 
 export async function makeAiImage(
   admin: SupabaseClient,
@@ -153,8 +225,13 @@ export async function makeAiImage(
     const id = await storeThemeImage(admin, acc.userId, bytes, { kind: 'ai', prompt: clean });
     return { id };
   } catch (e) {
-    if (e instanceof ImageGenError) return { fail: e.kind };
-    if (e instanceof UserFacingError) throw e;
+    if (e instanceof ImageGenError) {
+      // Cloudflare 가 오늘 몫을 다 썼다고 하면, 오늘은 다른 사람도 부르지 않게 (몫은 UTC 0시에 다시 찬다)
+      if (e.kind === 'quota') await fillServiceRoom(admin);
+      return { fail: e.kind };
+    }
+    // 그림은 그렸는데 저장하지 못함 (그림이 너무 많음 등): 테마는 무늬로 마저 만든다
+    if (e instanceof UserFacingError) return { fail: e.code === 'too_many_images' ? 'full' : 'failed' };
     console.warn('[kok] ai image store failed', (e as Error).message);
     return { fail: 'failed' };
   }
@@ -167,6 +244,8 @@ export function imageFailNote(fail: ImageFail): string {
       return '오늘 AI 그림 몫을 다 써서 무늬를 대신 넣었어요. 내일 다시 그릴 수 있어요.';
     case 'mine':
       return `AI 그림은 하루 ${AI_IMAGES_PER_DAY}번까지라 무늬를 대신 넣었어요. 내일 다시 그릴 수 있어요.`;
+    case 'full':
+      return '그림이 너무 많아서 무늬를 대신 넣었어요. 안 쓰는 테마를 지우면 다시 그릴 수 있어요.';
     case 'refused':
       return '이 설명으로는 그림을 그릴 수 없어서 무늬를 대신 넣었어요.';
     case 'not_configured':

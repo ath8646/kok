@@ -12,6 +12,8 @@ const PATTERNS = [
   ['Google API key', /AIza[0-9A-Za-z_-]{35}/],
   ['GitHub token', /(ghp|gho|ghu|ghs|ghr)_[A-Za-z0-9]{30,}|github_pat_[A-Za-z0-9_]{40,}/],
   ['Private key', /-----BEGIN (RSA |EC |OPENSSH )?PRIVATE KEY-----/],
+  ['Cloudflare API token', /CLOUDFLARE_API_TOKEN\s*[=:]\s*['"]?[A-Za-z0-9_-]{30,}/],
+  ['Kakao client secret', /KAKAO_(CLIENT_)?SECRET\s*[=:]\s*['"]?[A-Za-z0-9]{24,}/],
 ];
 
 const SKIP_DIRS = new Set(['node_modules', '.next', '.git', 'out', 'build', 'coverage', '.vercel']);

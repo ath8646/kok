@@ -6,7 +6,7 @@ import { usePathname, useRouter } from 'next/navigation';
 import { createContext, useCallback, useContext, useEffect, useState, type ReactNode } from 'react';
 import type { MeResponse } from '@/lib/types';
 import { QuickAddProvider } from './QuickAdd';
-import { applyTheme, missingCustomIds, rememberCustomThemes, type CustomTheme, type Theme } from '@/lib/theme';
+import { applyTheme, clearTheme, missingCustomIds, rememberCustomThemes, type CustomTheme, type Theme } from '@/lib/theme';
 import { sb } from '@/lib/data';
 import { Button, Icon, Spinner, cx } from './ui';
 
@@ -85,6 +85,8 @@ export function AppShell({ children }: { children: ReactNode }) {
   const apply = useCallback(
     (r: MeResult) => {
       if (r.kind === 'unauth') {
+        // 로그인이 끝났으면 이 기기에 적어 둔 테마도 지운다 (다음에 로그인하는 사람에게 보이지 않게)
+        clearTheme();
         router.replace(`/?next=${encodeURIComponent(window.location.pathname + window.location.search)}`);
         return;
       }
@@ -132,18 +134,28 @@ export function AppShell({ children }: { children: ReactNode }) {
       return;
     }
     let alive = true;
-    sb()
-      .from('user_themes')
-      .select('id, name, spec')
-      .in('id', missingCustomIds(t))
-      .then(({ data, error }) => {
-        if (!alive || error) return;
-        rememberCustomThemes((data ?? []) as CustomTheme[]);
-        // 지워진 테마는 기본 색으로
-        applyTheme(t, { allowMissing: true });
-      });
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const load = (tries: number) => {
+      sb()
+        .from('user_themes')
+        .select('id, name, spec')
+        .in('id', missingCustomIds(t))
+        .then(({ data, error }) => {
+          if (!alive) return;
+          if (error) {
+            // 못 읽으면 한 번 더 (그래도 안 되면 지난번 색 그대로 두고, 밝기·글꼴·종이는 이미 붙였다)
+            if (tries > 0) timer = setTimeout(() => load(tries - 1), 3000);
+            return;
+          }
+          rememberCustomThemes((data ?? []) as CustomTheme[]);
+          // 지워진 테마는 기본 색으로
+          applyTheme(t, { allowMissing: true });
+        });
+    };
+    load(1);
     return () => {
       alive = false;
+      if (timer) clearTimeout(timer);
     };
   }, [themeKey, themesOn]);
 

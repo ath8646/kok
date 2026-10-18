@@ -1,6 +1,7 @@
 // Cloudflare Workers AI 로 배경 그림 만들기 (FLUX.1 schnell, 무료 몫 하루 10,000 뉴런 ≈ 그림 170장).
 // 키는 Vercel 환경변수(CLOUDFLARE_ACCOUNT_ID, CLOUDFLARE_API_TOKEN)에만 있다. 없으면 그림 대신 무늬를 쓴다.
 import 'server-only';
+import { classifyCfError } from '@/lib/themes/cf-errors';
 
 const MODEL = '@cf/black-forest-labs/flux-1-schnell';
 /** 그림 한 장의 최대 크기 (FLUX 결과는 보통 100~300KB JPEG) */
@@ -40,7 +41,6 @@ export async function generateImage(prompt: string, opts: { seed?: number; timeo
       cache: 'no-store',
     });
     const text = await res.text();
-    if (res.status === 429) throw new ImageGenError('quota', '오늘 그림 몫을 다 썼어요.');
     let body: { success?: boolean; result?: { image?: unknown }; errors?: Array<{ code?: number; message?: string }> } | null = null;
     try {
       body = JSON.parse(text);
@@ -48,13 +48,13 @@ export async function generateImage(prompt: string, opts: { seed?: number; timeo
       body = null;
     }
     if (!res.ok || !body?.success || typeof body.result?.image !== 'string') {
+      const kind = classifyCfError(body);
+      if (kind === 'quota') throw new ImageGenError('quota', '오늘 그림 몫을 다 썼어요.');
+      if (kind === 'refused') throw new ImageGenError('refused', '이 그림은 만들 수 없어요.');
       const msg = (body?.errors ?? [])
         .map((e) => `${e.code ?? ''} ${e.message ?? ''}`)
         .join('; ')
         .slice(0, 300);
-      // 무료 몫을 다 쓰면 4006 같은 코드가 온다 (정확한 번호는 바뀔 수 있어 글자로도 본다)
-      if (/neuron|quota|limit|4006/i.test(msg)) throw new ImageGenError('quota', '오늘 그림 몫을 다 썼어요.');
-      if (/nsfw|safety|flagged|3030/i.test(msg)) throw new ImageGenError('refused', '이 그림은 만들 수 없어요.');
       console.warn('[kok] cloudflare image failed', res.status, msg);
       throw new ImageGenError('failed', '그림을 만들지 못했어요.');
     }

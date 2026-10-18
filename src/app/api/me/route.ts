@@ -2,6 +2,7 @@ import { requireAccount } from '@/lib/server/auth';
 import { energyStatus, getAppSettings, getFeatures, limitsFor } from '@/lib/server/account';
 import { errorResponse } from '@/lib/server/errors';
 import { costMultiplier } from '@/lib/ai/models';
+import { cloudflareReady } from '@/lib/server/cloudflare';
 import type { MeResponse } from '@/lib/types';
 
 export async function GET() {
@@ -39,6 +40,7 @@ export async function GET() {
       },
       notice: app.notice,
       aiEnabled: app.aiEnabled,
+      themePictures: cloudflareReady(),
       plan: {
         pdfPages: lim.pdfPages,
         images: lim.images,

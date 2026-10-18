@@ -119,6 +119,59 @@ export function sanitizePatternSvg(input: string): string | null {
   return svg.length <= PATTERN_MAX_CHARS ? svg : null;
 }
 
+/** 무늬에서 칠해질 수 있는 색과 그 진하기 (0~1) */
+export type Ink = { color: string; alpha: number };
+
+function opacityOf(v: string | undefined, fallback: number): number {
+  if (v === undefined) return fallback;
+  const n = v.endsWith('%') ? Number(v.slice(0, -1)) / 100 : Number(v);
+  return Number.isFinite(n) ? Math.min(1, Math.max(0, n)) : fallback;
+}
+
+function hex6(v: string): string {
+  return v.length === 4 ? `#${v[1]}${v[1]}${v[2]}${v[2]}${v[3]}${v[3]}` : v;
+}
+
+/**
+ * 깨끗하게 다시 만든 무늬 SVG 에서 칠해지는 색을 모두 찾는다 (글자가 그 위에서도 잘 보이게 색을 맞출 때 쓴다).
+ * fill 이 없으면 SVG 기본값인 검정으로 칠해지고, fill·stroke·fill-opacity·stroke-opacity 는 g 에서 물려받으며, opacity 는 곱해진다.
+ * 같은 색이면 가장 진한 것만 남긴다.
+ */
+export function patternInks(svg: string): Ink[] {
+  type Ctx = { fill: string; stroke: string; fillOpacity: number; strokeOpacity: number; opacity: number };
+  const stack: Ctx[] = [{ fill: '#000000', stroke: 'none', fillOpacity: 1, strokeOpacity: 1, opacity: 1 }];
+  const inks = new Map<string, number>();
+  const add = (color: string, alpha: number) => {
+    if (color === 'none' || alpha <= 0) return;
+    const c = hex6(color);
+    inks.set(c, Math.max(inks.get(c) ?? 0, alpha));
+  };
+  for (const m of svg.matchAll(/<(\/?)([a-z]+)([^>]*?)(\/?)>/g)) {
+    const [, closing, tag, rawAttrs, self] = m;
+    if (closing) {
+      if (stack.length > 1) stack.pop();
+      continue;
+    }
+    const attrs = new Map([...rawAttrs.matchAll(/([a-z-]+)="([^"]*)"/g)].map((a) => [a[1], a[2]] as const));
+    const parent = stack[stack.length - 1];
+    const ctx: Ctx = {
+      fill: attrs.get('fill') ?? parent.fill,
+      stroke: attrs.get('stroke') ?? parent.stroke,
+      fillOpacity: opacityOf(attrs.get('fill-opacity'), parent.fillOpacity),
+      strokeOpacity: opacityOf(attrs.get('stroke-opacity'), parent.strokeOpacity),
+      opacity: parent.opacity * opacityOf(attrs.get('opacity'), 1),
+    };
+    if (tag !== 'svg' && tag !== 'g') {
+      // 선(line)은 안을 칠하지 않는다
+      if (tag !== 'line') add(ctx.fill, ctx.opacity * ctx.fillOpacity);
+      const sw = attrs.get('stroke-width');
+      if (sw === undefined || parseFloat(sw) > 0) add(ctx.stroke, ctx.opacity * ctx.strokeOpacity);
+    }
+    if (!self) stack.push(ctx);
+  }
+  return [...inks].map(([color, alpha]) => ({ color, alpha }));
+}
+
 /** CSS background-image 에 넣을 주소 */
 export function svgDataUrl(svg: string): string {
   return `url("data:image/svg+xml,${encodeURIComponent(svg)}")`;

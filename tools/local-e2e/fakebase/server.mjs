@@ -27,7 +27,7 @@ pg.types.setTypeParser(20, (v) => Number(v));
 // date 는 문자열 그대로
 pg.types.setTypeParser(1082, (v) => v);
 
-const stats = { messages: 0, tasks: {} };
+const stats = { messages: 0, tasks: {}, maxDocBytes: 0, docs: 0 };
 let failTask = process.env.FAKE_FAIL_TASK || '';
 
 function b64urlJson(s) {
@@ -689,6 +689,15 @@ async function handleClaude(req, res) {
   const props = schema.properties ?? {};
   const content = body.messages?.[0]?.content ?? [];
   const textOf = typeof content === 'string' ? content : content.map((c) => (c.type === 'text' ? c.text : '')).join('\n');
+  // 실제 Claude 는 요청 하나가 32MB 를 넘으면 받지 않는다: 보낸 PDF 조각의 크기를 기록해 시험에서 확인한다
+  if (Array.isArray(content)) {
+    for (const c of content) {
+      if (c?.type === 'document' && c.source?.type === 'base64') {
+        stats.docs++;
+        stats.maxDocBytes = Math.max(stats.maxDocBytes, Math.floor((c.source.data.length * 3) / 4));
+      }
+    }
+  }
   let out;
   let task;
   if (props.key_points) {

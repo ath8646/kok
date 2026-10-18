@@ -5,6 +5,12 @@ export type Effort = 'low' | 'medium' | 'high';
 export type AiTask = 'organize' | 'merge' | 'visual' | 'quiz' | 'check' | 'grade';
 
 // ------------------------------------------------------------- 운영 설정 (app_settings)
+/**
+ * 파일 한 개의 최대 크기(MB). Supabase 저장소 'sources' 버킷 한도(schema.sql)와 Supabase 전체 업로드 한도보다 클 수 없다.
+ * 올리려면 세 곳을 같이 바꾼다: 이 값, schema.sql 의 file_size_limit, Supabase Storage 설정의 전체 한도.
+ */
+export const MAX_FILE_MB = 200;
+
 export const zLimits = z.object({
   freeDaily: z.number().catch(20),
   proMonthly: z.number().catch(2000),
@@ -18,7 +24,7 @@ export const zLimits = z.object({
   textCharsFree: z.number().catch(20000),
   textCharsPro: z.number().catch(100000),
   fileMbFree: z.number().catch(10),
-  fileMbPro: z.number().catch(50),
+  fileMbPro: z.number().catch(200),
   ratePerMinute: z.number().catch(10),
   freeFileDays: z.number().catch(7),
 });

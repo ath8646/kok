@@ -335,7 +335,7 @@ insert into public.app_settings (key, value) values
     "pdfPagesFree": 20, "pdfPagesPro": 150,
     "imagesFree": 5, "imagesPro": 30,
     "textCharsFree": 20000, "textCharsPro": 100000,
-    "fileMbFree": 10, "fileMbPro": 50,
+    "fileMbFree": 10, "fileMbPro": 200,
     "ratePerMinute": 10, "freeFileDays": 7
   }'::jsonb),
   ('models', '{
@@ -1025,9 +1025,11 @@ grant execute on function public.kok_admin_stats(timestamptz, timestamptz) to se
 -- 올리기는 서버가 검사하고 준 한 번짜리 주소로만 한다 (학생이 마음대로 올리거나 지우지 못한다).
 -- 보기는 경로 첫 폴더가 내 id 일 때만.
 -- =====================================================================
+-- 파일 한 개 200MB 까지 (Supabase 유료 플랜 필요: Storage 설정의 전체 업로드 한도도 200MB 이상으로 올린다).
+-- 이 값은 src/lib/settings.ts 의 MAX_FILE_MB 와 같아야 한다.
 insert into storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
 values (
-  'sources', 'sources', false, 52428800,
+  'sources', 'sources', false, 209715200,
   array['application/pdf', 'image/jpeg', 'image/png', 'image/webp']
 )
 on conflict (id) do update

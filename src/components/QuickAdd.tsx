@@ -14,6 +14,9 @@ import { ApiError, ICONS, Icon, Spinner, api, cx, useToast } from './ui';
 
 /** 동시에 정리할 수 있는 자료 수 (서버와 같다) */
 const MAX_PARALLEL = 3;
+/** 이보다 큰 PDF 는 브라우저에서 쪽수를 세지 않는다 (폰 메모리를 아끼고, 쪽수는 서버가 센다) */
+const BIG_PDF_BYTES = 30 * 1024 * 1024;
+const MB = 1024 * 1024;
 /** 자료 목록이 바뀌었다고 화면들에 알리는 이벤트 */
 export const SOURCES_CHANGED = 'kok:sources-changed';
 /** 과목이 바뀌었다고 알리는 이벤트 */
@@ -38,6 +41,8 @@ type Item = {
   error?: string;
   /** 이 자료 번호로 다 올린 파일 (있으면 '다시 하기'는 올리기를 건너뛰고 같은 번호로 만들기만 다시 한다) */
   files?: string[];
+  /** 올리는 파일 크기 합 (큰 파일은 띠에 MB 로 보여 준다) */
+  bytes?: number;
 };
 
 /** 올리기 전에 한 번 준비한 것 (다시 하기에서 사진을 또 줄이지 않게) */
@@ -120,7 +125,8 @@ function statusText(it: Item): string {
     case 'busy':
       return '요청이 많아서 잠깐 기다려요';
     case 'uploading':
-      return `올리는 중 ${it.done}/${it.total}`;
+      if (it.total > 1) return `올리는 중 ${it.done}/${it.total}`;
+      return it.bytes && it.bytes >= 5 * MB ? `올리는 중 (${Math.round(it.bytes / MB)}MB, 큰 파일은 조금 걸려요)` : '올리는 중';
     case 'starting':
       return '정리 시작하는 중';
     case 'done':
@@ -236,7 +242,8 @@ export function QuickAddProvider({
         return { kind: 'text', text: c.text, pages: 0, blobs: [] };
       }
       if (job.kind === 'pdf') {
-        const pages = await countPdfPages(job.file);
+        // 아주 큰 PDF 는 여기서 열지 않는다 (쪽수 검사는 서버가 한다)
+        const pages = job.file.size > BIG_PDF_BYTES ? 0 : await countPdfPages(job.file);
         if (pages > m.plan.pdfPages) throw new Error(`PDF가 ${pages}쪽이에요. 한 번에 ${m.plan.pdfPages}쪽까지 넣을 수 있어요. 나눠서 넣어 주세요.`);
         return { kind: 'pdf', text: '', pages, blobs: [job.file] };
       }
@@ -253,7 +260,7 @@ export function QuickAddProvider({
   /** 한 번짜리 올리기 주소를 받아 파일을 올린다 → 올린 경로 */
   const upload = useCallback(
     async (key: string, sourceId: string, prep: Prepared): Promise<string[]> => {
-      update(key, { status: 'uploading', done: 0, total: prep.blobs.length });
+      update(key, { status: 'uploading', done: 0, total: prep.blobs.length, bytes: prep.blobs.reduce((n, b) => n + b.size, 0) });
       const { uploads } = await api<{ uploads: Array<{ path: string; token: string }> }>('/api/uploads', {
         method: 'POST',
         body: JSON.stringify({ sourceId, kind: prep.kind, files: prep.blobs.map((b) => ({ size: b.size })) }),
@@ -263,7 +270,13 @@ export function QuickAddProvider({
         const { error } = await bucket.uploadToSignedUrl(uploads[i].path, uploads[i].token, prep.blobs[i], {
           contentType: prep.kind === 'pdf' ? 'application/pdf' : 'image/jpeg',
         });
-        if (error) throw new Error('파일을 올리지 못했어요. 인터넷 연결을 확인해 주세요.');
+        if (error) {
+          // 저장소 한도보다 큰 파일 (Supabase 전체 업로드 한도를 확인해야 한다)
+          const tooBig = /exceed|too large|maximum allowed size|payload/i.test(error.message ?? '') || (error as { status?: number }).status === 413;
+          throw new Error(
+            tooBig ? '파일이 저장소 한도보다 커서 올리지 못했어요. 더 작게 나눠서 넣어 주세요.' : '파일을 올리지 못했어요. 인터넷 연결을 확인해 주세요.',
+          );
+        }
         update(key, { done: i + 1 });
       }
       return uploads.map((u) => u.path);

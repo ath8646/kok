@@ -6,4 +6,6 @@ export ANTHROPIC_API_KEY=fake-key-local
 export ANTHROPIC_BASE_URL=http://localhost:54321
 export ADMIN_EMAILS=admin@example.com
 export CRON_SECRET=local-cron-secret-for-tests-only-123
+# 큰 PDF 나누기를 작은 시험 파일로 확인하려고 조각 한도를 아주 작게 둔다 (실제 서비스는 20MB)
+export KOK_PDF_PART_MAX_BYTES=12000
 export NEXT_TELEMETRY_DISABLED=1

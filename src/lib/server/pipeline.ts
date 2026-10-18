@@ -20,10 +20,11 @@ import {
 } from '@/lib/ai/schemas';
 import { checkPrompt, mergePrompt, organizePrompt, quizPrompt, visualPrompt, wrap, type MaterialMeta } from '@/lib/ai/prompts';
 import { modelForTier, type AiTask, type UserSettings } from '@/lib/settings';
-import { planChunks, slicePdf, splitText, PdfError } from '@/lib/pdf';
+import { planChunks, slicePdf, splitPdfBySize, splitText, PdfError } from '@/lib/pdf';
 import { getAccount, getAppSettings, charge, refundSource, type Account, type AppSettings } from './account';
 import { AiCallError, callJson, imageBlock, pdfBlock, textBlock, usageOf, type ContentPart } from './claude';
 import { UserFacingError } from './errors';
+import { removePaths } from './files';
 import { noteForPrompt } from './notes';
 
 export const IMAGES_PER_CHUNK = 6;
@@ -63,6 +64,22 @@ function mediaTypeOf(path: string): 'image/jpeg' | 'image/png' | 'image/webp' {
   if (p.endsWith('.png')) return 'image/png';
   if (p.endsWith('.webp')) return 'image/webp';
   return 'image/jpeg';
+}
+
+/**
+ * AI 한 번에 보내는 PDF 조각의 최대 크기. Claude 요청은 32MB까지이고 PDF 는 base64 로 보내 4/3 배가 되므로 20MB 로 둔다.
+ * 이보다 큰 PDF 는 처음 한 번 조각으로 나눠 저장하고, 단계마다 조각 하나만 받는다. (KOK_PDF_PART_MAX_BYTES 는 시험용)
+ */
+function pdfPartMaxBytes(): number {
+  const v = Number(process.env.KOK_PDF_PART_MAX_BYTES);
+  return Number.isFinite(v) && v > 0 ? v : 20 * 1024 * 1024;
+}
+
+type PdfPart = { start: number; end: number; path: string };
+
+function pdfPartsOf(src: SourceRow): PdfPart[] | null {
+  const v = src.draft.pdfParts;
+  return Array.isArray(v) && v.length ? (v as PdfPart[]) : null;
 }
 
 async function download(admin: SupabaseClient, path: string): Promise<Uint8Array> {
@@ -153,6 +170,19 @@ export function cleanMindmap(raw: Mindmap, maxNodes: number, locked: Mindmap['no
 }
 
 // ------------------------------------------------------------- 단계별 작업
+/** 큰 PDF 를 조각으로 나눠 `내id/자료id/parts/001.pdf …` 에 저장한다 (정리가 끝나면 지운다) */
+async function storePdfParts(ctx: Ctx, original: Uint8Array): Promise<PdfPart[]> {
+  const bucket = ctx.admin.storage.from(SOURCES_BUCKET);
+  const parts: PdfPart[] = [];
+  await splitPdfBySize(original, pdfPartMaxBytes(), async (p) => {
+    const path = `${ctx.src.user_id}/${ctx.src.id}/parts/${String(parts.length + 1).padStart(3, '0')}.pdf`;
+    const { error } = await bucket.upload(path, p.bytes, { contentType: 'application/pdf', upsert: true });
+    if (error) throw new Error(`PDF part upload failed: ${error.message}`);
+    parts.push({ start: p.start, end: p.end, path });
+  });
+  return parts;
+}
+
 async function stepOrganize(ctx: Ctx): Promise<Partial<SourceRow>> {
   const { src, admin } = ctx;
   const i = src.chunk_index;
@@ -161,13 +191,38 @@ async function stepOrganize(ctx: Ctx): Promise<Partial<SourceRow>> {
   const content: ContentPart[] = [];
 
   if (src.kind === 'pdf') {
-    const bytes = await download(admin, src.file_paths[0]);
-    const chunks = planChunks(src.page_count ?? 1);
-    const c = chunks[Math.min(i, chunks.length - 1)];
-    const slice = await slicePdf(bytes, c.start, c.end);
-    meta.pageStart = c.start;
-    meta.pageEnd = c.end;
-    content.push(pdfBlock(slice));
+    const parts = pdfPartsOf(src);
+    if (parts) {
+      // 큰 PDF: 나눠 둔 조각 하나만 받는다
+      const part = parts[Math.min(i, parts.length - 1)];
+      let bytes: Uint8Array;
+      try {
+        bytes = await download(admin, part.path);
+      } catch (e) {
+        // 조각이 없어졌다: 다음 단계에서 원본을 같은 방법으로 다시 나눈다 (조각 순서는 그대로라 이어서 정리한다)
+        const resplits = Number(src.draft.pdfResplits ?? 0);
+        if (e instanceof UserFacingError && e.code === 'file_missing' && resplits < 2) {
+          return { draft: { ...src.draft, pdfParts: null, pdfResplits: resplits + 1 } };
+        }
+        throw e;
+      }
+      meta.pageStart = part.start;
+      meta.pageEnd = part.end;
+      content.push(pdfBlock(bytes));
+    } else {
+      const bytes = await download(admin, src.file_paths[0]);
+      if (bytes.byteLength > pdfPartMaxBytes()) {
+        // 처음 한 번: AI 에 보낼 수 있는 크기로 나눠 저장만 하고, 정리는 다음 단계부터 조각마다 한다
+        const stored = await storePdfParts(ctx, bytes);
+        return { chunk_total: stored.length, progress: Math.max(src.progress, 4), draft: { ...src.draft, pdfParts: stored, attempts: 0 } };
+      }
+      const chunks = planChunks(src.page_count ?? 1);
+      const c = chunks[Math.min(i, chunks.length - 1)];
+      const slice = await slicePdf(bytes, c.start, c.end);
+      meta.pageStart = c.start;
+      meta.pageEnd = c.end;
+      content.push(pdfBlock(slice));
+    }
   } else if (src.kind === 'image') {
     const paths = src.file_paths.slice(i * IMAGES_PER_CHUNK, (i + 1) * IMAGES_PER_CHUNK);
     meta.imageStart = i * IMAGES_PER_CHUNK + 1;
@@ -276,6 +331,18 @@ async function stepCheckAndFinish(ctx: Ctx): Promise<'done'> {
     p_expire: expire,
   });
   if (error) throw error;
+  // 큰 PDF 를 나눈 조각은 정리가 끝나면 필요 없다 (원본은 '원본' 탭에서 보도록 남긴다)
+  const parts = pdfPartsOf(ctx.src);
+  if (parts) {
+    try {
+      await removePaths(
+        ctx.admin,
+        parts.map((x) => x.path),
+      );
+    } catch (e) {
+      console.warn('[kok] could not remove pdf parts', ctx.src.id, e);
+    }
+  }
   return 'done';
 }
 

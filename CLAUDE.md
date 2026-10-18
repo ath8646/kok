@@ -22,6 +22,7 @@
 - 디자인: 노트 앱(One UI) 느낌. 색·움직임 값은 `src/app/globals.css` 맨 위 변수, 화면 조각은 `src/components/ui.tsx`(`LargeHeader` 큰 제목, `kok-card`, `Sheet`, `Menu`). 움직임은 transform·opacity 만, 300ms 안, `prefers-reduced-motion` 을 따른다. 삼성 로고·상표·그림은 쓰지 않는다.
 - 자료함은 `/library` 와 `/library/[과목]` 이 같은 `LibraryView` 다. 과목 칩을 바꾸면 `history.replaceState` 로 주소만 바꾼다.
 - 자료 처리: `POST /api/sources` → `kok_create_source`(한 사람씩 줄 세워 동시 처리 수·에너지 검사 후 행 만들기) → `after()`로 `driveSource` → `runSteps`(90초까지 새 단계 시작) → 남으면 서명된 `/api/internal/process`로 이어 달리기. 상태는 `sources` 표(step, progress, partials, draft, locked_until). `partials`·`draft`는 학생에게 보이지 않는다(칸 단위 SELECT).
+- 큰 PDF(20MB 넘음)는 첫 정리 단계에서 AI 요청 한도(32MB, base64)에 맞게 `splitPdfBySize`로 나눠 `내id/자료id/parts/`에 저장하고(`draft.pdfParts`), 단계마다 조각 하나만 받는다. 정리가 끝나면 조각은 지운다. 파일 최대 크기를 바꾸려면 `MAX_FILE_MB`(settings.ts), `schema.sql`의 버킷 `file_size_limit`, Supabase Storage 전체 한도를 같이 바꾼다.
 - AI에 노트를 보낼 때는 `noteForPrompt`(길이 제한)를 쓰고, 작은 작업의 예상 에너지는 `runTask`가 보낼 내용 길이로 계산한다. 라우트 `maxDuration`보다 `timeoutMs`를 짧게 잡는다.
 - 복습: `src/lib/srs.ts`(ts-fsrs), `src/lib/review-plan.ts`(오늘 문제 고르기·시험 모드·연속 기록·약점 개념).
 

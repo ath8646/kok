@@ -1,7 +1,7 @@
 """콕 v0.1 끝-끝 시험 (가짜 Supabase·Claude + 로컬 Postgres).
 사용: python3 e2e.py  (앱: localhost:3000, 가짜 백엔드: localhost:54321)
 """
-import asyncio, base64, json, os, pathlib, sys, time, io, re
+import asyncio, base64, json, os, pathlib, sys, time, io, re, urllib.request
 from playwright.async_api import async_playwright, expect
 
 # 로컬 Postgres 접속 (db.sh 와 같은 기본값)
@@ -75,7 +75,10 @@ async def no_hscroll(page, where):
         ERRORS.append(f"[layout] horizontal scroll on {where}: {sw} > {cw}")
 
 
-def make_pdf(pages=3) -> bytes:
+def make_pdf(pages=3, pad=0) -> bytes:
+    """쪽마다 pad 바이트만큼 무거운 PDF (내용 스트림 안의 주석이라 보이지 않는다)"""
+    import random
+    rng = random.Random(7)
     objs = []
     kids = " ".join(f"{3 + i} 0 R" for i in range(pages))
     objs.append("<< /Type /Catalog /Pages 2 0 R >>")
@@ -83,7 +86,8 @@ def make_pdf(pages=3) -> bytes:
     for i in range(pages):
         objs.append(f"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Contents {3 + pages + i} 0 R /Resources << /Font << /F1 {3 + 2 * pages} 0 R >> >> >>")
     for i in range(pages):
-        stream = f"BT /F1 24 Tf 72 760 Td (Photosynthesis page {i + 1}) Tj ET"
+        filler = "".join(rng.choice("abcdefghijklmnopqrstuvwxyz0123456789") for _ in range(pad))
+        stream = f"BT /F1 24 Tf 72 760 Td (Photosynthesis page {i + 1}) Tj ET" + (f"\n%{filler}" if pad else "")
         objs.append(f"<< /Length {len(stream)} >>\nstream\n{stream}\nendstream")
     objs.append("<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>")
     out = io.BytesIO()
@@ -377,7 +381,11 @@ async def main():
         subprocess.run(["psql", "-d", "kokapp", "-qc", "delete from public.energy_ledger where user_id = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'"], check=True)
         await page.goto(BASE + "/library")
         await expect(page.locator("main a[href^='/notes/']").first).to_be_visible()
-        await drag_files(page, [("3단원_광합성.pdf", "application/pdf", (tmp / "sample.pdf").read_bytes())])
+        # 조각 한도(시험 12KB)보다 큰 PDF: 서버가 나눠 저장하고 조각마다 정리한 뒤 조각을 지운다
+        big_pdf = make_pdf(3, pad=5000)
+        assert len(big_pdf) > 12000, len(big_pdf)
+        before = json.loads(urllib.request.urlopen("http://localhost:54321/__stats").read())
+        await drag_files(page, [("3단원_광합성.pdf", "application/pdf", big_pdf)])
         await expect(page.get_by_text("여기에 놓으면 콕이 정리해요")).to_be_visible()
         await shot(page, "25-drop-overlay", full=False)
         await drop_files(page)
@@ -389,6 +397,13 @@ async def main():
         await shot(page, "25-library-after-drop", full=False)
         await pdf_card.click()
         assert await wait_ready(page), "pdf note not ready"
+        after = json.loads(urllib.request.urlopen("http://localhost:54321/__stats").read())
+        assert after["maxDocBytes"] <= 12000, after["maxDocBytes"]
+        assert after["docs"] - before["docs"] >= 2, (before["docs"], after["docs"])  # 조각 2개 이상
+        assert after["tasks"].get("organize", 0) - before["tasks"].get("organize", 0) >= 3, (before["tasks"], after["tasks"])  # 조각 정리 + 합치기
+        pdf_sid = page.url.rstrip("/").split("/")[-1].split("?")[0]
+        parts_dir = pathlib.Path(__file__).parent / "fakebase" / "files" / "sources" / USERS["student"][0] / pdf_sid / "parts"
+        assert not parts_dir.exists() or not any(parts_dir.iterdir()), list(parts_dir.iterdir())
         await page.get_by_role("tab", name="원본").click()
         await expect(page.get_by_role("link", name=re.compile("PDF 열기|쪽 열기"))).to_be_visible()
 

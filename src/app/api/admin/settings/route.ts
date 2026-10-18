@@ -3,9 +3,16 @@ import type { NextRequest } from 'next/server';
 import { z } from 'zod';
 import { assertSameOrigin, readJson, requireAccount } from '@/lib/server/auth';
 import { clearSettingsCache } from '@/lib/server/account';
+import { MAX_FILE_MB } from '@/lib/settings';
 import { UserFacingError, errorResponse } from '@/lib/server/errors';
 
 const num = (min: number, max: number) => z.number().finite().min(min).max(max);
+// 파일 크기는 저장소 한도(MAX_FILE_MB)를 넘길 수 없다
+const fileMb = z
+  .number()
+  .finite()
+  .min(1, '파일 MB는 1 이상이어야 해요.')
+  .max(MAX_FILE_MB, `파일 MB는 ${MAX_FILE_MB}까지 정할 수 있어요 (저장소 한도). 더 크게 하려면 저장소 한도부터 올려야 해요.`);
 const Limits = z.object({
   freeDaily: num(0, 100000),
   proMonthly: num(0, 10000000),
@@ -18,8 +25,8 @@ const Limits = z.object({
   imagesPro: num(1, 60),
   textCharsFree: num(100, 200000),
   textCharsPro: num(100, 200000),
-  fileMbFree: num(1, 50),
-  fileMbPro: num(1, 50),
+  fileMbFree: fileMb,
+  fileMbPro: fileMb,
   ratePerMinute: num(1, 1000),
   freeFileDays: num(1, 3650),
 });

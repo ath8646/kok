@@ -5,7 +5,7 @@ export const PAGES_PER_CHUNK = 15;
 
 export class PdfError extends Error {
   constructor(
-    public code: 'encrypted' | 'broken',
+    public code: 'encrypted' | 'broken' | 'page_too_big',
     message: string,
   ) {
     super(message);
@@ -40,6 +40,51 @@ export async function slicePdf(bytes: Uint8Array, start: number, end: number): P
   const pages = await out.copyPages(src, indices);
   pages.forEach((p) => out.addPage(p));
   return out.save();
+}
+
+export type PdfPartBytes = { start: number; end: number; bytes: Uint8Array };
+
+/**
+ * 큰 PDF 를 AI 한 번에 보낼 수 있는 크기(maxBytes)와 쪽 수(maxPages) 안의 조각으로 나눈다.
+ * 한 번만 읽고, 조각이 생길 때마다 onPart 로 넘긴다 (조각을 모두 메모리에 쌓지 않는다).
+ * 쪽마다 크기가 달라 조각이 너무 크면 반으로 나눠 다시 만든다. 한 쪽만으로도 너무 크면 PdfError('page_too_big').
+ */
+export async function splitPdfBySize(
+  bytes: Uint8Array,
+  maxBytes: number,
+  onPart: (part: PdfPartBytes) => Promise<void>,
+  maxPages: number = PAGES_PER_CHUNK,
+): Promise<Array<{ start: number; end: number }>> {
+  const src = await load(bytes);
+  const total = src.getPageCount();
+  const avg = bytes.byteLength / Math.max(1, total);
+  const per = Math.max(1, Math.min(maxPages, Math.floor(maxBytes / Math.max(1, avg))));
+  const ranges: Array<{ start: number; end: number }> = [];
+  const make = async (s: number, e: number) => {
+    const out = await PDFDocument.create();
+    const pages = await out.copyPages(
+      src,
+      Array.from({ length: e - s + 1 }, (_, i) => s - 1 + i),
+    );
+    pages.forEach((pg) => out.addPage(pg));
+    return out.save();
+  };
+  const emit = async (s: number, e: number): Promise<void> => {
+    const part = await make(s, e);
+    if (part.byteLength <= maxBytes) {
+      ranges.push({ start: s, end: e });
+      await onPart({ start: s, end: e, bytes: part });
+      return;
+    }
+    if (s === e) {
+      throw new PdfError('page_too_big', `${s}쪽이 너무 커서 AI에 보낼 수 없어요. 사진 해상도를 낮춰 PDF를 다시 저장해 올려 주세요.`);
+    }
+    const mid = Math.floor((s + e) / 2);
+    await emit(s, mid);
+    await emit(mid + 1, e);
+  };
+  for (let s = 1; s <= total; s += per) await emit(s, Math.min(total, s + per - 1));
+  return ranges;
 }
 
 export function planChunks(total: number, size: number = PAGES_PER_CHUNK): Array<{ start: number; end: number }> {

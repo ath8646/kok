@@ -5,7 +5,7 @@ import { useMe } from '@/components/AppShell';
 import { QuestionPreview } from '@/components/QuestionList';
 import { Button, Card, Chip, EmptyState, Field, LargeHeader, SectionTitle, Segmented, Toggle, api, cx, inputClass, useToast } from '@/components/ui';
 import { costMultiplier } from '@/lib/ai/models';
-import type { Limits, ModelsConfig, Notice } from '@/lib/settings';
+import { MAX_FILE_MB, type Limits, type ModelsConfig, type Notice } from '@/lib/settings';
 import type { QuestionRow } from '@/lib/types';
 
 type Overview = {
@@ -305,6 +305,9 @@ export default function AdminPage() {
             </label>
           ))}
         </div>
+        <p className="text-xs text-muted">
+          파일 MB는 {MAX_FILE_MB}까지 정할 수 있어요 (Supabase 저장소 한도). 20MB보다 큰 PDF는 AI에 보낼 수 있는 크기로 자동으로 나눠 정리해요.
+        </p>
         <Button size="sm" className="justify-self-start" busy={busy === 'limits'} onClick={() => saveSetting('limits', limits, '한도를')}>
           한도 저장
         </Button>

@@ -2,6 +2,7 @@
 import 'server-only';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { zNote, type Note } from '@/lib/ai/schemas';
+import { stripMarks } from '@/lib/richtext';
 import { UserFacingError } from './errors';
 
 export type OwnedNote = {
@@ -34,6 +35,12 @@ export async function loadOwnedNote(admin: SupabaseClient, noteId: string, userI
     version: typeof data.current_version === 'number' ? data.current_version : null,
     updatedAt: String(data.updated_at),
   };
+}
+
+/** AI 로 그림·문제를 만들기 전에: 비어 있는 노트(직접 만들고 아직 안 채움)는 에너지를 쓰기 전에 알려 준다 */
+export function assertNoteHasContent(note: Note): void {
+  const empty = !note.key_points.length && !note.summary.trim() && !note.terms.length && !note.formulas.length;
+  if (empty) throw new UserFacingError('empty_note', '노트가 비어 있어요. 정리 탭에서 개념을 먼저 적어 주세요.', 400);
 }
 
 /**
@@ -85,24 +92,29 @@ function clip(s: unknown, n: number): string {
   return t.length > n ? `${t.slice(0, n)}…` : t;
 }
 
+/** AI 에 보낼 글: 학생의 글자 꾸미기(**굵게** 등)는 빼고 (문제·그림에 기호가 옮겨 가지 않게), 길면 자른다 */
+function clipText(s: unknown, n: number): string {
+  return clip(typeof s === 'string' ? stripMarks(s) : '', n);
+}
+
 function noteJson(note: Note, scale: number): string {
   const n = (x: number) => Math.max(20, Math.floor(x * scale));
   const k = (x: number) => Math.max(3, Math.floor(x * scale));
   return JSON.stringify({
-    title: clip(note.title, 120),
-    summary: clip(note.summary, n(1500)),
+    title: clipText(note.title, 120),
+    summary: clipText(note.summary, n(1500)),
     key_points: note.key_points.slice(0, 12).map(({ id, title, explanation, why, importance, pages }) => ({
       id: clip(id, 20),
-      title: clip(title, 120),
-      explanation: clip(explanation, n(1200)),
-      why: clip(why, n(300)),
+      title: clipText(title, 120),
+      explanation: clipText(explanation, n(1200)),
+      why: clipText(why, n(300)),
       importance,
       pages: (pages ?? []).slice(0, 20),
     })),
-    terms: note.terms.slice(0, k(40)).map(({ term, meaning }) => ({ term: clip(term, 80), meaning: clip(meaning, n(300)) })),
-    formulas: note.formulas.slice(0, k(20)).map(({ latex, label }) => ({ latex: clip(latex, 300), label: clip(label, 100) })),
-    pitfalls: note.pitfalls.slice(0, k(20)).map(({ text, key_point_id }) => ({ text: clip(text, n(300)), key_point_id: clip(key_point_id, 20) })),
-    examples: note.examples.slice(0, k(20)).map(({ text, key_point_id }) => ({ text: clip(text, n(300)), key_point_id: clip(key_point_id, 20) })),
+    terms: note.terms.slice(0, k(40)).map(({ term, meaning }) => ({ term: clipText(term, 80), meaning: clipText(meaning, n(300)) })),
+    formulas: note.formulas.slice(0, k(20)).map(({ latex, label }) => ({ latex: clip(latex, 300), label: clipText(label, 100) })),
+    pitfalls: note.pitfalls.slice(0, k(20)).map(({ text, key_point_id }) => ({ text: clipText(text, n(300)), key_point_id: clip(key_point_id, 20) })),
+    examples: note.examples.slice(0, k(20)).map(({ text, key_point_id }) => ({ text: clipText(text, n(300)), key_point_id: clip(key_point_id, 20) })),
   });
 }
 
@@ -120,12 +132,12 @@ export function noteForPrompt(note: Note, maxChars = NOTE_PROMPT_MAX_CHARS): str
 export function noteExcerpt(note: Note, keyPointId: string | null): string {
   const kp = keyPointId ? note.key_points.find((k) => k.id === keyPointId) : undefined;
   return JSON.stringify({
-    summary: clip(note.summary, 1500),
-    key_point: kp ? { id: clip(kp.id, 20), title: clip(kp.title, 120), explanation: clip(kp.explanation, 1500), why: clip(kp.why, 400) } : null,
+    summary: clipText(note.summary, 1500),
+    key_point: kp ? { id: clip(kp.id, 20), title: clipText(kp.title, 120), explanation: clipText(kp.explanation, 1500), why: clipText(kp.why, 400) } : null,
     pitfalls: note.pitfalls
       .filter((p) => !kp || p.key_point_id === kp.id)
       .slice(0, 10)
-      .map((p) => clip(p.text, 300)),
-    terms: note.terms.slice(0, 30).map(({ term, meaning }) => ({ term: clip(term, 80), meaning: clip(meaning, 300) })),
+      .map((p) => clipText(p.text, 300)),
+    terms: note.terms.slice(0, 30).map(({ term, meaning }) => ({ term: clipText(term, 80), meaning: clipText(meaning, 300) })),
   });
 }

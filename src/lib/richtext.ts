@@ -66,6 +66,106 @@ export function splitMath(input: string): RichPart[] {
   return out;
 }
 
+// ------------------------------------------------------------ 쉬운 꾸미기
+// **굵게**, ==형광펜==, !!빨간 글씨!!, 줄 앞 '- ' 목록, '1. ' 번호 목록, $수식$.
+// 여는 표시 바로 뒤와 닫는 표시 바로 앞은 빈칸이 아니어야 꾸민다 ("대박!! 진짜!!" 같은 글은 그대로).
+
+export type Inline = { t: 'text'; v: string } | { t: 'math'; tex: string; display: boolean } | { t: 'b' | 'mark' | 'red'; c: Inline[] };
+export type RichLine = { list: 'bullet' | 'number' | null; n: number; c: Inline[] };
+
+export const RICH_MARKS = [
+  { mark: '**', t: 'b' },
+  { mark: '==', t: 'mark' },
+  { mark: '!!', t: 'red' },
+] as const;
+
+const PUA = 0xe000; // 수식 자리표 (개인용 글자 영역)
+
+function inlineNodes(s: string, maths: Array<{ tex: string; display: boolean }>, depth = 0): Inline[] {
+  const out: Inline[] = [];
+  let buf = '';
+  const flush = () => {
+    if (!buf) return;
+    let text = '';
+    for (const ch of buf) {
+      const code = ch.charCodeAt(0);
+      if (code >= PUA && code < PUA + maths.length) {
+        if (text) out.push({ t: 'text', v: text });
+        text = '';
+        out.push({ t: 'math', ...maths[code - PUA] });
+      } else text += ch;
+    }
+    if (text) out.push({ t: 'text', v: text });
+    buf = '';
+  };
+  let i = 0;
+  while (i < s.length) {
+    // 영어·숫자 바로 뒤의 표시는 여는 표시로 보지 않는다 (코드의 x**2, a==b 같은 글은 그대로)
+    const m = depth < 4 && !(i > 0 && /[A-Za-z0-9]/.test(s[i - 1])) ? RICH_MARKS.find((k) => s.startsWith(k.mark, i)) : undefined;
+    if (m) {
+      const from = i + m.mark.length;
+      // 여는 표시 뒤가 빈칸이 아니고, 같은 표시가 셋 이상 이어지지 않을 때만
+      if (from < s.length && !/\s/.test(s[from]) && s[from] !== m.mark[0]) {
+        let j = s.indexOf(m.mark, from + 1);
+        while (j !== -1 && (/\s/.test(s[j - 1]) || s[j + m.mark.length] === m.mark[0])) j = s.indexOf(m.mark, j + 1);
+        if (j !== -1) {
+          flush();
+          out.push({ t: m.t, c: inlineNodes(s.slice(from, j), maths, depth + 1) });
+          i = j + m.mark.length;
+          continue;
+        }
+      }
+    }
+    buf += s[i];
+    i++;
+  }
+  flush();
+  return out;
+}
+
+/** 꾸민 글을 줄과 조각으로 나눈다 (화면은 이것만 그린다: HTML 로 바꾸지 않는다) */
+export function parseRich(input: string): RichLine[] {
+  const maths: Array<{ tex: string; display: boolean }> = [];
+  let s = '';
+  for (const p of splitMath(input ?? '')) {
+    if (p.kind === 'text') s += p.text.replace(/[\ue000-\uf8ff]/g, '');
+    else if (maths.length < 6000) {
+      s += String.fromCharCode(PUA + maths.length);
+      maths.push({ tex: p.tex, display: p.display });
+    }
+  }
+  return s.split('\n').map((raw) => {
+    const bullet = raw.match(/^\s*[-•]\s+/);
+    const num = bullet ? null : raw.match(/^\s*(\d{1,3})[.)]\s+/);
+    if (bullet) return { list: 'bullet' as const, n: 0, c: inlineNodes(raw.slice(bullet[0].length), maths) };
+    if (num) return { list: 'number' as const, n: Number(num[1]), c: inlineNodes(raw.slice(num[0].length), maths) };
+    return { list: null, n: 0, c: inlineNodes(raw, maths) };
+  });
+}
+
+/** 꾸미기 기호나 수식이 들어 있는지 (고치기 칸에서 미리보기를 보일지) */
+export function hasRichMarks(text: string): boolean {
+  return parseRich(text).some((l) => l.list || l.c.some((n) => n.t !== 'text'));
+}
+
+/** 꾸미기 기호를 빼고 글만 (검색·미리보기용, 수식은 그대로) */
+export function stripRich(input: string): string {
+  const walk = (ns: Inline[]): string =>
+    ns.map((n) => (n.t === 'text' ? n.v : n.t === 'math' ? (n.display ? `$$${n.tex}$$` : `$${n.tex}$`) : walk(n.c))).join('');
+  return parseRich(input)
+    .map((l) => walk(l.c))
+    .join('\n');
+}
+
+/** 글자 꾸미기(**, ==, !!)만 빼고 줄 앞 목록 표시와 수식은 둔다 (AI 에 보낼 노트: AI 가 문제·그림에 기호를 옮기지 않게) */
+export function stripMarks(input: string): string {
+  const walk = (ns: Inline[]): string =>
+    ns.map((n) => (n.t === 'text' ? n.v : n.t === 'math' ? (n.display ? `$$${n.tex}$$` : `$${n.tex}$`) : walk(n.c))).join('');
+  return parseRich(input)
+    .map((l) => (l.list === 'bullet' ? '- ' : l.list === 'number' ? `${l.n}. ` : '') + walk(l.c))
+    .join('\n');
+}
+
 /** 수식 표시를 빼고 읽기 쉬운 글로 (검색·미리보기용) */
 export function plainText(input: string): string {
   return splitMath(input)
@@ -177,9 +277,9 @@ export function texToText(tex: string): string {
   return t.replace(/\s+/g, ' ').trim();
 }
 
-/** 카드 미리보기용: 수식은 읽을 수 있는 글자로, 줄바꿈과 마크다운 기호는 정리 */
+/** 카드 미리보기용: 수식은 읽을 수 있는 글자로, 줄바꿈과 꾸미기 기호는 정리 */
 export function previewText(input: string): string {
-  return splitMath(input ?? '')
+  return splitMath(stripRich(input ?? ''))
     .map((p) => (p.kind === 'text' ? p.text : texToText(p.tex)))
     .join('')
     .replace(/\*\*|__|`/g, '')

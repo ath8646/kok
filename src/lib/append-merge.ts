@@ -117,6 +117,28 @@ function uniqueTexts(...lists: Array<Array<{ text: string }>>): Array<{ text: st
   return out;
 }
 
+/**
+ * 지금 노트에 있던 항목은 지금 노트의 순서대로 둔다 (내가 바꾼 순서를 지킨다).
+ * 새로 생긴 항목은 AI 가 둔 자리에 그대로 두고, 있던 항목들이 차지한 자리만 지금 순서로 다시 채운다
+ */
+export function keepOrder<T>(merged: T[], current: T[], keyOf: (x: T) => string): T[] {
+  const rank = new Map<string, number>();
+  current.forEach((c, i) => {
+    const k = keyOf(c);
+    if (k && !rank.has(k)) rank.set(k, i);
+  });
+  const slots: number[] = [];
+  merged.forEach((m, i) => {
+    if (rank.has(keyOf(m))) slots.push(i);
+  });
+  const olds = slots.map((i) => merged[i]).sort((a, b) => (rank.get(keyOf(a)) ?? 0) - (rank.get(keyOf(b)) ?? 0));
+  const out = merged.slice();
+  slots.forEach((slot, j) => {
+    out[slot] = olds[j];
+  });
+  return out;
+}
+
 /** 지금 노트에서 내가 고친(edited) 항목을 AI 가 그대로 두었으면 '고침' 표시도 남긴다 */
 function keepEdited<T extends { edited?: boolean }>(merged: T[], current: T[], same: (a: T, b: T) => boolean): T[] {
   const edited = current.filter((c) => c.edited);
@@ -127,11 +149,13 @@ function keepEdited<T extends { edited?: boolean }>(merged: T[], current: T[], s
 /**
  * AI 가 합친 노트에 지금 노트의 것을 지킨다.
  * - 별표한 개념은 그대로 별표, 내가 고친 것을 그대로 둔 곳은 '고침' 표시
+ * - 있던 개념·용어·공식은 지금 노트의 순서대로 (내가 바꾼 순서)
  * - '한 번 확인해 보세요'(checks)와 'AI가 바꾼 것'(changes)은 지금 노트·새 자료의 것을 모두 남긴다 (AI 가 빠뜨려도)
+ * - 직접 만든 노트(manual)는 그 표시를 남긴다
  */
 export function keepFromCurrent(current: Note, merged: Note, newParts: Note[] = []): Note {
   const byId = new Map(current.key_points.map((k) => [k.id, k]));
-  const key_points = merged.key_points.map((k) => {
+  const key_points = keepOrder(merged.key_points, current.key_points, (k) => k.id).map((k) => {
     const c = byId.get(k.id);
     if (!c) return k;
     const next = { ...k };
@@ -142,8 +166,16 @@ export function keepFromCurrent(current: Note, merged: Note, newParts: Note[] = 
   const out: Note = {
     ...merged,
     key_points,
-    terms: keepEdited(merged.terms, current.terms, (a, b) => norm(a.term) === norm(b.term) && norm(a.meaning) === norm(b.meaning)),
-    formulas: keepEdited(merged.formulas, current.formulas, (a, b) => norm(a.latex) === norm(b.latex) && norm(a.label) === norm(b.label)),
+    terms: keepEdited(
+      keepOrder(merged.terms, current.terms, (t) => norm(t.term)),
+      current.terms,
+      (a, b) => norm(a.term) === norm(b.term) && norm(a.meaning) === norm(b.meaning),
+    ),
+    formulas: keepEdited(
+      keepOrder(merged.formulas, current.formulas, (f) => norm(f.latex)),
+      current.formulas,
+      (a, b) => norm(a.latex) === norm(b.latex) && norm(a.label) === norm(b.label),
+    ),
     pitfalls: keepEdited(merged.pitfalls, current.pitfalls, (a, b) => norm(a.text) === norm(b.text)),
     examples: keepEdited(merged.examples, current.examples, (a, b) => norm(a.text) === norm(b.text)),
     checks: uniqueTexts(current.checks, merged.checks, ...newParts.map((p) => p.checks)),
@@ -151,5 +183,7 @@ export function keepFromCurrent(current: Note, merged: Note, newParts: Note[] = 
   };
   if (current.summary_edited && norm(current.summary) === norm(merged.summary)) out.summary_edited = true;
   else delete out.summary_edited;
+  if (current.manual) out.manual = true;
+  else delete out.manual;
   return out;
 }

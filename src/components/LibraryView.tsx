@@ -8,14 +8,15 @@ import { SOURCES_CHANGED, SUBJECTS_CHANGED, useQuickAdd } from './QuickAdd';
 import { stepLabel, useActiveSources } from './ProcessingList';
 import { SubjectForm } from './SubjectForm';
 import { Button, EmptyState, ICONS, Icon, IconButton, LargeHeader, Menu, ProgressRing, Sheet, api, cx, inputClass, useToast, type MenuItem } from './ui';
-import { SOURCE_COLS, fetchAll, fetchSubjects, sb, topLevelSources, type SourceRowWithUnit } from '@/lib/data';
+import { NOTE_PEEK, SOURCE_COLS, fetchAll, fetchSubjects, peekText, sb, topLevelSources, type NotePeek, type SourceRowWithUnit } from '@/lib/data';
 import type { SubjectRow } from '@/lib/types';
 import { subjectVar } from '@/lib/colors';
 import { previewText } from '@/lib/richtext';
 import { daysUntil } from '@/lib/time';
 import { dropView, readView, writeView } from '@/lib/view-cache';
 
-type LibSource = SourceRowWithUnit & { summary: string | null };
+/** manual: AI 없이 직접 만든 노트 */
+type LibSource = SourceRowWithUnit & { summary: string | null; manual?: boolean };
 type LibData = { subjects: SubjectRow[]; sources: LibSource[] };
 
 /** 자료함 목록을 기억해 두는 이름 (다시 들어오면 바로 보이고, 뒤에서 새로 읽는다) */
@@ -37,16 +38,22 @@ async function fetchLibrary(): Promise<LibData> {
         }>;
       }),
     ),
-    fetchAll<{ source_id: string; summary: string | null }>(
+    fetchAll<NotePeek>(
       (a, b) =>
-        sb().from('notes').select('source_id, summary:body->>summary').order('id').range(a, b) as unknown as PromiseLike<{
-          data: Array<{ source_id: string; summary: string | null }> | null;
+        sb().from('notes').select(NOTE_PEEK).order('id').range(a, b) as unknown as PromiseLike<{
+          data: NotePeek[] | null;
           error: unknown;
         }>,
     ),
   ]);
-  const sum = new Map(notes.map((n) => [n.source_id, n.summary]));
-  return { subjects, sources: sources.map((s) => ({ ...s, summary: sum.get(s.id) ?? null })) };
+  const sum = new Map(notes.map((n) => [n.source_id, n]));
+  return {
+    subjects,
+    sources: sources.map((s) => {
+      const n = sum.get(s.id);
+      return { ...s, summary: n ? peekText(n) : null, manual: n?.manual === 'true' };
+    }),
+  };
 }
 
 const KIND_ICON = { text: ICONS.pen, pdf: ICONS.file, image: ICONS.image } as const;
@@ -575,7 +582,7 @@ function NoteCard({
         {subject ? <span className="h-2 w-2 shrink-0 rounded-full" style={{ background: subjectVar(subject.color) }} aria-hidden="true" /> : null}
         <Icon d={KIND_ICON[s.kind]} size={13} className="shrink-0" />
         <span className="truncate">
-          {KIND_LABEL[s.kind]}
+          {s.manual ? '직접 만든 노트' : KIND_LABEL[s.kind]}
           {s.page_count ? ` ${s.page_count}${s.kind === 'image' ? '장' : '쪽'}` : ''} · {shortDate(s.created_at)}
         </span>
       </p>
@@ -624,7 +631,7 @@ function NoteCard({
               // 정리 중이던 카드가 끝나면 미리보기가 번지며 나타난다
               <p className={cx('line-clamp-5 text-[13px] leading-relaxed text-muted', startedBusy && 'kok-fade')}>
                 <span className="float-right h-5 w-6" aria-hidden="true" />
-                {s.summary ? previewText(s.summary) : '정리 노트가 준비됐어요.'}
+                {s.summary ? previewText(s.summary) : s.manual ? '직접 만든 노트예요. 눌러서 채워 보세요.' : '정리 노트가 준비됐어요.'}
               </p>
             )}
             {fade}
@@ -678,6 +685,12 @@ function RenameForm({ s, units, onDone }: { s: LibSource; units: string[]; onDon
   const toast = useToast();
   const [title, setTitle] = useState(s.title ?? '');
   const [unit, setUnit] = useState(s.unit ?? '');
+  // 적는 글로 시작하는 단원 먼저, 많으면 12개까지
+  const typed = unit.trim();
+  const suggest = [
+    ...units.filter((u) => typed && u !== typed && u.startsWith(typed)),
+    ...units.filter((u) => !typed || u === typed || !u.startsWith(typed)),
+  ].slice(0, 12);
   return (
     <form
       className="grid gap-3"
@@ -695,15 +708,31 @@ function RenameForm({ s, units, onDone }: { s: LibSource; units: string[]; onDon
         자료 이름
         <input className={inputClass} value={title} maxLength={120} onChange={(e) => setTitle(e.target.value)} />
       </label>
-      <label className="grid gap-1.5 text-sm font-semibold">
-        단원 (같은 이름끼리 묶여요)
-        <input className={inputClass} value={unit} maxLength={40} list="unit-list" onChange={(e) => setUnit(e.target.value)} />
-        <datalist id="unit-list">
-          {units.map((u) => (
-            <option key={u} value={u} />
-          ))}
-        </datalist>
-      </label>
+      <div className="grid gap-1.5">
+        <label className="grid gap-1.5 text-sm font-semibold">
+          단원 (같은 이름끼리 묶여요)
+          <input className={inputClass} value={unit} maxLength={40} onChange={(e) => setUnit(e.target.value)} />
+        </label>
+        {/* 이 과목에 있는 단원: 눌러서 고른다 (브라우저 기본 펼침 목록 대신) */}
+        {suggest.length ? (
+          <div className="flex flex-wrap gap-1.5" role="group" aria-label="있는 단원">
+            {suggest.map((u) => (
+              <button
+                key={u}
+                type="button"
+                aria-pressed={u === unit.trim()}
+                onClick={() => setUnit(u)}
+                className={cx(
+                  'press rounded-full px-3 py-1 text-sm font-semibold',
+                  u === unit.trim() ? 'bg-ink text-surface' : 'bg-surface-2 text-ink hover:bg-surface-3',
+                )}
+              >
+                {u}
+              </button>
+            ))}
+          </div>
+        ) : null}
+      </div>
       <Button type="submit" className="justify-self-start">
         저장
       </Button>

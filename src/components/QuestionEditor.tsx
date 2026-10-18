@@ -1,6 +1,7 @@
 'use client';
 // 문제 직접 만들기·고치기
 import { useState } from 'react';
+import { Select } from './Select';
 import { Button, Field, Segmented, cx, inputClass } from './ui';
 
 export type QuestionDraft = {
@@ -210,14 +211,12 @@ export function QuestionEditor({
         </Field>
         {keyPoints?.length ? (
           <Field label="연결할 개념" htmlFor="q-kp">
-            <select id="q-kp" className={inputClass} value={d.key_point_id ?? ''} onChange={(e) => setD({ ...d, key_point_id: e.target.value || null })}>
-              <option value="">없음</option>
-              {keyPoints.map((k) => (
-                <option key={k.id} value={k.id}>
-                  {k.title}
-                </option>
-              ))}
-            </select>
+            <Select
+              id="q-kp"
+              value={d.key_point_id ?? ''}
+              onChange={(v) => setD({ ...d, key_point_id: v || null })}
+              options={[{ value: '', label: '없음' }, ...keyPoints.map((k) => ({ value: k.id, label: k.title }))]}
+            />
           </Field>
         ) : null}
       </div>

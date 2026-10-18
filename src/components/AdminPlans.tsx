@@ -2,6 +2,7 @@
 // 관리자 화면의 "테스트 플랜"과 "쿠폰(코드)" 칸.
 // 테스트 플랜: 번개(에너지) 총량과 한도를 정해 만든다. 코드를 쓴 사람은 코드에 정한 날수 동안 이 플랜을 쓰고, 끝나면 원래 요금제로 돌아간다.
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { Select } from '@/components/Select';
 import { ApiError, Button, Card, Chip, Field, SectionTitle, Sheet, Toggle, api, cx, inputClass, useToast } from '@/components/ui';
 import { MAX_FILE_MB, type Limits } from '@/lib/settings';
 
@@ -337,14 +338,14 @@ export function AdminPlans({
         <Card className="grid gap-3">
           <label className="grid gap-1 text-sm font-semibold">
             켜 줄 플랜
-            <select className={inputClass} value={newCoupon.planId ?? ''} onChange={(e) => setNewCoupon({ ...newCoupon, planId: e.target.value || null })}>
-              <option value="">Pro</option>
-              {(plans ?? []).map((p) => (
-                <option key={p.id} value={p.id}>
-                  테스트 플랜 · {p.name} (⚡ {fmt(num(p.energy_total) ?? 0)})
-                </option>
-              ))}
-            </select>
+            <Select
+              value={newCoupon.planId ?? ''}
+              onChange={(v) => setNewCoupon({ ...newCoupon, planId: v || null })}
+              options={[
+                { value: '', label: 'Pro' },
+                ...(plans ?? []).map((p) => ({ value: p.id, label: `테스트 플랜 · ${p.name} (⚡ ${fmt(num(p.energy_total) ?? 0)})` })),
+              ]}
+            />
           </label>
           <div className="grid grid-cols-3 gap-2">
             <label className="grid gap-1 text-sm font-semibold">

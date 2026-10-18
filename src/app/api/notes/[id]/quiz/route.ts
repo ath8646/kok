@@ -5,7 +5,7 @@ import { z } from 'zod';
 import { assertSameOrigin, assertUuid, readJson, requireAccount } from '@/lib/server/auth';
 import { getAppSettings } from '@/lib/server/account';
 import { UserFacingError, errorResponse } from '@/lib/server/errors';
-import { assertSameVersion, loadOwnedNote, noteForPrompt } from '@/lib/server/notes';
+import { assertNoteHasContent, assertSameVersion, loadOwnedNote, noteForPrompt } from '@/lib/server/notes';
 import { runTask } from '@/lib/server/tasks';
 import { textBlock } from '@/lib/server/claude';
 import { checkPrompt, quizPrompt, wrap } from '@/lib/ai/prompts';
@@ -46,6 +46,7 @@ export async function POST(req: NextRequest, ctx: RouteContext<'/api/notes/[id]/
       return Response.json({ ok: true, added: Number(data ?? rows.length) });
     }
     if (!Preview.safeParse(body).success) throw new UserFacingError('bad_body', '보낸 내용이 올바르지 않아요.', 400);
+    assertNoteHasContent(note.note);
 
     const app = await getAppSettings(admin);
     // 지금 버전의 문제만 센다 (다른 버전에만 있는 숨긴 문제는 바뀌지 않는다)

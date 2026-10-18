@@ -13,6 +13,7 @@ import { OriginalPanel } from '@/components/note/OriginalPanel';
 import { OriginalTab } from '@/components/note/OriginalTab';
 import { AppendStatus } from '@/components/note/AppendStatus';
 import { NoteChat } from '@/components/note/NoteChat';
+import { useStuck } from '@/components/useStuck';
 import { QuestionsPanel } from '@/components/note/QuestionsPanel';
 import { VisualPanel, type NoteView as NoteViewPrefs, type VisualType, type Visuals } from '@/components/note/VisualPanel';
 import type { CardInfo, QuestionRemoval } from '@/components/QuestionList';
@@ -37,6 +38,8 @@ import { zMindmap, zNote, zTable, zTimeline, type Mindmap, type TableSpec, type 
 import type { QuestionRow, SubjectRow } from '@/lib/types';
 import { subjectVar } from '@/lib/colors';
 import { VERSION_LIST_COLS, removalPlan, toVersionRow, type ChildSource, type VersionRow } from '@/lib/versions';
+import { previewText } from '@/lib/richtext';
+import { starredFirst } from '@/lib/note-order';
 
 type Tab = 'note' | 'visual' | 'questions' | 'original';
 type SourceFull = SourceRowWithUnit & { text_content: string | null; parent_id?: string | null };
@@ -191,6 +194,9 @@ export default function NotePage() {
   const canAppend = !!me?.canAppend;
   const [bundle, setBundle] = useState<Bundle | null | undefined>(undefined);
   const [tick, setTick] = useState(0);
+  // 탭 띠가 위에 붙었을 때만 바탕을 칠한다 (테마 배경이 띠 뒤에서 끊기지 않게)
+  const [subbarEl, subbarRef] = useState<HTMLDivElement | null>(null);
+  const subbarStuck = useStuck(subbarEl);
   const [tab, setTab] = useState<Tab>(() => {
     const t = initialParam('tab');
     return t === 'note' || t === 'visual' || t === 'questions' || t === 'original' ? t : 'note';
@@ -200,6 +206,16 @@ export default function NotePage() {
   const [glance, setGlance] = useState(true);
   const [reporting, setReporting] = useState(false);
   const [reason, setReason] = useState('');
+  const [renaming, setRenaming] = useState(false);
+  const [newTitle, setNewTitle] = useState('');
+  const [renameBusy, setRenameBusy] = useState(false);
+  const renameInput = useRef<HTMLInputElement>(null);
+  // 이름 칸을 열면 글을 골라 둔다 (바로 새 이름을 칠 수 있게). 시트가 먼저 자기에게 초점을 두어서 조금 뒤에
+  useEffect(() => {
+    if (!renaming) return;
+    const t = setTimeout(() => renameInput.current?.select(), 60);
+    return () => clearTimeout(t);
+  }, [renaming]);
   const [viewing, setViewing] = useState<number | null>(() => {
     const v = Number(initialParam('v'));
     return Number.isInteger(v) && v >= 1 ? v : null;
@@ -364,7 +380,8 @@ export default function NotePage() {
   const docQuestions = useMemo(() => (old ? (questions ?? []).filter((q) => old.questionIds.includes(q.id)) : liveQuestions), [old, questions, liveQuestions]);
   const existing = useMemo(() => new Set((questions ?? []).map((q) => q.id)), [questions]);
   const view = (raw?.view ?? {}) as NoteViewPrefs;
-  const keyPoints = useMemo(() => (body?.key_points ?? []).map((k) => ({ id: k.id, title: k.title })), [body]);
+  // 문제 만들기·채팅에서 쓰는 개념: 노트에 보이는 순서(별표 먼저), 이름은 꾸미기 기호 없이 글로
+  const keyPoints = useMemo(() => starredFirst(body?.key_points ?? []).map((k) => ({ id: k.id, title: previewText(k.title) || k.title })), [body]);
   const noteChars = useMemo(() => (note ? JSON.stringify(note.body).length : 0), [note]);
 
   // 예전 화면에서 고쳐서 저장되지 않았을 때 (다른 탭·기기에서 자료를 더했거나 버전을 바꿈): 알려 주고 새로 읽는다
@@ -445,6 +462,40 @@ export default function NotePage() {
       if (!row) return staleReload(STALE_LIVE);
       noteToken.current = String(row.updated_at);
     });
+  };
+
+  /** 노트 이름 바꾸기 (지금 버전): 노트와 자료 이름을 같이 바꾼다 (자료함·홈은 자료 이름을 보여 준다) */
+  const rename = async () => {
+    const t = newTitle.replace(/\s+/g, ' ').trim().slice(0, 120);
+    if (!note || !t || renameBusy) return;
+    setRenameBusy(true);
+    try {
+      const r = await queued(async (): Promise<boolean | 'stale'> => {
+        let q = sb().from('notes').update({ title: t }).eq('id', note.id);
+        if (noteToken.current) q = q.eq('updated_at', noteToken.current);
+        const { data, error } = await q.select('updated_at');
+        if (error) return false;
+        const row = data?.[0];
+        if (!row) return 'stale';
+        noteToken.current = String(row.updated_at);
+        return true;
+      });
+      if (r === 'stale') {
+        staleReload(STALE_LIVE);
+        return;
+      }
+      if (!r) {
+        toast('이름을 바꾸지 못했어요.', 'bad');
+        return;
+      }
+      await sb().from('sources').update({ title: t }).eq('id', sourceId);
+      setBundle((b) => (b && b.note ? { ...b, note: { ...b.note, title: t }, source: b.source ? { ...b.source, title: t } : b.source } : b));
+      window.dispatchEvent(new Event(SOURCES_CHANGED));
+      setRenaming(false);
+      toast('이름을 바꿨어요.', 'ok');
+    } finally {
+      setRenameBusy(false);
+    }
   };
 
   /** 지금 버전의 그림 저장: 읽은 그림 행 그대로일 때만 (새 버전이면 행이 새로 생겨 0행) */
@@ -591,6 +642,9 @@ export default function NotePage() {
     );
 
   const ready = source.status === 'ready' && !!note && !!body;
+  const manual = !!body?.manual;
+  // 직접 만든 노트는 AI 가 만든 것이 없으면 신고할 것도 없다 (자료를 더해 AI 가 합쳤으면 신고할 수 있다)
+  const reportable = !manual || versions.length > 0;
   const title = old?.title || note?.title || source.title || (ready ? '새 자료' : '정리하는 중…');
   const meta = (
     <span className="flex flex-wrap items-center gap-1.5 text-sm">
@@ -601,9 +655,18 @@ export default function NotePage() {
         </span>
       ) : null}
       {source.unit ? <Chip>{source.unit}</Chip> : null}
-      <span>· {source.kind === 'pdf' ? `PDF ${source.page_count ?? ''}쪽` : source.kind === 'image' ? `사진 ${source.page_count ?? ''}장` : '직접 쓴 글'}</span>
+      <span>
+        ·{' '}
+        {manual
+          ? '직접 만든 노트'
+          : source.kind === 'pdf'
+            ? `PDF ${source.page_count ?? ''}쪽`
+            : source.kind === 'image'
+              ? `사진 ${source.page_count ?? ''}장`
+              : '직접 쓴 글'}
+      </span>
       {versions.length ? <span>· 버전 {old ? old.number : cur}</span> : null}
-      <span>· AI 정리</span>
+      {manual ? null : <span>· AI 정리</span>}
     </span>
   );
 
@@ -634,14 +697,26 @@ export default function NotePage() {
           <Menu
             label="노트 메뉴"
             items={[
-              { label: '이 노트 문제 풀기', icon: ICONS.retry, onSelect: () => router.push(`/review?note=${note.id}`) },
+              ...(liveQuestions.length ? [{ label: '이 노트 문제 풀기', icon: ICONS.retry, onSelect: () => router.push(`/review?note=${note.id}`) }] : []),
+              ...(old
+                ? []
+                : [
+                    {
+                      label: '이름 바꾸기',
+                      icon: ICONS.pen,
+                      onSelect: () => {
+                        setNewTitle(note.title || source.title || '');
+                        setRenaming(true);
+                      },
+                    },
+                  ]),
               ...(versionsOn ? [{ label: versions.length ? '버전 기록' : '자료 더하기', icon: ICONS.file, onSelect: () => setTab('original') }] : []),
-              { label: '이상해요 (신고)', icon: ICONS.edit, onSelect: () => setReporting(true) },
+              ...(reportable ? [{ label: '이상해요 (신고)', icon: ICONS.edit, onSelect: () => setReporting(true) }] : []),
             ]}
           />
         }
       />
-      <div className={cx(STICKY_BELOW_TOPBAR, 'kok-subbar z-20 -mx-4 -mt-4 px-4 pb-2.5 pt-1 md:-mx-6 md:px-6')}>
+      <div ref={subbarRef} className={cx(STICKY_BELOW_TOPBAR, 'kok-subbar z-20 -mx-4 -mt-4 px-4 pb-2.5 pt-1 md:-mx-6 md:px-6', subbarStuck && 'is-stuck')}>
         <div className="grid grid-cols-4 gap-1 rounded-full bg-surface-2 p-1" role="tablist" aria-label="노트 보기">
           {TABS.map((t) => (
             <button
@@ -743,12 +818,16 @@ export default function NotePage() {
                   setTab('original');
                 }}
               />
-              <div className="flex flex-wrap gap-2">
-                {!old ? <LinkButton href={`/review?note=${note.id}`}>이 노트 문제 풀기</LinkButton> : null}
-                <Button variant="ghost" onClick={() => setReporting(true)}>
-                  이상해요
-                </Button>
-              </div>
+              {(!old && liveQuestions.length) || reportable ? (
+                <div className="flex flex-wrap gap-2">
+                  {!old && liveQuestions.length ? <LinkButton href={`/review?note=${note.id}`}>이 노트 문제 풀기</LinkButton> : null}
+                  {reportable ? (
+                    <Button variant="ghost" onClick={() => setReporting(true)}>
+                      이상해요
+                    </Button>
+                  ) : null}
+                </div>
+              ) : null}
             </div>
           ) : null}
 
@@ -821,6 +900,29 @@ export default function NotePage() {
           onApplied={reload}
         />
       ) : null}
+
+      <Sheet open={renaming} onClose={() => setRenaming(false)} title="노트 이름">
+        <form
+          className="grid gap-3"
+          onSubmit={(e) => {
+            e.preventDefault();
+            rename();
+          }}
+        >
+          <input
+            ref={renameInput}
+            aria-label="노트 이름"
+            className={inputClass}
+            value={newTitle}
+            maxLength={120}
+            onChange={(e) => setNewTitle(e.target.value)}
+            placeholder="예: 3단원 광합성"
+          />
+          <Button type="submit" className="justify-self-start" disabled={!newTitle.trim()} busy={renameBusy}>
+            저장
+          </Button>
+        </form>
+      </Sheet>
 
       <Sheet open={reporting} onClose={() => setReporting(false)} title="이상해요">
         <div className="grid gap-3">

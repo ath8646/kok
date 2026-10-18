@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { AdminPlans } from '@/components/AdminPlans';
 import { useMe } from '@/components/AppShell';
 import { QuestionPreview } from '@/components/QuestionList';
+import { Select } from '@/components/Select';
 import { Button, Card, Chip, EmptyState, Field, LargeHeader, SectionTitle, Segmented, Toggle, api, cx, inputClass, useToast } from '@/components/ui';
 import { costMultiplier } from '@/lib/ai/models';
 import { MAX_FILE_MB, type Limits, type ModelsConfig, type Notice } from '@/lib/settings';
@@ -274,15 +275,15 @@ export default function AdminPage() {
           {EFFORT_TASKS.map(([k, label]) => (
             <label key={k} className="grid gap-1 text-sm font-semibold">
               {label} effort
-              <select
-                className={inputClass}
+              <Select
                 value={models.effort[k]}
-                onChange={(e) => setModels({ ...models, effort: { ...models.effort, [k]: e.target.value as 'low' | 'medium' | 'high' } })}
-              >
-                <option value="low">low</option>
-                <option value="medium">medium</option>
-                <option value="high">high</option>
-              </select>
+                onChange={(v) => setModels({ ...models, effort: { ...models.effort, [k]: v } })}
+                options={[
+                  { value: 'low', label: 'low' },
+                  { value: 'medium', label: 'medium' },
+                  { value: 'high', label: 'high' },
+                ]}
+              />
             </label>
           ))}
         </div>

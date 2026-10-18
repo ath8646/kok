@@ -6,7 +6,7 @@ import { EnergyPill, useMe } from '@/components/AppShell';
 import { ProcessingList, useActiveSources } from '@/components/ProcessingList';
 import { SOURCES_CHANGED, useQuickAdd } from '@/components/QuickAdd';
 import { ICONS, Icon, LargeHeader, LinkButton, ProgressRing, SectionTitle, cx } from '@/components/ui';
-import { fetchPlanData, fetchSources, fetchStudyDays, sb, type PlanData, type SourceRowWithUnit } from '@/lib/data';
+import { NOTE_PEEK, fetchPlanData, fetchSources, fetchStudyDays, peekText, sb, type NotePeek, type PlanData, type SourceRowWithUnit } from '@/lib/data';
 import { pickToday, streakInfo } from '@/lib/review-plan';
 import { daysUntil, kstDateString } from '@/lib/time';
 import { subjectVar } from '@/lib/colors';
@@ -15,17 +15,21 @@ import { previewText } from '@/lib/richtext';
 import { energyPeriodLabel } from '@/lib/plans';
 import type { MeResponse } from '@/lib/types';
 
-type Recent = SourceRowWithUnit & { summary: string | null };
+/** manual: AI 없이 직접 만든 노트 */
+type Recent = SourceRowWithUnit & { summary: string | null; manual?: boolean };
 
 async function fetchRecent(): Promise<Recent[]> {
   const rows = await fetchSources({ limit: 8 });
   const ready = rows.filter((r) => r.status === 'ready').map((r) => r.id);
-  const sums = new Map<string, string | null>();
+  const sums = new Map<string, NotePeek>();
   if (ready.length) {
-    const { data } = await sb().from('notes').select('source_id, summary:body->>summary').in('source_id', ready);
-    for (const n of (data ?? []) as Array<{ source_id: string; summary: string | null }>) sums.set(n.source_id, n.summary);
+    const { data } = await sb().from('notes').select(NOTE_PEEK).in('source_id', ready);
+    for (const n of (data ?? []) as unknown as NotePeek[]) sums.set(n.source_id, n);
   }
-  return rows.map((r) => ({ ...r, summary: sums.get(r.id) ?? null }));
+  return rows.map((r) => {
+    const n = sums.get(r.id);
+    return { ...r, summary: n ? peekText(n) : null, manual: n?.manual === 'true' };
+  });
 }
 
 const WEEK = ['월', '화', '수', '목', '금', '토', '일'];
@@ -320,7 +324,9 @@ export default function HomePage() {
                         ? '멈췄어요. 눌러서 다시 해 보세요.'
                         : s.summary
                           ? previewText(s.summary)
-                          : '정리 노트가 준비됐어요.'}
+                          : s.manual
+                            ? '직접 만든 노트예요.'
+                            : '정리 노트가 준비됐어요.'}
                   </p>
                   <p className="kok-fill line-clamp-2 text-sm font-bold leading-snug">{s.title || '제목 없는 자료'}</p>
                   <p className="kok-fill mt-1 flex items-center gap-1.5 truncate text-[11px] text-muted">

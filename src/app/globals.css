@@ -38,6 +38,9 @@
   --hl: #ffd93d;
   --hl-ink: #3a2e00;
   --hl-mark: #ffd93d;
+  /* 별표: 채운 별(--star)과 테두리(--star-edge, 흰 바탕에서 3 이상) */
+  --star: #ffbe1a;
+  --star-edge: #b07d00;
   --ok: #128250;
   --ok-soft: #e3f4eb;
   --bad: #cf3434;
@@ -80,6 +83,8 @@
     --hl: #edcb3a;
     --hl-ink: #241c00;
     --hl-mark: rgba(237, 203, 58, 0.34);
+    --star: #ffc93c;
+    --star-edge: #ffc93c;
     --ok: #3bc488;
     --ok-soft: #10301f;
     --bad: #ff7a7a;
@@ -119,6 +124,8 @@
   --hl: #edcb3a;
   --hl-ink: #241c00;
   --hl-mark: rgba(237, 203, 58, 0.34);
+  --star: #ffc93c;
+  --star-edge: #ffc93c;
   --ok: #3bc488;
   --ok-soft: #10301f;
   --bad: #ff7a7a;
@@ -260,6 +267,50 @@ body {
 .hl-mark {
   background: linear-gradient(transparent 58%, var(--hl-mark) 58%);
   padding: 0 0.15em;
+}
+
+/* ------------------------------------------------------------ 쉬운 꾸미기 (노트 글)
+   ==형광펜==, !!빨간 글씨!!, 줄 앞 '- ' 목록과 '1. ' 번호 (src/components/RichText.tsx) */
+.kok-mark {
+  background: var(--hl-mark);
+  color: inherit;
+  border-radius: 0.3em;
+  padding: 0.05em 0.2em;
+  -webkit-box-decoration-break: clone;
+  box-decoration-break: clone;
+}
+.kok-red {
+  color: var(--bad);
+}
+.kok-rich {
+  display: block;
+  white-space: pre-wrap;
+}
+.kok-li {
+  display: block;
+  position: relative;
+  padding-left: 1.25em;
+}
+.kok-li + .kok-li {
+  margin-top: 0.15em;
+}
+.kok-li::before {
+  content: '•';
+  position: absolute;
+  left: 0.25em;
+  color: var(--muted);
+  font-weight: 800;
+}
+.kok-li[data-kind='number'] {
+  padding-left: 1.75em;
+}
+.kok-li[data-kind='number']::before {
+  content: attr(data-mark);
+  left: 0;
+  width: 1.4em;
+  text-align: right;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
 }
 
 /* 키보드로 옮겨 다닐 때 보이는 테두리. base 층이라 focus:outline-none 으로 끌 수 있다 */
@@ -431,12 +482,24 @@ body {
     background-color 200ms ease,
     box-shadow 200ms ease;
 }
-.kok-topbar.is-collapsed,
+/* 탭 띠: 붙기 전에는 칠하지 않는다 (테마 배경 그림·무늬가 그대로 이어지게). 붙은 뒤에만 위 띠처럼 */
 .kok-subbar {
+  background: transparent;
+  transition:
+    background-color 200ms ease,
+    box-shadow 200ms ease;
+}
+.kok-topbar.is-collapsed,
+.kok-subbar.is-stuck {
   background: color-mix(in srgb, var(--bg) 94%, transparent);
   backdrop-filter: saturate(1.6) blur(14px);
   -webkit-backdrop-filter: saturate(1.6) blur(14px);
   box-shadow: 0 1px 0 var(--line);
+}
+/* 배경 그림이 있으면 붙은 띠도 살짝 비치게 (흐리게 보이는 그림 위) */
+:root[data-bg] .kok-topbar.is-collapsed,
+:root[data-bg] .kok-subbar.is-stuck {
+  background: color-mix(in srgb, var(--bg) 84%, transparent);
 }
 .kok-topbar.is-flush {
   box-shadow: none;
@@ -672,6 +735,180 @@ body {
   animation: kok-mm-pop 0.35s var(--ease-out) backwards;
   transform-box: fill-box;
   transform-origin: center;
+}
+
+/* 짧게 나타나기 (미리보기·도움말처럼 고치는 중에 생기는 것) */
+.kok-appear {
+  animation: kok-fade 180ms ease backwards;
+}
+
+/* ------------------------------------------------------------ 별표
+   누르면 별이 튀어 오르며 작은 빛이 퍼지고, 카드 테두리가 한 번 빛난다. 별표한 카드는 오른쪽 위가 은은하게 물든다 */
+.kok-star path {
+  fill: transparent;
+  stroke: var(--muted);
+  transition:
+    fill 160ms ease,
+    stroke 160ms ease;
+}
+.kok-star.is-on path {
+  fill: var(--star);
+  stroke: var(--star-edge);
+}
+.kok-star.is-pop {
+  animation: kok-star-pop 300ms var(--ease-out);
+}
+@keyframes kok-star-pop {
+  0% {
+    transform: scale(0.45) rotate(-35deg);
+  }
+  55% {
+    transform: scale(1.28) rotate(8deg);
+  }
+  100% {
+    transform: scale(1) rotate(0deg);
+  }
+}
+.kok-burst {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+.kok-burst-ring {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 34px;
+  height: 34px;
+  margin: -17px 0 0 -17px;
+  border-radius: 999px;
+  border: 2px solid var(--star);
+  opacity: 0;
+  animation: kok-burst-ring 300ms var(--ease-out) both;
+}
+@keyframes kok-burst-ring {
+  0% {
+    transform: scale(0.35);
+    opacity: 0.9;
+  }
+  100% {
+    transform: scale(1.55);
+    opacity: 0;
+  }
+}
+.kok-burst-dot {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 5px;
+  height: 5px;
+  margin: -2.5px 0 0 -2.5px;
+  border-radius: 999px;
+  background: var(--star);
+  opacity: 0;
+  animation: kok-burst-dot 300ms var(--ease-out) both;
+}
+.kok-burst-dot:nth-child(odd) {
+  background: var(--fab);
+  width: 4px;
+  height: 4px;
+  margin: -2px 0 0 -2px;
+}
+@keyframes kok-burst-dot {
+  0% {
+    transform: rotate(var(--a)) translateY(-7px) scale(1);
+    opacity: 1;
+  }
+  100% {
+    transform: rotate(var(--a)) translateY(-25px) scale(0.2);
+    opacity: 0;
+  }
+}
+.kok-kp {
+  position: relative;
+  isolation: isolate;
+}
+.kok-kp::before,
+.kok-kp::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  opacity: 0;
+}
+.kok-kp::before {
+  z-index: -1;
+  background: radial-gradient(130% 95% at 100% 0%, color-mix(in srgb, var(--star) 20%, transparent), transparent 58%);
+  transition: opacity 300ms ease;
+}
+.kok-kp.is-starred::before {
+  opacity: 1;
+}
+.kok-kp::after {
+  box-shadow: 0 0 0 2px var(--star);
+}
+.kok-kp.is-flash::after {
+  animation: kok-flash 300ms ease-out;
+}
+@keyframes kok-flash {
+  30% {
+    opacity: 1;
+  }
+}
+.kok-badge-pop {
+  animation: kok-badge-pop 300ms var(--ease-out);
+}
+@keyframes kok-badge-pop {
+  45% {
+    transform: scale(1.24);
+  }
+}
+
+/* ------------------------------------------------------------ 순서 바꾸기 (개념·공식·용어)
+   꾹 눌러(마우스는 끌면) 들면 카드가 살짝 커지며 떠오르고, 다른 줄이 부드럽게 비켜 준다 */
+.kok-sort-row {
+  position: relative;
+  touch-action: manipulation;
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
+  cursor: grab;
+  border-radius: 18px;
+}
+.kok-sort-row.is-dragging {
+  z-index: 20;
+  cursor: grabbing;
+}
+.kok-sort-card {
+  position: relative;
+  transition: transform 160ms var(--ease-out);
+}
+.kok-sort-card::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  box-shadow:
+    0 14px 30px var(--shadow-strong),
+    0 2px 6px var(--shadow-strong);
+  opacity: 0;
+  transition: opacity 160ms ease;
+  pointer-events: none;
+}
+.kok-sort-row:active .kok-sort-card {
+  transform: scale(0.985);
+}
+.kok-sort-row.is-dragging .kok-sort-card {
+  transform: scale(1.025);
+}
+.kok-sort-row.is-dragging .kok-sort-card::after {
+  opacity: 1;
+}
+/* 순서 바꾸기 화면으로 들어올 때 줄이 차례로 */
+.kok-sort-in {
+  animation: kok-fade 200ms ease backwards;
+  animation-delay: calc(min(var(--i, 0), 8) * 18ms);
 }
 
 /* 움직임 줄이기: 옮겨 다니는 움직임은 빼고 바로 보여 준다 */

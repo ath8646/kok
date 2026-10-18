@@ -70,6 +70,8 @@ export const zNote = z.object({
   checks: z.array(z.object({ text: z.string() })).catch([]),
   changes: z.array(z.object({ text: z.string() })).catch([]),
   summary_edited: z.boolean().optional(),
+  /** AI 없이 직접 만든 노트 (빈 노트로 시작) */
+  manual: z.boolean().optional(),
 });
 
 export type Note = z.infer<typeof zNote>;

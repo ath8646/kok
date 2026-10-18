@@ -2,6 +2,7 @@
 // 문제 모아 보기: 과목·단원·유형·틀린 횟수로 거르기, 고치기·잠그기·쉬게 하기·지우기
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { QuestionList, type CardInfo } from '@/components/QuestionList';
+import { Select } from '@/components/Select';
 import { LargeHeader, Segmented, inputClass } from '@/components/ui';
 import { fetchAll, fetchSubjects, sb } from '@/lib/data';
 import type { QuestionRow, SubjectRow } from '@/lib/types';
@@ -85,30 +86,21 @@ export default function QuestionsPage() {
       />
       <div className="kok-card grid gap-2 p-3">
         <div className="grid grid-cols-2 gap-2">
-          <select
+          <Select
             aria-label="과목"
-            className={inputClass}
             value={subject}
-            onChange={(e) => {
-              setSubject(e.target.value);
+            onChange={(v) => {
+              setSubject(v);
               setUnit('');
             }}
-          >
-            <option value="">모든 과목</option>
-            {subjects.map((s) => (
-              <option key={s.id} value={s.id}>
-                {s.name}
-              </option>
-            ))}
-          </select>
-          <select aria-label="단원" className={inputClass} value={unit} onChange={(e) => setUnit(e.target.value)}>
-            <option value="">모든 단원</option>
-            {units.map((u) => (
-              <option key={u} value={u}>
-                {u}
-              </option>
-            ))}
-          </select>
+            options={[{ value: '', label: '모든 과목' }, ...subjects.map((s) => ({ value: s.id, label: s.name }))]}
+          />
+          <Select
+            aria-label="단원"
+            value={unit}
+            onChange={setUnit}
+            options={[{ value: '', label: '모든 단원' }, ...units.map((u) => ({ value: u, label: u }))]}
+          />
         </div>
         <Segmented
           label="유형"

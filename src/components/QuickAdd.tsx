@@ -1,6 +1,7 @@
 'use client';
 // 빠른 추가: 어디서나 오른쪽 아래 + 버튼 → 입력창(엔터 = AI가 바로 정리),
 // 파일을 화면에 끌어다 놓거나 붙여 넣으면 검사하고 바로 정리, 올리는 중인 것은 오른쪽 아래 띠에 보여 준다.
+import { useRouter } from 'next/navigation';
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import type { MeResponse, SubjectRow } from '@/lib/types';
 import { fetchSources, fetchSubjects, sb } from '@/lib/data';
@@ -12,7 +13,7 @@ import { MIN_TEXT_CHARS, checkText, fileKind, groupFiles, isSubmitKey, splitComp
 import { SUBJECT_COLORS } from '@/lib/settings';
 import { subjectVar } from '@/lib/colors';
 import { SOURCES_CHANGED, SUBJECTS_CHANGED } from '@/lib/events';
-import { ApiError, Button, ICONS, Icon, Sheet, Spinner, api, cx, useToast } from './ui';
+import { ApiError, Button, ICONS, Icon, Sheet, Spinner, api, cx, inputClass, useToast } from './ui';
 
 /** 동시에 정리할 수 있는 자료 수 (서버와 같다) */
 const MAX_PARALLEL = 3;
@@ -178,6 +179,7 @@ export function QuickAddProvider({
   children: ReactNode;
 }) {
   const toast = useToast();
+  const router = useRouter();
   const meRef = useRef(me);
   useEffect(() => {
     meRef.current = me;
@@ -633,6 +635,29 @@ export function QuickAddProvider({
     closeComposer();
   }, [composerSubject, text, attachments, filesToJobs, enqueue, closeComposer, toast]);
 
+  /** 빈 노트: AI 없이 직접 채우는 노트를 만들고 그 노트로 간다 (에너지를 쓰지 않는다) */
+  const createBlank = useCallback(
+    async (title: string): Promise<boolean> => {
+      const subjectId = composerSubject;
+      if (!subjectId) {
+        toast('과목을 골라 주세요.', 'bad');
+        return false;
+      }
+      try {
+        const r = await api<{ id: string }>('/api/notes/blank', { method: 'POST', body: JSON.stringify({ subjectId, title }) });
+        writeLast(meRef.current.userId, subjectId);
+        window.dispatchEvent(new CustomEvent(SOURCES_CHANGED, { detail: { id: r.id } }));
+        closeComposer();
+        router.push(`/notes/${r.id}`);
+        return true;
+      } catch (e) {
+        toast(e instanceof Error ? e.message : '빈 노트를 만들지 못했어요.', 'bad');
+        return false;
+      }
+    },
+    [composerSubject, toast, closeComposer, router],
+  );
+
   // ---------------------------------------------------------- 끌어다 놓기, 붙여 넣기
   const [dragging, setDragging] = useState(false);
   const [dropSubjectName, setDropSubjectName] = useState('');
@@ -871,6 +896,7 @@ export function QuickAddProvider({
               onAttach={(fs) => setAttachments((a) => [...a, ...toAttachments(fs)])}
               onDetach={(id) => setAttachments((a) => a.filter((x) => x.id !== id))}
               onSubmit={submitComposer}
+              onBlank={createBlank}
               onClose={closeComposer}
             />
           ) : null}
@@ -903,6 +929,7 @@ function Composer({
   onAttach,
   onDetach,
   onSubmit,
+  onBlank,
   onClose,
 }: {
   me: MeResponse;
@@ -917,6 +944,8 @@ function Composer({
   onAttach: (files: File[]) => void;
   onDetach: (id: string) => void;
   onSubmit: () => void;
+  /** 빈 노트 만들기 (이름) → 만들었는지 */
+  onBlank: (title: string) => Promise<boolean>;
   onClose: () => void;
 }) {
   const toast = useToast();
@@ -926,6 +955,14 @@ function Composer({
   const [picking, setPicking] = useState(false);
   const [newName, setNewName] = useState('');
   const [creating, setCreating] = useState(false);
+  // 빈 노트 만들기 (AI 없이): 이름만 받는다
+  const [blank, setBlank] = useState(false);
+  const [blankTitle, setBlankTitle] = useState('');
+  const [blankBusy, setBlankBusy] = useState(false);
+  const titleInput = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    if (blank) titleInput.current?.focus();
+  }, [blank]);
 
   useEffect(() => {
     area.current?.focus();
@@ -953,6 +990,20 @@ function Composer({
   const est = textReady ? estimateEnergy({ kind: 'text', chars: trimmed.length }, model, me.usdPerEnergy) : 0;
   const left = me.energy.unlimited ? null : Math.floor(me.energy.remaining ?? 0);
 
+  const startBlank = () => {
+    // 한 줄짜리 짧은 글을 적어 두었으면 그 글을 노트 이름으로
+    setBlankTitle(!trimmed.includes('\n') && trimmed.length <= 60 ? trimmed : '');
+    setBlank(true);
+  };
+  const makeBlank = async () => {
+    if (blankBusy) return;
+    const t = blankTitle.trim();
+    setBlankBusy(true);
+    const ok = await onBlank(t);
+    setBlankBusy(false);
+    if (ok && t && t === trimmed) onText('');
+  };
+
   const createSubject = async () => {
     const name = newName.trim();
     if (!name) return;
@@ -978,7 +1029,8 @@ function Composer({
         className="kok-composer kok-card absolute inset-x-3 top-[calc(12px+env(safe-area-inset-top))] grid gap-3 rounded-[28px] p-4 shadow-[0_24px_60px_var(--shadow-strong)] sm:inset-x-auto sm:bottom-[104px] sm:right-8 sm:top-auto sm:w-[460px]"
         onSubmit={(e) => {
           e.preventDefault();
-          if (canSend) onSubmit();
+          if (blank) makeBlank();
+          else if (canSend) onSubmit();
         }}
       >
         <div className="flex items-center justify-between gap-2">
@@ -1049,99 +1101,156 @@ function Composer({
             ) : null}
           </div>
           <span className="text-xs font-semibold text-muted">
-            {[est ? `⚡ 약 ${est}` : '', left !== null ? `남음 ${left}` : ''].filter(Boolean).join(' · ')}
+            {blank ? 'AI 없이 · 에너지 0' : [est ? `⚡ 약 ${est}` : '', left !== null ? `남음 ${left}` : ''].filter(Boolean).join(' · ')}
           </span>
         </div>
 
-        <textarea
-          ref={area}
-          rows={3}
-          enterKeyHint="send"
-          className="max-h-[260px] min-h-[84px] w-full resize-none bg-transparent px-1 text-[16px] leading-relaxed text-ink placeholder:text-muted/80 focus:outline-none"
-          placeholder={attachments.length ? '제목이나 설명 (없어도 돼요)' : '공부한 내용을 적거나 붙여 넣고 엔터를 눌러요'}
-          value={text}
-          maxLength={me.plan.textChars + 1000}
-          onChange={(e) => onText(e.target.value)}
-          onKeyDown={(e) => {
-            if (isSubmitKey(e.nativeEvent)) {
-              e.preventDefault();
-              if (canSend) onSubmit();
-              else if (!subjectId && (textReady || attachments.length)) {
-                setPicking(true);
-                toast('과목을 골라 주세요.');
-              } else if (!attachments.length && trimmed) toast(`${MIN_TEXT_CHARS}자 이상 적어 주세요. (지금 ${trimmed.length}자)`);
-            }
-          }}
-          aria-label="공부한 내용"
-        />
+        {blank ? (
+          <div className="kok-appear grid gap-3">
+            <div className="grid gap-0.5 px-1">
+              <p className="font-display text-lg">빈 노트 만들기</p>
+              <p className="text-sm text-muted">AI 없이 내가 직접 채우는 노트예요. 개념·공식·용어를 하나씩 적을 수 있어요.</p>
+            </div>
+            <input
+              ref={titleInput}
+              aria-label="노트 이름"
+              className={inputClass}
+              placeholder="노트 이름 (비우면 '새 노트')"
+              value={blankTitle}
+              maxLength={120}
+              enterKeyHint="done"
+              onChange={(e) => setBlankTitle(e.target.value)}
+              onKeyDown={(e) => {
+                if (isSubmitKey(e.nativeEvent)) {
+                  e.preventDefault();
+                  makeBlank();
+                }
+              }}
+            />
+            <div className="flex items-center gap-1">
+              <button
+                type="button"
+                className="press inline-flex h-10 items-center gap-1 rounded-full pl-2 pr-3.5 text-sm font-semibold text-muted hover:bg-surface-2 hover:text-ink"
+                onClick={() => {
+                  setBlank(false);
+                  requestAnimationFrame(() => area.current?.focus());
+                }}
+              >
+                <Icon d={ICONS.back} size={18} />
+                AI 정리로
+              </button>
+              <span className="flex-1" />
+              <button
+                type="submit"
+                className="press inline-flex h-10 items-center gap-1.5 rounded-full bg-accent px-4 text-sm font-bold text-accent-ink transition-opacity disabled:opacity-35"
+                disabled={!subjectId || blankBusy}
+              >
+                {blankBusy ? <Spinner /> : <Icon d={ICONS.check} size={18} strokeWidth={2.4} />}
+                만들기
+              </button>
+            </div>
+          </div>
+        ) : (
+          <>
+            <textarea
+              ref={area}
+              rows={3}
+              enterKeyHint="send"
+              className="max-h-[260px] min-h-[84px] w-full resize-none bg-transparent px-1 text-[16px] leading-relaxed text-ink placeholder:text-muted/80 focus:outline-none"
+              placeholder={attachments.length ? '제목이나 설명 (없어도 돼요)' : '공부한 내용을 적거나 붙여 넣고 엔터를 눌러요'}
+              value={text}
+              maxLength={me.plan.textChars + 1000}
+              onChange={(e) => onText(e.target.value)}
+              onKeyDown={(e) => {
+                if (isSubmitKey(e.nativeEvent)) {
+                  e.preventDefault();
+                  if (canSend) onSubmit();
+                  else if (!subjectId && (textReady || attachments.length)) {
+                    setPicking(true);
+                    toast('과목을 골라 주세요.');
+                  } else if (!attachments.length && trimmed) toast(`${MIN_TEXT_CHARS}자 이상 적어 주세요. (지금 ${trimmed.length}자)`);
+                }
+              }}
+              aria-label="공부한 내용"
+            />
 
-        {attachments.length ? (
-          <ul className="no-scrollbar -mx-1 flex gap-2 overflow-x-auto px-1 pb-0.5" aria-label="붙인 파일">
-            {attachments.map((a) => (
-              <AttachmentChip key={a.id} file={a.file} onRemove={() => onDetach(a.id)} />
-            ))}
-          </ul>
-        ) : null}
+            {attachments.length ? (
+              <ul className="no-scrollbar -mx-1 flex gap-2 overflow-x-auto px-1 pb-0.5" aria-label="붙인 파일">
+                {attachments.map((a) => (
+                  <AttachmentChip key={a.id} file={a.file} onRemove={() => onDetach(a.id)} />
+                ))}
+              </ul>
+            ) : null}
 
-        <div className="flex items-center gap-1">
-          <input
-            ref={fileInput}
-            type="file"
-            multiple
-            accept="application/pdf,.pdf,image/*,.txt,.md"
-            className="sr-only"
-            tabIndex={-1}
-            onChange={(e) => {
-              onAttach(Array.from(e.target.files ?? []));
-              e.target.value = '';
-            }}
-          />
-          <input
-            ref={cameraInput}
-            type="file"
-            accept="image/*"
-            capture="environment"
-            className="sr-only"
-            tabIndex={-1}
-            onChange={(e) => {
-              onAttach(Array.from(e.target.files ?? []));
-              e.target.value = '';
-            }}
-          />
-          <button
-            type="button"
-            className="press grid h-10 w-10 place-items-center rounded-full text-muted hover:bg-surface-2 hover:text-ink"
-            aria-label="파일 붙이기"
-            onClick={() => fileInput.current?.click()}
-          >
-            <Icon d={ICONS.clip} size={21} />
-          </button>
-          <button
-            type="button"
-            className="press grid h-10 w-10 place-items-center rounded-full text-muted hover:bg-surface-2 hover:text-ink"
-            aria-label="사진 찍기"
-            onClick={() => cameraInput.current?.click()}
-          >
-            <Icon d={ICONS.camera} size={21} />
-          </button>
-          <p className="ml-1 hidden min-w-0 flex-1 truncate text-xs text-muted sm:block">엔터: 정리 시작 · Shift+엔터: 줄바꿈</p>
-          <span className="flex-1 sm:hidden" />
-          <button
-            type="submit"
-            className="press inline-flex h-10 items-center gap-1.5 rounded-full bg-accent px-4 text-sm font-bold text-accent-ink transition-opacity disabled:opacity-35"
-            disabled={!canSend}
-            aria-label="AI 정리 시작"
-          >
-            정리
-            <Icon d={ICONS.send} size={18} strokeWidth={2.2} />
-          </button>
-        </div>
-        {!me.aiEnabled ? <p className="text-xs font-semibold text-bad">지금은 AI 기능을 잠깐 쉬고 있어요.</p> : null}
-        {trimmed && !attachments.length && trimmed.length < MIN_TEXT_CHARS ? (
-          <p className="-mt-1 px-1 text-xs text-muted">
-            {MIN_TEXT_CHARS}자 이상 적으면 정리할 수 있어요 ({trimmed.length}/{MIN_TEXT_CHARS})
-          </p>
-        ) : null}
+            <div className="flex items-center gap-1">
+              <input
+                ref={fileInput}
+                type="file"
+                multiple
+                accept="application/pdf,.pdf,image/*,.txt,.md"
+                className="sr-only"
+                tabIndex={-1}
+                onChange={(e) => {
+                  onAttach(Array.from(e.target.files ?? []));
+                  e.target.value = '';
+                }}
+              />
+              <input
+                ref={cameraInput}
+                type="file"
+                accept="image/*"
+                capture="environment"
+                className="sr-only"
+                tabIndex={-1}
+                onChange={(e) => {
+                  onAttach(Array.from(e.target.files ?? []));
+                  e.target.value = '';
+                }}
+              />
+              <button
+                type="button"
+                className="press grid h-10 w-10 place-items-center rounded-full text-muted hover:bg-surface-2 hover:text-ink"
+                aria-label="파일 붙이기"
+                onClick={() => fileInput.current?.click()}
+              >
+                <Icon d={ICONS.clip} size={21} />
+              </button>
+              <button
+                type="button"
+                className="press grid h-10 w-10 place-items-center rounded-full text-muted hover:bg-surface-2 hover:text-ink"
+                aria-label="사진 찍기"
+                onClick={() => cameraInput.current?.click()}
+              >
+                <Icon d={ICONS.camera} size={21} />
+              </button>
+              <button
+                type="button"
+                className="press inline-flex h-10 shrink-0 items-center gap-1.5 rounded-full px-3 text-sm font-semibold text-muted hover:bg-surface-2 hover:text-ink"
+                title="AI 없이 직접 채우는 노트"
+                onClick={startBlank}
+              >
+                <Icon d={ICONS.pen} size={19} />빈 노트
+              </button>
+              <p className="ml-1 hidden min-w-0 flex-1 truncate text-xs text-muted sm:block">엔터: 정리 시작 · Shift+엔터: 줄바꿈</p>
+              <span className="flex-1 sm:hidden" />
+              <button
+                type="submit"
+                className="press inline-flex h-10 items-center gap-1.5 rounded-full bg-accent px-4 text-sm font-bold text-accent-ink transition-opacity disabled:opacity-35"
+                disabled={!canSend}
+                aria-label="AI 정리 시작"
+              >
+                정리
+                <Icon d={ICONS.send} size={18} strokeWidth={2.2} />
+              </button>
+            </div>
+            {!me.aiEnabled ? <p className="text-xs font-semibold text-bad">지금은 AI 기능을 잠깐 쉬고 있어요.</p> : null}
+            {trimmed && !attachments.length && trimmed.length < MIN_TEXT_CHARS ? (
+              <p className="-mt-1 px-1 text-xs text-muted">
+                {MIN_TEXT_CHARS}자 이상 적으면 정리할 수 있어요 ({trimmed.length}/{MIN_TEXT_CHARS})
+              </p>
+            ) : null}
+          </>
+        )}
       </form>
     </div>
   );

@@ -88,6 +88,44 @@ describe('노트에 자료 더하기: 합친 노트에 지금 노트의 것을 �
     expect(changed.terms[0].edited).toBeUndefined();
     expect(changed.summary_edited).toBeUndefined();
   });
+
+  it('내가 바꾼 순서를 지키고, 새로 생긴 것은 AI 가 둔 자리에 둔다', () => {
+    const kp = (id: string) => ({ id, title: id, explanation: '', why: '', importance: 'medium' as const, pages: [] });
+    // 내가 k3 → k1 → k2 로 바꿔 두었다
+    const current = note({
+      key_points: [kp('k3'), kp('k1'), kp('k2')],
+      terms: [
+        { term: '전압', meaning: 'b' },
+        { term: '저항', meaning: 'a' },
+      ],
+      formulas: [
+        { latex: 'V=IR', label: '옴' },
+        { latex: 'P=VI', label: '전력' },
+      ],
+    });
+    // AI 는 원래 순서로 돌려놓고 새 개념 k4 를 가운데에 넣었다
+    const merged = note({
+      key_points: [kp('k1'), kp('k4'), kp('k2'), kp('k3')],
+      terms: [
+        { term: '저항', meaning: 'a' },
+        { term: '전류', meaning: 'c' },
+        { term: ' 전압 ', meaning: 'b' },
+      ],
+      formulas: [
+        { latex: 'P=VI', label: '전력' },
+        { latex: 'V=IR', label: '옴' },
+      ],
+    });
+    const out = keepFromCurrent(current, merged);
+    expect(out.key_points.map((k) => k.id)).toEqual(['k3', 'k4', 'k1', 'k2']);
+    expect(out.terms.map((t) => t.term.trim())).toEqual(['전압', '전류', '저항']);
+    expect(out.formulas.map((f) => f.latex)).toEqual(['V=IR', 'P=VI']);
+  });
+
+  it('직접 만든 노트 표시는 합친 뒤에도 남는다', () => {
+    expect(keepFromCurrent(note({ manual: true }), note()).manual).toBe(true);
+    expect(keepFromCurrent(note(), note({ manual: true })).manual).toBeUndefined();
+  });
 });
 
 describe('노트에 자료 더하기: 지금 버전에 다시 합치기', () => {

@@ -17,6 +17,7 @@ import {
   reorderNode,
   type PlacedNode,
 } from '@/lib/mindmap-layout';
+import { Select } from './Select';
 import { Button, cx, inputClass } from './ui';
 import { SUBJECT_COLOR_INDEX } from '@/lib/colors';
 import { subscribeTheme, themeSnapshot } from '@/lib/theme';
@@ -559,14 +560,13 @@ export function MindMap({
           </div>
           {sel.id !== ROOT_ID ? (
             <div className="flex flex-wrap items-center gap-2">
-              <select aria-label="옮길 곳" className={cx(inputClass, 'w-auto flex-1')} value={moveTarget} onChange={(e) => setMoveTarget(e.target.value)}>
-                <option value="">다른 가지 아래로 옮기기…</option>
-                {moveOptions.map((o) => (
-                  <option key={o.id} value={o.id}>
-                    {o.label}
-                  </option>
-                ))}
-              </select>
+              <Select
+                aria-label="옮길 곳"
+                className="w-auto flex-1"
+                value={moveTarget}
+                onChange={setMoveTarget}
+                options={[{ value: '', label: '다른 가지 아래로 옮기기…' }, ...moveOptions.map((o) => ({ value: o.id, label: o.label }))]}
+              />
               <Button size="sm" variant="secondary" disabled={!moveTarget} onClick={() => moveTarget && onChange?.(moveNode(spec, sel.id, moveTarget))}>
                 옮기기
               </Button>

@@ -4,7 +4,7 @@ import { z } from 'zod';
 import { assertSameOrigin, assertUuid, readJson, requireAccount } from '@/lib/server/auth';
 import { getAppSettings } from '@/lib/server/account';
 import { UserFacingError, errorResponse } from '@/lib/server/errors';
-import { assertNoAppendRunning, assertSameVersion, loadOwnedNote, noteForPrompt, updateNoteBody } from '@/lib/server/notes';
+import { assertNoAppendRunning, assertNoteHasContent, assertSameVersion, loadOwnedNote, noteForPrompt, updateNoteBody } from '@/lib/server/notes';
 import { runTask } from '@/lib/server/tasks';
 import { cleanMindmap, maxNodesFor } from '@/lib/server/pipeline';
 import { textBlock } from '@/lib/server/claude';
@@ -70,6 +70,7 @@ export async function POST(req: NextRequest, ctx: RouteContext<'/api/notes/[id]/
     if (!preview.success) throw new UserFacingError('bad_body', '보낸 내용이 올바르지 않아요.', 400);
     // 자료를 더하는 동안에는 적용할 수 없으니 에너지를 쓰기 전에 알려 준다
     await assertNoAppendRunning(admin, note.source_id);
+    assertNoteHasContent(note.note);
 
     const app = await getAppSettings(admin);
     const v = acc.settings.visual;

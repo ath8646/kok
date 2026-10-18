@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useEffect, useRef, useState } from 'react';
 import { useMe } from '@/components/AppShell';
+import { Select } from '@/components/Select';
 import { Button, Card, Chip, Field, LargeHeader, LinkButton, Segmented, SectionTitle, Toggle, api, cx, inputClass, useToast } from '@/components/ui';
 import { fetchSubjects, sb } from '@/lib/data';
 import { supabaseBrowser } from '@/lib/supabase/client';
@@ -296,24 +297,28 @@ export default function SettingsPage() {
           <Field label="과목별 기본">
             <div className="grid gap-2">
               {subjects.map((s) => (
-                <div key={s.id} className="flex items-center justify-between gap-2">
-                  <span className="truncate text-sm">{s.name}</span>
-                  <select
-                    aria-label={`${s.name} 기본 표현`}
-                    className={cx(inputClass, 'w-36 py-1.5')}
-                    value={draft.visual.bySubject[s.id] ?? ''}
-                    onChange={(ev) => {
-                      const by = { ...draft.visual.bySubject };
-                      if (ev.target.value) by[s.id] = ev.target.value as 'mindmap' | 'table' | 'timeline';
-                      else delete by[s.id];
-                      set('visual', { bySubject: by });
-                    }}
-                  >
-                    <option value="">따로 정하지 않음</option>
-                    <option value="mindmap">마인드맵</option>
-                    <option value="table">표</option>
-                    <option value="timeline">연표</option>
-                  </select>
+                <div key={s.id} className="flex items-center justify-between gap-3">
+                  <span className="min-w-0 flex-1 truncate text-sm">{s.name}</span>
+                  {/* 고르기 칸은 너비를 정해 두어 과목 이름이 잘리지 않게 */}
+                  <div className="w-44 shrink-0">
+                    <Select
+                      aria-label={`${s.name} 기본 표현`}
+                      className="py-1.5!"
+                      value={draft.visual.bySubject[s.id] ?? ''}
+                      onChange={(v) => {
+                        const by = { ...draft.visual.bySubject };
+                        if (v) by[s.id] = v;
+                        else delete by[s.id];
+                        set('visual', { bySubject: by });
+                      }}
+                      options={[
+                        { value: '', label: '따로 정하지 않음' },
+                        { value: 'mindmap', label: '마인드맵' },
+                        { value: 'table', label: '표' },
+                        { value: 'timeline', label: '연표' },
+                      ]}
+                    />
+                  </div>
                 </div>
               ))}
             </div>

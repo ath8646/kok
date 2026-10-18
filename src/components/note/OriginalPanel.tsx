@@ -42,6 +42,8 @@ export function OriginalPanel({
   }, [kind, focusPage, urls]);
 
   if (kind === 'text') {
+    // 빈 노트로 만든 노트는 원문이 없다
+    if (!text?.trim()) return <Card className="text-sm text-muted">직접 만든 노트라 원본이 없어요. 정리 탭에서 바로 채워 보세요.</Card>;
     return (
       <Card>
         <p className="mb-2 text-sm font-semibold text-muted">내가 쓴 원문 (AI가 바꾸지 않아요)</p>

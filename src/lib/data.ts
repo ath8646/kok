@@ -4,6 +4,7 @@ import { supabaseBrowser } from './supabase/client';
 import type { CardRow, QuestionRow, SourceListRow, SubjectRow } from './types';
 import type { PlanCard, PlanSubject } from './review-plan';
 import { kstDayStart } from './time';
+import { previewText } from './richtext';
 
 export function sb(): SupabaseClient {
   return supabaseBrowser();
@@ -75,6 +76,14 @@ export async function fetchSources(
   return (data ?? []) as SourceRowWithUnit[];
 }
 
+/** 카드 미리보기에 쓸 노트 조각: 요약 (직접 만든 노트는 요약이 없으면 첫 개념) */
+export const NOTE_PEEK = 'source_id, summary:body->>summary, manual:body->>manual, kp:body->key_points->0->>title, kpx:body->key_points->0->>explanation';
+export type NotePeek = { source_id: string; summary: string | null; manual: string | null; kp: string | null; kpx: string | null };
+export function peekText(n: NotePeek): string | null {
+  if (n.summary?.trim() || n.manual !== 'true') return n.summary;
+  return [n.kp, n.kpx].filter((x) => x?.trim()).join(' · ') || null;
+}
+
 type NoteKps = { id: string; kps: Array<{ id: string; importance?: string; title?: string }> | null };
 
 /** 노트마다 개념 중요도 */
@@ -86,7 +95,8 @@ export async function fetchImportance(): Promise<Map<string, Map<string, { impor
   const m = new Map<string, Map<string, { importance: string; title: string }>>();
   for (const r of rows) {
     const inner = new Map<string, { importance: string; title: string }>();
-    for (const k of r.kps ?? []) if (k?.id) inner.set(k.id, { importance: k.importance ?? 'medium', title: k.title ?? '' });
+    // 이름은 꾸미기 기호(**굵게** 등) 없이 글로
+    for (const k of r.kps ?? []) if (k?.id) inner.set(k.id, { importance: k.importance ?? 'medium', title: k.title ? previewText(k.title) || k.title : '' });
     m.set(r.id, inner);
   }
   return m;

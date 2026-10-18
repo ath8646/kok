@@ -11,6 +11,7 @@ import {
   applyTheme,
   currentMode,
   customId,
+  customIds,
   forgetCustomTheme,
   knownCustomTheme,
   rememberCustomThemes,
@@ -75,7 +76,15 @@ export function ThemeSettings({ me, theme, onChange }: { me: MeResponse; theme: 
   const toast = useToast();
   const canTheme = me.canTheme;
   const themesOn = me.features.themes;
-  const [customs, setCustoms] = useState<Ready[] | null>(null);
+  const [customs, setCustomsState] = useState<Ready[] | null>(null);
+  // 목록의 지금 값 (차례로 저장할 때 바로 앞 저장의 updated_at 을 써야 해서 화면이 다시 그려지기 전에도 읽는다)
+  const customsRef = useRef<Ready[] | null>(null);
+  const setCustoms = (next: Ready[] | ((cur: Ready[]) => Ready[])) => {
+    const value = typeof next === 'function' ? next(customsRef.current ?? []) : next;
+    customsRef.current = value;
+    setCustomsState(value);
+  };
+  const lookChain = useRef<Promise<void>>(Promise.resolve());
   const [separate, setSeparate] = useState(() => themeRef(theme, 'light') !== themeRef(theme, 'dark'));
   const [editing, setEditing] = useState<Ready | 'new' | null>(null);
   const [making, setMaking] = useState(false);
@@ -143,17 +152,14 @@ export function ThemeSettings({ me, theme, onChange }: { me: MeResponse; theme: 
     rememberCustomThemes([row]);
     const ready = toReady([row])[0];
     if (!ready) return;
-    setCustoms((cur) => {
-      const list = cur ?? [];
-      return list.some((t) => t.id === ready.id) ? list.map((t) => (t.id === ready.id ? ready : t)) : [...list, ready];
-    });
+    setCustoms((list) => (list.some((t) => t.id === ready.id) ? list.map((t) => (t.id === ready.id ? ready : t)) : [...list, ready]));
     const t = latest.current.theme;
     if (customId(themeRef(t, 'light')) === ready.id || customId(themeRef(t, 'dark')) === ready.id) applyTheme(t, { allowMissing: true });
   };
 
   const removed = (id: string) => {
     forgetCustomTheme(id);
-    setCustoms((cur) => (cur ?? []).filter((t) => t.id !== id));
+    setCustoms((list) => list.filter((t) => t.id !== id));
     // Pro 가 끝났으면 설정은 그대로 둔다 (다시 Pro 가 되면 없는 테마는 기본 색으로 보인다)
     if (!canTheme) return;
     const t = latest.current.theme;
@@ -161,6 +167,46 @@ export function ThemeSettings({ me, theme, onChange }: { me: MeResponse; theme: 
     if (customId(themeRef(t, 'light')) === id) patch.light = 'preset:default';
     if (customId(themeRef(t, 'dark')) === id) patch.dark = 'preset:default';
     if (Object.keys(patch).length) latest.current.onChange(patch);
+  };
+
+  /**
+   * 글꼴·종이 바꾸기. 내가 만든 테마를 쓰는 중이면 그 테마에도 저장한다
+   * (다른 테마에 갔다가 돌아와도 그 테마는 바꾼 글꼴·종이로). 저장은 한 줄로 세워 앞 저장의 updated_at 을 쓴다
+   */
+  const changeLook = (patch: { font?: ThemeFont; paper?: ThemePaper }) => {
+    if (!canTheme) return toast(PRO_ONLY);
+    latest.current.onChange(patch);
+    const ids = themesOn ? customIds(latest.current.theme) : [];
+    if (!ids.length) return;
+    lookChain.current = lookChain.current.then(async () => {
+      for (const id of ids) {
+        for (let attempt = 0; attempt < 2; attempt++) {
+          const cur = customsRef.current?.find((t) => t.id === id);
+          if (!cur) break;
+          const spec = { ...cur.spec, ...patch };
+          if (spec.font === cur.spec.font && spec.paper === cur.spec.paper) break;
+          try {
+            const r = await api<{ theme: ThemeRow }>(`/api/themes/${id}`, {
+              method: 'PATCH',
+              body: JSON.stringify({ spec, ...(cur.updatedAt ? { updatedAt: cur.updatedAt } : {}) }),
+            });
+            saved(r.theme);
+            break;
+          } catch (e) {
+            // 다른 곳에서 먼저 바뀌었으면 새로 읽어 한 번 더
+            if (attempt === 0 && e instanceof ApiError && e.code === 'theme_changed') {
+              const { data } = await sb().from('user_themes').select('id, name, spec, updated_at').eq('id', id).maybeSingle();
+              if (data) {
+                saved(data as ThemeRow);
+                continue;
+              }
+            }
+            toast((e as Error).message, 'bad');
+            break;
+          }
+        }
+      }
+    });
   };
 
   const removeTheme = async (t: Ready) => {
@@ -287,8 +333,8 @@ export function ThemeSettings({ me, theme, onChange }: { me: MeResponse; theme: 
                 aria-checked={on}
                 disabled={!canTheme}
                 tabIndex={on ? 0 : -1}
-                onKeyDown={(e) => radioKeys(e, i, THEME_FONTS.length, (n) => latest.current.onChange({ font: THEME_FONTS[n] as ThemeFont }))}
-                onClick={() => latest.current.onChange({ font: f as ThemeFont })}
+                onKeyDown={(e) => radioKeys(e, i, THEME_FONTS.length, (n) => changeLook({ font: THEME_FONTS[n] as ThemeFont }))}
+                onClick={() => changeLook({ font: f as ThemeFont })}
                 className={cx(
                   'press grid gap-0.5 rounded-2xl border-2 px-3 py-2.5 text-left disabled:cursor-not-allowed disabled:opacity-50',
                   on ? 'border-accent bg-accent-soft' : 'border-line hover:bg-surface-2',
@@ -315,8 +361,8 @@ export function ThemeSettings({ me, theme, onChange }: { me: MeResponse; theme: 
                 aria-checked={on}
                 disabled={!canTheme}
                 tabIndex={on ? 0 : -1}
-                onKeyDown={(e) => radioKeys(e, i, THEME_PAPERS.length, (n) => latest.current.onChange({ paper: THEME_PAPERS[n] as ThemePaper }))}
-                onClick={() => latest.current.onChange({ paper: p as ThemePaper })}
+                onKeyDown={(e) => radioKeys(e, i, THEME_PAPERS.length, (n) => changeLook({ paper: THEME_PAPERS[n] as ThemePaper }))}
+                onClick={() => changeLook({ paper: p as ThemePaper })}
                 className={cx(
                   'press grid gap-1.5 rounded-2xl p-1.5 text-xs font-semibold disabled:cursor-not-allowed disabled:opacity-50',
                   on ? 'bg-surface-2 text-ink' : 'text-muted hover:bg-surface-2',

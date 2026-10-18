@@ -171,42 +171,74 @@ export function ThemeSettings({ me, theme, onChange }: { me: MeResponse; theme: 
 
   /**
    * 글꼴·종이 바꾸기. 내가 만든 테마를 쓰는 중이면 그 테마에도 저장한다
-   * (다른 테마에 갔다가 돌아와도 그 테마는 바꾼 글꼴·종이로). 저장은 한 줄로 세워 앞 저장의 updated_at 을 쓴다
+   * (다른 테마에 갔다가 돌아와도 그 테마는 바꾼 글꼴·종이로). 화살표로 여러 번 바꿔도 잠깐 멈춘 뒤 마지막 것만 한 번 저장하고,
+   * 저장은 한 줄로 세워 앞 저장의 updated_at 을 쓴다
    */
+  const lookPending = useRef<{ ids: string[]; patch: { font?: ThemeFont; paper?: ThemePaper } } | null>(null);
+  const lookTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const flushLook = useRef<() => void>(() => {});
+  // 설정 화면을 바로 떠나도 기다리던 저장은 보낸다
+  useEffect(
+    () => () => {
+      if (lookTimer.current) {
+        clearTimeout(lookTimer.current);
+        lookTimer.current = null;
+        flushLook.current();
+      }
+    },
+    [],
+  );
   const changeLook = (patch: { font?: ThemeFont; paper?: ThemePaper }) => {
     if (!canTheme) return toast(PRO_ONLY);
     latest.current.onChange(patch);
     const ids = themesOn ? customIds(latest.current.theme) : [];
     if (!ids.length) return;
-    lookChain.current = lookChain.current.then(async () => {
-      for (const id of ids) {
-        for (let attempt = 0; attempt < 2; attempt++) {
-          const cur = customsRef.current?.find((t) => t.id === id);
-          if (!cur) break;
-          const spec = { ...cur.spec, ...patch };
-          if (spec.font === cur.spec.font && spec.paper === cur.spec.paper) break;
-          try {
-            const r = await api<{ theme: ThemeRow }>(`/api/themes/${id}`, {
-              method: 'PATCH',
-              body: JSON.stringify({ spec, ...(cur.updatedAt ? { updatedAt: cur.updatedAt } : {}) }),
-            });
-            saved(r.theme);
-            break;
-          } catch (e) {
-            // 다른 곳에서 먼저 바뀌었으면 새로 읽어 한 번 더
-            if (attempt === 0 && e instanceof ApiError && e.code === 'theme_changed') {
-              const { data } = await sb().from('user_themes').select('id, name, spec, updated_at').eq('id', id).maybeSingle();
-              if (data) {
-                saved(data as ThemeRow);
-                continue;
+    lookPending.current = { ids, patch: { ...(lookPending.current?.patch ?? {}), ...patch } };
+    if (lookTimer.current) clearTimeout(lookTimer.current);
+    flushLook.current = () => {
+      const pending = lookPending.current;
+      lookPending.current = null;
+      if (!pending) return;
+      const want = pending.patch;
+      lookChain.current = lookChain.current.then(async () => {
+        for (const id of pending.ids) {
+          for (let attempt = 0; attempt < 2; attempt++) {
+            const cur = customsRef.current?.find((t) => t.id === id);
+            if (!cur) break;
+            const spec = { ...cur.spec, ...want };
+            if (spec.font === cur.spec.font && spec.paper === cur.spec.paper) break;
+            try {
+              const r = await api<{ theme: ThemeRow }>(`/api/themes/${id}`, {
+                method: 'PATCH',
+                body: JSON.stringify({ spec, ...(cur.updatedAt ? { updatedAt: cur.updatedAt } : {}) }),
+              });
+              saved(r.theme);
+              break;
+            } catch (e) {
+              // 다른 곳에서 먼저 바뀌었으면 새로 읽어 한 번 더
+              if (attempt === 0 && e instanceof ApiError && e.code === 'theme_changed') {
+                const { data } = await sb().from('user_themes').select('id, name, spec, updated_at').eq('id', id).maybeSingle();
+                if (data) {
+                  saved(data as ThemeRow);
+                  continue;
+                }
               }
+              toast(
+                e instanceof ApiError && e.code === 'theme_changed'
+                  ? '다른 곳에서 테마가 바뀌어서 글꼴·종이를 테마에 저장하지 못했어요. 한 번 더 골라 주세요.'
+                  : (e as Error).message,
+                'bad',
+              );
+              break;
             }
-            toast((e as Error).message, 'bad');
-            break;
           }
         }
-      }
-    });
+      });
+    };
+    lookTimer.current = setTimeout(() => {
+      lookTimer.current = null;
+      flushLook.current();
+    }, 600);
   };
 
   const removeTheme = async (t: Ready) => {

@@ -1,7 +1,7 @@
 'use client';
 // 노트 고치기 칸들: 요약, 개념(설명·시험 포인트·함정·예시·중요도), 공식(기호 버튼 + 미리보기), 용어.
 // 글 칸은 RichField (쉬운 꾸미기 + 미리보기). 저장을 누르기 전에는 노트를 바꾸지 않는다.
-import { useId, useMemo, useState, type ReactNode } from 'react';
+import { useEffect, useId, useMemo, useState, type ReactNode } from 'react';
 import type { KeyPoint, Note } from '@/lib/ai/schemas';
 import { insertSnippet } from '@/lib/rich-edit';
 import { Tex, texProblem } from '@/components/RichText';
@@ -16,6 +16,16 @@ export const IMPORTANCE_OPTIONS: Array<{ value: KeyPoint['importance']; label: s
   { value: 'medium', label: '중요' },
   { value: 'low', label: '참고' },
 ];
+
+/** 고치던 내용이 저장되지 않았는지 노트 화면에 알린다 (다른 칸을 열 때 한 번 묻게). 닫히면 '없음' */
+export type OnDirty = (dirty: boolean) => void;
+
+function useReportDirty(dirty: boolean, onDirty?: OnDirty) {
+  useEffect(() => {
+    onDirty?.(dirty);
+  }, [dirty, onDirty]);
+  useEffect(() => () => onDirty?.(false), [onDirty]);
+}
 
 function Labeled({ label, htmlFor, children }: { label: string; htmlFor?: string; children: ReactNode }) {
   return (
@@ -66,8 +76,19 @@ function EditorActions({
 }
 
 // ------------------------------------------------------------------ 요약
-export function SummaryEditor({ initial, onSave, onCancel }: { initial: string; onSave: (v: string) => void; onCancel: () => void }) {
+export function SummaryEditor({
+  initial,
+  onSave,
+  onCancel,
+  onDirty,
+}: {
+  initial: string;
+  onSave: (v: string) => void;
+  onCancel: () => void;
+  onDirty?: OnDirty;
+}) {
   const [v, setV] = useState(initial);
+  useReportDirty(v !== initial, onDirty);
   const save = () => onSave(v.trim());
   return (
     <div className="grid gap-3">
@@ -146,18 +167,18 @@ export function KeyPointEditor({
   kp,
   pitfalls,
   examples,
-  isNew = false,
   onSave,
   onCancel,
   onDelete,
+  onDirty,
 }: {
   kp: KeyPoint;
   pitfalls: string[];
   examples: string[];
-  isNew?: boolean;
   onSave: (d: KeyPointDraft) => void;
   onCancel: () => void;
   onDelete?: () => void;
+  onDirty?: OnDirty;
 }) {
   const titleId = useId();
   const [title, setTitle] = useState(kp.title);
@@ -166,6 +187,16 @@ export function KeyPointEditor({
   const [importance, setImportance] = useState<KeyPoint['importance']>(kp.importance);
   const [pits, setPits] = useState(() => toItems(pitfalls, 'p'));
   const [exs, setExs] = useState(() => toItems(examples, 'e'));
+  const joined = (xs: Item[]) => xs.map((x) => x.text).join('\u0000');
+  useReportDirty(
+    title !== kp.title ||
+      explanation !== kp.explanation ||
+      why !== kp.why ||
+      importance !== kp.importance ||
+      joined(pits) !== pitfalls.join('\u0000') ||
+      joined(exs) !== examples.join('\u0000'),
+    onDirty,
+  );
   const canSave = !!title.trim();
   const save = () => {
     if (!canSave) return;
@@ -184,7 +215,7 @@ export function KeyPointEditor({
           value={title}
           maxLength={120}
           placeholder="예: 광합성"
-          autoFocus={isNew}
+          autoFocus
           onChange={(e) => setTitle(e.target.value)}
         />
       </Labeled>
@@ -237,17 +268,20 @@ export function FormulaEditor({
   onSave,
   onCancel,
   onDelete,
+  onDirty,
 }: {
   initial: Formula;
   onSave: (f: Formula) => void;
   onCancel: () => void;
   onDelete?: () => void;
+  onDirty?: OnDirty;
 }) {
   const nameId = useId();
   const texId = useId();
   const [label, setLabel] = useState(initial.label);
   const [latex, setLatex] = useState(initial.latex);
   const [tool, setTool] = useState(0);
+  useReportDirty(label !== initial.label || latex !== initial.latex, onDirty);
   const { ref, remember, apply } = useTextEdit(latex, setLatex, { maxLength: 1000, maxHeight: 220 });
   const problem = useMemo(() => texProblem(latex), [latex]);
   // 읽을 수 없는 공식은 저장하지 않는다 (처음부터 그랬던 공식은 이름만 고쳐도 되게 둔다)
@@ -274,7 +308,7 @@ export function FormulaEditor({
             spellCheck={false}
             autoCapitalize="off"
             autoCorrect="off"
-            autoFocus={!initial.latex}
+            autoFocus
             placeholder="예: S = \pi r^2"
             className="block w-full resize-none bg-transparent px-3.5 pb-2.5 pt-2 font-mono text-[14px] leading-relaxed text-ink placeholder:text-muted/80 focus:outline-none"
             onChange={(e) => setLatex(e.target.value)}
@@ -333,10 +367,23 @@ export function FormulaEditor({
 }
 
 // ------------------------------------------------------------------ 용어
-export function TermEditor({ initial, onSave, onCancel, onDelete }: { initial: Term; onSave: (t: Term) => void; onCancel: () => void; onDelete?: () => void }) {
+export function TermEditor({
+  initial,
+  onSave,
+  onCancel,
+  onDelete,
+  onDirty,
+}: {
+  initial: Term;
+  onSave: (t: Term) => void;
+  onCancel: () => void;
+  onDelete?: () => void;
+  onDirty?: OnDirty;
+}) {
   const termId = useId();
   const [term, setTerm] = useState(initial.term);
   const [meaning, setMeaning] = useState(initial.meaning);
+  useReportDirty(term !== initial.term || meaning !== initial.meaning, onDirty);
   const canSave = !!term.trim() && !!meaning.trim();
   const save = () => {
     if (canSave) onSave({ ...initial, term: term.trim(), meaning: meaning.trim() });

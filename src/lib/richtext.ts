@@ -81,6 +81,46 @@ export const RICH_MARKS = [
 
 const PUA = 0xe000; // 수식 자리표 (개인용 글자 영역)
 
+export type MarkHit = { mark: string; t: 'b' | 'mark' | 'red'; close: number };
+
+/**
+ * s 의 i 에서 꾸미기가 열리면 그 표시와 닫는 표시의 자리 (화면과 고치기 버튼이 같은 규칙을 쓴다).
+ * - 여는 표시 바로 뒤와 닫는 표시 바로 앞은 빈칸이 아니고, 같은 기호가 셋 이상 이어지지 않는다
+ * - 영어·숫자 바로 뒤에서 여는 표시는 안의 글에 한글 같은 글자가 있을 때만 (x**2 + y**2, a==b 는 그대로, 1**단계** 는 굵게)
+ */
+export function markAt(s: string, i: number): MarkHit | null {
+  const m = RICH_MARKS.find((k) => s.startsWith(k.mark, i));
+  if (!m) return null;
+  const n = m.mark.length;
+  const from = i + n;
+  if (from >= s.length || /\s/.test(s[from]) || s[from] === m.mark[0]) return null;
+  let j = s.indexOf(m.mark, from + 1);
+  while (j !== -1 && (/\s/.test(s[j - 1]) || s[j + n] === m.mark[0])) j = s.indexOf(m.mark, j + 1);
+  if (j === -1) return null;
+  if (i > 0 && /[A-Za-z0-9]/.test(s[i - 1]) && !/[^\x00-\x7f]/.test(s.slice(from, j))) return null;
+  return { mark: m.mark, t: m.t, close: j };
+}
+
+/** 한 줄 안의 꾸미기 자리 모두 (안쪽 것도). [여는 자리, 닫는 자리, 표시] — 고치기 버튼이 '이미 꾸민 곳'을 찾을 때 */
+export function markSpans(line: string): Array<{ open: number; close: number; mark: string }> {
+  const out: Array<{ open: number; close: number; mark: string }> = [];
+  const walk = (from: number, to: number, depth: number) => {
+    let i = from;
+    while (i < to) {
+      const hit = depth < 4 ? markAt(line.slice(0, to), i) : null;
+      if (hit) {
+        out.push({ open: i, close: hit.close, mark: hit.mark });
+        walk(i + hit.mark.length, hit.close, depth + 1);
+        i = hit.close + hit.mark.length;
+        continue;
+      }
+      i++;
+    }
+  };
+  walk(0, line.length, 0);
+  return out;
+}
+
 function inlineNodes(s: string, maths: Array<{ tex: string; display: boolean }>, depth = 0): Inline[] {
   const out: Inline[] = [];
   let buf = '';
@@ -100,21 +140,12 @@ function inlineNodes(s: string, maths: Array<{ tex: string; display: boolean }>,
   };
   let i = 0;
   while (i < s.length) {
-    // 영어·숫자 바로 뒤의 표시는 여는 표시로 보지 않는다 (코드의 x**2, a==b 같은 글은 그대로)
-    const m = depth < 4 && !(i > 0 && /[A-Za-z0-9]/.test(s[i - 1])) ? RICH_MARKS.find((k) => s.startsWith(k.mark, i)) : undefined;
-    if (m) {
-      const from = i + m.mark.length;
-      // 여는 표시 뒤가 빈칸이 아니고, 같은 표시가 셋 이상 이어지지 않을 때만
-      if (from < s.length && !/\s/.test(s[from]) && s[from] !== m.mark[0]) {
-        let j = s.indexOf(m.mark, from + 1);
-        while (j !== -1 && (/\s/.test(s[j - 1]) || s[j + m.mark.length] === m.mark[0])) j = s.indexOf(m.mark, j + 1);
-        if (j !== -1) {
-          flush();
-          out.push({ t: m.t, c: inlineNodes(s.slice(from, j), maths, depth + 1) });
-          i = j + m.mark.length;
-          continue;
-        }
-      }
+    const hit = depth < 4 ? markAt(s, i) : null;
+    if (hit) {
+      flush();
+      out.push({ t: hit.t, c: inlineNodes(s.slice(i + hit.mark.length, hit.close), maths, depth + 1) });
+      i = hit.close + hit.mark.length;
+      continue;
     }
     buf += s[i];
     i++;

@@ -16,7 +16,7 @@ import {
 } from '@dnd-kit/core';
 import { SortableContext, arrayMove, sortableKeyboardCoordinates, useSortable, verticalListSortingStrategy } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
-import { useId, useRef, useState, type CSSProperties, type ReactNode } from 'react';
+import { useEffect, useId, useRef, useState, type CSSProperties, type ReactNode } from 'react';
 import { cx } from '@/components/ui';
 import { useReducedMotion } from '@/components/useReducedMotion';
 
@@ -57,7 +57,7 @@ function GripIcon() {
   );
 }
 
-function Row({ id, index, children }: { id: string; index: number; children: ReactNode }) {
+function Row({ id, index, enter, children }: { id: string; index: number; enter: boolean; children: ReactNode }) {
   const reduced = useReducedMotion();
   const { attributes, listeners, setNodeRef, setActivatorNodeRef, transform, transition, isDragging } = useSortable({
     id,
@@ -67,7 +67,7 @@ function Row({ id, index, children }: { id: string; index: number; children: Rea
   const style = { transform: CSS.Translate.toString(transform), transition: reduced ? undefined : transition, '--i': index } as CSSProperties;
   // 목록 줄(li)은 그대로 두고, 잡는 곳(버튼 역할)은 안의 카드
   return (
-    <li ref={setNodeRef} style={style} className={cx('kok-sort-row kok-sort-in', isDragging && 'is-dragging')}>
+    <li ref={setNodeRef} style={style} className={cx('kok-sort-row', enter && 'kok-sort-in', isDragging && 'is-dragging')}>
       <div
         ref={setActivatorNodeRef}
         {...attributes}
@@ -111,6 +111,12 @@ export function SortList<T>({
   }
   const keys = keyOf ? items.map(keyOf) : own.keys;
   const dropAt = useRef<number | null>(null);
+  // 줄이 차례로 나타나는 움직임은 처음 한 번만 (옮긴 뒤 다시 그려질 때 깜빡이지 않게)
+  const [entered, setEntered] = useState(false);
+  useEffect(() => {
+    const t = setTimeout(() => setEntered(true), 320);
+    return () => clearTimeout(t);
+  }, []);
 
   const sensors = useSensors(
     useSensor(MouseSensor, { activationConstraint: { distance: 4 } }),
@@ -160,7 +166,7 @@ export function SortList<T>({
       <SortableContext items={keys} strategy={verticalListSortingStrategy}>
         <ul className="grid gap-2" aria-label={label}>
           {items.map((it, i) => (
-            <Row key={keys[i]} id={keys[i]} index={i}>
+            <Row key={keys[i]} id={keys[i]} index={i} enter={!entered}>
               {render(it, i)}
             </Row>
           ))}

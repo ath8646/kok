@@ -47,8 +47,14 @@ function replaceLinked<T extends Linked>(list: T[], kpId: string, texts: string[
 }
 
 /** 새 개념 번호: 개념은 물론 함정·예시가 가리키는 번호와도 겹치지 않게 (주인 없는 함정이 새 개념에 붙지 않게) */
-function newKeyPointId(note: Note): string {
-  const used = new Set([...note.key_points.map((k) => k.id), ...note.pitfalls.map((p) => p.key_point_id), ...note.examples.map((p) => p.key_point_id)]);
+function newKeyPointId(note: Note, reserved?: ReadonlySet<string>): string {
+  const used = new Set([
+    ...note.key_points.map((k) => k.id),
+    ...note.pitfalls.map((p) => p.key_point_id),
+    ...note.examples.map((p) => p.key_point_id),
+    // 지운 개념의 번호를 문제·마인드맵이 아직 가리키면 쓰지 않는다 (새 개념에 옛 문제가 붙지 않게)
+    ...(reserved ?? []),
+  ]);
   let n = note.key_points.length + 1;
   while (used.has(`k${n}`)) n++;
   return `k${n}`;
@@ -107,10 +113,11 @@ function useFlip(root: RefObject<HTMLElement | null>, orderKey: string, onLeadAw
   return capture;
 }
 
-function PencilButton({ onClick, label, className }: { onClick: () => void; label: string; className?: string }) {
+function PencilButton({ onClick, label, className, focusKey }: { onClick: () => void; label: string; className?: string; focusKey: string }) {
   return (
     <button
       type="button"
+      data-focus-key={focusKey}
       onClick={onClick}
       className={cx(
         'press inline-flex shrink-0 items-center gap-1 rounded-full px-2.5 py-1.5 text-xs font-semibold text-muted hover:bg-surface-2 hover:text-ink',
@@ -124,7 +131,21 @@ function PencilButton({ onClick, label, className }: { onClick: () => void; labe
   );
 }
 
-function SectionHead({ title, count, canSort, sorting, onSort }: { title: string; count?: number; canSort: boolean; sorting: boolean; onSort: () => void }) {
+function SectionHead({
+  title,
+  count,
+  canSort,
+  sorting,
+  onSort,
+  focusKey,
+}: {
+  title: string;
+  count?: number;
+  canSort: boolean;
+  sorting: boolean;
+  onSort: () => void;
+  focusKey: string;
+}) {
   return (
     <div className="flex min-h-10 items-center justify-between gap-2">
       <h3 className="font-display text-lg">
@@ -133,12 +154,13 @@ function SectionHead({ title, count, canSort, sorting, onSort }: { title: string
       </h3>
       {canSort ? (
         sorting ? (
-          <Button size="sm" onClick={onSort}>
+          <Button size="sm" data-focus-key={focusKey} onClick={onSort}>
             완료
           </Button>
         ) : (
           <button
             type="button"
+            data-focus-key={focusKey}
             className="press inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-sm font-semibold text-muted hover:bg-surface-2 hover:text-ink"
             onClick={onSort}
           >
@@ -156,10 +178,11 @@ function SortHint({ children }: { children: ReactNode }) {
 }
 
 /** 점선 '더하기' 줄 (개념·공식·용어 추가) */
-function AddRow({ children, onClick }: { children: ReactNode; onClick: () => void }) {
+function AddRow({ children, onClick, focusKey }: { children: ReactNode; onClick: () => void; focusKey: string }) {
   return (
     <button
       type="button"
+      data-focus-key={focusKey}
       onClick={onClick}
       className="press flex w-full items-center justify-center gap-1.5 rounded-[22px] border-2 border-dashed border-line px-4 py-3 text-sm font-semibold text-muted hover:border-accent hover:text-accent"
     >
@@ -177,6 +200,7 @@ export function NoteView({
   highlightKeyPoint,
   onSelectKeyPoint,
   onOpenPage,
+  reservedIds,
 }: {
   note: NoteBody;
   kind: string;
@@ -185,6 +209,8 @@ export function NoteView({
   highlightKeyPoint?: string | null;
   onSelectKeyPoint?: (id: string | null) => void;
   onOpenPage?: (page: number) => void;
+  /** 문제·마인드맵이 가리키는 개념 번호 (새 개념에 쓰지 않는다) */
+  reservedIds?: ReadonlySet<string>;
 }) {
   const toast = useToast();
   const [editing, setEditing] = useState<string | null>(null);
@@ -199,16 +225,49 @@ export function NoteView({
     }
   }
   const [showChanges, setShowChanges] = useState(false);
+  const rootRef = useRef<HTMLDivElement>(null);
+  // 고치던 칸에 저장하지 않은 글이 있는지 (다른 칸을 열거나 순서 바꾸기로 가기 전에 한 번 묻는다)
+  const dirty = useRef(false);
+  const onDirty = useCallback((d: boolean) => {
+    dirty.current = d;
+  }, []);
+  const leave = () => !editing || !dirty.current || window.confirm('고치던 내용이 아직 저장되지 않았어요. 그래도 닫을까요?');
+  // 고치기 칸·순서 바꾸기를 닫으면 연 버튼으로 초점을 돌려준다 (키보드·화면 읽기에서 자리를 잃지 않게)
+  const returnTo = useRef<string | null>(null);
+  useEffect(() => {
+    if (editing) return;
+    const key = returnTo.current;
+    if (!key) return;
+    returnTo.current = null;
+    const root = rootRef.current;
+    const active = document.activeElement;
+    // 다른 곳에 초점이 가 있으면 빼앗지 않는다
+    if (active && active !== document.body && !root?.contains(active)) return;
+    root?.querySelector<HTMLElement>(`[data-focus-key="${CSS.escape(key)}"]`)?.focus({ preventScroll: true });
+  }, [editing, sorting]);
   const change = (next: NoteBody) => onChange?.(next);
-  const save = (next: NoteBody) => {
+  const save = (next: NoteBody, back?: string) => {
     onChange?.(next);
+    dirty.current = false;
+    if (back) returnTo.current = back;
     setEditing(null);
   };
-  const open = (key: string) => {
+  const cancel = () => {
+    dirty.current = false;
+    setEditing(null);
+  };
+  /** 고치기 칸 열기. back: 닫은 뒤 초점을 돌려줄 버튼 */
+  const open = (key: string, back: string = key) => {
+    if (editing === key || !leave()) return;
+    dirty.current = false;
+    returnTo.current = back;
     setSorting(null);
     setEditing(key);
   };
   const sortToggle = (s: Exclude<Sorting, null>) => {
+    if (!leave()) return;
+    dirty.current = false;
+    returnTo.current = `sort-${s}`;
     setEditing(null);
     setSorting((cur) => (cur === s ? null : s));
   };
@@ -280,13 +339,16 @@ export function NoteView({
   };
 
   const saveKeyPoint = (d: KeyPointDraft, isNew: boolean) => {
-    const kp = { ...d.kp, edited: true };
-    save({
-      ...note,
-      key_points: isNew ? [...note.key_points, kp] : note.key_points.map((x) => (x.id === kp.id ? kp : x)),
-      pitfalls: replaceLinked(note.pitfalls, kp.id, d.pitfalls),
-      examples: replaceLinked(note.examples, kp.id, d.examples),
-    });
+    const kp = { ...d.kp, id: isNew ? newKeyPointId(note, reservedIds) : d.kp.id, edited: true };
+    save(
+      {
+        ...note,
+        key_points: isNew ? [...note.key_points, kp] : note.key_points.map((x) => (x.id === kp.id ? kp : x)),
+        pitfalls: replaceLinked(note.pitfalls, kp.id, d.pitfalls),
+        examples: replaceLinked(note.examples, kp.id, d.examples),
+      },
+      `kp-${kp.id}`,
+    );
   };
 
   const pages = (ps: number[]) =>
@@ -324,15 +386,15 @@ export function NoteView({
   const showTerms = note.terms.length > 0 || editing === 't-new';
 
   return (
-    <div className="grid gap-5">
+    <div ref={rootRef} className="grid gap-5">
       {/* 한 줄 요약 (kok-paper: 테마의 노트 종이 무늬) */}
       <section className="kok-card kok-paper p-4">
         <div className="mb-1 flex min-h-8 items-center justify-between gap-2">
           <h3 className="text-sm font-bold text-muted">한 줄 요약</h3>
-          {editable && editing !== 'summary' ? <PencilButton label="요약 고치기" onClick={() => open('summary')} /> : null}
+          {editable && editing !== 'summary' ? <PencilButton focusKey="summary" label="요약 고치기" onClick={() => open('summary')} /> : null}
         </div>
         {editing === 'summary' ? (
-          <SummaryEditor initial={note.summary} onCancel={() => setEditing(null)} onSave={(v) => save({ ...note, summary: v, summary_edited: true })} />
+          <SummaryEditor initial={note.summary} onDirty={onDirty} onCancel={cancel} onSave={(v) => save({ ...note, summary: v, summary_edited: true })} />
         ) : note.summary.trim() ? (
           <p className="text-[17px] font-semibold leading-relaxed">
             <span className="hl-mark">
@@ -352,6 +414,7 @@ export function NoteView({
           canSort={!!editable && note.key_points.length > 1}
           sorting={sorting === 'kp'}
           onSort={() => sortToggle('kp')}
+          focusKey="sort-kp"
         />
         {sorting === 'kp' ? (
           <div className="grid gap-2.5">
@@ -428,15 +491,19 @@ export function NoteView({
                         kp={kp}
                         pitfalls={pits.map((p) => p.text)}
                         examples={exs.map((p) => p.text)}
-                        onCancel={() => setEditing(null)}
+                        onDirty={onDirty}
+                        onCancel={cancel}
                         onSave={(d) => saveKeyPoint(d, false)}
                         onDelete={() =>
-                          save({
-                            ...note,
-                            key_points: note.key_points.filter((x) => x.id !== kp.id),
-                            pitfalls: note.pitfalls.filter((p) => p.key_point_id !== kp.id),
-                            examples: note.examples.filter((p) => p.key_point_id !== kp.id),
-                          })
+                          save(
+                            {
+                              ...note,
+                              key_points: note.key_points.filter((x) => x.id !== kp.id),
+                              pitfalls: note.pitfalls.filter((p) => p.key_point_id !== kp.id),
+                              examples: note.examples.filter((p) => p.key_point_id !== kp.id),
+                            },
+                            'add-kp',
+                          )
                         }
                       />
                     </div>
@@ -493,7 +560,7 @@ export function NoteView({
                           {kp.pages.length || editable ? (
                             <div className="mt-2 flex flex-wrap items-center justify-between gap-2" onClick={(e) => e.stopPropagation()}>
                               {pages(kp.pages)}
-                              {editable ? <PencilButton className="ml-auto" label={`${name} 고치기`} onClick={() => open(editKey)} /> : null}
+                              {editable ? <PencilButton focusKey={editKey} className="ml-auto" label={`${name} 고치기`} onClick={() => open(editKey)} /> : null}
                             </div>
                           ) : null}
                         </>
@@ -519,11 +586,11 @@ export function NoteView({
                   새 개념
                 </p>
                 <KeyPointEditor
-                  isNew
-                  kp={{ id: newKeyPointId(note), title: '', explanation: '', why: '', importance: 'medium', pages: [] }}
+                  kp={{ id: '', title: '', explanation: '', why: '', importance: 'medium', pages: [] }}
                   pitfalls={[]}
                   examples={[]}
-                  onCancel={() => setEditing(null)}
+                  onDirty={onDirty}
+                  onCancel={cancel}
                   onSave={(d) => saveKeyPoint(d, true)}
                 />
               </article>
@@ -534,13 +601,15 @@ export function NoteView({
                   {editable ? '외울 개념을 하나씩 적어 보세요. 굵게·형광펜으로 꾸밀 수도 있어요.' : '이 노트에는 개념이 없어요.'}
                 </p>
                 {editable ? (
-                  <Button className="mt-3" onClick={() => open('kp-new')}>
+                  <Button className="mt-3" data-focus-key="add-kp" onClick={() => open('kp-new', 'add-kp')}>
                     첫 개념 적기
                   </Button>
                 ) : null}
               </div>
             ) : editable ? (
-              <AddRow onClick={() => open('kp-new')}>개념 추가</AddRow>
+              <AddRow focusKey="add-kp" onClick={() => open('kp-new', 'add-kp')}>
+                개념 추가
+              </AddRow>
             ) : null}
           </div>
         )}
@@ -555,6 +624,7 @@ export function NoteView({
             canSort={!!editable && note.formulas.length > 1}
             sorting={sorting === 'formula'}
             onSort={() => sortToggle('formula')}
+            focusKey="sort-formula"
           />
           {sorting === 'formula' ? (
             <>
@@ -562,7 +632,7 @@ export function NoteView({
               <SortList
                 items={note.formulas}
                 label="공식 순서"
-                nameOf={(f) => f.label || f.latex}
+                nameOf={(f) => plain(f.label) || f.latex}
                 render={(f) => (
                   <span className="min-w-0 flex-1">
                     {f.label ? <span className="block truncate text-sm font-bold">{plain(f.label)}</span> : null}
@@ -581,9 +651,10 @@ export function NoteView({
                   <div key={i} className="kok-card p-4">
                     <FormulaEditor
                       initial={f}
-                      onCancel={() => setEditing(null)}
+                      onDirty={onDirty}
+                      onCancel={cancel}
                       onSave={(nf) => save({ ...note, formulas: note.formulas.map((x, j) => (j === i ? { ...nf, edited: true } : x)) })}
-                      onDelete={() => save({ ...note, formulas: note.formulas.filter((_, j) => j !== i) })}
+                      onDelete={() => save({ ...note, formulas: note.formulas.filter((_, j) => j !== i) }, 'add-f')}
                     />
                   </div>
                 ) : (
@@ -599,7 +670,9 @@ export function NoteView({
                           <Tex tex={f.latex} display />
                         </div>
                       </div>
-                      {editable ? <PencilButton label={`${f.label ? plain(f.label) : `공식 ${i + 1}`} 고치기`} onClick={() => open(`f-${i}`)} /> : null}
+                      {editable ? (
+                        <PencilButton focusKey={`f-${i}`} label={`${f.label ? plain(f.label) : `공식 ${i + 1}`} 고치기`} onClick={() => open(`f-${i}`)} />
+                      ) : null}
                     </div>
                   </div>
                 ),
@@ -608,12 +681,15 @@ export function NoteView({
                 <div className="kok-card kok-appear p-4">
                   <FormulaEditor
                     initial={{ latex: '', label: '' }}
-                    onCancel={() => setEditing(null)}
-                    onSave={(nf) => save({ ...note, formulas: [...note.formulas, { ...nf, edited: true }] })}
+                    onDirty={onDirty}
+                    onCancel={cancel}
+                    onSave={(nf) => save({ ...note, formulas: [...note.formulas, { ...nf, edited: true }] }, `f-${note.formulas.length}`)}
                   />
                 </div>
               ) : editable ? (
-                <AddRow onClick={() => open('f-new')}>공식 추가</AddRow>
+                <AddRow focusKey="add-f" onClick={() => open('f-new', 'add-f')}>
+                  공식 추가
+                </AddRow>
               ) : null}
             </>
           )}
@@ -629,6 +705,7 @@ export function NoteView({
             canSort={!!editable && note.terms.length > 1}
             sorting={sorting === 'term'}
             onSort={() => sortToggle('term')}
+            focusKey="sort-term"
           />
           {sorting === 'term' ? (
             <>
@@ -655,9 +732,10 @@ export function NoteView({
                       <div key={i} className="p-4">
                         <TermEditor
                           initial={t}
-                          onCancel={() => setEditing(null)}
+                          onDirty={onDirty}
+                          onCancel={cancel}
                           onSave={(nt) => save({ ...note, terms: note.terms.map((x, j) => (j === i ? { ...nt, edited: true } : x)) })}
-                          onDelete={() => save({ ...note, terms: note.terms.filter((_, j) => j !== i) })}
+                          onDelete={() => save({ ...note, terms: note.terms.filter((_, j) => j !== i) }, 'add-t')}
                         />
                       </div>
                     ) : (
@@ -669,7 +747,12 @@ export function NoteView({
                         <dd className="mt-0.5 min-w-0 text-[15px] sm:mt-0 sm:flex-1">
                           <RichText text={t.meaning} />
                           {editable ? (
-                            <PencilButton className="absolute right-2 top-2" label={`${plain(t.term)} 고치기`} onClick={() => open(`t-${i}`)} />
+                            <PencilButton
+                              focusKey={`t-${i}`}
+                              className="absolute right-2 top-2"
+                              label={`${plain(t.term)} 고치기`}
+                              onClick={() => open(`t-${i}`)}
+                            />
                           ) : null}
                         </dd>
                       </div>
@@ -681,12 +764,15 @@ export function NoteView({
                 <div className="kok-card kok-appear p-4">
                   <TermEditor
                     initial={{ term: '', meaning: '' }}
-                    onCancel={() => setEditing(null)}
-                    onSave={(nt) => save({ ...note, terms: [...note.terms, { ...nt, edited: true }] })}
+                    onDirty={onDirty}
+                    onCancel={cancel}
+                    onSave={(nt) => save({ ...note, terms: [...note.terms, { ...nt, edited: true }] }, `t-${note.terms.length}`)}
                   />
                 </div>
               ) : editable ? (
-                <AddRow onClick={() => open('t-new')}>용어 추가</AddRow>
+                <AddRow focusKey="add-t" onClick={() => open('t-new', 'add-t')}>
+                  용어 추가
+                </AddRow>
               ) : null}
             </>
           )}
@@ -699,8 +785,9 @@ export function NoteView({
           {!showFormulas ? (
             <button
               type="button"
+              data-focus-key="add-f"
               className="press inline-flex items-center gap-1.5 rounded-full bg-surface-2 px-4 py-2 text-sm font-semibold text-ink hover:bg-surface-3"
-              onClick={() => open('f-new')}
+              onClick={() => open('f-new', 'add-f')}
             >
               <Icon d={ICONS.plus} size={16} strokeWidth={2.4} />
               공식 추가
@@ -709,8 +796,9 @@ export function NoteView({
           {!showTerms ? (
             <button
               type="button"
+              data-focus-key="add-t"
               className="press inline-flex items-center gap-1.5 rounded-full bg-surface-2 px-4 py-2 text-sm font-semibold text-ink hover:bg-surface-3"
-              onClick={() => open('t-new')}
+              onClick={() => open('t-new', 'add-t')}
             >
               <Icon d={ICONS.plus} size={16} strokeWidth={2.4} />
               용어 추가

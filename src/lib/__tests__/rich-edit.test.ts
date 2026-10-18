@@ -17,8 +17,9 @@ describe('쉬운 꾸미기 읽기', () => {
     // 코드처럼 영어·숫자 바로 뒤에 붙은 표시
     expect(flat(parseRich('x**2 + y**2')[0].c)).toBe('x**2 + y**2');
     expect(flat(parseRich('a==b and c==d')[0].c)).toBe('a==b and c==d');
-    // 한글 바로 뒤는 꾸민다
+    // 한글 바로 뒤는 꾸민다. 숫자·영어 바로 뒤도 안에 한글이 있으면 꾸민다
     expect(flat(parseRich('광합성은**빛**')[0].c)).toBe('광합성은<b>빛</b>');
+    expect(flat(parseRich('1**단계**와 DNA**는** pH7!!이하!!')[0].c)).toBe('1<b>단계</b>와 DNA<b>는</b> pH7<red>이하</red>');
   });
   it('겹쳐 꾸미기와 수식 감싸기', () => {
     expect(flat(parseRich('**==둘 다==**')[0].c)).toBe('<b><mark>둘 다</mark></b>');
@@ -64,6 +65,46 @@ describe('꾸미기 버튼', () => {
   it('여러 줄은 줄마다 감싸고 목록 표시는 밖에 둔다', () => {
     const v = '- 하나\n- 둘';
     expect(apply(v, toggleWrap(v, 0, v.length, '**', 'x'))).toBe('- **하나**\n- **둘**');
+  });
+  it('버튼으로 붙인 기호는 늘 보인다 (숫자·영어 바로 뒤)', () => {
+    const cases: Array<[string, number, number, string, string]> = [
+      ['1단계', 1, 3, '**', '1**단계**'],
+      ['DNA는', 3, 4, '**', 'DNA**는**'],
+      ['pH7이하', 3, 5, '!!', 'pH7!!이하!!'],
+      ['abc', 1, 2, '**', '**abc**'],
+    ];
+    for (const [v, a, b, m, want] of cases) {
+      const out = apply(v, toggleWrap(v, a, b, m, 'x'));
+      expect(out).toBe(want);
+      expect(flat(parseRich(out)[0].c)).not.toContain(m);
+    }
+  });
+  it('꾸민 곳 안에 커서나 일부만 고르고 누르면 그 꾸미기를 푼다', () => {
+    expect(apply('가**나다**라', toggleWrap('가**나다**라', 4, 4, '**', 'x'))).toBe('가나다라');
+    expect(apply('**굵은글**', toggleWrap('**굵은글**', 2, 4, '**', 'x'))).toBe('굵은글');
+    expect(apply('**굵게**', toggleWrap('**굵게**', 0, 6, '**', 'x'))).toBe('굵게');
+    expect(apply('- **하나**', toggleWrap('- **하나**', 0, 8, '**', 'x'))).toBe('- 하나');
+    // 다른 꾸미기 안에서는 새로 감싼다
+    expect(apply('==형광==', toggleWrap('==형광==', 2, 4, '**', 'x'))).toBe('==**형광**==');
+  });
+  it('여러 줄: 모두 꾸며져 있으면 줄마다 풀고, 아니면 안 꾸민 줄만 감싼다', () => {
+    const both = '**a**\n**b**';
+    expect(apply(both, toggleWrap(both, 0, both.length, '**', 'x'))).toBe('a\nb');
+    const mixed = '- **하나**\n- 둘';
+    expect(apply(mixed, toggleWrap(mixed, 0, mixed.length, '**', 'x'))).toBe('- **하나**\n- **둘**');
+  });
+  it('안에 같은 꾸미기가 있으면 합쳐서 한 번만 감싼다', () => {
+    const v = 'a **b** c';
+    expect(apply(v, toggleWrap(v, 0, v.length, '**', 'x'))).toBe('**a b c**');
+  });
+  it('빈 칸·빈 줄에서 목록 버튼은 표시를 넣고, 번호는 윗줄에 이어서', () => {
+    const r = toggleList('', 0, 0, 'bullet');
+    expect(apply('', r)).toBe('- ');
+    expect(r.selStart).toBe(2);
+    const v = '1. 하나\n';
+    const r2 = toggleList(v, v.length, v.length, 'number');
+    expect(apply(v, r2)).toBe('1. 하나\n2. ');
+    expect(r2.selStart).toBe(v.length + 3);
   });
   it('목록 켜고 끄기, 번호는 1부터', () => {
     const v = '첫째\n둘째\n\n셋째';

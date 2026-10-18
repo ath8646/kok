@@ -696,12 +696,18 @@ function RenameForm({ s, units, onDone }: { s: LibSource; units: string[]; onDon
       className="grid gap-3"
       onSubmit={async (e) => {
         e.preventDefault();
+        const t = title.trim().slice(0, 120);
         const { error } = await sb()
           .from('sources')
-          .update({ title: title.trim().slice(0, 120), unit: unit.trim().slice(0, 40) })
+          .update({ title: t, unit: unit.trim().slice(0, 40) })
           .eq('id', s.id);
-        if (error) toast('저장하지 못했어요.', 'bad');
-        else onDone();
+        if (error) {
+          toast('저장하지 못했어요.', 'bad');
+          return;
+        }
+        // 노트 화면의 제목도 같이 (노트가 있으면). 이름이 바뀔 때만
+        if (t && t !== (s.title ?? '')) await sb().from('notes').update({ title: t }).eq('source_id', s.id);
+        onDone();
       }}
     >
       <label className="grid gap-1.5 text-sm font-semibold">

@@ -337,6 +337,22 @@ async def main():
         await expect(cards.first).to_contain_text("광합성의 재료")
         await expect(cards.nth(1)).to_contain_text("광합성의 결과물")
         await expect(cards.nth(2)).to_contain_text("광합성 장소")
+        # 고치던 내용이 있으면 다른 칸을 열기 전에 한 번 묻는다 (아니요 → 그대로), 닫으면 연 버튼으로 초점이 돌아온다
+        await page.get_by_role("button", name="요약 고치기").click()
+        await page.get_by_label("요약", exact=True).fill("고치던 요약")
+        asked = []
+
+        async def say_no(d):
+            asked.append(d.message)
+            await d.dismiss()
+
+        page.once("dialog", lambda d: asyncio.ensure_future(say_no(d)))
+        await page.locator("#kp-k4").get_by_role("button", name=re.compile("고치기$")).click()
+        await expect(page.get_by_label("요약", exact=True)).to_have_value("고치던 요약")
+        assert asked and "저장되지 않았어요" in asked[0], asked
+        await page.get_by_role("button", name="취소").first.click()
+        await expect(page.get_by_role("button", name="요약 고치기")).to_be_focused()
+        assert nbody("{summary}") == "광합성은 빛으로 ==포도당==을 만든다"
         # 개념 고치기: 중요도, 함정 빼기, 예시 더하기 (목록 기호로)
         kp2 = page.locator("#kp-k2")
         await kp2.get_by_role("button", name=re.compile("고치기$")).click()

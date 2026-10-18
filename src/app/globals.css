@@ -905,10 +905,10 @@ body {
 .kok-sort-row.is-dragging .kok-sort-card::after {
   opacity: 1;
 }
-/* 순서 바꾸기 화면으로 들어올 때 줄이 차례로 */
+/* 순서 바꾸기 화면으로 들어올 때 줄이 차례로 (늦게 나오는 줄도 300ms 안에 끝나게) */
 .kok-sort-in {
-  animation: kok-fade 200ms ease backwards;
-  animation-delay: calc(min(var(--i, 0), 8) * 18ms);
+  animation: kok-fade 180ms ease backwards;
+  animation-delay: calc(min(var(--i, 0), 5) * 16ms);
 }
 
 /* 움직임 줄이기: 옮겨 다니는 움직임은 빼고 바로 보여 준다 */

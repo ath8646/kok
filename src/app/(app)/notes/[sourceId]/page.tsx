@@ -375,7 +375,7 @@ export default function NotePage() {
   // 지금 보는 것: 지금 버전(노트) 또는 지난 버전
   const raw = old ? old.body : note?.body;
   const body = useMemo<NoteBody | null>(() => (raw ? ({ ...zNote.parse(raw), recommended: raw.recommended as string | undefined } as NoteBody) : null), [raw]);
-  const docVisuals = old ? old.visuals : (visuals ?? {});
+  const docVisuals = useMemo<Visuals>(() => (old ? old.visuals : (visuals ?? {})), [old, visuals]);
   const liveQuestions = useMemo(() => (questions ?? []).filter((q) => q.status !== 'hidden'), [questions]);
   const docQuestions = useMemo(() => (old ? (questions ?? []).filter((q) => old.questionIds.includes(q.id)) : liveQuestions), [old, questions, liveQuestions]);
   const existing = useMemo(() => new Set((questions ?? []).map((q) => q.id)), [questions]);
@@ -383,6 +383,13 @@ export default function NotePage() {
   // 문제 만들기·채팅에서 쓰는 개념: 노트에 보이는 순서(별표 먼저), 이름은 꾸미기 기호 없이 글로
   const keyPoints = useMemo(() => starredFirst(body?.key_points ?? []).map((k) => ({ id: k.id, title: previewText(k.title) || k.title })), [body]);
   const noteChars = useMemo(() => (note ? JSON.stringify(note.body).length : 0), [note]);
+  // 문제·마인드맵이 가리키는 개념 번호: 새로 만드는 개념에는 쓰지 않는다 (지운 개념의 문제가 새 개념에 붙지 않게)
+  const reservedIds = useMemo(() => {
+    const ids = new Set<string>();
+    for (const q of questions ?? []) if (q.key_point_id) ids.add(q.key_point_id);
+    for (const n of docVisuals.mindmap?.nodes ?? []) if (n.key_point_id) ids.add(n.key_point_id);
+    return ids;
+  }, [questions, docVisuals]);
 
   // 예전 화면에서 고쳐서 저장되지 않았을 때 (다른 탭·기기에서 자료를 더했거나 버전을 바꿈): 알려 주고 새로 읽는다
   const staleAt = useRef(0);
@@ -470,8 +477,13 @@ export default function NotePage() {
     if (!note || !t || renameBusy) return;
     setRenameBusy(true);
     try {
+      // 정리 안의 제목도 같이 (AI 에 보내는 노트 제목). 자료를 더하는 중에는 정리를 건드리지 않는다 (합치기를 다시 하지 않게)
+      const withBody = !(versionsOn && kidsActive);
       const r = await queued(async (): Promise<boolean | 'stale'> => {
-        let q = sb().from('notes').update({ title: t }).eq('id', note.id);
+        let q = sb()
+          .from('notes')
+          .update(withBody ? { title: t, body: { ...note.body, title: t } } : { title: t })
+          .eq('id', note.id);
         if (noteToken.current) q = q.eq('updated_at', noteToken.current);
         const { data, error } = await q.select('updated_at');
         if (error) return false;
@@ -489,7 +501,15 @@ export default function NotePage() {
         return;
       }
       await sb().from('sources').update({ title: t }).eq('id', sourceId);
-      setBundle((b) => (b && b.note ? { ...b, note: { ...b.note, title: t }, source: b.source ? { ...b.source, title: t } : b.source } : b));
+      setBundle((b) =>
+        b && b.note
+          ? {
+              ...b,
+              note: { ...b.note, title: t, body: withBody ? { ...b.note.body, title: t } : b.note.body },
+              source: b.source ? { ...b.source, title: t } : b.source,
+            }
+          : b,
+      );
       window.dispatchEvent(new Event(SOURCES_CHANGED));
       setRenaming(false);
       toast('이름을 바꿨어요.', 'ok');
@@ -666,7 +686,7 @@ export default function NotePage() {
               : '직접 쓴 글'}
       </span>
       {versions.length ? <span>· 버전 {old ? old.number : cur}</span> : null}
-      {manual ? null : <span>· AI 정리</span>}
+      {manual && !versions.length ? null : <span>· AI 정리</span>}
     </span>
   );
 
@@ -674,7 +694,16 @@ export default function NotePage() {
     return (
       <div className="grid gap-3">
         <LargeHeader size="compact" back={back} title={title} subtitle={meta} />
-        <ProcessingView source={source} onReload={reload} />
+        {source.status === 'ready' ? (
+          // 정리는 끝났는데 노트가 없다 (만들다 멈춘 빈 노트 등)
+          <EmptyState
+            title="노트를 불러오지 못했어요"
+            body="잠시 뒤에 다시 불러와 보세요. 계속 안 되면 자료함에서 지우고 다시 만들어 주세요."
+            action={<Button onClick={reload}>다시 불러오기</Button>}
+          />
+        ) : (
+          <ProcessingView source={source} onReload={reload} />
+        )}
       </div>
     );
   }
@@ -813,6 +842,7 @@ export default function NotePage() {
                 onChange={(next) => saveBody({ ...raw, ...next })}
                 highlightKeyPoint={kp}
                 onSelectKeyPoint={setKp}
+                reservedIds={reservedIds}
                 onOpenPage={(p) => {
                   setPage(p);
                   setTab('original');

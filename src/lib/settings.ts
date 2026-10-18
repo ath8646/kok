@@ -2,7 +2,7 @@
 import { z } from 'zod';
 
 export type Effort = 'low' | 'medium' | 'high';
-export type AiTask = 'organize' | 'merge' | 'visual' | 'quiz' | 'check' | 'grade';
+export type AiTask = 'organize' | 'merge' | 'visual' | 'quiz' | 'check' | 'grade' | 'chat';
 
 // ------------------------------------------------------------- 운영 설정 (app_settings)
 /**
@@ -44,8 +44,9 @@ export const zModelsConfig = z.object({
       quiz: zEffort.catch('medium'),
       check: zEffort.catch('low'),
       grade: zEffort.catch('low'),
+      chat: zEffort.catch('low'),
     })
-    .catch({ organize: 'medium', merge: 'low', visual: 'low', quiz: 'medium', check: 'low', grade: 'low' }),
+    .catch({ organize: 'medium', merge: 'low', visual: 'low', quiz: 'medium', check: 'low', grade: 'low', chat: 'low' }),
 });
 export type ModelsConfig = z.infer<typeof zModelsConfig>;
 export const DEFAULT_MODELS: ModelsConfig = zModelsConfig.parse({});
@@ -58,6 +59,15 @@ const zTier = z.enum(['fast', 'careful', 'admin']);
 export type ModelTier = z.infer<typeof zTier>;
 
 export const VISUAL_TYPES = ['mindmap', 'table', 'timeline'] as const;
+
+/** 테마 (Pro): 색, 글꼴, 노트 종이 무늬. 무료는 기본만 쓴다 */
+export const THEME_COLORS = ['default', 'ocean', 'forest', 'lavender', 'cherry', 'mint', 'mocha', 'night'] as const;
+export type ThemeColor = (typeof THEME_COLORS)[number];
+export const THEME_FONTS = ['default', 'round', 'hand', 'serif'] as const;
+export type ThemeFont = (typeof THEME_FONTS)[number];
+export const THEME_PAPERS = ['none', 'lined', 'grid', 'dots'] as const;
+export type ThemePaper = (typeof THEME_PAPERS)[number];
+export const DEFAULT_THEME = { color: 'default', font: 'default', paper: 'none' } as const satisfies { color: ThemeColor; font: ThemeFont; paper: ThemePaper };
 export type VisualType = (typeof VISUAL_TYPES)[number];
 
 export const zUserSettings = z.object({
@@ -67,8 +77,23 @@ export const zUserSettings = z.object({
       visual: zTier.catch('fast'),
       quiz: zTier.catch('fast'),
       grade: zTier.catch('fast'),
+      chat: zTier.catch('fast'),
     })
-    .catch({ organize: 'fast', visual: 'fast', quiz: 'fast', grade: 'fast' }),
+    .catch({ organize: 'fast', visual: 'fast', quiz: 'fast', grade: 'fast', chat: 'fast' }),
+  /** 노트 채팅: AI 가 문제·노트에 넣자고 할 수 있는지 (넣기 전에는 늘 미리보기로 묻는다) */
+  chat: z
+    .object({
+      allowQuestions: z.boolean().catch(true),
+      allowNote: z.boolean().catch(true),
+    })
+    .catch({ allowQuestions: true, allowNote: true }),
+  theme: z
+    .object({
+      color: z.enum(THEME_COLORS).catch('default'),
+      font: z.enum(THEME_FONTS).catch('default'),
+      paper: z.enum(THEME_PAPERS).catch('none'),
+    })
+    .catch({ ...DEFAULT_THEME }),
   visual: z
     .object({
       defaultType: z.enum(['auto', 'mindmap', 'table', 'timeline']).catch('auto'),

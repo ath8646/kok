@@ -46,6 +46,10 @@ export type Account = {
   canCareful: boolean;
   /** 원본 파일을 기한 없이 보관하는지 */
   keepFiles: boolean;
+  /** 노트에 자료 더하기(버전)를 쓸 수 있는지 (Pro·관리자, 켠 테스트 플랜) */
+  canAppend: boolean;
+  /** 테마를 쓸 수 있는지 (Pro·관리자, 켠 테스트 플랜) */
+  canTheme: boolean;
   /** 마지막 테스트 플랜이 끝난 시각 (무료·Pro 에너지는 이 뒤부터 센다, 켜져 있으면 null) */
   planEndedAt: string | null;
   banned: boolean;
@@ -102,12 +106,40 @@ export async function getAccount(admin: SupabaseClient, userId: string, email?: 
     custom,
     canCareful: caps.canCareful,
     keepFiles: caps.keepFiles,
+    canAppend: caps.canAppend,
+    canTheme: caps.canTheme,
     planEndedAt: plan.kind === 'custom' ? null : planEndedAt(row),
     banned: !!row.banned,
     consented: !!row.consented_at,
     settings: readUserSettings(row.settings),
     createdAt: row.created_at ?? null,
   };
+}
+
+// ------------------------------------------------------------- 새 표가 있는지
+export type Features = {
+  /** 노트 버전·자료 더하기 (note_versions, sources.parent_id) */
+  versions: boolean;
+  /** 노트 채팅 (chat_messages) */
+  chat: boolean;
+};
+
+let featuresCache: { at: number; value: Features } | null = null;
+
+/**
+ * schema.sql 을 다시 실행했는지(새 표·칸이 있는지) 확인한다. 배포가 먼저 되고 DB 는 나중에 바뀔 수 있어서,
+ * 없으면 새 기능을 끄고 지금까지처럼 동작한다. 1분 동안 기억한다
+ */
+export async function getFeatures(admin: SupabaseClient): Promise<Features> {
+  if (featuresCache && Date.now() - featuresCache.at < 60_000) return featuresCache.value;
+  const [v, p, c] = await Promise.all([
+    admin.from('note_versions').select('id').limit(1),
+    admin.from('sources').select('parent_id').limit(1),
+    admin.from('chat_messages').select('id').limit(1),
+  ]);
+  const value: Features = { versions: !v.error && !p.error, chat: !c.error };
+  featuresCache = { at: Date.now(), value };
+  return value;
 }
 
 // ------------------------------------------------------------- 운영 설정
@@ -257,7 +289,7 @@ export function energyWindows(acc: Pick<Account, 'isAdmin' | 'isPro' | 'plan' | 
 }
 
 export type ReserveResult = {
-  result: 'ok' | 'duplicate' | 'too_many' | 'no_energy' | 'not_found' | 'not_error';
+  result: 'ok' | 'duplicate' | 'too_many' | 'no_energy' | 'not_found' | 'not_error' | 'append_busy';
   busy?: number;
   used?: number;
   inflight?: number;
@@ -279,6 +311,8 @@ export function reserveError(r: ReserveResult, plan?: PlanInfo): UserFacingError
       return new UserFacingError('not_found', '자료를 찾을 수 없어요.', 404);
     case 'too_many':
       return new UserFacingError('too_many_running', `지금 정리 중인 자료가 ${r.busy ?? '여러'}개 있어요. 하나가 끝나면 다시 해 주세요.`, 429);
+    case 'append_busy':
+      return new UserFacingError('append_busy', '이 노트에 더하는 자료가 아직 정리 중이에요. 끝나면 다음 자료를 더할게요.', 429);
     case 'no_energy': {
       const left = Math.max(0, Math.floor(Number(r.limit ?? 0) - Number(r.used ?? 0) - Number(r.inflight ?? 0)));
       const busy = Number(r.inflight ?? 0) > 0 ? ' 정리 중인 자료가 쓸 에너지는 미리 빼 두었어요.' : '';

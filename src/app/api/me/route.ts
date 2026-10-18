@@ -1,5 +1,5 @@
 import { requireAccount } from '@/lib/server/auth';
-import { energyStatus, getAppSettings, limitsFor } from '@/lib/server/account';
+import { energyStatus, getAppSettings, getFeatures, limitsFor } from '@/lib/server/account';
 import { errorResponse } from '@/lib/server/errors';
 import { costMultiplier } from '@/lib/ai/models';
 import type { MeResponse } from '@/lib/types';
@@ -8,7 +8,7 @@ export async function GET() {
   try {
     const { admin, acc } = await requireAccount({ consent: false });
     const app = await getAppSettings(admin);
-    const e = await energyStatus(admin, acc, app.limits);
+    const [e, features] = await Promise.all([energyStatus(admin, acc, app.limits), getFeatures(admin)]);
     const L = app.limits;
     const lim = limitsFor(acc, L);
     const body: MeResponse = {
@@ -20,6 +20,9 @@ export async function GET() {
       proUntil: acc.proUntil,
       planInfo: acc.plan,
       canCareful: acc.canCareful,
+      canAppend: acc.canAppend,
+      canTheme: acc.canTheme,
+      features,
       consented: acc.consented,
       settings: acc.settings,
       energy: {

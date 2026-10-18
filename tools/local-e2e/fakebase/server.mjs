@@ -193,7 +193,10 @@ function condFor(col, opval, params) {
   const dot = rest.indexOf('.');
   const op = rest.slice(0, dot);
   const val = rest.slice(dot + 1);
-  const c = ident(col);
+  // proposal->>status 처럼 JSON 칸 안을 거르는 것도 받는다
+  const path = col.split(/(->>|->)/);
+  let c = ident(path[0]);
+  for (let i = 1; i < path.length; i += 2) c += `${path[i]}'${path[i + 1].replace(/'/g, "''")}'`;
   const p = (x) => {
     params.push(x);
     return `$${params.length}`;
@@ -668,6 +671,57 @@ function fakeVisual(prompt) {
   };
 }
 
+/** 노트에 자료를 더할 때: 지금 노트에 새 개념(k5) 하나가 붙은 노트 */
+function fakeMerged(textOf) {
+  const n = fakeNote(textOf);
+  return {
+    ...n,
+    summary: '식물은 광합성으로 양분을 만들고, 호흡으로 그 양분에서 에너지를 꺼내 쓴다.',
+    key_points: [
+      ...n.key_points,
+      { id: 'k5', title: '광합성과 호흡', explanation: '호흡은 포도당을 분해해 에너지를 얻는 과정으로, 밤낮없이 일어난다.', why: '광합성과 비교하는 문제가 나온다.', importance: 'high', pages: [] },
+    ],
+  };
+}
+
+/** 더한 자료(k5)로만 만든 새 문제 */
+function fakeNewQuiz() {
+  const base = { choices: [], answer_index: -1, answer_bool: false, answer_text: '', accepted: [], pages: [] };
+  return {
+    questions: [
+      { ...base, type: 'ox', prompt: '식물은 밤에도 호흡을 한다.', answer_bool: true, explanation: '호흡은 밤낮없이 일어나요.', key_point_id: 'k5', difficulty: 'easy' },
+      { ...base, type: 'short', prompt: '포도당을 분해해 에너지를 얻는 과정은?', answer_text: '호흡', accepted: ['세포 호흡'], explanation: '호흡으로 에너지를 얻어요.', key_point_id: 'k5', difficulty: 'medium' },
+    ],
+  };
+}
+
+/** 노트 채팅: '문제' 를 말하면 문제를, '노트에' 를 말하면 노트에 넣자고 한다 */
+function fakeChat(textOf) {
+  const q = (textOf.match(/<question>\n([\s\S]*?)\n<\/question>/) || [])[1] || '';
+  const allowQuestions = !/adding questions from chat is turned off/.test(textOf);
+  const allowNote = !/adding to the note from chat is turned off/.test(textOf);
+  const none = { kind: 'none', questions: [], note_addition: { key_point_id: '', title: '', text: '' } };
+  if (/문제/.test(q) && allowQuestions) {
+    return {
+      reply: '노트로 문제 2개를 만들었어요. 넣을지 골라 주세요.',
+      outside_note: false,
+      proposal: { ...none, kind: 'questions', questions: fakeQuiz().questions.slice(0, 2) },
+    };
+  }
+  if (/노트에/.test(q) && allowNote) {
+    return {
+      reply: '엽록체 설명에 이 내용을 더하면 좋겠어요.',
+      outside_note: true,
+      proposal: { ...none, kind: 'note', note_addition: { key_point_id: 'k2', title: '', text: '엽록체는 두 겹의 막으로 싸여 있어요.' } },
+    };
+  }
+  return {
+    reply: `노트에 따르면 광합성은 **엽록체**에서 일어나요. ${/자세히|더/.test(q) ? '노트 밖 설명을 보태면, 엽록체 안의 틸라코이드에서 빛을 받아요.' : ''}`.trim(),
+    outside_note: /자세히|더/.test(q),
+    proposal: none,
+  };
+}
+
 function fakeQuiz() {
   const base = { choices: [], answer_index: -1, answer_bool: false, answer_text: '', accepted: [], pages: [1] };
   return {
@@ -700,7 +754,13 @@ async function handleClaude(req, res) {
   }
   let out;
   let task;
-  if (props.key_points) {
+  if (props.reply) {
+    task = 'chat';
+    out = fakeChat(textOf);
+  } else if (props.key_points && /Merge the new material into the current note/.test(textOf)) {
+    task = 'merge';
+    out = fakeMerged(textOf);
+  } else if (props.key_points) {
     task = 'organize';
     out = fakeNote(textOf);
   } else if (props.mindmap) {
@@ -712,7 +772,7 @@ async function handleClaude(req, res) {
     out = { verdicts: Array.from({ length: n }, (_, i) => ({ index: i, keep: true, reason: 'ok' })) };
   } else if (props.questions) {
     task = /looks wrong/.test(textOf) ? 'fix' : 'quiz';
-    out = task === 'fix' ? { questions: [fakeQuiz().questions[0]] } : fakeQuiz();
+    out = task === 'fix' ? { questions: [fakeQuiz().questions[0]] } : /comes from the new material/.test(textOf) ? fakeNewQuiz() : fakeQuiz();
   } else if (props.result) {
     task = 'grade';
     const ans = (textOf.match(/<answer>\n([\s\S]*?)\n<\/answer>/) || [])[1] || '';

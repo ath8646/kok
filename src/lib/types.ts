@@ -14,6 +14,12 @@ export type MeResponse = {
   planInfo: PlanInfo;
   /** 꼼꼼 모델을 쓸 수 있는지 */
   canCareful: boolean;
+  /** 노트에 자료 더하기(버전)를 쓸 수 있는지 (Pro 기능) */
+  canAppend: boolean;
+  /** 테마를 쓸 수 있는지 (Pro 기능) */
+  canTheme: boolean;
+  /** DB 에 새 표가 있는지 (schema.sql 을 다시 실행하기 전에는 false) */
+  features: { versions: boolean; chat: boolean };
   consented: boolean;
   settings: UserSettings;
   energy: {
@@ -66,12 +72,14 @@ export type SourceListRow = {
   updated_at: string;
 };
 
+export type QuestionType = 'mcq' | 'ox' | 'cloze' | 'short';
+
 export type QuestionRow = {
   id: string;
   note_id: string | null;
   subject_id: string;
   key_point_id: string | null;
-  type: 'mcq' | 'ox' | 'cloze' | 'short';
+  type: QuestionType;
   prompt: string;
   choices: string[] | null;
   answer: number | boolean | string;
@@ -82,7 +90,8 @@ export type QuestionRow = {
   created_by: 'ai' | 'user';
   locked: boolean;
   edited: boolean;
-  status: 'active' | 'suspended';
+  /** hidden: 지금 쓰는 노트 버전에 없는 문제 (그 버전으로 바꾸면 돌아온다) */
+  status: 'active' | 'suspended' | 'hidden';
   created_at: string;
 };
 

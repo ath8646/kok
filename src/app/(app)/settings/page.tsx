@@ -1,15 +1,32 @@
 'use client';
-// 설정: 계정, 에너지, AI 모델, 시각화, 복습, 문제, 내 데이터
+// 설정: 계정, 에너지, AI 모델, AI 채팅, 테마(Pro), 시각화, 복습, 문제, 내 데이터
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useEffect, useRef, useState } from 'react';
 import { useMe } from '@/components/AppShell';
-import { Button, Card, Field, LargeHeader, LinkButton, Segmented, SectionTitle, Toggle, api, cx, inputClass, useToast } from '@/components/ui';
+import {
+  Button,
+  Card,
+  Chip,
+  Field,
+  ICONS,
+  Icon,
+  LargeHeader,
+  LinkButton,
+  Segmented,
+  SectionTitle,
+  Toggle,
+  api,
+  cx,
+  inputClass,
+  useToast,
+} from '@/components/ui';
 import { fetchSubjects, sb } from '@/lib/data';
 import { supabaseBrowser } from '@/lib/supabase/client';
 import type { SubjectRow } from '@/lib/types';
-import type { ModelTier, UserSettings } from '@/lib/settings';
+import { THEME_COLORS, THEME_FONTS, THEME_PAPERS, type ModelTier, type UserSettings } from '@/lib/settings';
 import { energyPeriodLabel, planLabel } from '@/lib/plans';
+import { THEME_COLOR_INFO, THEME_FONT_INFO, THEME_PAPER_INFO, applyTheme, clearTheme, loadThemeFont } from '@/lib/theme';
 
 const TASKS: Array<{ key: keyof UserSettings['models']; label: string; hint: string }> = [
   { key: 'organize', label: '정리', hint: '자료를 읽고 정리 노트로 바꿔요' },
@@ -26,6 +43,7 @@ const TASK_NAME: Record<string, string> = {
   check: '문제 검사',
   grade: '채점',
   fix: '문제 고치기',
+  chat: '노트 채팅',
   refund: '돌려받음',
 };
 
@@ -54,7 +72,11 @@ export default function SettingsPage() {
       .order('created_at', { ascending: false })
       .limit(20)
       .then(({ data }) => setLedger((data ?? []) as Ledger[]));
-    if (window.location.hash === '#energy') setTimeout(() => document.getElementById('energy')?.scrollIntoView({ behavior: 'smooth' }), 300);
+    // 다른 화면에서 #energy·#chat·#theme 로 들어오면 그 칸으로
+    const hash = window.location.hash.slice(1);
+    if (/^[a-z]+$/.test(hash)) setTimeout(() => document.getElementById(hash)?.scrollIntoView({ behavior: 'smooth' }), 300);
+    // 글꼴 고르기 미리보기
+    for (const f of THEME_FONTS) loadThemeFont(f);
   }, []);
 
   // 바꾸면 0.6초 뒤 저장
@@ -83,6 +105,13 @@ export default function SettingsPage() {
   const canCareful = me.canCareful;
   const set = <K extends keyof UserSettings>(k: K, v: Partial<UserSettings[K]>) => setDraft({ ...draft, [k]: { ...draft[k], ...v } });
   const e = me.energy;
+  const canTheme = me.canTheme;
+  /** 테마 고르기: 바로 화면에 보이고, 설정에도 저장한다 */
+  const pickTheme = (patch: Partial<UserSettings['theme']>) => {
+    if (!canTheme) return toast('테마는 Pro에서 쓸 수 있어요.');
+    set('theme', patch);
+    applyTheme({ ...draft.theme, ...patch });
+  };
 
   return (
     <div className="grid gap-2 pb-8">
@@ -128,6 +157,7 @@ export default function SettingsPage() {
             variant="ghost"
             onClick={async () => {
               await supabaseBrowser().auth.signOut();
+              clearTheme();
               router.replace('/');
               router.refresh();
             }}
@@ -206,6 +236,152 @@ export default function SettingsPage() {
           </div>
         ))}
         <p className="text-xs text-muted">배율은 에너지가 얼마나 더 드는지예요. 실제로는 쓴 만큼만 빠져요.</p>
+      </Card>
+
+      {me.features.chat ? (
+        <>
+          <SectionTitle>
+            <span id="chat" className="scroll-mt-24">
+              AI 채팅
+            </span>
+          </SectionTitle>
+          <Card className="grid gap-4">
+            <p className="text-sm text-muted">노트 화면의 주황 버튼을 누르면 그 노트에 대해 AI에게 물어볼 수 있어요. 답마다 에너지를 써요.</p>
+            <Field label="처음 고를 모델 (채팅 창에서 바꾸면 그 모델을 기억해요)">
+              <Segmented
+                label="채팅 모델"
+                value={draft.models.chat}
+                onChange={(v: ModelTier) => {
+                  if (v === 'careful' && !canCareful) return toast('꼼꼼 모드는 Pro에서 쓸 수 있어요.');
+                  set('models', { chat: v });
+                }}
+                options={[
+                  { value: 'fast' as ModelTier, label: '빠름' },
+                  { value: 'careful' as ModelTier, label: `꼼꼼${canCareful ? '' : '(Pro)'}` },
+                  ...(me.isAdmin ? [{ value: 'admin' as ModelTier, label: '최고' }] : []),
+                ]}
+              />
+            </Field>
+            <Toggle
+              id="set-chat-questions"
+              label="대화하다가 '문제로 넣어 줘' 하면 문제로 만들어 주기"
+              checked={draft.chat.allowQuestions}
+              onChange={(v) => set('chat', { allowQuestions: v })}
+            />
+            <Toggle
+              id="set-chat-note"
+              label="대화하다가 '노트에 넣어 줘' 하면 노트에 알맞게 넣어 주기"
+              checked={draft.chat.allowNote}
+              onChange={(v) => set('chat', { allowNote: v })}
+            />
+            <p className="text-xs text-muted">켜 두어도 바로 넣지 않아요. 먼저 미리보기를 보여 주고, [넣기]를 눌러야 들어가요.</p>
+          </Card>
+        </>
+      ) : null}
+
+      <SectionTitle>
+        <span id="theme" className="scroll-mt-24 inline-flex items-center gap-2">
+          테마 {!canTheme ? <Chip tone="accent">Pro</Chip> : null}
+        </span>
+      </SectionTitle>
+      <Card className="grid gap-5">
+        {!canTheme ? (
+          <div className="flex flex-wrap items-center justify-between gap-2 rounded-2xl bg-surface-2 px-3.5 py-3">
+            <p className="text-sm">테마는 Pro에서 쓸 수 있어요. 색·글꼴·노트 종이 무늬를 내 마음대로 바꿔요.</p>
+            <LinkButton href="/plan" size="sm" variant="secondary">
+              요금제 보기
+            </LinkButton>
+          </div>
+        ) : null}
+        <Field label="색">
+          <div className="grid grid-cols-4 gap-1.5 sm:grid-cols-8" role="radiogroup" aria-label="테마 색">
+            {THEME_COLORS.map((c) => {
+              const info = THEME_COLOR_INFO[c];
+              const on = draft.theme.color === c;
+              return (
+                <button
+                  key={c}
+                  type="button"
+                  role="radio"
+                  aria-checked={on}
+                  disabled={!canTheme}
+                  onClick={() => pickTheme({ color: c })}
+                  className={cx(
+                    'press grid justify-items-center gap-1.5 rounded-2xl px-1 py-2 text-xs font-semibold disabled:cursor-not-allowed disabled:opacity-50',
+                    on ? 'bg-surface-2 text-ink' : 'text-muted hover:bg-surface-2',
+                  )}
+                >
+                  <span
+                    className={cx(
+                      'relative grid h-10 w-10 place-items-center rounded-full ring-2 ring-offset-2 ring-offset-surface',
+                      on ? 'ring-ink' : 'ring-transparent',
+                    )}
+                  >
+                    <span className="absolute inset-0 rounded-full dark:hidden" style={{ background: info.light }} aria-hidden="true" />
+                    <span className="absolute inset-0 hidden rounded-full dark:block" style={{ background: info.dark }} aria-hidden="true" />
+                    {on ? <Icon d={ICONS.check} size={18} strokeWidth={2.8} className="relative text-white dark:text-black" /> : null}
+                  </span>
+                  {info.label}
+                </button>
+              );
+            })}
+          </div>
+        </Field>
+        <Field label="글꼴">
+          <div className="grid grid-cols-2 gap-2 sm:grid-cols-4" role="radiogroup" aria-label="테마 글꼴">
+            {THEME_FONTS.map((f) => {
+              const info = THEME_FONT_INFO[f];
+              const on = draft.theme.font === f;
+              return (
+                <button
+                  key={f}
+                  type="button"
+                  role="radio"
+                  aria-checked={on}
+                  disabled={!canTheme}
+                  onClick={() => pickTheme({ font: f })}
+                  className={cx(
+                    'press grid gap-0.5 rounded-2xl border-2 px-3 py-2.5 text-left disabled:cursor-not-allowed disabled:opacity-50',
+                    on ? 'border-accent bg-accent-soft' : 'border-line hover:bg-surface-2',
+                  )}
+                >
+                  <span className="text-lg leading-snug" style={{ fontFamily: info.family }}>
+                    가나다 공부
+                  </span>
+                  <span className={cx('text-xs font-semibold', on ? 'text-accent' : 'text-muted')}>{info.label}</span>
+                </button>
+              );
+            })}
+          </div>
+        </Field>
+        <Field label="노트 종이 무늬">
+          <div className="grid grid-cols-4 gap-2" role="radiogroup" aria-label="노트 종이 무늬">
+            {THEME_PAPERS.map((p) => {
+              const on = draft.theme.paper === p;
+              return (
+                <button
+                  key={p}
+                  type="button"
+                  role="radio"
+                  aria-checked={on}
+                  disabled={!canTheme}
+                  onClick={() => pickTheme({ paper: p })}
+                  className={cx(
+                    'press grid gap-1.5 rounded-2xl p-1.5 text-xs font-semibold disabled:cursor-not-allowed disabled:opacity-50',
+                    on ? 'bg-surface-2 text-ink' : 'text-muted hover:bg-surface-2',
+                  )}
+                >
+                  <span
+                    className={cx('block h-12 rounded-xl bg-surface ring-1 ring-line', p !== 'none' && `kok-paper-${p}`, on && 'ring-2 ring-accent')}
+                    aria-hidden="true"
+                  />
+                  {THEME_PAPER_INFO[p].label}
+                </button>
+              );
+            })}
+          </div>
+        </Field>
+        <p className="text-xs text-muted">테마는 이 계정의 모든 기기에 같이 적용돼요. Pro가 끝나면 기본 모양으로 돌아가고, 고른 테마는 남아 있어요.</p>
       </Card>
 
       <SectionTitle>시각화</SectionTitle>
@@ -487,6 +663,7 @@ export default function SettingsPage() {
                   await supabaseBrowser()
                     .auth.signOut()
                     .catch(() => {});
+                  clearTheme();
                   router.replace('/');
                   router.refresh();
                 } catch (err) {

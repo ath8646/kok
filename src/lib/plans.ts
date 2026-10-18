@@ -17,6 +17,10 @@ export type CustomPlan = {
   fileMb: number;
   /** 꼼꼼 모델을 쓸 수 있는지 */
   careful: boolean;
+  /** 노트에 자료 더하기(버전)를 쓸 수 있는지 */
+  canAppend: boolean;
+  /** 테마를 쓸 수 있는지 */
+  canTheme: boolean;
   note: string | null;
 };
 
@@ -43,6 +47,8 @@ export function toCustomPlan(row: Record<string, unknown>): CustomPlan {
     textChars: num(row.text_chars, 20000),
     fileMb: num(row.file_mb, 10),
     careful: row.careful !== false,
+    canAppend: row.can_append === true,
+    canTheme: row.can_theme === true,
     note: typeof row.note === 'string' ? row.note : null,
   };
 }
@@ -102,17 +108,24 @@ export type PlanLimits = {
   images: number;
   textChars: number;
   fileMb: number;
+} & PlanFlags;
+
+export type PlanFlags = {
   /** 꼼꼼 모델 */
   canCareful: boolean;
   /** 원본 파일을 기한 없이 보관 (아니면 처리 뒤 freeFileDays 일, 테스트 플랜은 플랜이 끝나고 freeFileDays 일) */
   keepFiles: boolean;
+  /** 노트에 자료 더하기(버전) */
+  canAppend: boolean;
+  /** 테마 */
+  canTheme: boolean;
 };
 
-/** 꼼꼼 모델·원본 보관처럼 숫자가 아닌 혜택 */
-export function planFlags(plan: PlanKind, custom: CustomPlan | null): { canCareful: boolean; keepFiles: boolean } {
-  if (plan === 'admin' || plan === 'pro') return { canCareful: true, keepFiles: true };
-  if (plan === 'custom' && custom) return { canCareful: custom.careful, keepFiles: false };
-  return { canCareful: false, keepFiles: false };
+/** 꼼꼼 모델·원본 보관·자료 더하기·테마처럼 숫자가 아닌 혜택 */
+export function planFlags(plan: PlanKind, custom: CustomPlan | null): PlanFlags {
+  if (plan === 'admin' || plan === 'pro') return { canCareful: true, keepFiles: true, canAppend: true, canTheme: true };
+  if (plan === 'custom' && custom) return { canCareful: custom.careful, keepFiles: false, canAppend: custom.canAppend, canTheme: custom.canTheme };
+  return { canCareful: false, keepFiles: false, canAppend: false, canTheme: false };
 }
 
 /** 플랜별 한도 */

@@ -1,24 +1,48 @@
 'use client';
-// 노트: 탭 정리 · 그림 · 문제 · 원본 (처리 중이면 진행 상태)
+// 노트: 탭 정리 · 그림 · 문제 · 원본 (처리 중이면 진행 상태). 오른쪽 아래 주황 버튼은 노트 채팅이다.
+// 노트에 자료를 더하면(Pro) 버전이 쌓인다. 원본 탭의 버전 기록에서 지난 버전을 열어(?v=번호) 보고 고치거나,
+// 그 버전을 지금 버전으로 쓰거나 지울 수 있다. 지난 버전에서 고친 것은 그 버전에 저장된다.
+// DB 에 버전·채팅 표가 아직 없으면(me.features) 예전처럼 동작한다.
 import { useParams, useRouter } from 'next/navigation';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useMe } from '@/components/AppShell';
-import { useQuickAdd } from '@/components/QuickAdd';
+import { SOURCES_CHANGED, useQuickAdd } from '@/components/QuickAdd';
 import { NoteView, type NoteBody } from '@/components/NoteView';
 import { ProcessingView } from '@/components/note/ProcessingView';
 import { OriginalPanel } from '@/components/note/OriginalPanel';
+import { OriginalTab } from '@/components/note/OriginalTab';
+import { AppendStatus } from '@/components/note/AppendStatus';
+import { NoteChat } from '@/components/note/NoteChat';
 import { QuestionsPanel } from '@/components/note/QuestionsPanel';
-import { VisualPanel, type NoteView as NoteViewPrefs, type Visuals } from '@/components/note/VisualPanel';
-import type { CardInfo } from '@/components/QuestionList';
-import { Button, Chip, EmptyState, ICONS, LargeHeader, LinkButton, Menu, STICKY_BELOW_TOPBAR, Sheet, cx, inputClass, useToast } from '@/components/ui';
+import { VisualPanel, type NoteView as NoteViewPrefs, type VisualType, type Visuals } from '@/components/note/VisualPanel';
+import type { CardInfo, QuestionRemoval } from '@/components/QuestionList';
+import {
+  Button,
+  Chip,
+  EmptyState,
+  ICONS,
+  LargeHeader,
+  LinkButton,
+  Menu,
+  STICKY_BELOW_TOPBAR,
+  Sheet,
+  Spinner,
+  api,
+  cx,
+  inputClass,
+  useToast,
+} from '@/components/ui';
 import { SOURCE_COLS, sb, type SourceRowWithUnit } from '@/lib/data';
-import { zMindmap, zNote, zTable, zTimeline } from '@/lib/ai/schemas';
+import { zMindmap, zNote, zTable, zTimeline, type Mindmap, type TableSpec, type TimelineSpec } from '@/lib/ai/schemas';
 import type { QuestionRow, SubjectRow } from '@/lib/types';
 import { subjectVar } from '@/lib/colors';
+import { VERSION_LIST_COLS, removalPlan, toVersionRow, type ChildSource, type VersionRow } from '@/lib/versions';
 
 type Tab = 'note' | 'visual' | 'questions' | 'original';
-type SourceFull = SourceRowWithUnit & { text_content: string | null };
-type NoteRow = { id: string; title: string; subject_id: string; body: Record<string, unknown> };
+type SourceFull = SourceRowWithUnit & { text_content: string | null; parent_id?: string | null };
+type NoteRow = { id: string; title: string; subject_id: string; body: Record<string, unknown>; current_version?: number };
+/** 지난 버전: 그 버전 행에 저장된 정리·그림·문제 목록 */
+type OldDoc = { number: number; title: string; body: Record<string, unknown>; visuals: Visuals; questionIds: string[] };
 
 const TABS: Array<{ id: Tab; label: string }> = [
   { id: 'note', label: '정리' },
@@ -27,56 +51,116 @@ const TABS: Array<{ id: Tab; label: string }> = [
   { id: 'original', label: '원본' },
 ];
 
+const Q_COLS =
+  'id, note_id, subject_id, key_point_id, type, prompt, choices, answer, accepted, explanation, difficulty, pages, created_by, locked, edited, status, created_at';
+const CHILD_COLS = `${SOURCE_COLS}, text_content, parent_id`;
+const VISUAL_TYPES: VisualType[] = ['mindmap', 'table', 'timeline'];
+
 type Bundle = {
   source: SourceFull | null;
   note: NoteRow | null;
   visuals: Visuals;
+  /** 이 노트의 문제 모두 (지금 버전에 없는 숨긴 문제도: 지난 버전 보기에 쓴다) */
   questions: QuestionRow[];
   cards: Map<string, CardInfo>;
   subject: SubjectRow | null;
+  versions: VersionRow[];
 };
 
-async function fetchBundle(sourceId: string): Promise<Bundle> {
-  const empty: Bundle = { source: null, note: null, visuals: {}, questions: [], cards: new Map(), subject: null };
-  const { data: s } = await sb().from('sources').select(`${SOURCE_COLS}, text_content`).eq('id', sourceId).maybeSingle();
-  const source = (s as SourceFull) ?? null;
-  if (!source || source.status !== 'ready') return { ...empty, source };
-  const { data: n } = await sb().from('notes').select('id, title, subject_id, body').eq('source_id', sourceId).maybeSingle();
-  if (!n) return { ...empty, source };
-  const [{ data: vs }, { data: qs }, { data: subj }] = await Promise.all([
-    sb().from('visuals').select('type, spec').eq('note_id', n.id),
-    sb()
-      .from('questions')
-      .select(
-        'id, note_id, subject_id, key_point_id, type, prompt, choices, answer, accepted, explanation, difficulty, pages, created_by, locked, edited, status, created_at',
-      )
-      .eq('note_id', n.id)
-      .order('created_at'),
-    sb().from('subjects').select('id, name, color, exam_date, position, created_at').eq('id', n.subject_id).maybeSingle(),
-  ]);
+function toVisuals(rows: Array<{ type: string; spec: unknown }>): Visuals {
   const visuals: Visuals = {};
-  for (const row of vs ?? []) {
-    if (row.type === 'mindmap') visuals.mindmap = zMindmap.parse(row.spec);
-    if (row.type === 'table') visuals.table = zTable.parse(row.spec);
-    if (row.type === 'timeline') visuals.timeline = zTimeline.parse(row.spec);
+  for (const row of rows) {
+    try {
+      if (row.type === 'mindmap') visuals.mindmap = zMindmap.parse(row.spec);
+      if (row.type === 'table') visuals.table = zTable.parse(row.spec);
+      if (row.type === 'timeline') visuals.timeline = zTimeline.parse(row.spec);
+    } catch {
+      // 모양이 깨진 그림은 건너뛴다 (노트는 그대로 보이게)
+    }
   }
+  return visuals;
+}
+
+async function fetchBundle(sourceId: string, versionsOn: boolean): Promise<Bundle> {
+  const empty: Bundle = { source: null, note: null, visuals: {}, questions: [], cards: new Map(), subject: null, versions: [] };
+  const { data: s } = await sb()
+    .from('sources')
+    .select(`${SOURCE_COLS}, text_content${versionsOn ? ', parent_id' : ''}`)
+    .eq('id', sourceId)
+    .maybeSingle();
+  const source = (s as SourceFull | null) ?? null;
+  if (!source || source.status !== 'ready' || source.parent_id) return { ...empty, source };
+  const { data: n } = await sb()
+    .from('notes')
+    .select(`id, title, subject_id, body${versionsOn ? ', current_version' : ''}`)
+    .eq('source_id', sourceId)
+    .maybeSingle();
+  if (!n) return { ...empty, source };
+  const note = n as unknown as NoteRow;
+  const [{ data: vs }, { data: qs }, { data: subj }, vr] = await Promise.all([
+    sb().from('visuals').select('type, spec').eq('note_id', note.id),
+    sb().from('questions').select(Q_COLS).eq('note_id', note.id).order('created_at').order('id'),
+    sb().from('subjects').select('id, name, color, exam_date, position, created_at').eq('id', note.subject_id).maybeSingle(),
+    versionsOn
+      ? sb().from('note_versions').select(VERSION_LIST_COLS).eq('note_id', note.id).order('number')
+      : Promise.resolve({ data: [] as Record<string, unknown>[] }),
+  ]);
   const questions = (qs ?? []) as QuestionRow[];
   let cards = new Map<string, CardInfo>();
-  if (questions.length) {
+  for (let i = 0; i < questions.length; i += 200) {
     const { data: cs } = await sb()
       .from('cards')
       .select('question_id, lapses, wrong_count, in_wrong_note, due, reps')
       .in(
         'question_id',
-        questions.map((q) => q.id),
+        questions.slice(i, i + 200).map((q) => q.id),
       );
-    cards = new Map((cs ?? []).map((c) => [c.question_id as string, c as unknown as CardInfo]));
+    cards = new Map([...cards, ...(cs ?? []).map((c) => [c.question_id as string, c as unknown as CardInfo] as const)]);
   }
-  return { source, note: n as NoteRow, visuals, questions, cards, subject: (subj as SubjectRow) ?? null };
+  return {
+    source,
+    note,
+    visuals: toVisuals((vs ?? []) as Array<{ type: string; spec: unknown }>),
+    questions,
+    cards,
+    subject: (subj as SubjectRow) ?? null,
+    versions: ((vr.data ?? []) as Record<string, unknown>[]).map(toVersionRow),
+  };
+}
+
+async function fetchKids(parentId: string): Promise<ChildSource[]> {
+  const { data, error } = await sb().from('sources').select(CHILD_COLS).eq('parent_id', parentId).order('created_at');
+  if (error) return [];
+  return (data ?? []) as unknown as ChildSource[];
+}
+
+async function fetchOldDoc(noteId: string, number: number): Promise<OldDoc | null> {
+  const { data } = await sb()
+    .from('note_versions')
+    .select('number, title, body, visuals, question_ids')
+    .eq('note_id', noteId)
+    .eq('number', number)
+    .maybeSingle();
+  if (!data) return null;
+  return {
+    number: Number(data.number),
+    title: typeof data.title === 'string' ? data.title : '',
+    body: (data.body ?? {}) as Record<string, unknown>,
+    visuals: toVisuals(Array.isArray(data.visuals) ? (data.visuals as Array<{ type: string; spec: unknown }>) : []),
+    questionIds: Array.isArray(data.question_ids) ? data.question_ids.map(String) : [],
+  };
 }
 
 function initialParam(name: string): string | null {
   return typeof window === 'undefined' ? null : new URLSearchParams(window.location.search).get(name);
+}
+
+/** 보는 버전을 주소에 적는다 (새로 고쳐도 같은 버전이 열리게) */
+function setViewParam(v: number | null) {
+  const url = new URL(window.location.href);
+  if (v === null) url.searchParams.delete('v');
+  else url.searchParams.set('v', String(v));
+  window.history.replaceState(null, '', `${url.pathname}${url.search}${url.hash}`);
 }
 
 export default function NotePage() {
@@ -84,8 +168,11 @@ export default function NotePage() {
   const { me } = useMe();
   const router = useRouter();
   const toast = useToast();
+  const versionsOn = !!me?.features.versions;
+  const chatOn = !!me?.features.chat;
+  const canAppend = !!me?.canAppend;
   const [bundle, setBundle] = useState<Bundle | null | undefined>(undefined);
-  const [version, setVersion] = useState(0);
+  const [tick, setTick] = useState(0);
   const [tab, setTab] = useState<Tab>(() => {
     const t = initialParam('tab');
     return t === 'note' || t === 'visual' || t === 'questions' || t === 'original' ? t : 'note';
@@ -95,11 +182,19 @@ export default function NotePage() {
   const [glance, setGlance] = useState(true);
   const [reporting, setReporting] = useState(false);
   const [reason, setReason] = useState('');
-  const reload = useCallback(() => setVersion((v) => v + 1), []);
+  const [viewing, setViewing] = useState<number | null>(() => {
+    const v = Number(initialParam('v'));
+    return Number.isInteger(v) && v >= 1 ? v : null;
+  });
+  const [oldDoc, setOldDoc] = useState<OldDoc | null>(null);
+  const [kids, setKids] = useState<ChildSource[]>([]);
+  const [kidsTick, setKidsTick] = useState(0);
+  const [verBusy, setVerBusy] = useState<string | null>(null);
+  const reload = useCallback(() => setTick((v) => v + 1), []);
 
   useEffect(() => {
     let alive = true;
-    fetchBundle(sourceId)
+    fetchBundle(sourceId, versionsOn)
       .then((b) => {
         if (alive) setBundle(b);
       })
@@ -109,23 +204,110 @@ export default function NotePage() {
     return () => {
       alive = false;
     };
-  }, [sourceId, version]);
+  }, [sourceId, tick, versionsOn]);
 
   const source = bundle === undefined ? undefined : (bundle?.source ?? null);
   const note = bundle?.note ?? null;
-  const visuals = bundle?.visuals ?? {};
-  const questions = bundle?.questions ?? [];
+  const visuals = bundle?.visuals;
+  const questions = bundle?.questions;
   const cards = bundle?.cards ?? new Map<string, CardInfo>();
   const subject = bundle?.subject ?? null;
+  const versions = useMemo(() => bundle?.versions ?? [], [bundle]);
   const noteId = note?.id;
+  const cur = note?.current_version ?? 1;
+  const parentId = source?.parent_id ?? null;
 
-  // + 버튼과 끌어다 놓기는 이 노트의 과목에 넣는다
+  // 노트에 더한 자료의 주소로 들어오면 그 노트로 보낸다
+  useEffect(() => {
+    if (parentId) router.replace(`/notes/${parentId}?tab=original`);
+  }, [parentId, router]);
+
+  // 노트에 더한 자료 (정리 중·실패·끝남). 막 끝난 자료가 있으면 노트를 다시 읽는다 (새 버전)
+  const prevKids = useRef<Map<string, string>>(new Map());
+  const nudged = useRef<Map<string, number>>(new Map());
+  useEffect(() => {
+    if (!versionsOn || !noteId) return;
+    let alive = true;
+    fetchKids(sourceId).then((rows) => {
+      if (!alive) return;
+      const finished = rows.some((r) => r.status === 'ready' && prevKids.current.has(r.id) && prevKids.current.get(r.id) !== 'ready');
+      prevKids.current = new Map(rows.map((r) => [r.id, r.status]));
+      setKids(rows);
+      if (finished) {
+        toast('자료를 더해 새 버전을 만들었어요.', 'ok');
+        setTick((t) => t + 1);
+      }
+      // 멈춘 처리는 이어서 하게 한다 (화면이 열려 있을 때)
+      for (const r of rows) {
+        if (r.status !== 'queued' && r.status !== 'processing') continue;
+        const lockedFree = !r.locked_until || Date.parse(r.locked_until) < Date.now();
+        const stale = Date.now() - Date.parse(r.updated_at) > 45_000;
+        const last = nudged.current.get(r.id) ?? 0;
+        if (lockedFree && stale && Date.now() - last > 60_000) {
+          nudged.current.set(r.id, Date.now());
+          api(`/api/sources/${r.id}/process`, { method: 'POST', body: '{}' }).catch(() => {});
+        }
+      }
+    });
+    return () => {
+      alive = false;
+    };
+  }, [sourceId, versionsOn, noteId, kidsTick, tick, toast]);
+  const kidsActive = kids.some((k) => k.status === 'queued' || k.status === 'processing');
+  useEffect(() => {
+    if (!kidsActive) return;
+    const t = setInterval(() => {
+      if (document.visibilityState === 'visible') setKidsTick((x) => x + 1);
+    }, 4000);
+    return () => clearInterval(t);
+  }, [kidsActive]);
+  useEffect(() => {
+    const on = () => setKidsTick((x) => x + 1);
+    window.addEventListener(SOURCES_CHANGED, on);
+    return () => window.removeEventListener(SOURCES_CHANGED, on);
+  }, []);
+
+  // 지난 버전 보기
+  const showOld = versionsOn && !!note && viewing !== null && viewing !== cur;
+  useEffect(() => {
+    if (!showOld || !noteId || viewing === null) return;
+    let alive = true;
+    fetchOldDoc(noteId, viewing).then((d) => {
+      if (!alive) return;
+      if (d) setOldDoc(d);
+      else {
+        toast('그 버전을 찾을 수 없어요.', 'bad');
+        setViewing(null);
+        setViewParam(null);
+      }
+    });
+    return () => {
+      alive = false;
+    };
+  }, [showOld, noteId, viewing, tick, toast]);
+  const old = showOld && oldDoc && oldDoc.number === viewing ? oldDoc : null;
+
+  // + 버튼·끌어다 놓기는 이 노트의 과목에 넣고, 노트 화면에서는 이 노트에 더한다 (Pro)
   const quick = useQuickAdd();
   const contextSubject = note?.subject_id ?? (source ? source.subject_id : null);
   useEffect(() => {
     quick.setContextSubject(contextSubject);
     return () => quick.setContextSubject(null);
   }, [quick, contextSubject]);
+  const targetSubject = note?.subject_id ?? null;
+  const targetTitle = note?.title || source?.title || '';
+  useEffect(() => {
+    if (!targetSubject) return;
+    quick.setNoteTarget({
+      sourceId,
+      subjectId: targetSubject,
+      title: targetTitle,
+      canAppend: canAppend && versionsOn,
+      hideFab: chatOn && !showOld,
+      versions: versionsOn,
+    });
+    return () => quick.setNoteTarget(null);
+  }, [quick, sourceId, targetSubject, targetTitle, canAppend, versionsOn, chatOn, showOld]);
 
   // 약점 개념에서 왔으면 그 개념으로 스크롤
   useEffect(() => {
@@ -133,23 +315,129 @@ export default function NotePage() {
     if (noteId && target) setTimeout(() => document.getElementById(`kp-${target}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' }), 200);
   }, [noteId]);
 
-  const body = useMemo<NoteBody | null>(
-    () => (note ? ({ ...zNote.parse(note.body), recommended: note.body.recommended as string | undefined } as NoteBody) : null),
-    [note],
-  );
-  const view = (note?.body.view ?? {}) as NoteViewPrefs;
+  // 지금 보는 것: 지금 버전(노트) 또는 지난 버전
+  const raw = old ? old.body : note?.body;
+  const body = useMemo<NoteBody | null>(() => (raw ? ({ ...zNote.parse(raw), recommended: raw.recommended as string | undefined } as NoteBody) : null), [raw]);
+  const docVisuals = old ? old.visuals : (visuals ?? {});
+  const liveQuestions = useMemo(() => (questions ?? []).filter((q) => q.status !== 'hidden'), [questions]);
+  const docQuestions = useMemo(() => (old ? (questions ?? []).filter((q) => old.questionIds.includes(q.id)) : liveQuestions), [old, questions, liveQuestions]);
+  const existing = useMemo(() => new Set((questions ?? []).map((q) => q.id)), [questions]);
+  const view = (raw?.view ?? {}) as NoteViewPrefs;
   const keyPoints = useMemo(() => (body?.key_points ?? []).map((k) => ({ id: k.id, title: k.title })), [body]);
+  const noteChars = useMemo(() => (note ? JSON.stringify(note.body).length : 0), [note]);
 
   const saveBody = async (next: Record<string, unknown>) => {
     if (!note) return;
+    if (old) {
+      setOldDoc((d) => (d && d.number === old.number ? { ...d, body: next } : d));
+      const { error } = await sb().from('note_versions').update({ body: next }).eq('note_id', note.id).eq('number', old.number);
+      if (error) toast('저장하지 못했어요.', 'bad');
+      return;
+    }
     setBundle((b) => (b && b.note ? { ...b, note: { ...b.note, body: next } } : b));
     const { error } = await sb().from('notes').update({ body: next }).eq('id', note.id);
     if (error) toast('저장하지 못했어요.', 'bad');
   };
 
+  /** 지난 버전의 그림 저장 (그 버전 행의 visuals 를 통째로 바꾼다) */
+  const saveOldVisual = async (t: VisualType, spec: Mindmap | TableSpec | TimelineSpec): Promise<boolean> => {
+    if (!note || !old) return false;
+    const next: Visuals = { ...old.visuals, [t]: spec };
+    const rows = VISUAL_TYPES.filter((k) => next[k]).map((k) => ({ type: k, spec: next[k] }));
+    const { error } = await sb().from('note_versions').update({ visuals: rows }).eq('note_id', note.id).eq('number', old.number);
+    if (error) return false;
+    setOldDoc((d) => (d && d.number === old.number ? { ...d, visuals: next } : d));
+    return true;
+  };
+
+  /** 지난 버전의 문제 목록 바꾸기 */
+  const setOldQuestionIds = async (ids: string[]): Promise<boolean> => {
+    if (!note || !old) return false;
+    const { error } = await sb().from('note_versions').update({ question_ids: ids }).eq('note_id', note.id).eq('number', old.number);
+    if (error) return false;
+    setOldDoc((d) => (d && d.number === old.number ? { ...d, questionIds: ids } : d));
+    return true;
+  };
+
+  // 버전이 있으면 문제 지우기는 다른 버전의 문제를 남긴다
+  const removal =
+    versionsOn && versions.length
+      ? (q: QuestionRow): QuestionRemoval => {
+          const plan = removalPlan(q.id, versions, cur, old ? old.number : cur, q.status !== 'hidden');
+          if (plan === 'hide') {
+            return {
+              label: '이 버전에서 빼기',
+              confirm: '이 문제를 지금 버전에서 뺄까요? 다른 버전에는 그대로 남아요.',
+              run: async () => !(await sb().from('questions').update({ status: 'hidden' }).eq('id', q.id)).error,
+            };
+          }
+          if (plan === 'unlist') {
+            return {
+              label: '이 버전에서 빼기',
+              confirm: '이 문제를 이 버전에서 뺄까요? 다른 버전에는 그대로 남아요.',
+              run: () => setOldQuestionIds((old?.questionIds ?? []).filter((x) => x !== q.id)),
+            };
+          }
+          return {
+            label: '지우기',
+            confirm: '이 문제를 지울까요? 푼 기록도 같이 지워져요.',
+            run: async () => {
+              const ok = !(await sb().from('questions').delete().eq('id', q.id)).error;
+              if (ok && old) await setOldQuestionIds(old.questionIds.filter((x) => x !== q.id));
+              return ok;
+            },
+          };
+        }
+      : undefined;
+
+  const openVersion = (n: number) => {
+    const v = n === cur ? null : n;
+    setViewing(v);
+    setViewParam(v);
+    setTab('note');
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
+
+  const switchTo = async (n: number) => {
+    if (!note) return;
+    if (!confirm(`버전 ${n}: 이 버전을 지금 버전으로 쓸까요?\n복습에는 이 버전의 문제가 나와요. 지금 쓰던 버전도 기록에 그대로 남아요.`)) return;
+    setVerBusy(`use-${n}`);
+    try {
+      await api(`/api/notes/${note.id}/versions`, { method: 'POST', body: JSON.stringify({ action: 'switch', number: n }) });
+      setViewing(null);
+      setViewParam(null);
+      toast(`지금 버전을 바꿨어요 (버전 ${n}).`, 'ok');
+      reload();
+    } catch (e) {
+      toast((e as Error).message, 'bad');
+    } finally {
+      setVerBusy(null);
+    }
+  };
+
+  const deleteVersion = async (n: number) => {
+    if (!note) return;
+    const warnCurrent = n === cur ? '\n지금 쓰는 버전이라, 지우면 남은 버전 중 가장 최근 버전을 쓰게 돼요.' : '';
+    if (!confirm(`버전 ${n}: 이 버전을 지울까요?\n이 버전에만 있던 문제(푼 기록 포함)와 더한 자료도 함께 지워지고, 되돌릴 수 없어요.${warnCurrent}`)) return;
+    setVerBusy(`del-${n}`);
+    try {
+      await api(`/api/notes/${note.id}/versions`, { method: 'POST', body: JSON.stringify({ action: 'delete', number: n }) });
+      if (viewing === n) {
+        setViewing(null);
+        setViewParam(null);
+      }
+      toast('버전을 지웠어요.', 'ok');
+      reload();
+    } catch (e) {
+      toast((e as Error).message, 'bad');
+    } finally {
+      setVerBusy(null);
+    }
+  };
+
   if (!me) return null;
   const back = { href: subject ? `/library/${subject.id}` : source?.subject_id ? `/library/${source.subject_id}` : '/library', label: '자료함으로' };
-  if (source === undefined)
+  if (source === undefined || parentId)
     return (
       <div className="grid gap-3">
         <LargeHeader size="compact" back={back} title=" " />
@@ -165,7 +453,7 @@ export default function NotePage() {
     );
 
   const ready = source.status === 'ready' && !!note && !!body;
-  const title = note?.title || source.title || (ready ? '새 자료' : '정리하는 중…');
+  const title = old?.title || note?.title || source.title || (ready ? '새 자료' : '정리하는 중…');
   const meta = (
     <span className="flex flex-wrap items-center gap-1.5 text-sm">
       {subject ? (
@@ -176,6 +464,7 @@ export default function NotePage() {
       ) : null}
       {source.unit ? <Chip>{source.unit}</Chip> : null}
       <span>· {source.kind === 'pdf' ? `PDF ${source.page_count ?? ''}쪽` : source.kind === 'image' ? `사진 ${source.page_count ?? ''}장` : '직접 쓴 글'}</span>
+      {versions.length ? <span>· 버전 {old ? old.number : cur}</span> : null}
       <span>· AI 정리</span>
     </span>
   );
@@ -188,6 +477,9 @@ export default function NotePage() {
       </div>
     );
   }
+
+  const loadingOld = showOld && !old;
+  const aiLocked = old ? '지난 버전에서는 AI로 다시 만들 수 없어요. 이 버전을 쓰면 할 수 있어요.' : undefined;
 
   return (
     <div className="grid gap-4">
@@ -202,6 +494,7 @@ export default function NotePage() {
             label="노트 메뉴"
             items={[
               { label: '이 노트 문제 풀기', icon: ICONS.retry, onSelect: () => router.push(`/review?note=${note.id}`) },
+              ...(versionsOn ? [{ label: versions.length ? '버전 기록' : '자료 더하기', icon: ICONS.file, onSelect: () => setTab('original') }] : []),
               { label: '이상해요 (신고)', icon: ICONS.edit, onSelect: () => setReporting(true) },
             ]}
           />
@@ -222,90 +515,168 @@ export default function NotePage() {
               )}
             >
               {t.label}
-              {t.id === 'questions' ? <span className="ml-1 tabular-nums opacity-60">{questions.length}</span> : null}
+              {t.id === 'questions' ? <span className="ml-1 tabular-nums opacity-60">{docQuestions.length}</span> : null}
             </button>
           ))}
         </div>
       </div>
 
-      {tab === 'note' ? (
-        <div className="grid gap-4">
-          {visuals.mindmap || visuals.table || visuals.timeline ? (
-            <section className="kok-card kok-rise p-3">
-              <button
-                type="button"
-                className="flex w-full items-center justify-between px-1 font-display text-lg"
-                onClick={() => setGlance((g) => !g)}
-                aria-expanded={glance}
-              >
-                한눈에 보기
-                <span className="text-sm font-normal text-muted">{glance ? '접기' : '펼치기'}</span>
-              </button>
-              {glance ? (
-                <div className="mt-2">
-                  <VisualPanel
-                    compact
-                    me={me}
-                    noteId={note.id}
-                    subjectId={note.subject_id}
-                    subjectColor={subject?.color ?? 'blue'}
-                    visuals={visuals}
-                    recommended={body.recommended}
-                    view={view}
-                    highlightKeyPoint={kp}
-                    onSaved={reload}
-                    onOpen={() => setTab('visual')}
-                  />
-                  <button type="button" className="mt-2 text-sm font-semibold text-accent" onClick={() => setTab('visual')}>
-                    그림 크게 보기·고치기 →
-                  </button>
-                </div>
-              ) : null}
-            </section>
-          ) : null}
-          <NoteView
-            note={body}
-            kind={source.kind}
-            editable
-            onChange={(next) => saveBody({ ...note.body, ...next })}
-            highlightKeyPoint={kp}
-            onSelectKeyPoint={setKp}
-            onOpenPage={(p) => {
-              setPage(p);
-              setTab('original');
-            }}
-          />
+      {versionsOn ? <AppendStatus kids={kids} onChanged={() => setKidsTick((x) => x + 1)} /> : null}
+
+      {showOld ? (
+        <section className="kok-card kok-rise grid gap-2.5 p-4 ring-2 ring-[color-mix(in_srgb,var(--accent)_35%,transparent)]" aria-live="polite">
+          <div className="flex flex-wrap items-center gap-2">
+            <p className="font-display text-lg">지난 버전을 보고 있어요</p>
+            <Chip tone="accent">버전 {viewing}</Chip>
+          </div>
+          <p className="text-sm text-muted">여기서 고친 내용은 이 버전에 저장돼요. 복습에는 지금 쓰는 버전(버전 {cur})의 문제가 나와요.</p>
           <div className="flex flex-wrap gap-2">
-            <LinkButton href={`/review?note=${note.id}`}>이 노트 문제 풀기</LinkButton>
-            <Button variant="ghost" onClick={() => setReporting(true)}>
-              이상해요
+            <Button size="sm" disabled={kidsActive || !!verBusy} busy={verBusy === `use-${viewing}`} onClick={() => viewing !== null && switchTo(viewing)}>
+              이 버전 쓰기
+            </Button>
+            <Button size="sm" variant="secondary" onClick={() => openVersion(cur)}>
+              지금 버전으로 돌아가기
             </Button>
           </div>
+        </section>
+      ) : null}
+
+      {loadingOld ? (
+        <div className="grid gap-3" aria-busy="true">
+          <div className="kok-card kok-shimmer h-40" />
+          <p className="flex items-center gap-2 text-sm text-muted">
+            <Spinner /> 지난 버전을 여는 중
+          </p>
         </div>
-      ) : null}
+      ) : (
+        <>
+          {tab === 'note' ? (
+            <div className="grid gap-4">
+              {docVisuals.mindmap || docVisuals.table || docVisuals.timeline ? (
+                <section className="kok-card kok-rise p-3">
+                  <button
+                    type="button"
+                    className="flex w-full items-center justify-between px-1 font-display text-lg"
+                    onClick={() => setGlance((g) => !g)}
+                    aria-expanded={glance}
+                  >
+                    한눈에 보기
+                    <span className="text-sm font-normal text-muted">{glance ? '접기' : '펼치기'}</span>
+                  </button>
+                  {glance ? (
+                    <div className="mt-2">
+                      <VisualPanel
+                        key={old ? `v${old.number}` : 'live'}
+                        compact
+                        me={me}
+                        noteId={note.id}
+                        subjectId={note.subject_id}
+                        subjectColor={subject?.color ?? 'blue'}
+                        visuals={docVisuals}
+                        recommended={body.recommended}
+                        view={view}
+                        highlightKeyPoint={kp}
+                        onSaved={reload}
+                        onOpen={() => setTab('visual')}
+                        saveSpec={old ? saveOldVisual : undefined}
+                        aiLocked={aiLocked}
+                      />
+                      <button type="button" className="mt-2 text-sm font-semibold text-accent" onClick={() => setTab('visual')}>
+                        그림 크게 보기·고치기 →
+                      </button>
+                    </div>
+                  ) : null}
+                </section>
+              ) : null}
+              <NoteView
+                key={old ? `v${old.number}` : 'live'}
+                note={body}
+                kind={source.kind}
+                editable
+                onChange={(next) => saveBody({ ...raw, ...next })}
+                highlightKeyPoint={kp}
+                onSelectKeyPoint={setKp}
+                onOpenPage={(p) => {
+                  setPage(p);
+                  setTab('original');
+                }}
+              />
+              <div className="flex flex-wrap gap-2">
+                {!old ? <LinkButton href={`/review?note=${note.id}`}>이 노트 문제 풀기</LinkButton> : null}
+                <Button variant="ghost" onClick={() => setReporting(true)}>
+                  이상해요
+                </Button>
+              </div>
+            </div>
+          ) : null}
 
-      {tab === 'visual' ? (
-        <VisualPanel
-          me={me}
+          {tab === 'visual' ? (
+            <VisualPanel
+              key={old ? `v${old.number}` : 'live'}
+              me={me}
+              noteId={note.id}
+              subjectId={note.subject_id}
+              subjectColor={subject?.color ?? 'blue'}
+              visuals={docVisuals}
+              recommended={body.recommended}
+              view={view}
+              highlightKeyPoint={kp}
+              onSaved={reload}
+              onViewChange={(v) => saveBody({ ...raw, view: v })}
+              onReport={() => setReporting(true)}
+              saveSpec={old ? saveOldVisual : undefined}
+              aiLocked={aiLocked}
+            />
+          ) : null}
+
+          {tab === 'questions' ? (
+            <QuestionsPanel
+              me={me}
+              noteId={note.id}
+              subjectId={note.subject_id}
+              questions={docQuestions}
+              cards={cards}
+              keyPoints={keyPoints}
+              onChanged={reload}
+              removal={removal}
+              oldVersion={old ? { number: old.number, addQuestion: (id) => setOldQuestionIds([...old.questionIds, id]) } : undefined}
+            />
+          ) : null}
+
+          {tab === 'original' ? (
+            versionsOn ? (
+              <OriginalTab
+                me={me}
+                parent={source}
+                kids={kids.filter((k) => k.status === 'ready')}
+                versions={versions}
+                current={cur}
+                viewing={old ? old.number : cur}
+                existing={existing}
+                liveQuestionCount={liveQuestions.length}
+                appendBusy={kidsActive}
+                focusPage={page}
+                busy={verBusy}
+                onOpen={openVersion}
+                onUse={switchTo}
+                onDelete={deleteVersion}
+                onAdd={(files, text) => quick.addToNote(files, text, false)}
+              />
+            ) : (
+              <OriginalPanel kind={source.kind} text={source.text_content} paths={source.file_paths} expireAt={source.files_expire_at} focusPage={page} />
+            )
+          ) : null}
+        </>
+      )}
+
+      {chatOn && !showOld ? (
+        <NoteChat
           noteId={note.id}
-          subjectId={note.subject_id}
-          subjectColor={subject?.color ?? 'blue'}
-          visuals={visuals}
-          recommended={body.recommended}
-          view={view}
-          highlightKeyPoint={kp}
-          onSaved={reload}
-          onViewChange={(v) => saveBody({ ...note.body, view: v })}
-          onReport={() => setReporting(true)}
+          noteTitle={title}
+          noteChars={noteChars}
+          keyPointTitle={(id) => keyPoints.find((k) => k.id === id)?.title ?? null}
+          onApplied={reload}
         />
-      ) : null}
-
-      {tab === 'questions' ? (
-        <QuestionsPanel me={me} noteId={note.id} subjectId={note.subject_id} questions={questions} cards={cards} keyPoints={keyPoints} onChanged={reload} />
-      ) : null}
-
-      {tab === 'original' ? (
-        <OriginalPanel kind={source.kind} text={source.text_content} paths={source.file_paths} expireAt={source.files_expire_at} focusPage={page} />
       ) : null}
 
       <Sheet open={reporting} onClose={() => setReporting(false)} title="이상해요">

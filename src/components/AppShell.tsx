@@ -6,6 +6,7 @@ import { usePathname, useRouter } from 'next/navigation';
 import { createContext, useCallback, useContext, useEffect, useState, type ReactNode } from 'react';
 import type { MeResponse } from '@/lib/types';
 import { QuickAddProvider } from './QuickAdd';
+import { applyTheme, type Theme } from '@/lib/theme';
 import { Button, Icon, Spinner, cx } from './ui';
 
 type MeCtx = {
@@ -111,6 +112,14 @@ export function AppShell({ children }: { children: ReactNode }) {
   useEffect(() => {
     if (me && !me.consented && pathname !== '/welcome') router.replace('/welcome');
   }, [me, pathname, router]);
+
+  // 테마 (Pro·테스트 플랜에서 켠 경우): 쓸 수 없게 되면 기본으로 돌아간다 (고른 테마는 설정에 남는다)
+  const theme = me ? (me.canTheme ? me.settings.theme : null) : undefined;
+  const themeKey = theme === undefined ? '' : JSON.stringify(theme);
+  useEffect(() => {
+    if (!themeKey) return;
+    applyTheme(JSON.parse(themeKey) as Theme | null);
+  }, [themeKey]);
 
   // 다른 화면으로 가면 집중 모드를 끈다
   const [prevPath, setPrevPath] = useState(pathname);

@@ -66,6 +66,7 @@ const EFFORT_TASKS: Array<[keyof ModelsConfig['effort'], string]> = [
   ['quiz', '문제'],
   ['check', '검사'],
   ['grade', '채점'],
+  ['chat', '채팅'],
 ];
 
 export default function AdminPage() {

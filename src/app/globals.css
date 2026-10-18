@@ -88,6 +88,156 @@
   }
 }
 
+/* ------------------------------------------------------------ 테마 (Pro)
+   <html data-theme data-font data-paper> 로 바꾼다 (src/lib/theme.ts).
+   글자로 쓰는 포인트 색(--accent)은 흰 바탕·회색 바탕·연한 포인트 바탕 모두에서 명암비 4.5 이상,
+   버튼 글자(--accent-ink)도 4.5 이상, + 버튼 아이콘(--fab-ink)은 3 이상으로 골랐다. */
+:root {
+  --paper-line: rgba(40, 60, 110, 0.085);
+  --paper-dot: rgba(40, 60, 110, 0.2);
+}
+:root[data-theme='ocean'] {
+  --accent: #1a5fc2;
+  --accent-soft: #e7f0fd;
+  --fab: #2b6fe0;
+}
+:root[data-theme='forest'] {
+  --accent: #2b7a3a;
+  --accent-soft: #e6f4e8;
+  --fab: #2f8a43;
+}
+:root[data-theme='lavender'] {
+  --accent: #6a48c7;
+  --accent-soft: #f0ebfd;
+  --fab: #7656e0;
+}
+:root[data-theme='cherry'] {
+  --accent: #c0185a;
+  --accent-soft: #fde8f0;
+  --fab: #df3f77;
+}
+:root[data-theme='mint'] {
+  --accent: #0b7a6b;
+  --accent-soft: #dff5f1;
+  --fab: #119c88;
+}
+:root[data-theme='mocha'] {
+  --accent: #8a5524;
+  --accent-soft: #f6ece1;
+  --fab: #a46a34;
+  --bg: #f6f2ed;
+  --surface-2: #f0e9e1;
+  --surface-3: #e6ddd2;
+  --line: #e6ddd2;
+}
+:root[data-theme='night'] {
+  --accent: #3a45b8;
+  --accent-soft: #eaecfd;
+  --fab: #4552d6;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --paper-line: rgba(255, 255, 255, 0.07);
+    --paper-dot: rgba(255, 255, 255, 0.16);
+  }
+  :root[data-theme='ocean'] {
+    --accent: #7cb0ff;
+    --accent-soft: #132541;
+    --accent-ink: #04122b;
+    --fab: #7cb0ff;
+    --fab-ink: #04122b;
+  }
+  :root[data-theme='forest'] {
+    --accent: #6ccf86;
+    --accent-soft: #12291a;
+    --accent-ink: #03210d;
+    --fab: #6ccf86;
+    --fab-ink: #03210d;
+  }
+  :root[data-theme='lavender'] {
+    --accent: #b8a2ff;
+    --accent-soft: #251c3e;
+    --accent-ink: #170b35;
+    --fab: #b8a2ff;
+    --fab-ink: #170b35;
+  }
+  :root[data-theme='cherry'] {
+    --accent: #ff8db4;
+    --accent-soft: #3b1625;
+    --accent-ink: #2c0615;
+    --fab: #ff8db4;
+    --fab-ink: #2c0615;
+  }
+  :root[data-theme='mint'] {
+    --accent: #5adfc8;
+    --accent-soft: #0e2b27;
+    --accent-ink: #032520;
+    --fab: #5adfc8;
+    --fab-ink: #032520;
+  }
+  :root[data-theme='mocha'] {
+    --accent: #e2b388;
+    --accent-soft: #33261a;
+    --accent-ink: #2a1706;
+    --fab: #e2b388;
+    --fab-ink: #2a1706;
+    --bg: #0b0806;
+    --surface-2: #231e1a;
+    --surface-3: #2e2823;
+    --line: #2e2823;
+  }
+  /* 밤하늘: 다크 모드에서는 바탕도 남색으로 */
+  :root[data-theme='night'] {
+    --accent: #9ca6ff;
+    --accent-soft: #1d2042;
+    --accent-ink: #0b0f33;
+    --fab: #9ca6ff;
+    --fab-ink: #0b0f33;
+    --bg: #04050d;
+    --surface: #12142a;
+    --surface-2: #1b1e38;
+    --surface-3: #252949;
+    --raised: #2e3358;
+    --line: #22264a;
+    --muted: #a3a7c4;
+  }
+}
+
+/* 테마 글꼴 (글꼴 파일은 고른 사람만 받는다). 제목(font-display)도 같은 글꼴로 */
+:root[data-font='round'] {
+  --font-sans: 'Gowun Dodum', 'Pretendard Variable', 'Pretendard', 'Apple SD Gothic Neo', 'Malgun Gothic', sans-serif;
+}
+:root[data-font='hand'] {
+  --font-sans: 'Gaegu', 'Pretendard Variable', 'Pretendard', 'Apple SD Gothic Neo', 'Malgun Gothic', sans-serif;
+}
+:root[data-font='serif'] {
+  --font-sans: 'Gowun Batang', 'Apple SD Gothic Neo', 'Malgun Gothic', serif;
+}
+:root[data-font] .font-display {
+  font-family: var(--font-sans);
+}
+
+/* 노트 종이 무늬 (정리 카드에만). kok-paper-* 는 설정 화면의 미리보기 */
+:root[data-paper='lined'] .kok-paper,
+.kok-paper-lined {
+  background-image: linear-gradient(to bottom, transparent calc(100% - 1px), var(--paper-line) calc(100% - 1px));
+  background-size: 100% 28px;
+}
+:root[data-paper='grid'] .kok-paper,
+.kok-paper-grid {
+  background-image: linear-gradient(var(--paper-line) 1px, transparent 1px), linear-gradient(90deg, var(--paper-line) 1px, transparent 1px);
+  background-size: 22px 22px;
+}
+:root[data-paper='dots'] .kok-paper,
+.kok-paper-dots {
+  background-image: radial-gradient(var(--paper-dot) 1.1px, transparent 1.5px);
+  background-size: 18px 18px;
+}
+/* 미리보기 칸은 작아서 줄 간격을 줄여 무늬가 보이게 */
+.kok-paper-lined {
+  background-size: 100% 12px;
+}
+
 @theme inline {
   --color-bg: var(--bg);
   --color-surface: var(--surface);
@@ -458,6 +608,23 @@ body {
 }
 .kok-dash {
   animation: kok-dash 1s linear infinite;
+}
+
+/* 채팅: 답을 쓰는 중 점 세 개 (움직임 줄이기면 그냥 점으로 보인다) */
+@keyframes kok-dot {
+  0%,
+  80%,
+  100% {
+    opacity: 0.3;
+    transform: translateY(0);
+  }
+  40% {
+    opacity: 1;
+    transform: translateY(-3px);
+  }
+}
+.kok-dot {
+  animation: kok-dot 1s var(--ease-in-out) infinite;
 }
 
 /* 아래 탭: 고른 탭 뒤 알약 모양 */

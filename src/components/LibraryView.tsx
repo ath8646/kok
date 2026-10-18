@@ -8,7 +8,7 @@ import { SOURCES_CHANGED, SUBJECTS_CHANGED, useQuickAdd } from './QuickAdd';
 import { stepLabel, useActiveSources } from './ProcessingList';
 import { SubjectForm } from './SubjectForm';
 import { Button, EmptyState, ICONS, Icon, IconButton, LargeHeader, Menu, ProgressRing, Sheet, api, cx, inputClass, useToast, type MenuItem } from './ui';
-import { SOURCE_COLS, fetchAll, fetchSubjects, sb, type SourceRowWithUnit } from '@/lib/data';
+import { SOURCE_COLS, fetchAll, fetchSubjects, sb, topLevelSources, type SourceRowWithUnit } from '@/lib/data';
 import type { SubjectRow } from '@/lib/types';
 import { subjectVar } from '@/lib/colors';
 import { previewText } from '@/lib/richtext';
@@ -19,12 +19,15 @@ type LibSource = SourceRowWithUnit & { summary: string | null };
 async function fetchLibrary(): Promise<{ subjects: SubjectRow[]; sources: LibSource[] }> {
   const [subjects, sources, notes] = await Promise.all([
     fetchSubjects(),
-    fetchAll<SourceRowWithUnit>(
-      (a, b) =>
-        sb().from('sources').select(SOURCE_COLS).order('created_at', { ascending: false }).order('id').range(a, b) as unknown as PromiseLike<{
+    fetchAll<SourceRowWithUnit>((a, b) =>
+      topLevelSources<SourceRowWithUnit[]>((onlyTop) => {
+        let q = sb().from('sources').select(SOURCE_COLS);
+        if (onlyTop) q = q.is('parent_id', null);
+        return q.order('created_at', { ascending: false }).order('id').range(a, b) as unknown as PromiseLike<{
           data: SourceRowWithUnit[] | null;
           error: unknown;
-        }>,
+        }>;
+      }),
     ),
     fetchAll<{ source_id: string; summary: string | null }>(
       (a, b) =>

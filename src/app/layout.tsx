@@ -4,6 +4,7 @@ import 'pretendard/dist/web/variable/pretendardvariable-dynamic-subset.css';
 import 'katex/dist/katex.min.css';
 import './globals.css';
 import { Providers } from '@/components/Providers';
+import { THEME_BOOT } from '@/lib/theme';
 
 export const metadata: Metadata = {
   title: { default: '콕 · 준비는 AI가, 외우기는 내가', template: '%s · 콕' },
@@ -26,7 +27,11 @@ export const viewport: Viewport = {
 
 export default function RootLayout({ children }: LayoutProps<'/'>) {
   return (
-    <html lang="ko">
+    // 테마(Pro)는 그리기 전에 <html> 에 속성을 붙이므로 그 속성 차이는 경고하지 않는다
+    <html lang="ko" suppressHydrationWarning>
+      <head>
+        <script dangerouslySetInnerHTML={{ __html: THEME_BOOT }} />
+      </head>
       <body className="min-h-dvh antialiased">
         <Providers>{children}</Providers>
       </body>

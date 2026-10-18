@@ -82,6 +82,17 @@ describe('테스트 플랜 판단', () => {
     expect(planFlags('custom', { ...custom, careful: true }).canCareful).toBe(true);
   });
 
+  it('자료 더하기·테마: Pro·관리자는 쓰고, 무료는 못 쓰고, 테스트 플랜은 플랜마다 켠 것만', () => {
+    expect(planFlags('pro', null)).toMatchObject({ canAppend: true, canTheme: true });
+    expect(planFlags('admin', null)).toMatchObject({ canAppend: true, canTheme: true });
+    expect(planFlags('free', null)).toMatchObject({ canAppend: false, canTheme: false });
+    // 예전 플랜 행(칸이 없음)은 끈 것으로 본다
+    expect(planFlags('custom', custom)).toMatchObject({ canAppend: false, canTheme: false });
+    const on = toCustomPlan({ id: 'x', name: 'a', energy_total: 10, can_append: true, can_theme: true });
+    expect(planFlags('custom', on)).toMatchObject({ canAppend: true, canTheme: true });
+    expect(planFlags('custom', { ...on, canTheme: false })).toMatchObject({ canAppend: true, canTheme: false });
+  });
+
   it('끝난 테스트 플랜 뒤부터 무료·Pro 에너지를 센다', () => {
     expect(planEndedAt({ custom_plan_until: earlier }, NOW)).toBe(earlier);
     expect(planEndedAt({ custom_plan_until: later }, NOW)).toBeNull(); // 아직 켜져 있음

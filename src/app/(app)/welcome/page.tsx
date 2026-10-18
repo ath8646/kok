@@ -6,6 +6,7 @@ import { useState } from 'react';
 import { useMe } from '@/components/AppShell';
 import { Button, Card, Field, cx, inputClass, useToast } from '@/components/ui';
 import { supabaseBrowser } from '@/lib/supabase/client';
+import { clearTheme } from '@/lib/theme';
 import { SUBJECT_COLORS } from '@/lib/settings';
 import { SUBJECT_COLOR_LABEL, subjectVar } from '@/lib/colors';
 
@@ -166,6 +167,7 @@ export default function WelcomePage() {
         className="text-sm text-muted underline"
         onClick={async () => {
           await supabaseBrowser().auth.signOut();
+          clearTheme();
           router.replace('/');
           router.refresh();
         }}

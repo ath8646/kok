@@ -185,6 +185,38 @@ export type QuizItem = z.infer<typeof zQuizItem>;
 
 export const zQuiz = z.object({ questions: z.array(z.unknown()).catch([]) });
 
+// ---------------------------------------------------------------- 노트 채팅
+export const chatJsonSchema: JsonSchema = obj({
+  reply: str,
+  // 노트 밖 일반 지식을 보탰는지 (화면에 표시)
+  outside_note: { type: 'boolean' },
+  proposal: obj({
+    kind: { type: 'string', enum: ['none', 'questions', 'note'] },
+    questions: (quizJsonSchema.properties as Record<string, unknown>).questions,
+    note_addition: obj({ key_point_id: str, title: str, text: str }),
+  }),
+});
+
+export const zNoteAddition = z.object({
+  key_point_id: z.string().catch(''),
+  title: z.string().catch(''),
+  text: z.string().catch(''),
+});
+export type NoteAddition = z.infer<typeof zNoteAddition>;
+
+export const zChat = z.object({
+  reply: z.string().catch(''),
+  outside_note: z.boolean().catch(false),
+  proposal: z
+    .object({
+      kind: z.enum(['none', 'questions', 'note']).catch('none'),
+      questions: z.array(z.unknown()).catch([]),
+      note_addition: zNoteAddition.catch({ key_point_id: '', title: '', text: '' }),
+    })
+    .catch({ kind: 'none', questions: [], note_addition: { key_point_id: '', title: '', text: '' } }),
+});
+export type ChatResult = z.infer<typeof zChat>;
+
 // ---------------------------------------------------------------- 자기 검사
 export const checkJsonSchema: JsonSchema = obj({
   verdicts: { type: 'array', items: obj({ index: int, keep: { type: 'boolean' }, reason: str }) },

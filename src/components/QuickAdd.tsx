@@ -4,14 +4,14 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import type { MeResponse, SubjectRow } from '@/lib/types';
 import { fetchSources, fetchSubjects, sb } from '@/lib/data';
-import { estimateEnergy } from '@/lib/ai/models';
+import { estimateEnergy, estimateSmallTask } from '@/lib/ai/models';
 import { clientModel } from '@/lib/client-model';
 import { energyWindow, refillText } from '@/lib/plans';
 import { shrinkImage } from '@/lib/image';
 import { MIN_TEXT_CHARS, checkText, fileKind, groupFiles, isSubmitKey, splitComposer, titleFromName } from '@/lib/quick-add';
 import { SUBJECT_COLORS } from '@/lib/settings';
 import { subjectVar } from '@/lib/colors';
-import { ApiError, ICONS, Icon, Spinner, api, cx, useToast } from './ui';
+import { ApiError, Button, ICONS, Icon, Sheet, Spinner, api, cx, useToast } from './ui';
 
 /** 동시에 정리할 수 있는 자료 수 (서버와 같다) */
 const MAX_PARALLEL = 3;
@@ -31,11 +31,28 @@ type Job =
 
 type Status = 'waiting' | 'preparing' | 'slot' | 'busy' | 'uploading' | 'starting' | 'done' | 'error';
 
+/** 노트 화면: 끌어다 놓기·붙여 넣기를 이 노트에 더한다 (Pro) */
+export type NoteTarget = {
+  /** 노트의 자료 번호 (더한 자료의 부모) */
+  sourceId: string;
+  subjectId: string;
+  title: string;
+  /** 노트에 자료 더하기를 쓸 수 있는지 (Pro) */
+  canAppend: boolean;
+  /** 이 화면은 + 버튼 대신 다른 버튼(노트 채팅)을 쓴다 */
+  hideFab: boolean;
+  /** DB 에 버전 표가 있는지. 없으면 끌어다 놓기·붙여 넣기는 예전처럼 새 노트로 정리한다 */
+  versions: boolean;
+};
+
 type Item = {
   key: string;
   sourceId: string;
   job: Job;
   subjectId: string;
+  /** 노트에 더하는 자료면 그 노트의 자료 번호와 제목 */
+  parentId?: string;
+  noteTitle?: string;
   status: Status;
   done: number;
   total: number;
@@ -60,10 +77,21 @@ type Ctx = {
   addFiles: (files: File[]) => void;
   /** 지금 보고 있는 과목 (자료함에서 과목을 고르면 그 과목에 넣는다) */
   setContextSubject: (id: string | null) => void;
+  /** 노트 화면: 끌어다 놓기·붙여 넣기를 이 노트에 더한다 (null 이면 보통 화면) */
+  setNoteTarget: (t: NoteTarget | null) => void;
+  /** 지금 노트에 파일·글을 더한다 (ask 면 먼저 한 번 묻는다) */
+  addToNote: (files: File[], text?: string, ask?: boolean) => void;
   enabled: boolean;
 };
 
-const QuickAddCtx = createContext<Ctx>({ openComposer: () => {}, addFiles: () => {}, setContextSubject: () => {}, enabled: false });
+const QuickAddCtx = createContext<Ctx>({
+  openComposer: () => {},
+  addFiles: () => {},
+  setContextSubject: () => {},
+  setNoteTarget: () => {},
+  addToNote: () => {},
+  enabled: false,
+});
 
 export function useQuickAdd() {
   return useContext(QuickAddCtx);
@@ -129,9 +157,9 @@ function statusText(it: Item): string {
       if (it.total > 1) return `올리는 중 ${it.done}/${it.total}`;
       return it.bytes && it.bytes >= 5 * MB ? `올리는 중 (${Math.round(it.bytes / MB)}MB, 큰 파일은 조금 걸려요)` : '올리는 중';
     case 'starting':
-      return '정리 시작하는 중';
+      return it.parentId ? '노트에 더하기 시작하는 중' : '정리 시작하는 중';
     case 'done':
-      return '정리를 시작했어요';
+      return it.parentId ? '노트에 더하는 중이에요. 원본 탭에서 볼 수 있어요' : '정리를 시작했어요';
     case 'error':
       return it.error ?? '넣지 못했어요';
   }
@@ -158,6 +186,9 @@ export function QuickAddProvider({
   const [subjects, setSubjects] = useState<SubjectRow[] | null>(null);
   const subjectsRef = useRef<SubjectRow[]>([]);
   const contextSubject = useRef<string | null>(null);
+  const noteTargetRef = useRef<NoteTarget | null>(null);
+  const [noteTarget, setNoteTargetState] = useState<NoteTarget | null>(null);
+  const [pendingAppend, setPendingAppend] = useState<{ files: File[]; text: string } | null>(null);
   const loadSubjects = useCallback(async () => {
     try {
       const list = await fetchSubjects();
@@ -217,7 +248,7 @@ export function QuickAddProvider({
         if (after || i > 0) await sleep(5000);
         let busy: number | null = null;
         try {
-          const rows = await fetchSources({ active: true, limit: 20 });
+          const rows = await fetchSources({ active: true, limit: 20, withChildren: true });
           busy = rows.filter((r) => r.status === 'queued' || r.status === 'processing').length;
         } catch {
           busy = null; // 셀 수 없으면 조금 뒤에 다시 센다
@@ -226,6 +257,26 @@ export function QuickAddProvider({
         update(key, { status: 'slot' });
       }
       throw new Error('정리 중인 자료가 오래 끝나지 않아요. 잠시 뒤에 다시 해 주세요.');
+    },
+    [update],
+  );
+
+  /** 한 노트에는 자료를 하나씩 더한다: 앞서 더하는 자료가 끝날 때까지 기다린다 (Supabase 에서 직접 센다) */
+  const waitForAppend = useCallback(
+    async (key: string, parentId: string, after = false) => {
+      for (let i = 0; i < 720; i++) {
+        if (after || i > 0) await sleep(5000);
+        let busy: number | null = null;
+        try {
+          const { data, error } = await sb().from('sources').select('id').eq('parent_id', parentId).in('status', ['queued', 'processing']).limit(1);
+          busy = error ? null : (data ?? []).length;
+        } catch {
+          busy = null;
+        }
+        if (busy === 0) return;
+        update(key, { status: 'slot' });
+      }
+      throw new Error('노트에 더하는 자료가 오래 끝나지 않아요. 잠시 뒤에 다시 해 주세요.');
     },
     [update],
   );
@@ -305,6 +356,7 @@ export function QuickAddProvider({
               title: it.job.title,
               text: prep.kind === 'text' ? prep.text : undefined,
               files,
+              ...(it.parentId ? { parentId: it.parentId } : {}),
             }),
           });
           return 'ok';
@@ -316,6 +368,10 @@ export function QuickAddProvider({
             await waitForSlot(it.key, true);
             continue;
           }
+          if (e.code === 'append_busy' && it.parentId && slotWaits++ < 120) {
+            await waitForAppend(it.key, it.parentId, true);
+            continue;
+          }
           if (e.code === 'rate_limited' && rateWaits++ < 6) {
             update(it.key, { status: 'busy' });
             await sleep(20_000);
@@ -325,7 +381,7 @@ export function QuickAddProvider({
         }
       }
     },
-    [update, waitForSlot],
+    [update, waitForSlot, waitForAppend],
   );
 
   const runItem = useCallback(
@@ -342,7 +398,10 @@ export function QuickAddProvider({
         if (!files) {
           // 에너지가 모자라면 올리기 전에 멈춘다 (마지막 검사는 서버가 한다)
           const model = clientModel(m, m.settings.models.organize);
-          const est = estimateEnergy({ kind: prep.kind, pages: prep.pages, images: prep.blobs.length, chars: prep.text.length }, model, m.usdPerEnergy);
+          // 노트에 더하는 자료는 지금 노트와 합치는 값도 든다 (서버 계산과 같게)
+          const est =
+            estimateEnergy({ kind: prep.kind, pages: prep.pages, images: prep.blobs.length, chars: prep.text.length }, model, m.usdPerEnergy) +
+            (it.parentId ? Math.ceil(estimateSmallTask(model, m.usdPerEnergy, 9000, 3000)) : 0);
           const left = m.energy.unlimited ? Infinity : (m.energy.remaining ?? 0);
           if (est > left) {
             throw new Error(`에너지가 부족해요. 필요: 약 ${est}, 남음: ${Math.floor(left)}. ${refillText(m.planInfo, energyWindow(m.energy))}`);
@@ -350,6 +409,7 @@ export function QuickAddProvider({
         }
         for (let round = 0; ; round++) {
           if (!files) {
+            if (it.parentId) await waitForAppend(it.key, it.parentId);
             await waitForSlot(it.key);
             files = prep.blobs.length ? await upload(it.key, sourceId, prep) : [];
             update(it.key, { files });
@@ -371,7 +431,7 @@ export function QuickAddProvider({
         update(it.key, { status: 'error', error: (e as Error).message || '넣지 못했어요.' });
       }
     },
-    [update, remove, waitForSlot, prepare, upload, create, refreshMe],
+    [update, remove, waitForSlot, waitForAppend, prepare, upload, create, refreshMe],
   );
 
   const running = useRef(false);
@@ -390,11 +450,20 @@ export function QuickAddProvider({
   }, [runItem]);
 
   const enqueue = useCallback(
-    (jobs: Job[], subjectId: string) => {
+    (jobs: Job[], subjectId: string, into?: { parentId: string; noteTitle: string }) => {
       if (!jobs.length) return;
-      const added: Item[] = jobs.map((job) => ({ key: newId(), sourceId: newId(), job, subjectId, status: 'waiting', done: 0, total: 0 }));
+      const added: Item[] = jobs.map((job) => ({
+        key: newId(),
+        sourceId: newId(),
+        job,
+        subjectId,
+        status: 'waiting',
+        done: 0,
+        total: 0,
+        ...(into ? { parentId: into.parentId, noteTitle: into.noteTitle } : {}),
+      }));
       commit([...itemsRef.current, ...added]);
-      writeLast(meRef.current.userId, subjectId);
+      if (!into) writeLast(meRef.current.userId, subjectId);
       pump();
     },
     [commit, pump],
@@ -568,7 +637,7 @@ export function QuickAddProvider({
       dragDepth.current += 1;
       if (dragDepth.current === 1) {
         const id = openRef.current ? '' : resolveSubject();
-        setDropSubjectName(subjectsRef.current.find((s) => s.id === id)?.name ?? '');
+        setDropSubjectName(noteTargetRef.current?.versions && !openRef.current ? '' : (subjectsRef.current.find((s) => s.id === id)?.name ?? ''));
         setDragging(true);
       }
     };
@@ -589,8 +658,9 @@ export function QuickAddProvider({
       setDragging(false);
       const files = Array.from(e.dataTransfer?.files ?? []);
       if (!files.length) return;
-      // 입력창이 열려 있으면 그 안에 붙이고, 아니면 바로 정리
+      // 입력창이 열려 있으면 그 안에 붙이고, 노트 화면이면 이 노트에 더하고, 아니면 바로 정리
       if (openRef.current) setAttachments((a) => [...a, ...toAttachments(files)]);
+      else if (noteTargetRef.current?.versions) setPendingAppend({ files, text: '' });
       else addFiles(files);
     };
     const onPaste = (e: ClipboardEvent) => {
@@ -609,7 +679,14 @@ export function QuickAddProvider({
       if (t && (t.closest('input, textarea, select, [contenteditable="true"]') || t.isContentEditable)) return;
       if (files.length) {
         e.preventDefault();
-        addFiles(files);
+        if (noteTargetRef.current?.versions) setPendingAppend({ files, text: '' });
+        else addFiles(files);
+        return;
+      }
+      // 노트 화면에서 글을 붙여 넣으면 이 노트에 더할지 묻는다
+      if (!openRef.current && noteTargetRef.current?.versions && pasted.trim().length >= MIN_TEXT_CHARS) {
+        e.preventDefault();
+        setPendingAppend({ files: [], text: pasted });
         return;
       }
       // 글을 붙여 넣으면 입력창을 열어 그 글을 넣어 둔다 (엔터를 누르면 정리)
@@ -666,7 +743,62 @@ export function QuickAddProvider({
     contextSubject.current = id;
   }, []);
 
-  const ctx = useMemo<Ctx>(() => ({ openComposer, addFiles, setContextSubject, enabled }), [openComposer, addFiles, setContextSubject, enabled]);
+  const setNoteTarget = useCallback((t: NoteTarget | null) => {
+    noteTargetRef.current = t;
+    setNoteTargetState(t);
+  }, []);
+  /** 지금 노트에 더할 자료를 줄에 넣는다 (Pro 가 아니면 하지 않는다: 서버도 막는다) */
+  const enqueueAppend = useCallback(
+    (p: { files: File[]; text: string }) => {
+      const t = noteTargetRef.current;
+      if (!t || !t.canAppend) return;
+      if (!meRef.current.aiEnabled) {
+        toast('지금은 AI 기능을 잠깐 쉬고 있어요.', 'bad');
+        return;
+      }
+      const jobs: Job[] = [];
+      if (p.text.trim()) {
+        const c = checkText(p.text, meRef.current.plan);
+        if (!c.ok) {
+          toast(c.reason, 'bad');
+          return;
+        }
+        jobs.push({ kind: 'text', text: c.text, title: '' });
+      }
+      jobs.push(...filesToJobs(p.files));
+      enqueue(jobs, t.subjectId, { parentId: t.sourceId, noteTitle: t.title });
+    },
+    [filesToJobs, enqueue, toast],
+  );
+  /** 노트에 더하기 전에 한 번 묻는다 (Pro 가 아니면 새 노트로 넣을지 묻는다). ask=false 면 묻지 않고 바로 더한다 */
+  const addToNote = useCallback(
+    (files: File[], text = '', ask = true) => {
+      if (!files.length && !text.trim()) return;
+      if (ask || !noteTargetRef.current?.canAppend) setPendingAppend({ files, text });
+      else enqueueAppend({ files, text });
+    },
+    [enqueueAppend],
+  );
+  const confirmAppend = useCallback(() => {
+    const p = pendingAppend;
+    setPendingAppend(null);
+    if (p) enqueueAppend(p);
+  }, [pendingAppend, enqueueAppend]);
+  const appendAsNew = useCallback(() => {
+    const p = pendingAppend;
+    setPendingAppend(null);
+    if (!p) return;
+    if (p.files.length) addFiles(p.files);
+    if (p.text.trim()) {
+      setText((cur) => (cur.trim() ? `${cur}\n${p.text}` : p.text));
+      openComposer();
+    }
+  }, [pendingAppend, addFiles, openComposer]);
+
+  const ctx = useMemo<Ctx>(
+    () => ({ openComposer, addFiles, setContextSubject, setNoteTarget, addToNote, enabled }),
+    [openComposer, addFiles, setContextSubject, setNoteTarget, addToNote, enabled],
+  );
 
   return (
     <QuickAddCtx.Provider value={ctx}>
@@ -674,21 +806,24 @@ export function QuickAddProvider({
       <div inert={open}>{children}</div>
       {enabled ? (
         <>
-          <button
-            ref={fabRef}
-            type="button"
-            className={cx(
-              'kok-fab fixed bottom-[calc(80px+env(safe-area-inset-bottom))] right-4 grid h-[58px] w-[58px] place-items-center rounded-full bg-fab text-fab-ink md:bottom-8 md:right-8',
-              open ? 'z-[56]' : 'z-40',
-            )}
-            aria-label={open ? '입력창 닫기' : '자료 넣기'}
-            aria-expanded={open && !closing}
-            onClick={() => (open ? closeComposer() : openComposer())}
-          >
-            <span className="kok-fab-icon grid place-items-center">
-              <Icon d={ICONS.plus} size={28} strokeWidth={2.4} />
-            </span>
-          </button>
+          {/* 노트 화면은 + 버튼 대신 노트 채팅 버튼을 쓴다 */}
+          {noteTarget?.hideFab ? null : (
+            <button
+              ref={fabRef}
+              type="button"
+              className={cx(
+                'kok-fab fixed bottom-[calc(80px+env(safe-area-inset-bottom))] right-4 grid h-[58px] w-[58px] place-items-center rounded-full bg-fab text-fab-ink md:bottom-8 md:right-8',
+                open ? 'z-[56]' : 'z-40',
+              )}
+              aria-label={open ? '입력창 닫기' : '자료 넣기'}
+              aria-expanded={open && !closing}
+              onClick={() => (open ? closeComposer() : openComposer())}
+            >
+              <span className="kok-fab-icon grid place-items-center">
+                <Icon d={ICONS.plus} size={28} strokeWidth={2.4} />
+              </span>
+            </button>
+          )}
           <Tray items={items} subjects={subjects ?? []} onRetry={retry} onRemove={dismiss} />
           {open ? (
             <Composer
@@ -713,7 +848,15 @@ export function QuickAddProvider({
               onClose={closeComposer}
             />
           ) : null}
-          {dragging ? <DropOverlay subjectName={dropSubjectName} intoComposer={open} /> : null}
+          {dragging ? <DropOverlay subjectName={dropSubjectName} intoComposer={open} note={open ? null : noteTarget} /> : null}
+          <AppendSheet
+            target={noteTarget}
+            pending={pendingAppend}
+            me={me}
+            onConfirm={confirmAppend}
+            onAsNew={appendAsNew}
+            onClose={() => setPendingAppend(null)}
+          />
         </>
       ) : null}
     </QuickAddCtx.Provider>
@@ -1031,7 +1174,75 @@ function AttachmentChip({ file, onRemove }: { file: File; onRemove: () => void }
 }
 
 // ------------------------------------------------------------- 끌어다 놓기 안내
-function DropOverlay({ subjectName, intoComposer }: { subjectName: string; intoComposer: boolean }) {
+/** 노트에 더하기 전에 한 번 묻는다. Pro 가 아니면 새 노트로 넣을지 묻는다 */
+function AppendSheet({
+  target,
+  pending,
+  me,
+  onConfirm,
+  onAsNew,
+  onClose,
+}: {
+  target: NoteTarget | null;
+  pending: { files: File[]; text: string } | null;
+  me: MeResponse;
+  onConfirm: () => void;
+  onAsNew: () => void;
+  onClose: () => void;
+}) {
+  const open = !!pending && !!target;
+  const items = pending
+    ? [...pending.files.map((f) => f.name), ...(pending.text.trim() ? [`글: ${pending.text.trim().replace(/\s+/g, ' ').slice(0, 40)}…`] : [])]
+    : [];
+  return (
+    <Sheet
+      open={open}
+      onClose={onClose}
+      title={target?.canAppend ? '이 노트에 더할까요?' : '노트에 더하기는 Pro 기능이에요'}
+      footer={
+        target?.canAppend ? (
+          <div className="flex gap-2">
+            <Button className="flex-1" onClick={onConfirm} disabled={!me.aiEnabled}>
+              노트에 더하기
+            </Button>
+            <Button variant="secondary" onClick={onClose}>
+              취소
+            </Button>
+          </div>
+        ) : (
+          <div className="flex gap-2">
+            <Button className="flex-1" onClick={onAsNew}>
+              새 노트로 넣기
+            </Button>
+            <Button variant="secondary" onClick={onClose}>
+              취소
+            </Button>
+          </div>
+        )
+      }
+    >
+      {target ? (
+        <div className="grid gap-3">
+          <p className="text-sm text-muted">
+            {target.canAppend
+              ? `'${target.title}'에 아래 자료를 더해요. AI가 지금 노트와 합쳐 새 버전을 만들고, 지금 버전은 원본 탭에 그대로 남아요.`
+              : 'Pro에서는 지금 노트에 자료를 더해 새 버전을 만들 수 있어요. 지금은 따로 새 노트로 넣을 수 있어요.'}
+          </p>
+          <ul className="grid gap-1.5">
+            {items.map((x, i) => (
+              <li key={i} className="flex items-center gap-2 rounded-xl bg-surface-2 px-3 py-2 text-sm">
+                <Icon d={x.startsWith('글:') ? ICONS.pen : ICONS.file} size={16} className="shrink-0 text-muted" />
+                <span className="truncate">{x}</span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
+    </Sheet>
+  );
+}
+
+function DropOverlay({ subjectName, intoComposer, note }: { subjectName: string; intoComposer: boolean; note: NoteTarget | null }) {
   return (
     <div className="kok-drop pointer-events-none fixed inset-0 z-[70] grid place-items-center bg-[color-mix(in_srgb,var(--bg)_72%,transparent)] p-6 backdrop-blur-[6px]">
       <div className="kok-drop-card relative grid w-full max-w-md justify-items-center gap-3 rounded-[32px] bg-surface px-8 py-12 text-center shadow-2xl">
@@ -1041,10 +1252,19 @@ function DropOverlay({ subjectName, intoComposer }: { subjectName: string; intoC
         <div className="kok-float grid h-16 w-16 place-items-center rounded-full bg-fab text-fab-ink shadow-lg">
           <Icon d={ICONS.upload} size={30} strokeWidth={2.2} />
         </div>
-        <p className="font-display text-xl">{intoComposer ? '여기에 놓으면 입력창에 붙여요' : '여기에 놓으면 콕이 정리해요'}</p>
+        <p className="font-display text-xl">
+          {intoComposer ? '여기에 놓으면 입력창에 붙여요' : note ? '여기에 놓으면 이 노트에 더해요' : '여기에 놓으면 콕이 정리해요'}
+        </p>
         <p className="text-sm text-muted">
           PDF · 사진 · 글 파일
-          {!intoComposer && subjectName ? (
+          {note ? (
+            <>
+              {' '}
+              → <b className="text-ink">{note.title}</b>
+              {note.canAppend ? '' : ' (Pro)'}
+            </>
+          ) : null}
+          {!intoComposer && !note && subjectName ? (
             <>
               {' '}
               → <b className="text-ink">{subjectName}</b>
@@ -1098,7 +1318,9 @@ function Tray({
                   it.status === 'error' ? 'line-clamp-4 text-bad' : it.status === 'done' ? 'line-clamp-2 text-ok' : 'line-clamp-2 text-muted',
                 )}
               >
-                {it.status !== 'error' && subjectName(it.subjectId) ? `${subjectName(it.subjectId)} · ` : ''}
+                {it.status !== 'error' && (it.noteTitle || subjectName(it.subjectId))
+                  ? `${it.noteTitle ? `→ ${it.noteTitle}` : subjectName(it.subjectId)} · `
+                  : ''}
                 {statusText(it)}
               </span>
               {busy && (it.status === 'uploading' || it.status === 'preparing') && it.total > 1 ? (

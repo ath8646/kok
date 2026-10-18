@@ -710,6 +710,192 @@ async def main():
         await octx.close()
         await actx.close()
 
+        # ---------------- 노트 채팅
+        step("note chat: ask about the note, add questions and note text only after [넣기]")
+        ctx, page = await new_ctx(browser, "student")
+        await page.goto(BASE + "/library")
+        await page.get_by_role("tab", name=re.compile("^과학")).click()
+        await page.wait_for_url(LIBRARY_SUBJECT)
+        await page.get_by_role("link", name=re.compile("광합성")).first.click()
+        assert await wait_ready(page), "note not ready"
+        note_sid = page.url.rstrip("/").split("/")[-1].split("?")[0]
+        live_q = lambda: int(psql(f"select count(*) from public.questions q join public.notes n on n.id = q.note_id where n.source_id = '{note_sid}' and q.status <> 'hidden'"))
+        # 앞 단계에서 AI 를 많이 불러서 1분 요청 한도(10번)에 걸리지 않게 비운다
+        psql(f"delete from public.rate_hits where user_id = '{USERS['student'][0]}'")
+        assert await page.get_by_role("button", name="자료 넣기", exact=True).count() == 0, "+ button becomes the chat button on a note"
+        await page.get_by_role("button", name="노트에게 물어보기").click()
+        chat = page.get_by_role("dialog", name="노트에게 물어보기")
+        await expect(chat).to_be_visible()
+        await shot(page, "40-chat-empty", full=False)
+        await no_hscroll(page, "chat")
+        box = chat.get_by_label("물어볼 내용")
+        await box.fill("광합성은 어디서 일어나?")
+        await box.press("Enter")
+        await expect(chat.get_by_text(re.compile("노트에 따르면 광합성은")).first).to_be_visible(timeout=15000)
+        assert "**" not in await chat.inner_text(), "markdown marks are removed from replies"
+        await expect(chat.get_by_text(re.compile(r"^⚡ [\d.]+$")).first).to_be_visible()
+        n_before = live_q()
+        await box.fill("이 노트로 문제 만들어 줘")
+        await box.press("Enter")
+        await expect(chat.get_by_text("이 문제 2개를 노트에 넣을까요?")).to_be_visible(timeout=15000)
+        assert live_q() == n_before, "questions must not be added before [넣기]"
+        await shot(page, "41-chat-proposal", full=False)
+        await chat.get_by_role("button", name="넣기", exact=True).click()
+        await expect(page.get_by_text("문제 2개를 넣었어요.")).to_be_visible()
+        await expect(chat.get_by_text("넣었어요 ✓")).to_be_visible()
+        assert live_q() == n_before + 2, (n_before, live_q())
+        # 두 번 눌러도 한 번만 들어간다 (서버가 먼저 상태를 바꾼다)
+        msg_id = psql(f"select m.id from public.chat_messages m join public.notes n on n.id = m.note_id where n.source_id = '{note_sid}' and m.proposal->>'kind' = 'questions'")
+        note_id = psql(f"select id from public.notes where source_id = '{note_sid}'")
+        r = await page.request.post(BASE + f"/api/notes/{note_id}/chat/apply", headers={"origin": BASE}, data={"messageId": msg_id, "action": "apply"})
+        assert r.status == 409, r.status
+        assert live_q() == n_before + 2
+        await box.fill("엽록체 내용을 노트에 넣어 줘")
+        await box.press("Enter")
+        await expect(chat.get_by_text("'광합성 장소: 엽록체' 개념에 넣을까요?")).to_be_visible(timeout=15000)
+        await expect(chat.get_by_text("노트 밖 설명 포함").first).to_be_visible()
+        await chat.get_by_role("button", name="넣기", exact=True).click()
+        await expect(page.get_by_text("노트에 넣었어요.")).to_be_visible()
+        await box.fill("문제 하나만 더 만들어 줘")
+        await box.press("Enter")
+        await expect(chat.get_by_role("button", name="취소", exact=True)).to_be_visible(timeout=15000)
+        await chat.get_by_role("button", name="취소", exact=True).click()
+        await expect(chat.get_by_text("넣지 않았어요")).to_be_visible()
+        assert live_q() == n_before + 2
+        await shot(page, "42-chat-done", full=False)
+        # 모델을 바꾸면 기억한다
+        await chat.get_by_role("radio", name=re.compile("^꼼꼼")).click()
+        await expect(chat.get_by_role("radio", name=re.compile("^꼼꼼"))).to_have_attribute("aria-checked", "true")
+        await page.wait_for_timeout(800)
+        await page.keyboard.press("Escape")
+        await expect(chat).to_be_hidden()
+        await expect(page.get_by_text(re.compile("두 겹의 막으로 싸여 있어요"))).to_be_visible()
+        await page.reload()
+        assert await wait_ready(page)
+        await page.get_by_role("button", name="노트에게 물어보기").click()
+        await expect(chat.get_by_text("광합성은 어디서 일어나?")).to_be_visible()  # 대화는 노트마다 남는다
+        await expect(chat.get_by_role("radio", name=re.compile("^꼼꼼"))).to_have_attribute("aria-checked", "true")
+        # 설정에서 문제 넣기를 끄면 AI 가 문제를 내밀지 않는다
+        await page.goto(BASE + "/settings#chat")
+        await page.wait_for_timeout(900)  # #chat 으로 부드럽게 내려간 뒤에 누른다
+        toggle = page.get_by_label("대화하다가 '문제로 넣어 줘' 하면 문제로 만들어 주기")
+        await expect(toggle).to_be_checked()
+        await page.get_by_text("대화하다가 '문제로 넣어 줘' 하면 문제로 만들어 주기").click()
+        await expect(toggle).not_to_be_checked()
+        await expect(page.get_by_text("저장됨")).to_be_visible(timeout=5000)
+        await shot(page, "42-settings-chat", full=False)
+        await page.goto(BASE + f"/notes/{note_sid}")
+        assert await wait_ready(page)
+        await page.get_by_role("button", name="노트에게 물어보기").click()
+        msgs = chat.get_by_role("log").locator(":scope > ul > li")
+        await expect(msgs.first).to_be_visible()
+        n_msgs = await msgs.count()
+        n_cards = await chat.get_by_text(re.compile("개를 노트에 넣을까요")).count()
+        await chat.get_by_label("물어볼 내용").fill("문제 만들어 줘")
+        await chat.get_by_label("물어볼 내용").press("Enter")
+        await expect(msgs).to_have_count(n_msgs + 2, timeout=15000)  # 내 말 + 답
+        assert await chat.get_by_text(re.compile("개를 노트에 넣을까요")).count() == n_cards, "no question proposal when turned off"
+        await page.keyboard.press("Escape")
+
+        # ---------------- 노트에 자료 더하기와 버전 (Pro)
+        step("add material to a note (Pro): a new version, the old one stays")
+        await page.get_by_role("tab", name="원본").click()
+        add = page.get_by_role("region", name="이 노트에 자료 더하기")
+        await add.get_by_label("더할 내용").fill("광합성과 호흡을 비교해 보자. 호흡은 포도당을 분해해서 에너지를 얻는 과정이고 밤낮없이 일어난다.")
+        await expect(add.get_by_text(re.compile(r"⚡ 약 [\d.]+"))).to_be_visible()
+        await shot(page, "43-append-form", full=False)
+        n_live = live_q()
+        await add.get_by_role("button", name="글 더하기").click()
+        await expect(page.get_by_text("이 노트에 자료를 더하는 중이에요")).to_be_visible(timeout=20000)
+        await shot(page, "44-append-progress", full=False)
+        await expect(page.get_by_text("자료를 더해 새 버전을 만들었어요.")).to_be_visible(timeout=90000)
+        versions = page.get_by_role("region", name="버전 기록")
+        await expect(versions.get_by_text("버전 2 · 더한 자료")).to_be_visible()
+        await expect(versions.get_by_text("지금 쓰는 버전")).to_be_visible()
+        await shot(page, "45-versions")
+        await no_hscroll(page, "versions")
+        assert psql(f"select count(*) from public.note_versions v join public.notes n on n.id = v.note_id where n.source_id = '{note_sid}'") == "2"
+        assert live_q() == n_live + 2, (n_live, live_q())  # 새 자료 문제만 더한다
+        await page.get_by_role("tab", name="정리").click()
+        await expect(page.get_by_role("heading", name=re.compile("광합성과 호흡"))).to_be_visible()
+        # 자료함에는 더한 자료가 따로 보이지 않는다
+        await page.goto(BASE + "/library")
+        await page.wait_for_timeout(800)
+        assert await page.get_by_text(re.compile("광합성과 호흡을 비교해")).count() == 0
+
+        step("old version: open, edit, use it, delete the other")
+        await page.goto(BASE + f"/notes/{note_sid}?tab=original")
+        assert await wait_ready(page)
+        await versions.locator("li").filter(has_text="버전 1 · 처음 자료").get_by_role("button", name="열기").click()
+        await expect(page.get_by_text("지난 버전을 보고 있어요")).to_be_visible()
+        assert "v=1" in page.url, page.url
+        await expect(page.get_by_role("heading", name=re.compile("광합성과 호흡"))).to_have_count(0)
+        await page.get_by_role("button", name="요약 고치기").click()
+        await page.get_by_label("요약").fill("버전 1에서 고친 요약이에요.")
+        await page.get_by_role("button", name="저장", exact=True).first.click()
+        await expect(page.get_by_text("버전 1에서 고친 요약이에요.")).to_be_visible()
+        await page.wait_for_timeout(600)
+        v1_summary = lambda: psql(f"select v.body->>'summary' from public.note_versions v join public.notes n on n.id = v.note_id where n.source_id = '{note_sid}' and v.number = 1")
+        assert v1_summary() == "버전 1에서 고친 요약이에요.", v1_summary()
+        assert psql(f"select body->>'summary' from public.notes where source_id = '{note_sid}'") != "버전 1에서 고친 요약이에요."
+        await page.get_by_role("tab", name=re.compile("문제")).click()
+        await expect(page.get_by_text(re.compile("버전 1의 문제예요"))).to_be_visible()
+        await expect(page.get_by_text("식물은 밤에도 호흡을 한다.")).to_have_count(0)
+        await page.get_by_role("button", name="직접 만들기").click()
+        dlg = page.get_by_role("dialog")
+        await dlg.get_by_role("radio", name="OX").click()
+        await dlg.get_by_label("문제", exact=True).fill("버전 1에만 있는 문제이다.")
+        await dlg.get_by_role("button", name="저장", exact=True).click()
+        await expect(page.get_by_text("버전 1에 문제를 만들었어요.")).to_be_visible()
+        await expect(page.get_by_text("버전 1에만 있는 문제이다.")).to_be_visible()
+        assert psql("select status from public.questions where prompt = '버전 1에만 있는 문제이다.'") == "hidden"
+        await shot(page, "46-old-version", full=False)
+        page.once("dialog", lambda d: d.accept())
+        await page.get_by_role("button", name="이 버전 쓰기").first.click()
+        await expect(page.get_by_text("지금 버전을 바꿨어요 (버전 1).")).to_be_visible()
+        await expect(page.get_by_text("지난 버전을 보고 있어요")).to_have_count(0)
+        assert "v=" not in page.url, page.url
+        assert psql(f"select current_version from public.notes where source_id = '{note_sid}'") == "1"
+        assert psql("select status from public.questions where prompt = '식물은 밤에도 호흡을 한다.'") == "hidden"
+        assert psql("select status from public.questions where prompt = '버전 1에만 있는 문제이다.'") == "active"
+        await expect(page.get_by_text("버전 1에만 있는 문제이다.")).to_be_visible()
+        await expect(page.get_by_text("식물은 밤에도 호흡을 한다.")).to_have_count(0)
+        await page.get_by_role("tab", name="원본").click()
+        page.once("dialog", lambda d: d.accept())
+        await versions.locator("li").filter(has_text="버전 2 · 더한 자료").get_by_role("button", name="지우기").click()
+        await expect(page.get_by_text("버전을 지웠어요.")).to_be_visible()
+        await expect(versions.get_by_text("버전 2 · 더한 자료")).to_have_count(0)
+        assert psql("select count(*) from public.questions where prompt = '식물은 밤에도 호흡을 한다.'") == "0"
+        assert psql(f"select count(*) from public.sources where parent_id = '{note_sid}'") == "0"
+
+        step("dropping a file on a note asks before adding it")
+        await drag_files(page, [("메모.txt", "text/plain", "호흡과 광합성의 차이를 정리한 메모예요. 호흡은 에너지를 꺼내 쓴다.".encode())])
+        await expect(page.get_by_text("여기에 놓으면 이 노트에 더해요")).to_be_visible()
+        await drop_files(page)
+        sheet = page.get_by_role("dialog", name="이 노트에 더할까요?")
+        await expect(sheet.get_by_text("메모.txt")).to_be_visible()
+        await shot(page, "47-append-confirm", full=False)
+        await sheet.get_by_role("button", name="취소").click()
+        await expect(sheet).to_be_hidden()
+        assert await page.get_by_label("넣는 중인 자료").count() == 0, "nothing is added without confirming"
+        await ctx.close()
+
+        step("free users cannot add material to a note")
+        octx, opage = await new_ctx(browser, "other")
+        await opage.goto(BASE + f"/notes/{sid}")
+        assert await wait_ready(opage), "other's note not ready"
+        await drag_files(opage, [("단어.txt", "text/plain", "orange 는 오렌지, grape 는 포도라는 뜻이다. 과일 단어를 더 외우자.".encode())])
+        await drop_files(opage)
+        sheet = opage.get_by_role("dialog", name="노트에 더하기는 Pro 기능이에요")
+        await expect(sheet.get_by_role("button", name="새 노트로 넣기")).to_be_visible()
+        await shot(opage, "47-append-free", full=False)
+        await sheet.get_by_role("button", name="취소").click()
+        await opage.get_by_role("tab", name="원본").click()
+        await expect(opage.get_by_role("region", name="이 노트에 자료 더하기").get_by_role("link", name="요금제 보기")).to_be_visible()
+        r = await opage.request.post(BASE + "/api/sources", headers={"origin": BASE}, data={"id": str(uuid.uuid4()), "subjectId": subject_id, "kind": "text", "title": "", "text": words, "parentId": sid})
+        assert r.status == 403, (r.status, await r.text())
+        await octx.close()
+
         # 다크 모드 폰 한 장
         step("dark phone note")
         ctx, page = await new_ctx(browser, "student", scheme="dark")
@@ -745,6 +931,42 @@ async def main():
         assert len(centers) > 3 and (max(xs) - min(xs)) + (max(ys) - min(ys)) > 150, centers
         await shot(page, "34-mindmap-step", full=False)
         await ctx.close()
+
+        # ---------------- 테마 (Pro)
+        step("themes (Pro): colour, font and note paper")
+        ctx, page = await new_ctx(browser, "student")
+        await page.goto(BASE + "/settings#theme")
+        await page.get_by_role("radiogroup", name="테마 색").get_by_role("radio", name="바다").click()
+        await expect(page.locator("html")).to_have_attribute("data-theme", "ocean")
+        await page.get_by_role("radiogroup", name="테마 글꼴").get_by_role("radio", name=re.compile("둥근 글씨")).click()
+        await expect(page.locator("html")).to_have_attribute("data-font", "round")
+        await page.get_by_role("radiogroup", name="노트 종이 무늬").get_by_role("radio", name="줄 노트").click()
+        await expect(page.locator("html")).to_have_attribute("data-paper", "lined")
+        await expect(page.get_by_text("저장됨")).to_be_visible(timeout=5000)
+        await page.locator("#theme").scroll_into_view_if_needed()
+        await shot(page, "48-settings-theme", full=False)
+        await no_hscroll(page, "settings theme")
+        await page.goto(BASE + f"/notes/{note_sid}")
+        # 다시 열면 화면을 그리기 전에 붙는다
+        assert await page.evaluate("document.documentElement.dataset.theme") == "ocean"
+        assert await wait_ready(page)
+        accent = await page.evaluate("getComputedStyle(document.documentElement).getPropertyValue('--accent').trim()")
+        assert accent.lower() == "#1a5fc2", accent
+        font = await page.evaluate("getComputedStyle(document.body).fontFamily")
+        assert "Gowun Dodum" in font, font
+        await shot(page, "49-note-theme")
+        await ctx.close()
+        ctx, page = await new_ctx(browser, "student", scheme="dark")
+        await page.goto(BASE + f"/notes/{note_sid}")
+        assert await wait_ready(page)
+        await expect(page.locator("html")).to_have_attribute("data-theme", "ocean")
+        await shot(page, "49-note-theme-dark", full=False)
+        await ctx.close()
+        octx, opage = await new_ctx(browser, "other")
+        await opage.goto(BASE + "/settings#theme")
+        await expect(opage.get_by_role("radiogroup", name="테마 색").get_by_role("radio", name="바다")).to_be_disabled()
+        assert await opage.evaluate("document.documentElement.dataset.theme || ''") == ""
+        await octx.close()
         await browser.close()
 
     print("\nSTEPS OK:", len(STEPS))

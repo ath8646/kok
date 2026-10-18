@@ -105,8 +105,8 @@ export function NoteView({
 
   return (
     <div className="grid gap-5">
-      {/* 한 줄 요약 */}
-      <section className="kok-card p-4">
+      {/* 한 줄 요약 (kok-paper: 테마의 노트 종이 무늬) */}
+      <section className="kok-card kok-paper p-4">
         <div className="mb-1 flex items-center justify-between gap-2">
           <h3 className="text-sm font-bold text-muted">한 줄 요약</h3>
           {editable && editing !== 'summary' ? <PencilButton label="요약 고치기" onClick={() => setEditing('summary')} /> : null}
@@ -135,7 +135,7 @@ export function NoteView({
             <article
               key={kp.id}
               id={`kp-${kp.id}`}
-              className={cx('kok-card p-4 transition-shadow', hl && 'shadow-[0_0_0_3px_var(--hl)]')}
+              className={cx('kok-card kok-paper p-4 transition-shadow', hl && 'shadow-[0_0_0_3px_var(--hl)]')}
               onClick={() => onSelectKeyPoint?.(hl ? null : kp.id)}
             >
               <div className="flex items-start gap-3">

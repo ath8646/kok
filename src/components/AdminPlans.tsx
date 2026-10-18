@@ -15,6 +15,9 @@ export type PlanRow = {
   text_chars: number;
   file_mb: number;
   careful: boolean;
+  /** schema.sql 을 다시 실행하기 전에는 없다 */
+  can_append?: boolean;
+  can_theme?: boolean;
   note: string | null;
   created_at: string;
   active_users: number;
@@ -45,6 +48,8 @@ type PlanForm = {
   textChars: string;
   fileMb: string;
   careful: boolean;
+  canAppend: boolean;
+  canTheme: boolean;
   note: string;
 };
 
@@ -77,6 +82,8 @@ function blankForm(L: Limits): PlanForm {
     textChars: String(L.textCharsPro),
     fileMb: String(Math.min(L.fileMbPro, MAX_FILE_MB)),
     careful: true,
+    canAppend: true,
+    canTheme: true,
     note: '',
   };
 }
@@ -93,6 +100,8 @@ function formFrom(p: PlanRow): PlanForm {
     textChars: String(p.text_chars),
     fileMb: String(p.file_mb),
     careful: p.careful,
+    canAppend: p.can_append === true,
+    canTheme: p.can_theme === true,
     note: p.note ?? '',
   };
 }
@@ -100,7 +109,7 @@ function formFrom(p: PlanRow): PlanForm {
 /** 폼 → 서버로 보낼 값. 빈칸이면 무엇이 빠졌는지 알려 준다 */
 function toBody(f: PlanForm): { body: Record<string, unknown> } | { error: string } {
   if (!f.name.trim()) return { error: '플랜 이름을 적어 주세요.' };
-  const out: Record<string, unknown> = { name: f.name.trim(), careful: f.careful, note: f.note.trim() };
+  const out: Record<string, unknown> = { name: f.name.trim(), careful: f.careful, canAppend: f.canAppend, canTheme: f.canTheme, note: f.note.trim() };
   for (const field of NUM_FIELDS) {
     const raw = f[field.key].trim();
     if (!raw) {
@@ -282,6 +291,8 @@ export function AdminPlans({ limits, onChanged, refreshKey = 0 }: { limits: Limi
                     <Chip tone="hl">⚡ {fmt(num(p.energy_total) ?? 0)}</Chip>
                     {daily !== null ? <Chip>하루 ⚡ {fmt(daily)}</Chip> : null}
                     {p.careful ? <Chip tone="accent">꼼꼼 모델</Chip> : null}
+                    {p.can_append ? <Chip tone="accent">자료 더하기</Chip> : null}
+                    {p.can_theme ? <Chip tone="accent">테마</Chip> : null}
                     <Chip tone={p.active_users ? 'ok' : 'plain'}>쓰는 사람 {p.active_users}명</Chip>
                   </div>
                   <p className="text-xs text-muted">
@@ -462,6 +473,8 @@ export function AdminPlans({ limits, onChanged, refreshKey = 0 }: { limits: Limi
               참고: 무료는 하루 ⚡ {fmt(limits.freeDaily)}, Pro는 한 달 ⚡ {fmt(limits.proMonthly)} (하루 최대 ⚡ {fmt(limits.proDaily)})예요.
             </p>
             <Toggle id="plan-careful" label="꼼꼼 모델 쓰기" checked={form.careful} onChange={(v) => setForm({ ...form, careful: v })} />
+            <Toggle id="plan-append" label="노트에 자료 더하기 (버전)" checked={form.canAppend} onChange={(v) => setForm({ ...form, canAppend: v })} />
+            <Toggle id="plan-theme" label="테마 쓰기" checked={form.canTheme} onChange={(v) => setForm({ ...form, canTheme: v })} />
             <input
               aria-label="메모"
               className={inputClass}

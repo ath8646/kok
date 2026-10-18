@@ -47,17 +47,22 @@ export function QuestionPreview({
 
 export type CardInfo = { lapses: number; wrong_count: number; in_wrong_note: boolean; due: string; reps: number };
 
+/** 지우기를 바꿀 때 (노트 버전: 다른 버전에 있는 문제는 지우지 않고 이 버전에서만 뺀다) */
+export type QuestionRemoval = { label: string; confirm: string; run: () => Promise<boolean> };
+
 export function QuestionList({
   questions,
   cards,
   keyPoints,
   onChanged,
+  removal,
   emptyText = '문제가 없어요.',
 }: {
   questions: QuestionRow[];
   cards?: Map<string, CardInfo>;
   keyPoints?: Array<{ id: string; title: string }>;
   onChanged: () => void;
+  removal?: (q: QuestionRow) => QuestionRemoval;
   emptyText?: string;
 }) {
   const toast = useToast();
@@ -92,6 +97,7 @@ export function QuestionList({
                   {q.locked ? <Chip tone="hl">🔒 잠금</Chip> : null}
                   {q.edited ? <Chip tone="accent">고침</Chip> : null}
                   {q.status === 'suspended' ? <Chip tone="warn">쉬는 중</Chip> : null}
+                  {q.status === 'hidden' ? <Chip>지금 버전엔 없음</Chip> : null}
                   {c && c.wrong_count > 0 ? <Chip tone="bad">틀림 {c.wrong_count}</Chip> : null}
                 </span>
                 {!isOpen ? (
@@ -116,19 +122,22 @@ export function QuestionList({
                   >
                     {q.locked ? '잠금 풀기' : '잠그기'}
                   </Button>
-                  <Button
-                    size="sm"
-                    variant="secondary"
-                    onClick={() =>
-                      update(
-                        q.id,
-                        { status: q.status === 'active' ? 'suspended' : 'active' },
-                        q.status === 'active' ? '복습에서 뺐어요.' : '다시 복습에 넣었어요.',
-                      )
-                    }
-                  >
-                    {q.status === 'active' ? '잠깐 쉬기' : '다시 내기'}
-                  </Button>
+                  {/* 지금 버전에 없는 문제(hidden)는 복습에 나오지 않으므로 쉬기·다시 내기가 없다 */}
+                  {q.status !== 'hidden' ? (
+                    <Button
+                      size="sm"
+                      variant="secondary"
+                      onClick={() =>
+                        update(
+                          q.id,
+                          { status: q.status === 'active' ? 'suspended' : 'active' },
+                          q.status === 'active' ? '복습에서 뺐어요.' : '다시 복습에 넣었어요.',
+                        )
+                      }
+                    >
+                      {q.status === 'active' ? '잠깐 쉬기' : '다시 내기'}
+                    </Button>
+                  ) : null}
                   <Button size="sm" variant="ghost" onClick={() => setReporting(q)}>
                     이상해요
                   </Button>
@@ -137,13 +146,14 @@ export function QuestionList({
                     variant="ghost"
                     className="ml-auto text-bad"
                     onClick={async () => {
-                      if (!confirm('이 문제를 지울까요? 푼 기록도 같이 지워져요.')) return;
-                      const { error } = await sb().from('questions').delete().eq('id', q.id);
-                      if (error) toast('지우지 못했어요.', 'bad');
+                      const r = removal?.(q);
+                      if (!confirm(r?.confirm ?? '이 문제를 지울까요? 푼 기록도 같이 지워져요.')) return;
+                      const ok = r ? await r.run() : !(await sb().from('questions').delete().eq('id', q.id)).error;
+                      if (!ok) toast('지우지 못했어요.', 'bad');
                       else onChanged();
                     }}
                   >
-                    지우기
+                    {removal?.(q).label ?? '지우기'}
                   </Button>
                 </div>
               </div>
@@ -321,11 +331,15 @@ export function ReportSheet({
   );
 }
 
-/** 직접 문제 만들기 (AI 비용 없음): 문제 + 복습 카드를 같이 만든다 */
-export async function createOwnQuestion(d: QuestionDraft, ctx: { noteId: string | null; subjectId: string }): Promise<boolean> {
+/**
+ * 직접 문제 만들기 (AI 비용 없음): 문제 + 복습 카드를 같이 만든다 → 만든 문제 번호 (못 만들면 null).
+ * hidden: 지난 노트 버전에 만드는 문제 (그 버전을 쓰기 전에는 복습에 나오지 않는다)
+ */
+export async function createOwnQuestion(d: QuestionDraft, ctx: { noteId: string | null; subjectId: string; hidden?: boolean }): Promise<string | null> {
   const { data, error } = await sb()
     .from('questions')
     .insert({
+      ...(ctx.hidden ? { status: 'hidden' } : {}),
       note_id: ctx.noteId,
       subject_id: ctx.subjectId,
       key_point_id: d.key_point_id,
@@ -340,7 +354,7 @@ export async function createOwnQuestion(d: QuestionDraft, ctx: { noteId: string 
     })
     .select('id')
     .single();
-  if (error || !data) return false;
+  if (error || !data) return null;
   const { error: cErr } = await sb().from('cards').insert({ question_id: data.id, subject_id: ctx.subjectId, due: new Date().toISOString() });
-  return !cErr;
+  return cErr ? null : (data.id as string);
 }

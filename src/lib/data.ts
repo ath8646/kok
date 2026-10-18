@@ -33,12 +33,44 @@ export const SOURCE_COLS =
 
 export type SourceRowWithUnit = SourceListRow & { unit: string };
 
-export async function fetchSources(opts: { subjectId?: string; active?: boolean; limit?: number } = {}): Promise<SourceRowWithUnit[]> {
-  let q = sb().from('sources').select(SOURCE_COLS).order('created_at', { ascending: false });
-  if (opts.subjectId) q = q.eq('subject_id', opts.subjectId);
-  if (opts.active) q = q.in('status', ['queued', 'processing', 'error']);
-  if (opts.limit) q = q.limit(opts.limit);
-  const { data, error } = await q;
+/** 노트에 더한 자료 칸(parent_id)이 DB 에 있는지 (schema.sql 을 다시 실행하기 전에는 없다). 처음 읽을 때 알아낸다 */
+let parentCol: boolean | null = null;
+function missingParentCol(e: unknown): boolean {
+  const err = e as { code?: string; message?: string } | null;
+  return !!err && (err.code === '42703' || err.code === '42501' || /parent_id/.test(err.message ?? ''));
+}
+
+/**
+ * 자료 목록은 노트에 더한 자료(부모가 있는 자료)를 빼고 읽는다 (그 자료는 노트의 원본 탭에 보인다).
+ * make(true) 는 부모가 없는 자료만 읽는 요청을 만든다. 칸이 아직 없으면 make(false) 로 그냥 읽는다.
+ */
+export async function topLevelSources<T>(
+  make: (onlyTop: boolean) => PromiseLike<{ data: T | null; error: unknown }>,
+): Promise<{ data: T | null; error: unknown }> {
+  if (parentCol !== false) {
+    const r = await make(true);
+    if (!r.error) {
+      parentCol = true;
+      return r;
+    }
+    if (!missingParentCol(r.error)) return r;
+    parentCol = false;
+  }
+  return make(false);
+}
+
+export async function fetchSources(
+  opts: { subjectId?: string; active?: boolean; limit?: number; /** 노트에 더하는 자료도 (동시에 정리하는 수 세기) */ withChildren?: boolean } = {},
+): Promise<SourceRowWithUnit[]> {
+  const build = (onlyTop: boolean) => {
+    let q = sb().from('sources').select(SOURCE_COLS).order('created_at', { ascending: false });
+    if (onlyTop) q = q.is('parent_id', null);
+    if (opts.subjectId) q = q.eq('subject_id', opts.subjectId);
+    if (opts.active) q = q.in('status', ['queued', 'processing', 'error']);
+    if (opts.limit) q = q.limit(opts.limit);
+    return q;
+  };
+  const { data, error } = opts.withChildren ? await build(false) : await topLevelSources(build);
   if (error) throw error;
   return (data ?? []) as SourceRowWithUnit[];
 }

@@ -42,6 +42,8 @@ export function VisualPanel({
   onViewChange,
   onReport,
   onOpen,
+  saveSpec,
+  aiLocked,
   compact = false,
 }: {
   me: MeResponse;
@@ -57,6 +59,10 @@ export function VisualPanel({
   onReport?: () => void;
   /** 한눈에 보기에서 누르면 그림 탭으로 */
   onOpen?: () => void;
+  /** 고친 그림 저장을 바꾼다 (지난 버전 보기: 그 버전에 저장). 없으면 지금 노트의 그림에 저장 */
+  saveSpec?: (t: VisualType, spec: Mindmap | TableSpec | TimelineSpec) => Promise<boolean>;
+  /** AI 로 다시 그리기를 막을 때 그 까닭 (지난 버전 보기) */
+  aiLocked?: string;
   compact?: boolean;
 }) {
   const toast = useToast();
@@ -83,8 +89,8 @@ export function VisualPanel({
   const save = async (t: VisualType, spec: Mindmap | TableSpec | TimelineSpec) => {
     setLocal((v) => ({ ...v, [t]: spec }));
     setSaving('saving');
-    const { error } = await sb().from('visuals').update({ spec }).eq('note_id', noteId).eq('type', t);
-    if (error) {
+    const ok = saveSpec ? await saveSpec(t, spec) : !(await sb().from('visuals').update({ spec }).eq('note_id', noteId).eq('type', t)).error;
+    if (!ok) {
       setSaving('idle');
       toast('저장하지 못했어요.', 'bad');
     } else setSaving('saved');
@@ -211,10 +217,11 @@ export function VisualPanel({
 
       <Sheet open={more} onClose={() => setMore(false)} title="그림 더보기">
         <div className="grid gap-2">
+          {aiLocked ? <p className="rounded-2xl bg-surface-2 px-3 py-2 text-sm text-muted">{aiLocked}</p> : null}
           <Button
             variant="secondary"
             className="justify-between"
-            disabled={!!busy || !me.aiEnabled}
+            disabled={!!busy || !me.aiEnabled || !!aiLocked}
             onClick={() => {
               setMore(false);
               regenerate();
@@ -227,7 +234,7 @@ export function VisualPanel({
             <Button
               variant="secondary"
               className="justify-between"
-              disabled={!!busy || !me.aiEnabled}
+              disabled={!!busy || !me.aiEnabled || !!aiLocked}
               onClick={() => {
                 setMore(false);
                 regenerate('table');
@@ -241,7 +248,7 @@ export function VisualPanel({
             <Button
               variant="secondary"
               className="justify-between"
-              disabled={!!busy || !me.aiEnabled}
+              disabled={!!busy || !me.aiEnabled || !!aiLocked}
               onClick={() => {
                 setMore(false);
                 regenerate('timeline');

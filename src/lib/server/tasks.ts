@@ -32,8 +32,20 @@ export async function runTask(
     /** 한 번 기다리는 최대 시간. 라우트 제한 시간보다 짧아야 한다 */
     timeoutMs: number;
     sourceId?: string | null;
+    /** 공통 지시 대신 쓸 지시 (노트 채팅) */
+    system?: string;
   },
 ): Promise<unknown> {
+  return (await runTaskFull(admin, acc, app, t)).json;
+}
+
+/** runTask 와 같고, 쓴 에너지와 모델도 돌려준다 */
+export async function runTaskFull(
+  admin: SupabaseClient,
+  acc: Account,
+  app: AppSettings,
+  t: Parameters<typeof runTask>[3],
+): Promise<{ json: unknown; energy: number; model: string }> {
   const model = modelForTier(app.models, t.tier, acc.canCareful, acc.isAdmin);
   const estimate =
     t.minEstimate === 0 ? 0 : Math.max(t.minEstimate ?? 0, estimateSmallTask(model, app.limits.usdPerEnergy, contentTokens(t.content), t.outTokens));
@@ -47,9 +59,10 @@ export async function runTask(
       maxTokens: t.maxTokens,
       timeoutMs: t.timeoutMs,
       maxRetries: 0,
+      system: t.system,
     });
-    await charge(admin, { acc, task: t.task, model: res.model, usage: res.usage, usdPerEnergy: app.limits.usdPerEnergy, sourceId: t.sourceId });
-    return res.json;
+    const cost = await charge(admin, { acc, task: t.task, model: res.model, usage: res.usage, usdPerEnergy: app.limits.usdPerEnergy, sourceId: t.sourceId });
+    return { json: res.json, energy: cost.energy, model: res.model };
   } catch (e) {
     const usage = usageOf(e);
     if (usage) await charge(admin, { acc, task: t.task, model, usage, usdPerEnergy: app.limits.usdPerEnergy, sourceId: t.sourceId });

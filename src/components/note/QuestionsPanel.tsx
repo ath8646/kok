@@ -5,7 +5,7 @@ import type { MeResponse, QuestionRow } from '@/lib/types';
 import { estimateSmallTask } from '@/lib/ai/models';
 import { clientModel } from '@/lib/client-model';
 import { QuestionEditor } from '../QuestionEditor';
-import { QuestionList, QuestionPreview, createOwnQuestion, type CardInfo } from '../QuestionList';
+import { QuestionList, QuestionPreview, createOwnQuestion, type CardInfo, type QuestionRemoval } from '../QuestionList';
 import { Button, LinkButton, Sheet, api, useToast } from '../ui';
 
 type PreviewRow = Pick<QuestionRow, 'type' | 'prompt' | 'choices' | 'answer' | 'accepted' | 'explanation' | 'difficulty' | 'pages'> & { key_point_id: string };
@@ -18,6 +18,8 @@ export function QuestionsPanel({
   cards,
   keyPoints,
   onChanged,
+  removal,
+  oldVersion,
 }: {
   me: MeResponse;
   noteId: string;
@@ -26,6 +28,10 @@ export function QuestionsPanel({
   cards: Map<string, CardInfo>;
   keyPoints: Array<{ id: string; title: string }>;
   onChanged: () => void;
+  /** 지우기 대신 (노트 버전이 있으면 다른 버전의 문제는 남긴다) */
+  removal?: (q: QuestionRow) => QuestionRemoval;
+  /** 지난 버전을 보고 있을 때: 만든 문제를 그 버전 목록에 넣는다 */
+  oldVersion?: { number: number; addQuestion: (id: string) => Promise<boolean> };
 }) {
   const toast = useToast();
   const [adding, setAdding] = useState(false);
@@ -38,36 +44,49 @@ export function QuestionsPanel({
   return (
     <div className="grid gap-3">
       <div className="flex flex-wrap gap-2">
-        <LinkButton href={`/review?note=${noteId}`}>이 노트 문제 풀기</LinkButton>
+        {!oldVersion ? <LinkButton href={`/review?note=${noteId}`}>이 노트 문제 풀기</LinkButton> : null}
         <Button variant="secondary" onClick={() => setAdding(true)}>
           직접 만들기
         </Button>
-        <Button
-          variant="secondary"
-          busy={busy}
-          disabled={!me.aiEnabled}
-          onClick={async () => {
-            setBusy(true);
-            try {
-              const r = await api<{ preview: PreviewRow[]; replaceCount: number; keptCount: number }>(`/api/notes/${noteId}/quiz`, {
-                method: 'POST',
-                body: JSON.stringify({ action: 'preview' }),
-              });
-              if (!r.preview.length) toast('새 문제를 만들지 못했어요. 다시 해 주세요.', 'bad');
-              else setPreview({ rows: r.preview, replaceCount: r.replaceCount, keptCount: r.keptCount });
-            } catch (e) {
-              toast((e as Error).message, 'bad');
-            } finally {
-              setBusy(false);
-            }
-          }}
-        >
-          다시 만들기 ⚡{est}
-        </Button>
+        {!oldVersion ? (
+          <Button
+            variant="secondary"
+            busy={busy}
+            disabled={!me.aiEnabled}
+            onClick={async () => {
+              setBusy(true);
+              try {
+                const r = await api<{ preview: PreviewRow[]; replaceCount: number; keptCount: number }>(`/api/notes/${noteId}/quiz`, {
+                  method: 'POST',
+                  body: JSON.stringify({ action: 'preview' }),
+                });
+                if (!r.preview.length) toast('새 문제를 만들지 못했어요. 다시 해 주세요.', 'bad');
+                else setPreview({ rows: r.preview, replaceCount: r.replaceCount, keptCount: r.keptCount });
+              } catch (e) {
+                toast((e as Error).message, 'bad');
+              } finally {
+                setBusy(false);
+              }
+            }}
+          >
+            다시 만들기 ⚡{est}
+          </Button>
+        ) : null}
       </div>
-      <p className="text-xs text-muted">잠근 문제, 내가 고친 문제, 내가 만든 문제는 다시 만들어도 그대로 남아요.</p>
+      <p className="text-xs text-muted">
+        {oldVersion
+          ? `버전 ${oldVersion.number}의 문제예요. 여기서 만든 문제는 이 버전을 쓸 때 복습에 나와요. AI로 다시 만들려면 이 버전을 먼저 써 주세요.`
+          : '잠근 문제, 내가 고친 문제, 내가 만든 문제는 다시 만들어도 그대로 남아요.'}
+      </p>
 
-      <QuestionList questions={questions} cards={cards} keyPoints={keyPoints} onChanged={onChanged} emptyText="이 노트에는 아직 문제가 없어요." />
+      <QuestionList
+        questions={questions}
+        cards={cards}
+        keyPoints={keyPoints}
+        onChanged={onChanged}
+        removal={removal}
+        emptyText={oldVersion ? '이 버전에는 문제가 없어요.' : '이 노트에는 아직 문제가 없어요.'}
+      />
 
       <Sheet open={adding} onClose={() => setAdding(false)} title="문제 직접 만들기">
         <QuestionEditor
@@ -76,10 +95,11 @@ export function QuestionsPanel({
           onCancel={() => setAdding(false)}
           onSave={async (d) => {
             setSaving(true);
-            const ok = await createOwnQuestion(d, { noteId, subjectId });
+            const id = await createOwnQuestion(d, { noteId, subjectId, hidden: !!oldVersion });
+            const ok = !!id && (!oldVersion || (await oldVersion.addQuestion(id)));
             setSaving(false);
             if (!ok) return toast('저장하지 못했어요.', 'bad');
-            toast('문제를 만들었어요. 오늘 복습에 나와요.', 'ok');
+            toast(oldVersion ? `버전 ${oldVersion.number}에 문제를 만들었어요.` : '문제를 만들었어요. 오늘 복습에 나와요.', 'ok');
             setAdding(false);
             onChanged();
           }}

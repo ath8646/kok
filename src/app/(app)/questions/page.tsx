@@ -27,7 +27,9 @@ export default function QuestionsPage() {
     let alive = true;
     Promise.all([
       fetchSubjects(),
-      fetchAll<QuestionRow>((a, b) => sb().from('questions').select(QCOLS).order('created_at', { ascending: false }).order('id').range(a, b)),
+      fetchAll<QuestionRow>((a, b) =>
+        sb().from('questions').select(QCOLS).neq('status', 'hidden').order('created_at', { ascending: false }).order('id').range(a, b),
+      ),
       fetchAll<{ question_id: string } & CardInfo>((a, b) =>
         sb().from('cards').select('question_id, lapses, wrong_count, in_wrong_note, due, reps').order('question_id').range(a, b),
       ),

@@ -44,6 +44,8 @@ export type JsonCall = {
   timeoutMs?: number;
   /** SDK 자동 재시도 횟수 (기본 1). 자료 처리는 단계마다 따로 다시 하므로 0 */
   maxRetries?: number;
+  /** 공통 지시(COMMON_SYSTEM) 대신 쓸 지시 (노트 채팅) */
+  system?: string;
 };
 
 export type JsonResult = { json: unknown; usage: Usage; model: string };
@@ -57,7 +59,7 @@ export async function callJson(req: JsonCall): Promise<JsonResult> {
       {
         model: req.model,
         max_tokens: req.maxTokens,
-        system: COMMON_SYSTEM,
+        system: req.system ?? COMMON_SYSTEM,
         messages: [{ role: 'user', content: req.content }],
         output_config: { effort: req.effort, format: { type: 'json_schema', schema: req.schema } },
         ...(thinking ? { thinking } : {}),

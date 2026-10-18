@@ -6,6 +6,7 @@ import { adminClient, SOURCES_BUCKET } from '@/lib/supabase/admin';
 import {
   checkJsonSchema,
   noteJsonSchema,
+  zMindmap,
   quizJsonSchema,
   toQuestionRow,
   visualJsonSchema,
@@ -18,7 +19,7 @@ import {
   type Note,
   type VisualResult,
 } from '@/lib/ai/schemas';
-import { checkPrompt, mergePrompt, organizePrompt, quizPrompt, visualPrompt, wrap, type MaterialMeta } from '@/lib/ai/prompts';
+import { appendMergePrompt, checkPrompt, mergePrompt, organizePrompt, quizPrompt, visualPrompt, wrap, type MaterialMeta } from '@/lib/ai/prompts';
 import { modelForTier, type AiTask, type UserSettings } from '@/lib/settings';
 import { planChunks, slicePdf, splitPdfBySize, splitText, PdfError } from '@/lib/pdf';
 import { getAccount, getAppSettings, charge, refundSource, type Account, type AppSettings } from './account';
@@ -51,6 +52,8 @@ export type SourceRow = {
   model: string | null;
   error: string | null;
   updated_at: string;
+  /** 노트에 더하는 자료면 그 노트의 자료 (끝나면 노트의 새 버전이 된다) */
+  parent_id?: string | null;
 };
 
 export function chunkCount(kind: SourceRow['kind'], pages: number, images: number, text: string): number {
@@ -247,36 +250,89 @@ async function stepOrganize(ctx: Ctx): Promise<Partial<SourceRow>> {
   if (next < total) {
     return { partials, chunk_index: next, progress, draft: { ...src.draft, attempts: 0 } };
   }
-  if (total > 1) return { partials, chunk_index: next, step: 'merge', progress, draft: { ...src.draft, attempts: 0 } };
+  // 여러 조각이거나 노트에 더하는 자료면 합치기 단계로
+  if (total > 1 || src.parent_id) return { partials, chunk_index: next, step: 'merge', progress, draft: { ...src.draft, attempts: 0 } };
   return { partials: [], chunk_index: next, step: 'visual', progress: 62, draft: { ...src.draft, note, attempts: 0 } };
 }
 
 async function stepMerge(ctx: Ctx): Promise<Partial<SourceRow>> {
   const parts = (ctx.src.partials ?? []).map((p) => zNote.parse(p));
+  if (ctx.src.parent_id) return stepAppendMerge(ctx, parts);
   const content = [textBlock(wrap('partials', JSON.stringify(parts))), textBlock(mergePrompt(parts.length))];
   const json = await ai(ctx, 'merge', content, noteJsonSchema, 8000);
   const note = normalizeNote(zNote.parse(json));
   return { partials: [], step: 'visual', progress: 66, draft: { ...ctx.src.draft, note, attempts: 0 } };
 }
 
+/** 노트에 더하는 자료: 지금 노트에 새 자료의 정리를 합친다 (기존 개념 번호는 그대로) */
+async function stepAppendMerge(ctx: Ctx, parts: Note[]): Promise<Partial<SourceRow>> {
+  const { data: n, error } = await ctx.admin.from('notes').select('id, body').eq('source_id', ctx.src.parent_id).maybeSingle();
+  if (error) throw error;
+  if (!n) throw new UserFacingError('not_found', '자료를 더할 노트를 찾을 수 없어요. 노트가 지워졌을 수 있어요.', 404);
+  const current = zNote.parse(n.body ?? {});
+  const content = [
+    textBlock(wrap('note', noteForPrompt(current))),
+    textBlock(wrap('new_parts', JSON.stringify(parts))),
+    textBlock(appendMergePrompt(parts.length)),
+  ];
+  const json = await ai(ctx, 'merge', content, noteJsonSchema, 8000);
+  const merged = normalizeNote(zNote.parse(json));
+  // 별표한 개념은 그대로 별표
+  const starred = new Set(current.key_points.filter((k) => k.starred).map((k) => k.id));
+  const note = { ...merged, key_points: merged.key_points.map((k) => (starred.has(k.id) ? { ...k, starred: true } : k)) };
+  return { partials: [], step: 'visual', progress: 66, draft: { ...ctx.src.draft, note, newParts: parts, parentNoteId: n.id, attempts: 0 } };
+}
+
+/** 노트에 더하는 자료면 그 노트 번호 */
+function parentNoteId(ctx: Ctx): string | null {
+  return ctx.src.parent_id && typeof ctx.src.draft.parentNoteId === 'string' ? ctx.src.draft.parentNoteId : null;
+}
+
 async function stepVisual(ctx: Ctx): Promise<Partial<SourceRow>> {
   const note = zNote.parse(ctx.src.draft.note);
   const v = ctx.settings.visual;
   const maxNodes = maxNodesFor(v.depth);
-  const content = [textBlock(wrap('note', noteForPrompt(note))), textBlock(visualPrompt({ depth: v.depth, labelStyle: v.labels, maxNodes }))];
+  const content = [textBlock(wrap('note', noteForPrompt(note)))];
+  // 노트에 더할 때는 지금 마인드맵에서 학생이 고친 노드를 그대로 둔다
+  let locked: Mindmap['nodes'] = [];
+  const pid = parentNoteId(ctx);
+  if (pid) {
+    const { data: cur } = await ctx.admin.from('visuals').select('spec').eq('note_id', pid).eq('type', 'mindmap').maybeSingle();
+    const parsed = cur ? zMindmap.safeParse(cur.spec) : null;
+    locked = parsed?.success ? parsed.data.nodes.filter((x) => x.edited).slice(0, 60) : [];
+    if (locked.length) {
+      content.push(
+        textBlock(
+          wrap(
+            'locked_nodes',
+            JSON.stringify(locked.map(({ id, parent_id, label }) => ({ id: id.slice(0, 40), parent_id: parent_id.slice(0, 40), label: label.slice(0, 80) }))),
+          ),
+        ),
+      );
+    }
+  }
+  content.push(textBlock(visualPrompt({ depth: v.depth, labelStyle: v.labels, maxNodes })));
   const json = await ai(ctx, 'visual', content, visualJsonSchema, 4000);
   const visual = zVisualResult.parse(json);
-  visual.mindmap = cleanMindmap(visual.mindmap, maxNodes);
+  visual.mindmap = cleanMindmap(visual.mindmap, maxNodes, locked);
   return { step: 'quiz', progress: 76, draft: { ...ctx.src.draft, visual, attempts: 0 } };
 }
 
 async function stepQuiz(ctx: Ctx): Promise<Partial<SourceRow>> {
   const note = zNote.parse(ctx.src.draft.note);
   const q = ctx.settings.quiz;
+  const pid = parentNoteId(ctx);
+  // 노트에 더할 때는 새 자료의 내용으로만, 지금 노트의 문제와 겹치지 않게 만든다
+  let existing: string[] = [];
+  if (pid) {
+    const { data: rows } = await ctx.admin.from('questions').select('prompt').eq('note_id', pid).neq('status', 'hidden').limit(200);
+    existing = (rows ?? []).map((r) => String(r.prompt).slice(0, 300));
+  }
   const content = [
     textBlock(wrap('note', noteForPrompt(note))),
-    textBlock(wrap('existing_questions', '[]')),
-    textBlock(quizPrompt({ types: q.types, mix: q.mix, language: q.language, perKeyPoint: q.perKeyPoint })),
+    ...(pid ? [textBlock(wrap('new_parts', JSON.stringify(ctx.src.draft.newParts ?? [])))] : []),
+    textBlock(wrap('existing_questions', JSON.stringify(existing))),
+    textBlock(quizPrompt({ types: q.types, mix: q.mix, language: q.language, perKeyPoint: q.perKeyPoint }, { onlyNew: !!pid })),
   ];
   const json = await ai(ctx, 'quiz', content, quizJsonSchema, 8000);
   const raw = zQuiz.parse(json).questions;
@@ -318,19 +374,34 @@ async function stepCheckAndFinish(ctx: Ctx): Promise<'done'> {
   if (visual.timeline.include && visual.timeline.events.length) {
     visuals.push({ type: 'timeline', spec: { title: visual.timeline.title, events: visual.timeline.events } });
   }
-  const noteBody = { ...note, recommended: visual.recommended };
+  let noteBody: Record<string, unknown> = { ...note, recommended: visual.recommended };
+  const pid = parentNoteId(ctx);
+  if (pid) {
+    // 그림 보기 설정(노트마다)은 지금 노트의 것을 그대로 쓴다
+    const { data: cur } = await ctx.admin.from('notes').select('body').eq('id', pid).maybeSingle();
+    const view = (cur?.body as Record<string, unknown> | undefined)?.view;
+    if (view) noteBody = { ...noteBody, view };
+  }
   // 원본 파일: Pro·관리자는 계속, 무료는 처리 뒤 freeFileDays 일, 테스트 플랜은 플랜이 끝나고 freeFileDays 일
   const keepFrom = ctx.acc.plan.kind === 'custom' && ctx.acc.plan.until ? Math.max(Date.parse(ctx.acc.plan.until), Date.now()) : Date.now();
   const expire = ctx.acc.keepFiles || ctx.src.kind === 'text' ? null : new Date(keepFrom + ctx.app.limits.freeFileDays * 86400_000).toISOString();
 
-  const { error } = await ctx.admin.rpc('kok_finalize_source', {
-    p_source: ctx.src.id,
-    p_title: note.title || ctx.src.title,
-    p_note: noteBody,
-    p_visuals: visuals,
-    p_questions: kept,
-    p_expire: expire,
-  });
+  if (pid && !ctx.src.title) {
+    // 이름 없이 더한 자료(글 등)는 그 자료의 정리 제목을 이름으로 (버전 기록에 보인다)
+    const parts = Array.isArray(ctx.src.draft.newParts) ? (ctx.src.draft.newParts as Array<{ title?: unknown }>) : [];
+    const title = typeof parts[0]?.title === 'string' ? parts[0].title.trim().slice(0, 120) : '';
+    if (title) await ctx.admin.from('sources').update({ title }).eq('id', ctx.src.id).eq('title', '');
+  }
+  const { error } = pid
+    ? await ctx.admin.rpc('kok_finalize_append', { p_child: ctx.src.id, p_note: noteBody, p_visuals: visuals, p_questions: kept, p_expire: expire })
+    : await ctx.admin.rpc('kok_finalize_source', {
+        p_source: ctx.src.id,
+        p_title: note.title || ctx.src.title,
+        p_note: noteBody,
+        p_visuals: visuals,
+        p_questions: kept,
+        p_expire: expire,
+      });
   if (error) throw error;
   // 큰 PDF 를 나눈 조각은 정리가 끝나면 필요 없다 (원본은 '원본' 탭에서 보도록 남긴다)
   const parts = pdfPartsOf(ctx.src);

@@ -21,6 +21,8 @@ export const PlanBody = z.object({
   textChars: num('글자 수', 100, 200_000, { int: true }),
   fileMb: num('파일 MB', 1, MAX_FILE_MB, { int: true }),
   careful: z.boolean({ error: '꼼꼼 모델 쓰기를 골라 주세요.' }),
+  canAppend: z.boolean().default(false),
+  canTheme: z.boolean().default(false),
   note: z.string().trim().max(100, '메모는 100자까지예요.').default(''),
 });
 export type PlanInput = z.infer<typeof PlanBody>;
@@ -36,6 +38,8 @@ export function planRow(b: PlanInput) {
     text_chars: b.textChars,
     file_mb: b.fileMb,
     careful: b.careful,
+    can_append: b.canAppend,
+    can_theme: b.canTheme,
     note: b.note || null,
   };
 }

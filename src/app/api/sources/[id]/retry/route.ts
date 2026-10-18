@@ -1,7 +1,7 @@
 // 실패한 자료를 실패한 단계부터 다시 처리한다
 import { after, type NextRequest } from 'next/server';
 import { assertSameOrigin, assertUuid, requireAccount } from '@/lib/server/auth';
-import { MAX_PARALLEL_SOURCES, assertAiAllowed, energyWindows, getAppSettings, reserveError, type ReserveResult } from '@/lib/server/account';
+import { MAX_PARALLEL_SOURCES, assertAiAllowed, energyWindows, getAppSettings, getFeatures, reserveError, type ReserveResult } from '@/lib/server/account';
 import { UserFacingError, errorResponse } from '@/lib/server/errors';
 import { driveSource } from '@/lib/server/drive';
 
@@ -13,9 +13,19 @@ export async function POST(req: NextRequest, ctx: RouteContext<'/api/sources/[id
     const { id } = await ctx.params;
     assertUuid(id);
     const { admin, acc } = await requireAccount();
-    const { data: src } = await admin.from('sources').select('id, user_id, status, file_paths, kind').eq('id', id).maybeSingle();
+    // 노트에 더한 자료 칸(parent_id)은 schema.sql 을 다시 실행한 뒤에만 있다
+    const { versions } = await getFeatures(admin);
+    const { data } = await admin
+      .from('sources')
+      .select(`id, user_id, status, file_paths, kind${versions ? ', parent_id' : ''}`)
+      .eq('id', id)
+      .maybeSingle();
+    const src = data as { id: string; user_id: string; status: string; file_paths: string[] | null; kind: string; parent_id?: string | null } | null;
     if (!src || src.user_id !== acc.userId) throw new UserFacingError('not_found', '자료를 찾을 수 없어요.', 404);
     if (src.status !== 'error') return Response.json({ ok: true, status: src.status });
+    if (src.parent_id && !acc.canAppend) {
+      throw new UserFacingError('pro_only', '노트에 자료 더하기는 Pro 기능이에요. 이 자료는 지우고 새 노트로 넣을 수 있어요.', 403);
+    }
     if (src.kind !== 'text' && !(src.file_paths ?? []).length) {
       throw new UserFacingError('file_gone', '원본 파일이 없어서 다시 할 수 없어요. 자료를 새로 넣어 주세요.', 400);
     }

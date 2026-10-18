@@ -2,12 +2,21 @@
 import { after, type NextRequest } from 'next/server';
 import { z } from 'zod';
 import { assertSameOrigin, readJson, requireAccount } from '@/lib/server/auth';
-import { MAX_PARALLEL_SOURCES, assertAiAllowed, energyWindows, getAppSettings, limitsFor, reserveError, type ReserveResult } from '@/lib/server/account';
+import {
+  MAX_PARALLEL_SOURCES,
+  assertAiAllowed,
+  energyWindows,
+  getAppSettings,
+  getFeatures,
+  limitsFor,
+  reserveError,
+  type ReserveResult,
+} from '@/lib/server/account';
 import { UserFacingError, errorResponse } from '@/lib/server/errors';
 import { assertOwnPath, downloadOwn, extOk, removePaths, sniff } from '@/lib/server/files';
 import { chunkCount } from '@/lib/server/pipeline';
 import { driveSource } from '@/lib/server/drive';
-import { estimateEnergy } from '@/lib/ai/models';
+import { estimateEnergy, estimateSmallTask } from '@/lib/ai/models';
 import { modelForTier } from '@/lib/settings';
 import { pdfPageCount } from '@/lib/pdf';
 import { adminClient } from '@/lib/supabase/admin';
@@ -21,6 +30,8 @@ const Body = z.object({
   title: z.string().max(120).catch(''),
   text: z.string().max(200_000).optional(),
   files: z.array(z.string().max(200)).max(60).catch([]),
+  /** 이 자료를 더할 노트의 자료 (Pro). 정리가 끝나면 그 노트의 새 버전이 된다 */
+  parentId: z.string().uuid().nullable().optional(),
 });
 
 export async function POST(req: NextRequest) {
@@ -39,6 +50,21 @@ export async function POST(req: NextRequest) {
     const app = await getAppSettings(admin);
     const L = app.limits;
     const lim = limitsFor(acc, L);
+
+    // 노트에 자료 더하기: Pro 기능, 정리가 끝난 내 노트에만, 과목은 그 노트의 과목
+    const parentId = b.parentId ?? null;
+    if (parentId) {
+      if (!(await getFeatures(admin)).versions) {
+        throw new UserFacingError('schema_outdated', '노트에 자료를 더하려면 관리자가 Supabase 에서 schema.sql 을 다시 실행해야 해요.', 503);
+      }
+      if (!acc.canAppend) throw new UserFacingError('pro_only', '노트에 자료 더하기는 Pro 기능이에요.', 403);
+      const { data: parent } = await admin.from('sources').select('id, user_id, subject_id, status, parent_id').eq('id', parentId).maybeSingle();
+      if (!parent || parent.user_id !== acc.userId || parent.parent_id) throw new UserFacingError('not_found', '노트를 찾을 수 없어요.', 404);
+      if (parent.status !== 'ready') throw new UserFacingError('parent_not_ready', '노트 정리가 끝난 뒤에 자료를 더할 수 있어요.', 409);
+      const { data: pnote } = await admin.from('notes').select('id').eq('source_id', parentId).maybeSingle();
+      if (!pnote) throw new UserFacingError('not_found', '노트를 찾을 수 없어요.', 404);
+      b.subjectId = parent.subject_id as string;
+    }
 
     const { data: subject } = await admin.from('subjects').select('id').eq('id', b.subjectId).eq('user_id', acc.userId).maybeSingle();
     if (!subject) throw new UserFacingError('no_subject', '과목을 찾을 수 없어요.', 404);
@@ -88,7 +114,10 @@ export async function POST(req: NextRequest) {
     }
 
     const model = modelForTier(app.models, acc.settings.models.organize, acc.canCareful, acc.isAdmin);
-    const estimate = estimateEnergy({ kind: b.kind, pages, images, chars: text?.length ?? 0 }, model, L.usdPerEnergy);
+    // 노트에 더할 때는 지금 노트와 합치는 단계가 하나 더 있다
+    const estimate =
+      estimateEnergy({ kind: b.kind, pages, images, chars: text?.length ?? 0 }, model, L.usdPerEnergy) +
+      (parentId ? Math.ceil(estimateSmallTask(model, L.usdPerEnergy, 9000, 3000)) : 0);
 
     // 먼저 빠르게 검사하고(정지·무료 전체 한도·요청 속도·에너지), 마지막 검사와 행 만들기는 DB 가 한 번에 한다:
     // 정리 중인 자료가 쓸 에너지까지 미리 빼고, 같은 사람의 요청은 한 줄로 세운다 (동시에 여러 개 보내도 한도를 넘지 않게)
@@ -108,6 +137,7 @@ export async function POST(req: NextRequest) {
         model,
         plan_at_start: acc.plan.kind,
         energy_estimate: estimate,
+        ...(parentId ? { parent_id: parentId } : {}),
       },
       p_max_parallel: acc.isAdmin ? null : MAX_PARALLEL_SOURCES,
       ...energyWindows(acc, L),
@@ -126,7 +156,7 @@ export async function POST(req: NextRequest) {
   } catch (e) {
     // 잠깐 기다리면 되는 거절(요청이 너무 빠름, 정리 중인 자료가 꽉 참)은 파일을 남겨 둔다:
     // 브라우저가 같은 파일로 다시 보낸다 (끝내 안 보내면 1시간 뒤 청소가 지운다)
-    const retryLater = e instanceof UserFacingError && (e.code === 'rate_limited' || e.code === 'too_many_running');
+    const retryLater = e instanceof UserFacingError && (e.code === 'rate_limited' || e.code === 'too_many_running' || e.code === 'append_busy');
     if (cleanup && !retryLater && ownerId && uploaded.length) {
       // 받지 못한 자료의 파일은 바로 지우고, '아직 정리하지 않은 파일' 수에서도 뺀다
       try {

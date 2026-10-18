@@ -14,7 +14,7 @@ export async function requireUser(): Promise<SessionUser> {
   const sub = data?.claims?.sub;
   if (!sub) throw new UserFacingError('unauthorized', '로그인이 필요해요. 다시 로그인해 주세요.', 401);
   // 익명 로그인은 쓰지 않는다 (켜져 있어도 막는다)
-  if (data.claims.is_anonymous === true) throw new UserFacingError('unauthorized', '구글로 로그인해 주세요.', 401);
+  if (data.claims.is_anonymous === true) throw new UserFacingError('unauthorized', '익명으로는 쓸 수 없어요. 로그인해 주세요.', 401);
   const email = typeof data.claims.email === 'string' ? data.claims.email : null;
   const meta = data.claims.app_metadata as { provider?: unknown } | undefined;
   const provider = typeof meta?.provider === 'string' ? meta.provider : null;

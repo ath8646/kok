@@ -15,7 +15,7 @@ Claude 답은 정해진 예시(광합성 노트·문제)를 돌려줘요. 실제
 ```bash
 cd tools/local-e2e
 bash db.sh setup                         # 처음 한 번
-(cd fakebase && npm install && npm start) # 가짜 백엔드 :54321 (다른 창에서 계속 켜 두기)
+node fakebase/server.mjs                 # 가짜 백엔드 :54321 (다른 창에서 계속 켜 두기, 저장소 맨 위에서 npm install 먼저)
 bash serve.sh                            # 앱 빌드 + :3000 (다른 창에서 계속 켜 두기)
 python3 e2e.py                           # 가입 → 자료 넣기 → 노트·그림·문제 → 복습 → 오답 → 관리자 … (화면은 shots/ 에)
 python3 e2e_fail.py                      # 처리 실패·환불·다시 하기, 비상 스위치, 다른 사람 자료 막기

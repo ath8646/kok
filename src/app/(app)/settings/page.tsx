@@ -146,7 +146,7 @@ export default function SettingsPage() {
             </Button>
           </div>
         </Field>
-        <p className="text-sm text-muted">구글 계정: {me.email}</p>
+        <p className="text-sm text-muted">로그인 계정: {me.email}</p>
         <div className="flex flex-wrap items-center gap-2">
           <span className="rounded-full bg-surface-2 px-3 py-1 text-sm font-bold">{planLabel(me.planInfo)}</span>
           <LinkButton href="/plan" size="sm" variant="secondary">

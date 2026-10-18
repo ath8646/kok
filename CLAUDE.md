@@ -26,6 +26,11 @@
 - AI에 노트를 보낼 때는 `noteForPrompt`(길이 제한)를 쓰고, 작은 작업의 예상 에너지는 `runTask`가 보낼 내용 길이로 계산한다. 라우트 `maxDuration`보다 `timeoutMs`를 짧게 잡는다.
 - 요금제 판단은 `src/lib/plans.ts` 한 곳(관리자 > 테스트 플랜 > Pro > 무료). 서버는 `getAccount`의 `acc.plan`·`acc.custom`·`acc.canCareful`·`acc.keepFiles`와 `limitsFor(acc, L)`을 쓰고, `isPro`로 혜택을 정하지 않는다. 테스트 플랜(`custom_plans`, 서버만)은 쿠폰 `plan_id`로 켜고(`kok_redeem_coupon`), 번개는 `custom_plan_start`부터 세며 DB 검사에는 `energyWindows`의 두 번째 창으로 넘긴다. 하루 최대도 플랜을 켠 뒤부터 센다.
 - 복습: `src/lib/srs.ts`(ts-fsrs), `src/lib/review-plan.ts`(오늘 문제 고르기·시험 모드·연속 기록·약점 개념).
+- 새 표·칸을 쓰는 기능은 `getFeatures(admin)`(서버, 1분 기억) → `me.features`(화면)로 켠다. 배포가 schema.sql 다시 실행보다 먼저 될 수 있어서, 없으면 예전처럼 동작해야 한다. 브라우저의 자료 목록은 `topLevelSources`/`fetchSources` 로 읽는다(더한 자료 빼기, 칸이 없으면 그냥 읽기). 브라우저에서 sources 의 새 칸을 select 할 때도 features 를 본다(칸 단위 GRANT).
+- 노트 채팅: `POST /api/notes/[id]/chat`(`CHAT_SYSTEM` + `chatPrompt`, `runTaskFull`, 사용자·AI 말을 한 번에 저장: 여러 행 insert 는 모든 칸을 적는다) → 넣자는 것은 `chat_messages.proposal`(pending) → `chat/apply` 가 먼저 상태를 바꾸고(두 번 눌러도 한 번) AI 없이 넣는다. 화면 `src/components/note/NoteChat.tsx`(노트 화면에서는 + 버튼 대신 이 버튼, `NoteTarget.hideFab`).
+- 노트에 자료 더하기(Pro, `acc.canAppend`): 더한 자료 = `sources.parent_id` 가 있는 자료 행, 한 노트에 하나씩(`append_busy`). 파이프라인은 합치기 단계에서 지금 노트와 합치고(`appendMergePrompt`), 문제는 새 내용으로만(`quizPrompt` onlyNew), 끝은 `kok_finalize_append`. 버전: `note_versions`(지금 버전 행은 바꿀 때만 저장되니 지금 버전은 늘 notes·visuals·questions 를 본다), `notes.current_version`, 지금 버전에 없는 문제는 `status = 'hidden'`. 바꾸기·지우기는 `/api/notes/[id]/versions`(→ `kok_switch_version`/`kok_delete_version`), 지난 버전 고치기는 화면이 note_versions 를 직접. 문제 빼기 규칙은 `removalPlan`(`src/lib/versions.ts`).
+- 테마(Pro, `acc.canTheme`): `settings.theme` → AppShell 이 `applyTheme`(`src/lib/theme.ts`)로 `<html data-theme|data-font|data-paper>`. 색 값은 `globals.css` 의 테마 칸(명암비 4.5 이상)과 `THEME_COLOR_INFO` 를 같이 고친다. 글꼴 CSS 는 `src/lib/theme-fonts/*` 를 동적으로 불러온다. 깜빡임 막기는 layout 의 `THEME_BOOT`.
+- Apple 로그인: `NEXT_PUBLIC_APPLE_LOGIN=1` 일 때만 버튼(`src/lib/login.ts`). Apple Secret Key(JWT)는 180일마다 끝나서 주인이 새로 만들어 Supabase 에 넣어야 한다. 관리자는 구글 로그인만.
 
 ## 확인 명령
 

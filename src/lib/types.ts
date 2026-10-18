@@ -1,23 +1,34 @@
 // 화면과 서버가 같이 쓰는 모양
 import type { UserSettings } from './settings';
+import type { PlanInfo } from './plans';
 
 export type MeResponse = {
   userId: string;
   email: string;
   nickname: string | null;
   isAdmin: boolean;
+  /** 지금 적용되는 플랜이 Pro 인지 (테스트 플랜이 켜져 있으면 false) */
   isPro: boolean;
   proUntil: string | null;
+  /** 지금 적용되는 플랜 (관리자·테스트 플랜·Pro·무료)과 이름, 끝나는 날 */
+  planInfo: PlanInfo;
+  /** 꼼꼼 모델을 쓸 수 있는지 */
+  canCareful: boolean;
   consented: boolean;
   settings: UserSettings;
   energy: {
     unlimited: boolean;
     remaining: number | null;
     limit: number | null;
-    period: 'day' | 'month';
+    /** day: 무료(오늘), month: Pro(이번 달), plan: 테스트 플랜(기간 전체) */
+    period: 'day' | 'month' | 'plan';
+    /** 오늘 쓴 에너지 (테스트 플랜이면 플랜을 켠 뒤 오늘 쓴 것만) */
     usedToday: number;
     usedMonth: number;
     proDaily: number | null;
+    /** 테스트 플랜: 켠 뒤 쓴 번개, 하루 최대 */
+    usedPlan: number | null;
+    planDaily: number | null;
   };
   notice: { active: boolean; text: string };
   aiEnabled: boolean;

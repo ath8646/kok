@@ -34,7 +34,7 @@ export async function runTask(
     sourceId?: string | null;
   },
 ): Promise<unknown> {
-  const model = modelForTier(app.models, t.tier, acc.isPro, acc.isAdmin);
+  const model = modelForTier(app.models, t.tier, acc.canCareful, acc.isAdmin);
   const estimate =
     t.minEstimate === 0 ? 0 : Math.max(t.minEstimate ?? 0, estimateSmallTask(model, app.limits.usdPerEnergy, contentTokens(t.content), t.outTokens));
   await assertAiAllowed(admin, acc, app, { estimate, rateLimit: true });

@@ -1,6 +1,7 @@
 'use client';
-// 관리자 화면: 키 상태, 숫자, 비상 스위치, 공지, 모델, 한도, 사용자, 쿠폰, 신고함, 운영자 정보
+// 관리자 화면: 키 상태, 숫자, 비상 스위치, 공지, 모델, 한도, 사용자, 테스트 플랜·쿠폰, 신고함, 운영자 정보
 import { useCallback, useEffect, useState } from 'react';
+import { AdminPlans } from '@/components/AdminPlans';
 import { useMe } from '@/components/AppShell';
 import { QuestionPreview } from '@/components/QuestionList';
 import { Button, Card, Chip, EmptyState, Field, LargeHeader, SectionTitle, Segmented, Toggle, api, cx, inputClass, useToast } from '@/components/ui';
@@ -12,6 +13,8 @@ type Overview = {
   stats: {
     users: number;
     pro_users: number;
+    /** 테스트 플랜을 쓰는 사람 (schema.sql 을 다시 실행하기 전에는 없음) */
+    custom_users?: number;
     active_today: number;
     usd_month: number;
     usd_month_free: number;
@@ -31,10 +34,11 @@ type UserRow = {
   plan: string;
   pro_until: string | null;
   pro_active: boolean;
+  /** 켜져 있는 테스트 플랜 */
+  custom_plan: { id: string; name: string; until: string } | null;
   banned: boolean;
   created_at: string;
 };
-type Coupon = { code: string; days: number; max_uses: number; used: number; note: string | null; expires_at: string | null; created_at: string };
 type Report = { id: number; reporter_id: string; target_type: string; target_id: string | null; reason: string; status: string; created_at: string };
 
 const LIMIT_LABELS: Array<[keyof Limits, string]> = [
@@ -77,9 +81,6 @@ export default function AdminPage() {
   const [busy, setBusy] = useState<string | null>(null);
   const [q, setQ] = useState('');
   const [users, setUsers] = useState<UserRow[]>([]);
-  const [coupons, setCoupons] = useState<Coupon[]>([]);
-  const [newCoupon, setNewCoupon] = useState({ days: 30, maxUses: 1, count: 1, note: '' });
-  const [madeCodes, setMadeCodes] = useState<string[]>([]);
   const [reports, setReports] = useState<{
     reports: Report[];
     questions: Record<string, QuestionRow>;
@@ -98,7 +99,6 @@ export default function AdminPage() {
     const r = await api<{ users: UserRow[] }>(`/api/admin/users?q=${encodeURIComponent(term)}`);
     setUsers(r.users);
   }, []);
-  const loadCoupons = useCallback(async () => setCoupons((await api<{ coupons: Coupon[] }>('/api/admin/coupons')).coupons), []);
   const loadReports = useCallback(async () => setReports(await api('/api/admin/reports?status=open')), []);
 
   useEffect(() => {
@@ -107,14 +107,12 @@ export default function AdminPage() {
     Promise.all([
       api<Overview>('/api/admin/overview'),
       api<{ users: UserRow[] }>('/api/admin/users?q='),
-      api<{ coupons: Coupon[] }>('/api/admin/coupons'),
       api<NonNullable<typeof reports>>('/api/admin/reports?status=open'),
     ])
-      .then(([o, u, c, r]) => {
+      .then(([o, u, r]) => {
         if (!alive) return;
         applyOverview(o);
         setUsers(u.users);
-        setCoupons(c.coupons);
         setReports(r);
       })
       .catch((e) => {
@@ -205,7 +203,7 @@ export default function AdminPage() {
         {(
           [
             ['사용자', s.users],
-            ['Pro', s.pro_users],
+            ['Pro · 테스트 플랜', `${s.pro_users} · ${s.custom_users ?? 0}`],
             ['오늘 복습한 사람', s.active_today],
             ['이번 달 자료', s.sources_month],
             ['이번 달 AI 비용', usd(s.usd_month)],
@@ -337,6 +335,11 @@ export default function AdminPage() {
                   <span className="text-sm text-muted">{u.email}</span>
                   {u.role === 'admin' ? <Chip tone="accent">관리자</Chip> : null}
                   {pro ? <Chip tone="hl">Pro ~{new Date(u.pro_until!).toLocaleDateString('ko-KR')}</Chip> : null}
+                  {u.custom_plan ? (
+                    <Chip tone="accent">
+                      {u.custom_plan.name} ~{new Date(u.custom_plan.until).toLocaleDateString('ko-KR')}
+                    </Chip>
+                  ) : null}
                   {u.banned ? <Chip tone="bad">정지</Chip> : null}
                 </div>
                 <div className="flex flex-wrap gap-2">
@@ -356,6 +359,24 @@ export default function AdminPage() {
                   >
                     Pro 기간
                   </Button>
+                  {u.custom_plan ? (
+                    <Button
+                      size="sm"
+                      variant="secondary"
+                      onClick={async () => {
+                        if (!confirm(`'${u.custom_plan!.name}' 플랜을 지금 끝낼까요? 원래 요금제로 돌아가요.`)) return;
+                        try {
+                          await api(`/api/admin/users/${u.id}`, { method: 'PATCH', body: JSON.stringify({ endCustomPlan: true }) });
+                          toast('테스트 플랜을 끝냈어요.', 'ok');
+                          loadUsers(q);
+                        } catch (e) {
+                          toast((e as Error).message, 'bad');
+                        }
+                      }}
+                    >
+                      테스트 플랜 끝내기
+                    </Button>
+                  ) : null}
                   <Button
                     size="sm"
                     variant="ghost"
@@ -379,101 +400,7 @@ export default function AdminPage() {
         </ul>
       </Card>
 
-      <SectionTitle>Pro 쿠폰</SectionTitle>
-      <Card className="grid gap-3">
-        <div className="grid grid-cols-3 gap-2">
-          <label className="grid gap-1 text-sm font-semibold">
-            기간(일)
-            <input
-              type="number"
-              className={inputClass}
-              value={newCoupon.days}
-              min={1}
-              onChange={(e) => setNewCoupon({ ...newCoupon, days: Number(e.target.value) })}
-            />
-          </label>
-          <label className="grid gap-1 text-sm font-semibold">
-            쓸 수 있는 사람
-            <input
-              type="number"
-              className={inputClass}
-              value={newCoupon.maxUses}
-              min={1}
-              onChange={(e) => setNewCoupon({ ...newCoupon, maxUses: Number(e.target.value) })}
-            />
-          </label>
-          <label className="grid gap-1 text-sm font-semibold">
-            만들 개수
-            <input
-              type="number"
-              className={inputClass}
-              value={newCoupon.count}
-              min={1}
-              max={50}
-              onChange={(e) => setNewCoupon({ ...newCoupon, count: Number(e.target.value) })}
-            />
-          </label>
-        </div>
-        <input
-          aria-label="메모"
-          className={inputClass}
-          value={newCoupon.note}
-          maxLength={100}
-          placeholder="메모 (예: 친구 시험용)"
-          onChange={(e) => setNewCoupon({ ...newCoupon, note: e.target.value })}
-        />
-        <Button
-          size="sm"
-          className="justify-self-start"
-          busy={busy === 'coupon'}
-          onClick={async () => {
-            setBusy('coupon');
-            try {
-              const r = await api<{ codes: string[] }>('/api/admin/coupons', { method: 'POST', body: JSON.stringify(newCoupon) });
-              setMadeCodes(r.codes);
-              loadCoupons();
-            } catch (e) {
-              toast((e as Error).message, 'bad');
-            } finally {
-              setBusy(null);
-            }
-          }}
-        >
-          쿠폰 만들기
-        </Button>
-        {madeCodes.length ? (
-          <div className="rounded-xl bg-hl/40 p-3">
-            <p className="text-sm font-semibold">새 쿠폰 (눌러서 복사)</p>
-            <div className="mt-1 flex flex-wrap gap-2">
-              {madeCodes.map((c) => (
-                <button
-                  key={c}
-                  type="button"
-                  className="rounded-lg bg-surface px-2 py-1 font-mono text-sm"
-                  onClick={() => navigator.clipboard?.writeText(c).then(() => toast('복사했어요.'))}
-                >
-                  {c}
-                </button>
-              ))}
-            </div>
-          </div>
-        ) : null}
-        {coupons.length ? (
-          <details>
-            <summary className="cursor-pointer text-sm font-semibold">만든 쿠폰 {coupons.length}개</summary>
-            <ul className="mt-2 grid gap-1 text-sm">
-              {coupons.map((c) => (
-                <li key={c.code} className="flex flex-wrap justify-between gap-2 border-b border-line py-1">
-                  <span className="font-mono">{c.code}</span>
-                  <span className="text-muted">
-                    {c.days}일 · {c.used}/{c.max_uses}명 {c.note ? `· ${c.note}` : ''}
-                  </span>
-                </li>
-              ))}
-            </ul>
-          </details>
-        ) : null}
-      </Card>
+      <AdminPlans limits={ov.settings.limits} onChanged={() => loadUsers(q).catch(() => {})} />
 
       <SectionTitle>신고함</SectionTitle>
       <Card className="grid gap-3">

@@ -9,6 +9,7 @@ import { fetchSubjects, sb } from '@/lib/data';
 import { supabaseBrowser } from '@/lib/supabase/client';
 import type { SubjectRow } from '@/lib/types';
 import type { ModelTier, UserSettings } from '@/lib/settings';
+import { energyPeriodLabel, planLabel } from '@/lib/plans';
 
 const TASKS: Array<{ key: keyof UserSettings['models']; label: string; hint: string }> = [
   { key: 'organize', label: '정리', hint: '자료를 읽고 정리 노트로 바꿔요' },
@@ -79,7 +80,7 @@ export default function SettingsPage() {
   }, [draft]);
 
   if (!me || !draft) return null;
-  const canCareful = me.isPro || me.isAdmin;
+  const canCareful = me.canCareful;
   const set = <K extends keyof UserSettings>(k: K, v: Partial<UserSettings[K]>) => setDraft({ ...draft, [k]: { ...draft[k], ...v } });
   const e = me.energy;
 
@@ -87,7 +88,7 @@ export default function SettingsPage() {
     <div className="grid gap-2 pb-8">
       <LargeHeader
         title="설정"
-        subtitle={`${me.nickname ?? '나'} · ${me.isAdmin ? '관리자' : me.isPro ? 'Pro' : '무료'}`}
+        subtitle={`${me.nickname ?? '나'} · ${planLabel(me.planInfo, false)}`}
         actions={
           <span className="mr-2 text-xs font-semibold text-muted" aria-live="polite">
             {saved === 'saving' ? '저장 중…' : saved === 'saved' ? '저장됨 ✓' : ''}
@@ -118,9 +119,7 @@ export default function SettingsPage() {
         </Field>
         <p className="text-sm text-muted">구글 계정: {me.email}</p>
         <div className="flex flex-wrap items-center gap-2">
-          <span className="rounded-full bg-surface-2 px-3 py-1 text-sm font-bold">
-            {me.isAdmin ? '관리자' : me.isPro ? `Pro (${new Date(me.proUntil!).toLocaleDateString('ko-KR')}까지)` : '무료'}
-          </span>
+          <span className="rounded-full bg-surface-2 px-3 py-1 text-sm font-bold">{planLabel(me.planInfo)}</span>
           <LinkButton href="/plan" size="sm" variant="secondary">
             요금제·쿠폰
           </LinkButton>
@@ -145,12 +144,21 @@ export default function SettingsPage() {
       </SectionTitle>
       <Card className="grid gap-3">
         <p className="text-lg font-bold">
-          {e.unlimited ? '무제한 (관리자)' : `${e.period === 'month' ? '이번 달' : '오늘'} 남은 에너지 ⚡ ${Math.floor(e.remaining ?? 0)} / ${e.limit}`}
+          {e.unlimited ? '무제한 (관리자)' : `${energyPeriodLabel(e.period)} 남은 에너지 ⚡ ${Math.floor(e.remaining ?? 0)} / ${e.limit}`}
         </p>
         <p className="text-sm text-muted">
-          오늘 {e.usedToday} 사용 · 이번 달 {e.usedMonth} 사용
-          {e.proDaily ? ` · Pro는 하루 최대 ${e.proDaily}` : ''}. 1 에너지는 AI 비용 약 1.4원이에요. 복습·오답노트·직접 만든 문제·마인드맵 고치기는 에너지가
-          들지 않아요.
+          {e.period === 'plan' ? (
+            <>
+              &apos;{me.planInfo.name}&apos; 플랜에서 {e.usedPlan ?? 0} 사용 · 오늘 {e.usedToday} 사용
+              {e.planDaily !== null ? ` · 하루 최대 ${e.planDaily}` : ''}. 플랜 에너지는 기간 동안 다시 채워지지 않아요.
+            </>
+          ) : (
+            <>
+              오늘 {e.usedToday} 사용 · 이번 달 {e.usedMonth} 사용
+              {e.proDaily ? ` · Pro는 하루 최대 ${e.proDaily}` : ''}.
+            </>
+          )}{' '}
+          1 에너지는 AI 비용 약 1.4원이에요. 복습·오답노트·직접 만든 문제·마인드맵 고치기는 에너지가 들지 않아요.
         </p>
         {ledger.length ? (
           <details>

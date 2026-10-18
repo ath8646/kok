@@ -30,7 +30,7 @@ export async function POST(req: NextRequest, ctx: RouteContext<'/api/sources/[id
     });
     if (error) throw error;
     const v = verdict as ReserveResult;
-    const refusal = reserveError(v);
+    const refusal = reserveError(v, acc.plan);
     if (refusal) throw refusal;
     if (v.result === 'not_error') return Response.json({ ok: true, status: v.status ?? 'queued' });
     const origin = req.nextUrl.origin;

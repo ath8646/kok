@@ -1,8 +1,11 @@
 'use client';
-// 요금제: 무료와 Pro 비교, 쿠폰 입력 (결제는 v0.4)
+// 요금제: 무료와 Pro 비교, 지금 쓰는 테스트 플랜, 쿠폰 입력 (결제는 v0.4)
 import { useState } from 'react';
 import { useMe } from '@/components/AppShell';
-import { Button, Card, Field, LargeHeader, api, inputClass, useToast } from '@/components/ui';
+import { Button, Card, Chip, Field, LargeHeader, api, inputClass, useToast } from '@/components/ui';
+import { planLabel } from '@/lib/plans';
+
+const day = (iso: string) => new Date(iso).toLocaleDateString('ko-KR', { timeZone: 'Asia/Seoul' });
 
 export default function PlanPage() {
   const { me, refresh } = useMe();
@@ -28,10 +31,10 @@ export default function PlanPage() {
       <LargeHeader title="요금제" subtitle="무료로 충분히 쓰고, 더 필요하면 Pro" back={{ href: '/settings', label: '설정으로' }} />
       <Card className="flex flex-wrap items-center justify-between gap-2">
         <span className="font-semibold">지금 요금제</span>
-        <span className="rounded-full bg-surface-2 px-3 py-1 font-bold">
-          {me.isAdmin ? '관리자' : me.isPro ? `Pro · ${new Date(me.proUntil!).toLocaleDateString('ko-KR')}까지` : '무료'}
-        </span>
+        <span className="rounded-full bg-surface-2 px-3 py-1 font-bold">{planLabel(me.planInfo)}</span>
       </Card>
+
+      {me.planInfo.kind === 'custom' ? <CustomPlanCard /> : null}
 
       <div className="kok-card overflow-x-auto">
         <table className="w-full min-w-[440px] border-collapse text-[15px]">
@@ -61,7 +64,7 @@ export default function PlanPage() {
           </tbody>
         </table>
       </div>
-      <p className="text-sm text-muted">결제는 다음 버전에서 열려요. 지금은 운영자가 나눠 주는 쿠폰으로 Pro를 켤 수 있어요.</p>
+      <p className="text-sm text-muted">결제는 다음 버전에서 열려요. 지금은 운영자가 나눠 주는 쿠폰으로 Pro나 테스트 플랜을 켤 수 있어요.</p>
 
       <Card>
         <form
@@ -71,10 +74,16 @@ export default function PlanPage() {
             if (!code.trim()) return;
             setBusy(true);
             try {
-              const r = await api<{ proUntil: string }>('/api/coupon', { method: 'POST', body: JSON.stringify({ code: code.trim() }) });
-              toast(`Pro가 켜졌어요! ${new Date(r.proUntil).toLocaleDateString('ko-KR')}까지예요.`, 'ok');
+              const r = await api<{ until: string; plan?: { kind: 'pro' | 'custom'; name: string } }>('/api/coupon', {
+                method: 'POST',
+                body: JSON.stringify({ code: code.trim() }),
+              });
+              const until = day(r.until);
+              if (r.plan?.kind === 'custom') toast(`'${r.plan.name}' 플랜이 켜졌어요! ${until}까지예요.`, 'ok');
+              else if (me.planInfo.kind === 'custom') toast(`Pro가 ${until}까지 켜졌어요. 지금 쓰는 테스트 플랜이 끝나면 Pro가 적용돼요.`, 'ok');
+              else toast(`Pro가 켜졌어요! ${until}까지예요.`, 'ok');
               setCode('');
-              refresh();
+              await refresh();
             } catch (err) {
               toast((err as Error).message, 'bad');
             } finally {
@@ -99,5 +108,42 @@ export default function PlanPage() {
         </form>
       </Card>
     </div>
+  );
+}
+
+/** 지금 쓰는 테스트 플랜 (관리자가 만든 플랜) 내용 */
+function CustomPlanCard() {
+  const { me } = useMe();
+  if (!me || me.planInfo.kind !== 'custom') return null;
+  const e = me.energy;
+  const items: Array<[string, string]> = [
+    ['남은 에너지', `⚡ ${Math.floor(e.remaining ?? 0)} / ${e.limit ?? 0}`],
+    ['하루 최대', e.planDaily === null ? '없음' : `⚡ ${e.planDaily}`],
+    ['PDF 한 번에', `${me.plan.pdfPages}쪽`],
+    ['사진 한 번에', `${me.plan.images}장`],
+    ['글 한 번에', `${me.plan.textChars.toLocaleString('ko-KR')}자`],
+    ['파일 한 개 크기', `${me.plan.fileMb}MB`],
+    ['AI 모델', me.canCareful ? '빠름 + 꼼꼼' : '빠름'],
+    ['원본 파일 보관', me.plan.fileDays === null ? '계속' : `처리 후 ${me.plan.fileDays}일`],
+  ];
+  return (
+    <Card className="grid gap-3">
+      <div className="flex flex-wrap items-start justify-between gap-2">
+        <div className="grid gap-0.5">
+          <span className="text-xs font-semibold text-accent">테스트 플랜</span>
+          <span className="font-display text-xl">{me.planInfo.name}</span>
+        </div>
+        {me.planInfo.until ? <Chip tone="accent">{day(me.planInfo.until)}까지</Chip> : null}
+      </div>
+      <dl className="grid grid-cols-2 gap-x-3 gap-y-2.5 text-sm">
+        {items.map(([k, v]) => (
+          <div key={k} className="grid gap-0.5">
+            <dt className="text-xs text-muted">{k}</dt>
+            <dd className="font-semibold tabular-nums">{v}</dd>
+          </div>
+        ))}
+      </dl>
+      <p className="text-xs text-muted">플랜 에너지는 기간 동안 다시 채워지지 않아요. 플랜이 끝나면 원래 요금제로 돌아가요.</p>
+    </Card>
   );
 }

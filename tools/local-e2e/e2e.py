@@ -493,9 +493,13 @@ async def main():
 
         step("plan: bad coupon")
         await page.goto(BASE + "/plan")
+        n0 = len(ERRORS)
         await page.get_by_label("쿠폰 번호").fill("KOK-NOPE-NOPE")
         await page.get_by_role("button", name="쿠폰 쓰기").click()
         await expect(page.get_by_text("없는 쿠폰이에요. 글자를 다시 확인해 주세요.")).to_be_visible()
+        # 일부러 낸 400 은 오류 목록에서 뺀다
+        assert all("/api/coupon" in e or "status of 400" in e for e in ERRORS[n0:]), ERRORS[n0:]
+        del ERRORS[n0:]
         await shot(page, "29-plan", full=False)
         await ctx.close()
 
@@ -512,7 +516,7 @@ async def main():
         await expect(page.get_by_text(re.compile("연결됨"))).to_be_visible()
         await page.get_by_role("button", name="키 시험").click()
         await expect(page.get_by_text(re.compile("작동해요"))).to_be_visible()
-        await page.get_by_role("button", name="쿠폰 만들기").click()
+        await page.get_by_role("button", name="Pro 코드 만들기").click()
         code_btn = page.locator("button.font-mono").first
         await expect(code_btn).to_be_visible()
         code = (await code_btn.inner_text()).strip()
@@ -550,6 +554,120 @@ async def main():
         me = await r.json()
         assert me["email"] == "other@example.com", me
         await ctx.close()
+
+        # ---------------- 관리자가 만든 테스트 플랜
+        step("test plan: admin makes a plan and a code")
+        actx, apage = await new_ctx(browser, "admin", width=1280)
+        await apage.goto(BASE + "/admin")
+        await apage.get_by_role("button", name="+ 새 플랜").click()
+        sheet = apage.get_by_role("dialog", name="새 테스트 플랜")
+        await expect(sheet).to_be_visible()
+        await sheet.get_by_label("플랜 이름").fill("베타 테스터")
+        await sheet.get_by_label("번개(⚡) 총량").fill("100")
+        await sheet.get_by_label("PDF 쪽수 (한 번에)").fill("33")
+        await sheet.get_by_text("꼼꼼 모델 쓰기").click()  # 끈다
+        await shot(apage, "35-admin-plan-form", full=False)
+        await sheet.get_by_role("button", name="플랜 만들기").click()
+        await expect(apage.get_by_text(re.compile("'베타 테스터' 플랜을 만들었어요"))).to_be_visible()
+        plan_item = apage.locator("li").filter(has=apage.get_by_role("button", name="고치기"))
+        await expect(plan_item).to_have_count(1)
+        await expect(plan_item.get_by_text("⚡ 100")).to_be_visible()
+        await plan_item.get_by_role("button", name="코드 만들기", exact=True).click()
+        await apage.get_by_label("기간(일)").fill("7")
+        await apage.get_by_role("button", name="'베타 테스터' 코드 만들기").click()
+        plan_code_btn = apage.locator("button.font-mono").first
+        await expect(plan_code_btn).to_be_visible()
+        plan_code = (await plan_code_btn.inner_text()).strip()
+        await expect(apage.get_by_text(re.compile("새 코드 · 베타 테스터 7일"))).to_be_visible()
+        await shot(apage, "36-admin-plans")
+        await no_hscroll(apage, "admin")
+
+        step("test plan: another account redeems the code")
+        octx, opage = await new_ctx(browser, "other")
+        await opage.goto(BASE + "/plan")
+        await opage.get_by_label("쿠폰 번호").fill(plan_code.lower())  # 소문자로 적어도 된다
+        await opage.get_by_role("button", name="쿠폰 쓰기").click()
+        await expect(opage.get_by_text(re.compile("'베타 테스터' 플랜이 켜졌어요!"))).to_be_visible()
+        await expect(opage.get_by_text("테스트 플랜", exact=True)).to_be_visible()
+        await expect(opage.get_by_text("⚡ 100 / 100")).to_be_visible()
+        await expect(opage.get_by_text("33쪽")).to_be_visible()
+        await shot(opage, "37-plan-custom")
+        await no_hscroll(opage, "plan (test plan)")
+        me = await (await opage.request.get(BASE + "/api/me")).json()
+        assert me["planInfo"]["kind"] == "custom" and me["planInfo"]["name"] == "베타 테스터", me["planInfo"]
+        assert me["energy"]["period"] == "plan" and me["energy"]["limit"] == 100 and me["energy"]["remaining"] == 100, me["energy"]
+        assert me["plan"]["pdfPages"] == 33 and me["canCareful"] is False and me["plan"]["fileDays"] is None, me
+        from datetime import datetime
+        span = datetime.fromisoformat(me["planInfo"]["until"].replace("Z", "+00:00")) - datetime.fromisoformat(me["planInfo"]["start"].replace("Z", "+00:00"))
+        assert abs(span.total_seconds() / 86400 - 7) < 0.01, span
+        await opage.goto(BASE + "/home")
+        await expect(opage.get_by_text("플랜 AI 에너지")).to_be_visible()
+        await expect(opage.get_by_text(re.compile("^베타 테스터 · .+까지$"))).to_be_visible()
+        await shot(opage, "38-home-test-plan", full=False)
+        await opage.goto(BASE + "/settings")
+        await expect(opage.get_by_text("플랜 남은 에너지 ⚡ 100 / 100")).to_be_visible()
+
+        step("test plan: energy is counted from the plan total")
+        psql = lambda sql: subprocess.run(["psql", "-d", "kokapp", "-tAc", sql], capture_output=True, text=True, check=True).stdout.strip()
+        other_id = USERS["other"][0]
+        subject_id = psql(f"select id from public.subjects where user_id = '{other_id}' order by created_at limit 1")
+        import uuid
+        sid = str(uuid.uuid4())
+        words = "영어 단어 정리. apple 은 사과, banana 는 바나나, cherry 는 체리라는 뜻이다. 과일 이름을 외우자."
+        r = await opage.request.post(BASE + "/api/sources", data={"id": sid, "subjectId": subject_id, "kind": "text", "title": "", "text": words})
+        assert r.ok, await r.text()
+        status = ""
+        for _ in range(90):
+            status = psql(f"select status from public.sources where id = '{sid}'")
+            if status in ("ready", "error"):
+                break
+            await opage.wait_for_timeout(1000)
+        assert status == "ready", status
+        assert psql(f"select plan_at_start from public.sources where id = '{sid}'") == "custom"
+        assert psql(f"select string_agg(distinct plan, ',') from public.energy_ledger where source_id = '{sid}'") == "custom"
+        me = await (await opage.request.get(BASE + "/api/me")).json()
+        used = me["energy"]["usedPlan"]
+        assert used and used > 0, me["energy"]
+        assert abs(me["energy"]["remaining"] - max(0, 100 - used)) < 0.2, me["energy"]
+
+        step("test plan: when the plan total runs out, AI stops with the plan's reason")
+        await apage.reload()
+        await plan_item.get_by_role("button", name="고치기").click()
+        sheet = apage.get_by_role("dialog", name="테스트 플랜 고치기")
+        await sheet.get_by_label("번개(⚡) 총량").fill("1")
+        await sheet.get_by_role("button", name="고친 내용 저장").click()
+        await expect(apage.get_by_text("플랜을 고쳤어요.")).to_be_visible()
+        r = await opage.request.post(BASE + "/api/sources", data={"id": str(uuid.uuid4()), "subjectId": subject_id, "kind": "text", "title": "", "text": words})
+        assert r.status == 402, (r.status, await r.text())
+        body = await r.json()
+        assert "'베타 테스터' 플랜 에너지는 기간 동안 다시 채워지지 않아요" in body["message"], body
+        await opage.goto(BASE + "/library")
+        await opage.get_by_role("button", name="자료 넣기", exact=True).click()
+        composer = opage.get_by_role("dialog", name="자료 넣기")
+        await expect(composer.get_by_text("영어", exact=True).first).to_be_visible()  # 과목이 골라졌는지
+        await composer.get_by_label("공부한 내용").fill(words)
+        await composer.get_by_label("공부한 내용").press("Enter")
+        await expect(opage.get_by_text(re.compile("플랜 에너지는 기간 동안 다시 채워지지 않아요")).first).to_be_visible()
+        await shot(opage, "39-test-plan-empty", full=False)
+
+        step("test plan: admin ends it early, then deletes the plan and its codes")
+        await apage.get_by_label("사용자 찾기").fill("other@example.com")
+        await apage.get_by_role("button", name="찾기", exact=True).click()
+        await expect(apage.get_by_text(re.compile("^베타 테스터 ~"))).to_be_visible()
+        apage.once("dialog", lambda d: d.accept())
+        await apage.get_by_role("button", name="테스트 플랜 끝내기").click()
+        await expect(apage.get_by_text("테스트 플랜을 끝냈어요.")).to_be_visible()
+        me = await (await opage.request.get(BASE + "/api/me")).json()
+        assert me["planInfo"]["kind"] == "free" and me["energy"]["period"] == "day", me["planInfo"]
+        apage.once("dialog", lambda d: d.accept())
+        await plan_item.get_by_role("button", name="지우기").click()
+        await expect(apage.get_by_text("플랜을 지웠어요.")).to_be_visible()
+        await expect(apage.get_by_text("아직 만든 테스트 플랜이 없어요.")).to_be_visible()
+        assert psql("select count(*) from public.custom_plans") == "0"
+        assert psql("select count(*) from public.coupons where plan_id is not null") == "0"
+        assert psql(f"select count(*) from public.coupons where code = '{plan_code}'") == "0"
+        await octx.close()
+        await actx.close()
 
         # 다크 모드 폰 한 장
         step("dark phone note")

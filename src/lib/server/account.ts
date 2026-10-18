@@ -4,6 +4,26 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import { costUsd, usdToEnergy, type Usage } from '@/lib/ai/models';
 import { readLimits, readModels, readUserSettings, zNotice, type Limits, type ModelsConfig, type Notice, type UserSettings } from '@/lib/settings';
 import { kstDayStart, kstMonthStart } from '@/lib/time';
+import {
+  customPlanActive,
+  energyWindow,
+  planFlags,
+  planLimits,
+  refillText,
+  resolvePlan,
+  toCustomPlan,
+  type CustomPlan,
+  type PlanInfo,
+  type PlanLimits,
+} from '@/lib/plans';
+
+export type { PlanInfo, PlanLimits };
+export { refillText };
+
+/** 이 사람에게 지금 적용되는 한도 (파일·쪽수·사진·글자) */
+export function limitsFor(acc: Pick<Account, 'plan' | 'custom'>, L: Limits): PlanLimits {
+  return planLimits(acc.plan.kind, acc.custom, L);
+}
 import { UserFacingError } from './errors';
 import { deletedSince } from './tombstone';
 
@@ -12,8 +32,17 @@ export type Account = {
   email: string;
   nickname: string | null;
   isAdmin: boolean;
+  /** 지금 적용되는 플랜이 Pro 인지 (테스트 플랜이 켜져 있으면 false) */
   isPro: boolean;
   proUntil: string | null;
+  /** 지금 적용되는 플랜 (관리자 > 테스트 플랜 > Pro > 무료) */
+  plan: PlanInfo;
+  /** 켜져 있는 테스트 플랜 (없으면 null) */
+  custom: CustomPlan | null;
+  /** 꼼꼼 모델을 쓸 수 있는지 */
+  canCareful: boolean;
+  /** 원본 파일을 기한 없이 보관하는지 */
+  keepFiles: boolean;
   banned: boolean;
   consented: boolean;
   settings: UserSettings;
@@ -48,14 +77,26 @@ export async function getAccount(admin: SupabaseClient, userId: string, email?: 
   // (다른 로그인 방법이 켜져 있어도 남이 관리자 이메일로 가입해 관리자가 되지 못하게 구글만 믿는다)
   const isAdmin = row.role === 'admin' || (row.provider === 'google' && !!mail && adminEmails().includes(mail));
   const proUntil: string | null = row.pro_until ?? null;
-  const isPro = row.plan === 'pro' && !!proUntil && Date.parse(proUntil) > Date.now();
+  // 테스트 플랜이 켜져 있으면 그 플랜 내용을 읽는다 (플랜이 지워졌으면 원래 플랜으로)
+  let customRow: CustomPlan | null = null;
+  if (!isAdmin && customPlanActive(row)) {
+    const { data: cp, error: cpErr } = await admin.from('custom_plans').select('*').eq('id', row.custom_plan_id).maybeSingle();
+    if (cpErr) console.error('[kok] custom plan read failed', cpErr);
+    if (cp) customRow = toCustomPlan(cp);
+  }
+  const { info: plan, custom } = resolvePlan(row, customRow, isAdmin);
+  const caps = planFlags(plan.kind, custom);
   return {
     userId,
     email: mail,
     nickname: row.nickname ?? null,
     isAdmin,
-    isPro,
+    isPro: plan.kind === 'pro',
     proUntil,
+    plan,
+    custom,
+    canCareful: caps.canCareful,
+    keepFiles: caps.keepFiles,
     banned: !!row.banned,
     consented: !!row.consented_at,
     settings: readUserSettings(row.settings),
@@ -102,11 +143,14 @@ export function clearSettingsCache() {
 export type EnergyStatus = {
   unlimited: boolean;
   remaining: number;
-  /** 오늘(무료) 또는 이번 달(Pro) 한도 */
+  /** 오늘(무료), 이번 달(Pro) 또는 플랜 기간 전체(테스트 플랜) 한도 */
   limit: number;
-  period: 'day' | 'month';
+  period: 'day' | 'month' | 'plan';
   usedToday: number;
   usedMonth: number;
+  /** 테스트 플랜: 플랜을 켠 뒤 쓴 번개, 하루 최대 */
+  usedPlan?: number;
+  planDaily?: number | null;
 };
 
 async function sumEnergy(admin: SupabaseClient, userId: string, since: Date): Promise<number> {
@@ -119,6 +163,16 @@ export async function energyStatus(admin: SupabaseClient, acc: Account, limits: 
   const [usedToday, usedMonth] = await Promise.all([sumEnergy(admin, acc.userId, kstDayStart()), sumEnergy(admin, acc.userId, kstMonthStart())]);
   if (acc.isAdmin) {
     return { unlimited: true, remaining: Infinity, limit: Infinity, period: 'day', usedToday, usedMonth };
+  }
+  if (acc.plan.kind === 'custom' && acc.custom && acc.plan.start) {
+    // 테스트 플랜: 켠 뒤부터 쓴 번개를 총량에서 빼고, 하루 최대가 있으면 그것도 본다.
+    // '오늘'도 플랜을 켠 뒤부터 센다 (켜기 전에 쓴 것은 플랜의 하루 최대에 넣지 않는다)
+    const start = new Date(acc.plan.start);
+    const usedPlan = await sumEnergy(admin, acc.userId, start);
+    const planToday = start.getTime() > kstDayStart().getTime() ? usedPlan : usedToday;
+    const daily = acc.custom.energyDaily;
+    const remaining = Math.max(0, Math.min(acc.custom.energyTotal - usedPlan, daily === null ? Infinity : daily - planToday));
+    return { unlimited: false, remaining, limit: acc.custom.energyTotal, period: 'plan', usedToday: planToday, usedMonth, usedPlan, planDaily: daily };
   }
   if (acc.isPro) {
     const remaining = Math.max(0, Math.min(limits.proMonthly - usedMonth, limits.proDaily - usedToday));
@@ -139,7 +193,7 @@ export async function assertAiAllowed(
   if (!app.aiEnabled && !acc.isAdmin) {
     throw new UserFacingError('ai_paused', '지금은 AI 기능을 잠깐 쉬고 있어요. 복습은 그대로 할 수 있어요.', 503);
   }
-  if (!acc.isAdmin && !acc.isPro) {
+  if (acc.plan.kind === 'free') {
     const { data, error } = await admin.rpc('kok_free_usd_since', { p_since: kstMonthStart().toISOString() });
     if (error) throw error;
     if (Number(data ?? 0) >= app.limits.freeMonthlyBudgetUsd) {
@@ -163,10 +217,9 @@ export async function assertAiAllowed(
   }
   const status = await energyStatus(admin, acc, app.limits);
   if (!status.unlimited && status.remaining < opts.estimate) {
-    const when = status.period === 'day' ? '내일' : '다음 달';
     throw new UserFacingError(
       'no_energy',
-      `에너지가 부족해요. 필요: 약 ${Math.ceil(opts.estimate)}, 남음: ${Math.floor(status.remaining)}. ${when} 다시 채워져요.`,
+      `에너지가 부족해요. 필요: 약 ${Math.ceil(opts.estimate)}, 남음: ${Math.floor(status.remaining)}. ${refillText(acc.plan, energyWindow({ ...status, proDaily: acc.isPro ? app.limits.proDaily : null }))}`,
       402,
     );
   }
@@ -176,11 +229,19 @@ export async function assertAiAllowed(
 /** 한 사람이 동시에 정리할 수 있는 자료 수 (관리자는 제한 없음) */
 export const MAX_PARALLEL_SOURCES = 3;
 
-/** 자료 만들기·다시 하기에서 DB 가 검사할 에너지 한도 (null = 검사 안 함) */
-export function energyWindows(acc: Pick<Account, 'isAdmin' | 'isPro'>, limits: Limits) {
+/**
+ * 자료 만들기·다시 하기에서 DB 가 검사할 에너지 한도 (null = 검사 안 함).
+ * 두 번째 창(p_month_*)은 Pro 는 이번 달, 테스트 플랜은 플랜을 켠 때부터 끝날 때까지다.
+ */
+export function energyWindows(acc: Pick<Account, 'isAdmin' | 'isPro' | 'plan' | 'custom'>, limits: Limits) {
   const day = kstDayStart().toISOString();
   const month = kstMonthStart().toISOString();
   if (acc.isAdmin) return { p_day_start: day, p_day_limit: null, p_month_start: month, p_month_limit: null };
+  if (acc.plan.kind === 'custom' && acc.custom && acc.plan.start) {
+    // 하루 창도 플랜을 켠 뒤부터 (energyStatus 와 같게)
+    const planDay = Date.parse(acc.plan.start) > Date.parse(day) ? acc.plan.start : day;
+    return { p_day_start: planDay, p_day_limit: acc.custom.energyDaily, p_month_start: acc.plan.start, p_month_limit: acc.custom.energyTotal };
+  }
   if (acc.isPro) return { p_day_start: day, p_day_limit: limits.proDaily, p_month_start: month, p_month_limit: limits.proMonthly };
   return { p_day_start: day, p_day_limit: limits.freeDaily, p_month_start: month, p_month_limit: null };
 }
@@ -197,7 +258,7 @@ export type ReserveResult = {
 };
 
 /** kok_create_source·kok_retry_source 결과를 한국어 오류로 (ok 면 null) */
-export function reserveError(r: ReserveResult): UserFacingError | null {
+export function reserveError(r: ReserveResult, plan?: PlanInfo): UserFacingError | null {
   switch (r.result) {
     case 'ok':
     case 'not_error':
@@ -211,12 +272,8 @@ export function reserveError(r: ReserveResult): UserFacingError | null {
     case 'no_energy': {
       const left = Math.max(0, Math.floor(Number(r.limit ?? 0) - Number(r.used ?? 0) - Number(r.inflight ?? 0)));
       const busy = Number(r.inflight ?? 0) > 0 ? ' 정리 중인 자료가 쓸 에너지는 미리 빼 두었어요.' : '';
-      const when = r.period === 'month' ? '다음 달' : '내일';
-      return new UserFacingError(
-        'no_energy',
-        `에너지가 부족해요. 필요: 약 ${Math.ceil(Number(r.need ?? 0))}, 남음: ${left}.${busy} ${when} 다시 채워져요.`,
-        402,
-      );
+      const when = refillText(plan ?? { kind: 'free', name: '무료', start: null, until: null }, r.period === 'month' ? 'period' : 'day');
+      return new UserFacingError('no_energy', `에너지가 부족해요. 필요: 약 ${Math.ceil(Number(r.need ?? 0))}, 남음: ${left}.${busy} ${when}`, 402);
     }
     default:
       return new UserFacingError('reserve_failed', '자료를 시작하지 못했어요. 다시 해 주세요.', 500);
@@ -227,7 +284,7 @@ export function reserveError(r: ReserveResult): UserFacingError | null {
 export async function charge(
   admin: SupabaseClient,
   args: {
-    acc: Pick<Account, 'userId' | 'isPro' | 'isAdmin'>;
+    acc: Pick<Account, 'userId' | 'plan'>;
     task: string;
     model: string;
     usage: Usage;
@@ -247,7 +304,8 @@ export async function charge(
     cache_read_tokens: args.usage.cache_read_input_tokens ?? 0,
     usd,
     energy,
-    plan: args.acc.isAdmin ? 'admin' : args.acc.isPro ? 'pro' : 'free',
+    // free 만 '무료 전체 월 예산'에 들어간다 (테스트 플랜은 custom)
+    plan: args.acc.plan.kind,
     source_id: args.sourceId ?? null,
   });
   if (error) console.error('[kok] charge insert failed', error);

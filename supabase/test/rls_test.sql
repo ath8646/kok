@@ -58,6 +58,20 @@ do $$ begin
   end;
 end $$;
 
+-- 테스트 플랜 표는 학생이 볼 수 없고, 내 플랜 칸도 바꿀 수 없다
+do $$ begin
+  begin
+    perform 1 from public.custom_plans;
+    raise exception 'custom plans should be hidden';
+  exception when insufficient_privilege then null;
+  end;
+  begin
+    update public.profiles set custom_plan_until = now() + interval '1 year' where id = auth.uid();
+    raise exception 'custom plan update should be denied';
+  exception when insufficient_privilege then null;
+  end;
+end $$;
+
 -- 서버 전용 함수 막힘
 do $$ begin
   begin
@@ -143,6 +157,34 @@ do $$ begin
   exception when raise_exception then
     if sqlerrm <> 'coupon_already_used' then raise; end if;
   end;
+end $$;
+
+-- 테스트 플랜 코드: Pro 는 건드리지 않고, 지금부터 정한 기간 동안 그 플랜
+insert into public.custom_plans (id, name, energy_total, energy_daily, pdf_pages, images, text_chars, file_mb, careful)
+  values ('44444444-4444-4444-4444-444444444444', '시험 플랜', 500, 100, 50, 10, 50000, 30, false);
+insert into public.coupons (code, days, max_uses, plan_id) values ('TESTPLAN', 7, 1, '44444444-4444-4444-4444-444444444444');
+select public.kok_redeem_coupon('testplan', '22222222-2222-2222-2222-222222222222');
+do $$
+declare p public.profiles%rowtype;
+begin
+  select * into p from public.profiles where id = '22222222-2222-2222-2222-222222222222';
+  if p.custom_plan_id is distinct from '44444444-4444-4444-4444-444444444444'::uuid then raise exception 'plan coupon did not set custom plan'; end if;
+  if p.plan <> 'free' then raise exception 'plan coupon must not touch pro'; end if;
+  if p.custom_plan_start is null or p.custom_plan_until < now() + interval '6 days 23 hours' or p.custom_plan_until > now() + interval '7 days 1 hour' then
+    raise exception 'custom plan period wrong';
+  end if;
+  begin
+    perform public.kok_redeem_coupon('TESTPLAN', '11111111-1111-1111-1111-111111111111');
+    raise exception 'used up plan coupon should fail';
+  exception when raise_exception then
+    if sqlerrm <> 'coupon_used_up' then raise; end if;
+  end;
+end $$;
+-- 플랜을 지우면 그 플랜의 코드도 지워지고, 쓰던 사람은 원래 플랜으로 돌아간다
+delete from public.custom_plans where id = '44444444-4444-4444-4444-444444444444';
+do $$ begin
+  if exists (select 1 from public.coupons where code = 'TESTPLAN') then raise exception 'plan codes should go with the plan'; end if;
+  if (select custom_plan_id from public.profiles where id = '22222222-2222-2222-2222-222222222222') is not null then raise exception 'custom plan should be cleared'; end if;
 end $$;
 
 insert into public.sources (user_id, subject_id, kind, text_content)

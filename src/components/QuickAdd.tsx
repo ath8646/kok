@@ -6,6 +6,7 @@ import type { MeResponse, SubjectRow } from '@/lib/types';
 import { fetchSources, fetchSubjects, sb } from '@/lib/data';
 import { estimateEnergy } from '@/lib/ai/models';
 import { clientModel } from '@/lib/client-model';
+import { energyWindow, refillText } from '@/lib/plans';
 import { shrinkImage } from '@/lib/image';
 import { MIN_TEXT_CHARS, checkText, fileKind, groupFiles, isSubmitKey, splitComposer, titleFromName } from '@/lib/quick-add';
 import { SUBJECT_COLORS } from '@/lib/settings';
@@ -344,7 +345,7 @@ export function QuickAddProvider({
           const est = estimateEnergy({ kind: prep.kind, pages: prep.pages, images: prep.blobs.length, chars: prep.text.length }, model, m.usdPerEnergy);
           const left = m.energy.unlimited ? Infinity : (m.energy.remaining ?? 0);
           if (est > left) {
-            throw new Error(`에너지가 부족해요. 필요: 약 ${est}, 남음: ${Math.floor(left)}. ${m.energy.period === 'day' ? '내일' : '다음 달'} 다시 채워져요.`);
+            throw new Error(`에너지가 부족해요. 필요: 약 ${est}, 남음: ${Math.floor(left)}. ${refillText(m.planInfo, energyWindow(m.energy))}`);
           }
         }
         for (let round = 0; ; round++) {
@@ -461,7 +462,8 @@ export function QuickAddProvider({
       setComposerSubject(subjectId || resolveSubject());
       setClosing(false);
       setOpen(true);
-      loadSubjects();
+      // 과목 목록을 아직 못 읽었을 때 열었으면, 읽은 뒤에 과목을 골라 둔다
+      loadSubjects().then(() => setComposerSubject((cur) => cur || resolveSubject()));
     },
     [enabled, resolveSubject, loadSubjects],
   );
@@ -895,7 +897,10 @@ function Composer({
             if (isSubmitKey(e.nativeEvent)) {
               e.preventDefault();
               if (canSend) onSubmit();
-              else if (!attachments.length && trimmed) toast(`${MIN_TEXT_CHARS}자 이상 적어 주세요. (지금 ${trimmed.length}자)`);
+              else if (!subjectId && (textReady || attachments.length)) {
+                setPicking(true);
+                toast('과목을 골라 주세요.');
+              } else if (!attachments.length && trimmed) toast(`${MIN_TEXT_CHARS}자 이상 적어 주세요. (지금 ${trimmed.length}자)`);
             }
           }}
           aria-label="공부한 내용"
@@ -1086,7 +1091,13 @@ function Tray({
             </span>
             <span className="grid min-w-0 flex-1 gap-0.5">
               <span className="truncate text-sm font-bold">{jobLabel(it.job)}</span>
-              <span className={cx('line-clamp-2 text-xs', it.status === 'error' ? 'text-bad' : it.status === 'done' ? 'text-ok' : 'text-muted')}>
+              <span
+                className={cx(
+                  'text-xs',
+                  // 오류는 이유까지 읽을 수 있게 조금 더 길게
+                  it.status === 'error' ? 'line-clamp-4 text-bad' : it.status === 'done' ? 'line-clamp-2 text-ok' : 'line-clamp-2 text-muted',
+                )}
+              >
                 {it.status !== 'error' && subjectName(it.subjectId) ? `${subjectName(it.subjectId)} · ` : ''}
                 {statusText(it)}
               </span>

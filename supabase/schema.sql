@@ -284,7 +284,33 @@ create index if not exists energy_time_idx on public.energy_ledger (created_at d
 create index if not exists energy_source_idx on public.energy_ledger (source_id) where source_id is not null;
 
 -- ---------------------------------------------------------------------
--- coupons: Pro 쿠폰 (서버만)
+-- custom_plans: 관리자가 만드는 플랜 (시험용, 서버만).
+-- 코드(쿠폰)로 나눠 주고, 코드를 쓴 때부터 코드에 정한 기간 동안 이 플랜이 적용된다.
+-- 그동안은 Pro·무료 대신 이 플랜의 번개(에너지) 총량과 한도를 쓰고, 끝나면 원래 플랜으로 돌아간다.
+-- ---------------------------------------------------------------------
+create table if not exists public.custom_plans (
+  id uuid primary key default gen_random_uuid(),
+  name text not null check (char_length(name) between 1 and 30),
+  -- 기간 전체에 쓸 수 있는 번개(에너지) 총량, 하루 최대 (null = 하루 제한 없음)
+  energy_total numeric(12, 1) not null check (energy_total >= 0 and energy_total <= 10000000),
+  energy_daily numeric(12, 1) check (energy_daily is null or (energy_daily >= 0 and energy_daily <= 10000000)),
+  pdf_pages int not null check (pdf_pages between 1 and 2000),
+  images int not null check (images between 1 and 60),
+  text_chars int not null check (text_chars between 100 and 200000),
+  file_mb int not null check (file_mb between 1 and 5000),
+  -- 꼼꼼 모델을 쓸 수 있는지
+  careful boolean not null default true,
+  note text check (note is null or char_length(note) <= 100),
+  created_at timestamptz not null default now()
+);
+
+-- 사용자가 지금 쓰는 테스트 플랜 (코드를 쓴 시각부터 끝나는 시각까지). 학생은 보기만 한다
+alter table public.profiles add column if not exists custom_plan_id uuid references public.custom_plans(id) on delete set null;
+alter table public.profiles add column if not exists custom_plan_start timestamptz;
+alter table public.profiles add column if not exists custom_plan_until timestamptz;
+
+-- ---------------------------------------------------------------------
+-- coupons: Pro·테스트 플랜 코드 (서버만)
 -- ---------------------------------------------------------------------
 create table if not exists public.coupons (
   code text primary key,
@@ -295,6 +321,9 @@ create table if not exists public.coupons (
   expires_at timestamptz,
   created_at timestamptz not null default now()
 );
+
+-- 이 코드가 주는 플랜 (null = Pro). 플랜을 지우면 그 플랜의 코드도 지워진다
+alter table public.coupons add column if not exists plan_id uuid references public.custom_plans(id) on delete cascade;
 
 create table if not exists public.coupon_redemptions (
   code text not null references public.coupons(code) on delete cascade,
@@ -482,14 +511,14 @@ revoke all on
   public.profiles, public.subjects, public.sources, public.notes, public.visuals,
   public.questions, public.cards, public.review_logs, public.energy_ledger,
   public.coupons, public.coupon_redemptions, public.reports, public.app_settings, public.rate_hits,
-  public.upload_tickets, public.account_tombstones
+  public.upload_tickets, public.account_tombstones, public.custom_plans
 from anon, authenticated;
 
 grant all on
   public.profiles, public.subjects, public.sources, public.notes, public.visuals,
   public.questions, public.cards, public.review_logs, public.energy_ledger,
   public.coupons, public.coupon_redemptions, public.reports, public.app_settings, public.rate_hits,
-  public.upload_tickets, public.account_tombstones
+  public.upload_tickets, public.account_tombstones, public.custom_plans
 to service_role;
 grant usage, select on all sequences in schema public to service_role;
 
@@ -551,6 +580,7 @@ alter table public.app_settings enable row level security;
 alter table public.rate_hits enable row level security;
 alter table public.upload_tickets enable row level security;
 alter table public.account_tombstones enable row level security;
+alter table public.custom_plans enable row level security;
 
 -- profiles
 drop policy if exists "profiles: read own" on public.profiles;
@@ -826,7 +856,8 @@ begin
 end;
 $$;
 
--- 쿠폰 사용: 한 번에 검사하고 Pro 기간을 늘린다
+-- 쿠폰 사용: 한 번에 검사하고, Pro 코드면 Pro 기간을 늘리고
+-- 테스트 플랜 코드면 지금부터 정한 기간 동안 그 플랜을 켠다 (번개 총량은 지금부터 새로 센다)
 create or replace function public.kok_redeem_coupon(p_code text, p_user uuid)
 returns timestamptz
 language plpgsql
@@ -854,11 +885,20 @@ begin
   insert into public.coupon_redemptions (code, user_id) values (c.code, p_user);
   update public.coupons set used = used + 1 where code = c.code;
 
-  update public.profiles
-     set plan = 'pro',
-         pro_until = greatest(coalesce(pro_until, now()), now()) + make_interval(days => c.days)
-   where id = p_user
-  returning pro_until into new_until;
+  if c.plan_id is null then
+    update public.profiles
+       set plan = 'pro',
+           pro_until = greatest(coalesce(pro_until, now()), now()) + make_interval(days => c.days)
+     where id = p_user
+    returning pro_until into new_until;
+  else
+    update public.profiles
+       set custom_plan_id = c.plan_id,
+           custom_plan_start = now(),
+           custom_plan_until = now() + make_interval(days => c.days)
+     where id = p_user
+    returning custom_plan_until into new_until;
+  end if;
 
   return new_until;
 end;
@@ -875,6 +915,7 @@ as $$
   select jsonb_build_object(
     'users', (select count(*) from public.profiles),
     'pro_users', (select count(*) from public.profiles where plan = 'pro' and pro_until > now()),
+    'custom_users', (select count(*) from public.profiles where custom_plan_id is not null and custom_plan_until > now()),
     'active_today', (select count(distinct user_id) from public.review_logs where reviewed_at >= p_day_start),
     'usd_month', (select coalesce(sum(usd), 0) from public.energy_ledger where created_at >= p_month_start),
     'usd_month_free', (select coalesce(sum(usd), 0) from public.energy_ledger where created_at >= p_month_start and plan = 'free'),

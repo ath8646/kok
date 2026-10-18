@@ -12,6 +12,8 @@ import { daysUntil, kstDateString } from '@/lib/time';
 import { subjectVar } from '@/lib/colors';
 import { dueLabel } from '@/lib/srs';
 import { previewText } from '@/lib/richtext';
+import { energyPeriodLabel } from '@/lib/plans';
+import type { MeResponse } from '@/lib/types';
 
 type Recent = SourceRowWithUnit & { summary: string | null };
 
@@ -27,6 +29,18 @@ async function fetchRecent(): Promise<Recent[]> {
 }
 
 const WEEK = ['월', '화', '수', '목', '금', '토', '일'];
+
+/** 에너지 카드 아래 한 줄: 어떤 플랜의 에너지인지, 언제 채워지는지 */
+function energyFoot(me: MeResponse): string {
+  if (me.energy.unlimited) return '관리자';
+  const p = me.planInfo;
+  if (p.kind === 'custom') {
+    const until = p.until ? new Date(p.until).toLocaleDateString('ko-KR', { month: 'long', day: 'numeric', timeZone: 'Asia/Seoul' }) : null;
+    return until ? `${p.name} · ${until}까지` : p.name;
+  }
+  if (p.kind === 'pro') return 'Pro';
+  return `하루 ${me.energy.limit}씩 채워져요`;
+}
 
 /** 이번 주(월~일) 공부한 날 */
 function weekDots(days: string[]) {
@@ -192,7 +206,7 @@ export default function HomePage() {
           <span className="text-xs text-muted">이번 주 쉬는 날 {streak.restUsedThisWeek}/2</span>
         </section>
         <Link href="/settings#energy" className="kok-card kok-card-hover press kok-rise grid content-between gap-1 p-4" style={{ ['--i' as string]: 2 }}>
-          <span className="text-sm font-semibold text-muted">{me.energy.period === 'month' ? '이번 달' : '오늘'} AI 에너지</span>
+          <span className="text-sm font-semibold text-muted">{energyPeriodLabel(me.energy.period)} AI 에너지</span>
           <span className="font-display text-[28px] leading-tight tabular-nums">
             {me.energy.unlimited ? '∞' : `⚡ ${Math.floor(me.energy.remaining ?? 0)}`}
           </span>
@@ -204,7 +218,7 @@ export default function HomePage() {
               />
             </span>
           ) : null}
-          <span className="text-xs text-muted">{me.energy.unlimited ? '관리자' : me.isPro ? 'Pro' : `하루 ${me.energy.limit}씩 채워져요`}</span>
+          <span className="truncate text-xs text-muted">{energyFoot(me)}</span>
         </Link>
       </div>
 

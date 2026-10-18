@@ -1,5 +1,5 @@
 import { requireAccount } from '@/lib/server/auth';
-import { energyStatus, getAppSettings } from '@/lib/server/account';
+import { energyStatus, getAppSettings, limitsFor } from '@/lib/server/account';
 import { errorResponse } from '@/lib/server/errors';
 import { costMultiplier } from '@/lib/ai/models';
 import type { MeResponse } from '@/lib/types';
@@ -10,7 +10,7 @@ export async function GET() {
     const app = await getAppSettings(admin);
     const e = await energyStatus(admin, acc, app.limits);
     const L = app.limits;
-    const pro = acc.isPro || acc.isAdmin;
+    const lim = limitsFor(acc, L);
     const body: MeResponse = {
       userId: acc.userId,
       email: acc.email,
@@ -18,6 +18,8 @@ export async function GET() {
       isAdmin: acc.isAdmin,
       isPro: acc.isPro,
       proUntil: acc.proUntil,
+      planInfo: acc.plan,
+      canCareful: acc.canCareful,
       consented: acc.consented,
       settings: acc.settings,
       energy: {
@@ -28,15 +30,17 @@ export async function GET() {
         usedToday: Math.round(e.usedToday * 10) / 10,
         usedMonth: Math.round(e.usedMonth * 10) / 10,
         proDaily: acc.isPro ? L.proDaily : null,
+        usedPlan: e.usedPlan === undefined ? null : Math.round(e.usedPlan * 10) / 10,
+        planDaily: e.planDaily ?? null,
       },
       notice: app.notice,
       aiEnabled: app.aiEnabled,
       plan: {
-        pdfPages: pro ? L.pdfPagesPro : L.pdfPagesFree,
-        images: pro ? L.imagesPro : L.imagesFree,
-        textChars: pro ? L.textCharsPro : L.textCharsFree,
-        fileMb: pro ? L.fileMbPro : L.fileMbFree,
-        fileDays: pro ? null : L.freeFileDays,
+        pdfPages: lim.pdfPages,
+        images: lim.images,
+        textChars: lim.textChars,
+        fileMb: lim.fileMb,
+        fileDays: lim.keepFiles ? null : L.freeFileDays,
       },
       usdPerEnergy: L.usdPerEnergy,
       models: { fast: app.models.fast, careful: app.models.careful, adminTest: app.models.adminTest },

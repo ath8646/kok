@@ -24,11 +24,12 @@
 - 자료 처리: `POST /api/sources` → `kok_create_source`(한 사람씩 줄 세워 동시 처리 수·에너지 검사 후 행 만들기) → `after()`로 `driveSource` → `runSteps`(90초까지 새 단계 시작) → 남으면 서명된 `/api/internal/process`로 이어 달리기. 상태는 `sources` 표(step, progress, partials, draft, locked_until). `partials`·`draft`는 학생에게 보이지 않는다(칸 단위 SELECT).
 - 큰 PDF(20MB 넘음)는 첫 정리 단계에서 AI 요청 한도(32MB, base64)에 맞게 `splitPdfBySize`로 나눠 `내id/자료id/parts/`에 저장하고(`draft.pdfParts`), 단계마다 조각 하나만 받는다. 정리가 끝나면 조각은 지운다. 파일 최대 크기를 바꾸려면 `MAX_FILE_MB`(settings.ts), `schema.sql`의 버킷 `file_size_limit`, Supabase Storage 전체 한도를 같이 바꾼다.
 - AI에 노트를 보낼 때는 `noteForPrompt`(길이 제한)를 쓰고, 작은 작업의 예상 에너지는 `runTask`가 보낼 내용 길이로 계산한다. 라우트 `maxDuration`보다 `timeoutMs`를 짧게 잡는다.
+- 요금제 판단은 `src/lib/plans.ts` 한 곳(관리자 > 테스트 플랜 > Pro > 무료). 서버는 `getAccount`의 `acc.plan`·`acc.custom`·`acc.canCareful`·`acc.keepFiles`와 `limitsFor(acc, L)`을 쓰고, `isPro`로 혜택을 정하지 않는다. 테스트 플랜(`custom_plans`, 서버만)은 쿠폰 `plan_id`로 켜고(`kok_redeem_coupon`), 번개는 `custom_plan_start`부터 세며 DB 검사에는 `energyWindows`의 두 번째 창으로 넘긴다. 하루 최대도 플랜을 켠 뒤부터 센다.
 - 복습: `src/lib/srs.ts`(ts-fsrs), `src/lib/review-plan.ts`(오늘 문제 고르기·시험 모드·연속 기록·약점 개념).
 
 ## 확인 명령
 
 ```bash
 npm test && npm run lint && npm run typecheck && npm run check:secrets
-# RLS (로컬 Postgres): supabase/ 에서 stub.sql → schema.sql(두 번) → rls_test.sql
+# RLS (로컬 Postgres, UTF8 데이터베이스): supabase/ 에서 stub.sql → schema.sql(두 번) → rls_test.sql
 ```

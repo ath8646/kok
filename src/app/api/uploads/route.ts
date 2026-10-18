@@ -3,7 +3,7 @@
 import type { NextRequest } from 'next/server';
 import { z } from 'zod';
 import { assertSameOrigin, readJson, requireAccount } from '@/lib/server/auth';
-import { getAppSettings } from '@/lib/server/account';
+import { getAppSettings, limitsFor } from '@/lib/server/account';
 import { UserFacingError, errorResponse } from '@/lib/server/errors';
 import { sweepOrphanUploads } from '@/lib/server/files';
 import { SOURCES_BUCKET } from '@/lib/supabase/admin';
@@ -37,13 +37,15 @@ export async function POST(req: NextRequest) {
     if (!app.aiEnabled && !acc.isAdmin) throw new UserFacingError('ai_paused', '지금은 AI 기능을 잠깐 쉬고 있어요. 복습은 그대로 할 수 있어요.', 503);
 
     const L = app.limits;
-    const pro = acc.isPro || acc.isAdmin;
-    const maxMb = pro ? L.fileMbPro : L.fileMbFree;
+    const lim = limitsFor(acc, L);
+    // 하루 올리기 수·대기 파일 수는 무료가 아니면(Pro·테스트 플랜) 넉넉하게
+    const pro = acc.plan.kind !== 'free';
+    const maxMb = lim.fileMb;
     if (b.kind === 'pdf') {
       if (b.files.length !== 1) throw new UserFacingError('one_pdf', 'PDF는 한 번에 하나씩 넣어 주세요.', 400);
       if (b.files[0].size > maxMb * MB) throw new UserFacingError('too_big', `파일이 너무 커요. ${maxMb}MB까지 넣을 수 있어요.`, 400);
     } else {
-      const maxImages = pro ? L.imagesPro : L.imagesFree;
+      const maxImages = lim.images;
       if (b.files.length > maxImages) throw new UserFacingError('too_many_images', `사진은 한 번에 ${maxImages}장까지 넣을 수 있어요.`, 400);
       if (b.files.some((f) => f.size > Math.min(maxMb, 10) * MB)) throw new UserFacingError('too_big', '사진 파일이 너무 커요.', 400);
     }

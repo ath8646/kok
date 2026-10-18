@@ -4,6 +4,6 @@ import type { ModelTier } from './settings';
 
 export function clientModel(me: MeResponse, tier: ModelTier): string {
   if (tier === 'admin' && me.isAdmin) return me.models.adminTest;
-  if ((tier === 'careful' || tier === 'admin') && (me.isPro || me.isAdmin)) return me.models.careful;
+  if ((tier === 'careful' || tier === 'admin') && (me.canCareful || me.isAdmin)) return me.models.careful;
   return me.models.fast;
 }

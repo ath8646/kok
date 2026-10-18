@@ -100,7 +100,7 @@ type Ctx = {
 
 function modelFor(ctx: Ctx, task: AiTask): string {
   const tier = task === 'visual' ? ctx.settings.models.visual : task === 'quiz' || task === 'check' ? ctx.settings.models.quiz : ctx.settings.models.organize;
-  return modelForTier(ctx.app.models, tier, ctx.acc.isPro, ctx.acc.isAdmin);
+  return modelForTier(ctx.app.models, tier, ctx.acc.canCareful, ctx.acc.isAdmin);
 }
 
 async function ai(ctx: Ctx, task: AiTask, content: ContentPart[], schema: Record<string, unknown>, maxTokens: number) {
@@ -319,8 +319,7 @@ async function stepCheckAndFinish(ctx: Ctx): Promise<'done'> {
     visuals.push({ type: 'timeline', spec: { title: visual.timeline.title, events: visual.timeline.events } });
   }
   const noteBody = { ...note, recommended: visual.recommended };
-  const expire =
-    ctx.acc.isPro || ctx.acc.isAdmin || ctx.src.kind === 'text' ? null : new Date(Date.now() + ctx.app.limits.freeFileDays * 86400_000).toISOString();
+  const expire = ctx.acc.keepFiles || ctx.src.kind === 'text' ? null : new Date(Date.now() + ctx.app.limits.freeFileDays * 86400_000).toISOString();
 
   const { error } = await ctx.admin.rpc('kok_finalize_source', {
     p_source: ctx.src.id,

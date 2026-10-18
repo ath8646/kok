@@ -14,7 +14,8 @@ USERS="insert into auth.users (id, email, raw_app_meta_data) values
   ('cccccccc-cccc-4ccc-8ccc-cccccccccccc', 'other@example.com', '$G');"
 case "${1:-reset}" in
   setup)
-    $P -d postgres -c "drop database if exists kokapp with (force);" -c "create database kokapp;" >/dev/null
+    # Supabase 처럼 UTF8 로 만든다 (SQL_ASCII 면 char_length 가 한글을 바이트로 세서 글자 수 검사가 달라진다)
+    $P -d postgres -c "drop database if exists kokapp with (force);" -c "create database kokapp template template0 encoding 'UTF8' lc_collate 'C' lc_ctype 'C';" >/dev/null
     $P -d kokapp -f "$SUPA/test/stub.sql" >/dev/null 2>&1
     $P -d kokapp -f "$SUPA/schema.sql" >/dev/null 2>&1
     $P -d kokapp -c "$USERS" >/dev/null
@@ -23,7 +24,7 @@ case "${1:-reset}" in
     $P -d kokapp -f "$SUPA/test/stub.sql" >/dev/null 2>&1
     $P -d kokapp -c "truncate auth.users cascade; truncate public.coupons cascade; truncate storage.objects; delete from public.app_settings;" >/dev/null 2>&1
     $P -d kokapp -f "$SUPA/schema.sql" >/dev/null 2>&1
-    $P -d kokapp -c "truncate public.account_tombstones, public.upload_tickets;" >/dev/null
+    $P -d kokapp -c "truncate public.account_tombstones, public.upload_tickets; truncate public.custom_plans cascade;" >/dev/null
     $P -d kokapp -c "$USERS" >/dev/null
     rm -rf "$HERE/fakebase/files"
     ;;

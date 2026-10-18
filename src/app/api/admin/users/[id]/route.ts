@@ -1,4 +1,4 @@
-// 관리자: 계정 정지/풀기, Pro 켜기/끄기
+// 관리자: 계정 정지/풀기, Pro 켜기/끄기, 테스트 플랜 끝내기
 import type { NextRequest } from 'next/server';
 import { z } from 'zod';
 import { assertSameOrigin, assertUuid, readJson, requireAccount } from '@/lib/server/auth';
@@ -7,6 +7,8 @@ import { UserFacingError, errorResponse } from '@/lib/server/errors';
 const Body = z.object({
   banned: z.boolean().optional(),
   proDays: z.number().int().min(0).max(3650).optional(),
+  /** true: 켜져 있는 테스트 플랜을 바로 끝낸다 (원래 플랜으로 돌아감) */
+  endCustomPlan: z.boolean().optional(),
 });
 
 export async function PATCH(req: NextRequest, ctx: RouteContext<'/api/admin/users/[id]'>) {
@@ -29,6 +31,11 @@ export async function PATCH(req: NextRequest, ctx: RouteContext<'/api/admin/user
         patch.plan = 'pro';
         patch.pro_until = new Date(Date.now() + b.proDays * 86400_000).toISOString();
       }
+    }
+    if (b.endCustomPlan) {
+      patch.custom_plan_id = null;
+      patch.custom_plan_start = null;
+      patch.custom_plan_until = null;
     }
     if (!Object.keys(patch).length) return Response.json({ ok: true });
     const { error } = await admin.from('profiles').update(patch).eq('id', id);

@@ -7,7 +7,7 @@ Claude 답은 정해진 예시(광합성 노트·문제)를 돌려줘요. 실제
 
 ## 준비
 
-- Postgres 15+ (`PGHOST`·`PGPORT`·`PGUSER`, 기본값 `/tmp` · `54329` · `postgres`)
+- Postgres 15+ (`PGHOST`·`PGPORT`·`PGUSER`, 기본값 `/tmp` · `54329` · `postgres`). `db.sh setup` 은 Supabase 처럼 UTF8 데이터베이스를 만들어요
 - Node 20+, Python 3 + Playwright(Chromium)
 
 ## 실행

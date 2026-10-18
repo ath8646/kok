@@ -40,6 +40,9 @@ export default function WrongPage() {
   const [notes, setNotes] = useState<Map<string, NoteInfo>>(new Map());
   const [items, setItems] = useState<Array<{ q: QuestionRow; lapses: number }>>([]);
   const [open, setOpen] = useState<string | null>(null);
+  // 못 읽었을 때는 '비어 있어요' 대신 다시 불러오기를 보여 준다
+  const [failed, setFailed] = useState(false);
+  const [attempt, setAttempt] = useState(0);
 
   useEffect(() => {
     let alive = true;
@@ -50,19 +53,26 @@ export default function WrongPage() {
         setTitles(r.titles);
         setNotes(r.notes);
         setItems(r.items);
+        setFailed(false);
         setLoading(false);
       })
       .catch(() => {
         if (!alive) return;
-        toast('오답노트를 불러오지 못했어요.', 'bad');
+        setFailed(true);
         setLoading(false);
       });
     return () => {
       alive = false;
     };
-  }, [toast]);
+  }, [attempt]);
 
-  const subtitleText = items.length ? `틀린 문제 ${items.length}개 · 3번 연속 맞히면 졸업해요` : '틀린 문제가 모이는 곳이에요';
+  const retry = () => {
+    setLoading(true);
+    setFailed(false);
+    setAttempt((a) => a + 1);
+  };
+
+  const subtitleText = failed ? '불러오지 못했어요' : items.length ? `틀린 문제 ${items.length}개 · 3번 연속 맞히면 졸업해요` : '틀린 문제가 모이는 곳이에요';
   const subtitle = loading ? (
     // 읽는 동안에도 부제 줄 높이를 지켜서, 다 읽었을 때 제목이 위로 튀지 않게 한다
     <span className="kok-skel inline-block h-6 align-top" aria-hidden="true">
@@ -92,6 +102,15 @@ export default function WrongPage() {
 
       {loading ? (
         <WrongSkeleton />
+      ) : failed ? (
+        <div className="kok-fill">
+          <EmptyState
+            icon={<Icon d={ICONS.retry} size={34} strokeWidth={2.2} />}
+            title="오답노트를 불러오지 못했어요"
+            body="인터넷 연결을 확인하고 다시 불러와 주세요."
+            action={<Button onClick={retry}>다시 불러오기</Button>}
+          />
+        </div>
       ) : !items.length ? (
         // 자리 표시와 모양이 달라서 카드째 살짝 번지며 나타난다
         <div className="kok-fill">

@@ -129,25 +129,30 @@ export default function ReviewPage() {
   const subjectNames = useMemo(() => new Map((plan?.subjects ?? []).map((s) => [s.id, s.name])), [plan]);
   const reviewSettings = me?.settings.review;
 
+  // 못 읽었을 때는 '오늘 할 일 끝' 대신 다시 불러오기를 보여 준다
+  const [failed, setFailed] = useState(false);
+
   const applyQueue = useCallback((r: { plan: PlanData; items: Item[] }) => {
     setPlan(r.plan);
     setQueue(r.items);
     setIdx(0);
     setResults([]);
+    setFailed(false);
     setPhase('start');
   }, []);
 
-  /** 버튼에서 다시 고를 때 (미리 풀기, 조금 더 하기) */
+  const loadFailed = useCallback(() => {
+    setQueue([]);
+    setFailed(true);
+    setPhase('start');
+  }, []);
+
+  /** 버튼에서 다시 고를 때 (미리 풀기, 조금 더 하기, 다시 불러오기) */
   const rebuild = (practiceAhead: boolean) => {
     if (!reviewSettings) return;
     if (phase === 'end') setRound((r) => r + 1);
     setPhase('loading');
-    fetchQueue(mode, practiceAhead, reviewSettings)
-      .then(applyQueue)
-      .catch(() => {
-        toast('복습을 불러오지 못했어요.', 'bad');
-        setPhase('start');
-      });
+    fetchQueue(mode, practiceAhead, reviewSettings).then(applyQueue).catch(loadFailed);
   };
 
   useEffect(() => {
@@ -158,9 +163,7 @@ export default function ReviewPage() {
         if (alive) applyQueue(r);
       })
       .catch(() => {
-        if (!alive) return;
-        toast('복습을 불러오지 못했어요.', 'bad');
-        setPhase('start');
+        if (alive) loadFailed();
       });
     return () => {
       alive = false;
@@ -282,7 +285,7 @@ export default function ReviewPage() {
     // 불러오는 동안과 다 불러온 뒤가 같은 틀이라 제목은 그대로 있고, 부제와 카드 안의 글만 바뀐다
     const ready = phase === 'start';
     const n = queue.length;
-    const subtitleText = n ? `${n}문제가 준비됐어요` : '지금은 풀 문제가 없어요';
+    const subtitleText = failed ? '불러오지 못했어요' : n ? `${n}문제가 준비됐어요` : '지금은 풀 문제가 없어요';
     const subtitle = ready ? (
       <span key={subtitleText} className="kok-swap">
         {subtitleText}
@@ -298,6 +301,14 @@ export default function ReviewPage() {
         <LargeHeader title={MODE_TITLE[mode.kind]} subtitle={subtitle} />
         {!ready ? (
           <StartSkeleton />
+        ) : failed ? (
+          <div className="kok-fill">
+            <EmptyState
+              title="복습을 불러오지 못했어요"
+              body="인터넷 연결을 확인하고 다시 불러와 주세요."
+              action={<Button onClick={() => rebuild(ahead)}>다시 불러오기</Button>}
+            />
+          </div>
         ) : n === 0 ? (
           // 자리 표시와 모양이 달라서 카드째 살짝 번지며 나타난다
           <div className="kok-fill">

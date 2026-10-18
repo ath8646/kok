@@ -14,6 +14,7 @@ export async function GET() {
     const body: MeResponse = {
       userId: acc.userId,
       email: acc.email,
+      provider: acc.provider,
       nickname: acc.nickname,
       isAdmin: acc.isAdmin,
       isPro: acc.isPro,

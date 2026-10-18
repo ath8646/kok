@@ -4,6 +4,8 @@ import Link from 'next/link';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { SourceRowWithUnit } from '@/lib/data';
 import { fetchSources } from '@/lib/data';
+import { SOURCES_CHANGED } from '@/lib/events';
+import { dropView } from '@/lib/view-cache';
 import { Button, ICONS, Icon, ProgressRing, api, cx, useToast } from './ui';
 
 export function stepLabel(s: Pick<SourceRowWithUnit, 'status' | 'step' | 'chunk_index' | 'chunk_total'>): string {
@@ -42,6 +44,8 @@ export function useActiveSources(subjectId?: string) {
       const nowIds = new Set(rows.map((r) => r.id));
       const finished = [...prev.current.keys()].filter((id) => !nowIds.has(id));
       if (finished.length) {
+        // 기억해 둔 자료함 목록은 이제 옛것이다 (정리 중으로 보이지 않게)
+        dropView();
         setDoneCount((c) => c + finished.length);
         const all = await fetchSources({ subjectId, limit: 30 });
         setJustDone((d) => [...all.filter((r) => finished.includes(r.id) && r.status === 'ready'), ...d].slice(0, 5));
@@ -125,6 +129,7 @@ export function ProcessingList({ items, justDone, reload }: Pick<ReturnType<type
                       try {
                         await api(`/api/sources/${s.id}/retry`, { method: 'POST', body: '{}' });
                         toast('다시 시작했어요.');
+                        window.dispatchEvent(new Event(SOURCES_CHANGED));
                         await reload();
                       } catch (e) {
                         toast((e as Error).message, 'bad');
@@ -142,6 +147,7 @@ export function ProcessingList({ items, justDone, reload }: Pick<ReturnType<type
                       if (!confirm('이 자료를 지울까요?')) return;
                       try {
                         await api(`/api/sources/${s.id}`, { method: 'DELETE' });
+                        window.dispatchEvent(new Event(SOURCES_CHANGED));
                         await reload();
                       } catch (e) {
                         toast((e as Error).message, 'bad');

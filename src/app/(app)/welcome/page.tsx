@@ -7,6 +7,7 @@ import { useMe } from '@/components/AppShell';
 import { Button, Card, Field, cx, inputClass, useToast } from '@/components/ui';
 import { supabaseBrowser } from '@/lib/supabase/client';
 import { clearTheme } from '@/lib/theme';
+import { dropView } from '@/lib/view-cache';
 import { SUBJECT_COLORS } from '@/lib/settings';
 import { SUBJECT_COLOR_LABEL, subjectVar } from '@/lib/colors';
 
@@ -168,6 +169,7 @@ export default function WelcomePage() {
         onClick={async () => {
           await supabaseBrowser().auth.signOut();
           clearTheme();
+          dropView();
           router.replace('/');
           router.refresh();
         }}

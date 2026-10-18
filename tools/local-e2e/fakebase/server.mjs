@@ -607,6 +607,25 @@ async function handleAuth(req, res, url, auth) {
     });
   }
   if (p === 'logout') return send(res, 204, null);
+  // 관리자: 사용자 한 명 (로그인 회사 계정 번호는 raw_app_meta_data 의 provider·provider_id 로 흉내 낸다)
+  if (p.startsWith('admin/users/') && req.method === 'GET') {
+    if (auth.role !== 'service_role') return send(res, 403, { msg: 'forbidden' });
+    const id = p.split('/')[2];
+    const r = await pool.query('select id, email, raw_app_meta_data as meta from auth.users where id = $1', [id]);
+    if (!r.rows.length) return send(res, 404, { code: 404, error_code: 'user_not_found', msg: 'User not found' });
+    const u = r.rows[0];
+    const provider = u.meta?.provider ?? 'google';
+    return send(res, 200, {
+      id: u.id,
+      aud: 'authenticated',
+      role: 'authenticated',
+      email: u.email ?? '',
+      app_metadata: { provider, providers: [provider] },
+      user_metadata: {},
+      identities: [{ identity_id: crypto.randomUUID(), id: String(u.meta?.provider_id ?? u.id), user_id: u.id, provider, identity_data: {} }],
+      created_at: new Date().toISOString(),
+    });
+  }
   if (p.startsWith('admin/users/') && req.method === 'DELETE') {
     if (auth.role !== 'service_role') return send(res, 403, { msg: 'forbidden' });
     const id = p.split('/')[2];

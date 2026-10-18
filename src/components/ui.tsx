@@ -8,7 +8,7 @@ export function cx(...parts: Array<string | false | null | undefined>): string {
 }
 
 type BtnProps = React.ButtonHTMLAttributes<HTMLButtonElement> & {
-  variant?: 'primary' | 'secondary' | 'ghost' | 'danger' | 'ink';
+  variant?: 'primary' | 'secondary' | 'ghost' | 'danger' | 'ink' | 'kakao';
   size?: 'sm' | 'md' | 'lg';
   busy?: boolean;
 };
@@ -22,6 +22,8 @@ const BTN_VARIANTS = {
   secondary: 'bg-surface-2 text-ink hover:bg-surface-3',
   ghost: 'text-ink hover:bg-surface-2',
   danger: 'bg-bad text-white hover:brightness-110',
+  // 카카오 로그인 버튼: 카카오 안내대로 노란 바탕(#FEE500)에 검은 글자(85%). 어두운 화면에서도 같은 색
+  kakao: 'bg-[#FEE500] text-black/85 hover:brightness-95',
 };
 
 export function Button({ variant = 'primary', size = 'md', busy, className, children, disabled, type = 'button', ...rest }: BtnProps) {

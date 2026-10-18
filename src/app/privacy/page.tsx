@@ -1,6 +1,7 @@
 import type { Metadata } from 'next';
 import { LegalPage, Sec } from '@/components/LegalPage';
 import { getSiteInfo } from '@/lib/server/site';
+import { APPLE_LOGIN, KAKAO_LOGIN } from '@/lib/login';
 
 export const metadata: Metadata = { title: '개인정보처리방침' };
 export const revalidate = 300;
@@ -25,13 +26,21 @@ export default async function PrivacyPage() {
                 <td className="py-2 pr-3">구글로 로그인하면: 구글 계정 이메일, 이름, 프로필 사진 주소, 계정 식별 번호</td>
                 <td className="py-2 pr-3">로그인, 계정 구분, 문의 답변</td>
               </tr>
-              <tr className="border-b border-line align-top">
-                <td className="py-2 pr-3">
-                  Apple로 로그인하면: Apple이 알려 주는 이메일(&lsquo;나의 이메일 가리기&rsquo;를 고르면 Apple이 만든 전달용 주소), 계정 식별 번호, 처음
-                  로그인할 때 보내기로 고른 이름
-                </td>
-                <td className="py-2 pr-3">로그인, 계정 구분, 문의 답변</td>
-              </tr>
+              {KAKAO_LOGIN ? (
+                <tr className="border-b border-line align-top">
+                  <td className="py-2 pr-3">카카오로 로그인하면: 카카오 회원번호(계정 식별 번호), 동의한 경우 카카오계정 이메일·닉네임·프로필 사진 주소</td>
+                  <td className="py-2 pr-3">로그인, 계정 구분, 문의 답변</td>
+                </tr>
+              ) : null}
+              {APPLE_LOGIN ? (
+                <tr className="border-b border-line align-top">
+                  <td className="py-2 pr-3">
+                    Apple로 로그인하면: Apple이 알려 주는 이메일(&lsquo;나의 이메일 가리기&rsquo;를 고르면 Apple이 만든 전달용 주소), 계정 식별 번호, 처음
+                    로그인할 때 보내기로 고른 이름
+                  </td>
+                  <td className="py-2 pr-3">로그인, 계정 구분, 문의 답변</td>
+                </tr>
+              ) : null}
               <tr className="border-b border-line align-top">
                 <td className="py-2 pr-3">닉네임</td>
                 <td className="py-2 pr-3">화면에 이름 보여 주기 (실명이 아니어도 돼요)</td>
@@ -55,7 +64,9 @@ export default async function PrivacyPage() {
             </tbody>
           </table>
         </div>
-        <p>콕은 실명, 생일, 학교, 전화번호를 따로 묻지 않아요. 구글·Apple이 보낸 이름은 로그인 정보에만 남고, 화면에는 직접 정한 닉네임만 보여요.</p>
+        <p>
+          콕은 실명, 생일, 학교, 전화번호를 따로 묻지 않아요. 로그인한 회사가 보낸 이름·프로필 사진은 로그인 정보에만 남고, 화면에는 직접 정한 닉네임만 보여요.
+        </p>
       </Sec>
 
       <Sec title="2. 보관 기간과 지우기">
@@ -63,7 +74,7 @@ export default async function PrivacyPage() {
           <li>탈퇴하면 계정, 자료, 노트, 문제, 기록, 올린 파일을 바로 모두 지워요.</li>
           <li>
             다만 AI 비용 기록(작업 종류, 토큰 수, 비용)은 누구 것인지 알 수 없게 바꿔서 비용 관리를 위해 남겨요. 그리고 탈퇴하고 바로 다시 가입해 무료 에너지를
-            또 받는 것을 막으려고, 이메일을 알아볼 수 없게 바꾼 값과 탈퇴 시각을 2일 동안만 보관해요.
+            또 받는 것을 막으려고, 이메일과 로그인 계정 식별 번호를 알아볼 수 없게 바꾼 값과 탈퇴 시각을 2일 동안만 보관해요.
           </li>
           <li>무료 요금제에서 올린 원본 파일(PDF, 사진)은 처리 7일 뒤 지워요. 노트·그림·문제는 남아요.</li>
           <li>올렸지만 정리를 시작하지 않은 파일은 하루 안에 지워요.</li>
@@ -73,7 +84,10 @@ export default async function PrivacyPage() {
       </Sec>
 
       <Sec title="3. 맡기는 곳과 해외 이전">
-        <p>서비스를 운영하려고 아래 회사에 정보 처리를 맡겨요. 모두 해외 회사라서, 서비스를 쓰는 동안 인터넷으로 정보가 전송돼요.</p>
+        <p>
+          서비스를 운영하려고 아래 회사에 정보 처리를 맡겨요. {KAKAO_LOGIN ? '카카오를 빼면 모두 해외 회사라서' : '모두 해외 회사라서'}, 서비스를 쓰는 동안
+          인터넷으로 정보가 전송돼요.
+        </p>
         <ul className="list-disc pl-5">
           <li>
             <b>Supabase Inc.</b> (미국) · 로그인, 데이터베이스, 파일 저장 · 데이터는 서울 지역 서버에 저장 · 탈퇴할 때까지
@@ -88,9 +102,16 @@ export default async function PrivacyPage() {
           <li>
             <b>Google LLC</b> (미국) · 구글 로그인 · 구글로 로그인할 때
           </li>
-          <li>
-            <b>Apple Inc.</b> (미국) · Apple 로그인 · Apple로 로그인할 때
-          </li>
+          {KAKAO_LOGIN ? (
+            <li>
+              <b>(주)카카오</b> (대한민국) · 카카오 로그인 · 카카오로 로그인할 때
+            </li>
+          ) : null}
+          {APPLE_LOGIN ? (
+            <li>
+              <b>Apple Inc.</b> (미국) · Apple 로그인 · Apple로 로그인할 때
+            </li>
+          ) : null}
         </ul>
         <p>이 밖의 곳에 개인정보를 팔거나 넘기지 않아요. 법에 따른 요청이 있을 때만 예외로 해요.</p>
       </Sec>

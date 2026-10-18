@@ -6,7 +6,7 @@
 
 ## 들어 있는 기능 (v0.1)
 
-- 구글 로그인(Apple 로그인은 설정 후 켜기), 약관 동의, 닉네임, 과목·단원
+- 구글 로그인(카카오·Apple 로그인은 설정 후 켜기), 약관 동의, 닉네임, 과목·단원
 - 자료 넣기: 어느 화면에서나 오른쪽 아래 **+ 버튼** → 입력창에 적고 **엔터**(Shift+엔터는 줄바꿈)면 바로 AI 정리. PDF·사진·글 파일은 화면 아무 데나 **끌어다 놓거나 붙여 넣으면** 검사하고 알아서 정리(PDF는 하나씩, 사진은 묶어서 한 자료, 한글·워드는 PDF로 저장하라고 안내). PDF는 15쪽씩(무거운 PDF는 AI에 보낼 수 있는 크기로 더 잘게) 나눠 처리, 파일 한 개 무료 10MB·Pro 200MB(관리자 화면에서 바꿈), 사진은 올리기 전 긴 변 2000px로 줄임
 - 자료함: 노트 앱처럼 과목(폴더) 칩 + 노트 카드 격자, 큰 제목이 스크롤하면 위 띠로 작아짐, 정리 중인 카드는 진행 고리, 멈춘 카드는 바로 다시 하기
 - AI 정리 노트: 한 줄 요약, 핵심 개념(중요도·시험 포인트·출처 쪽), 용어, 공식(KaTeX), 함정, 예시, 내가 쓴 글이면 "확인해 보세요"와 바뀐 점
@@ -38,7 +38,7 @@ src/
   app/                 화면과 API (route.ts)
     (app)/             로그인한 뒤 화면: home, library, notes, review, wrong, questions, settings, plan, admin, welcome (add 는 자료함으로 보내기만)
     api/               서버 API: sources(자료 처리·노트에 더하기), notes(그림·문제 다시 만들기, chat, versions), grade, coupon, account, admin, cron, internal
-    auth/callback/     구글·Apple 로그인에서 돌아오는 곳
+    auth/callback/     구글·카카오·Apple 로그인에서 돌아오는 곳
   components/          화면 조각 (QuickAdd: + 버튼·끌어다 놓기, LibraryView: 자료함, MindMap, NoteView, QuestionCard …)
   lib/
     ai/                요금표·에너지, 프롬프트, JSON 스키마
@@ -66,7 +66,20 @@ Vercel → Settings → Environment Variables 에만 넣어요. 이 저장소는
 | `ANTHROPIC_API_KEY` | Claude API 키 — 비밀 |
 | `ADMIN_EMAILS` | 관리자 구글 이메일 (쉼표로 여러 개). 구글로 로그인한 계정만 관리자가 돼요 (Apple 로그인은 안 돼요) |
 | `CRON_SECRET` | 매일 청소 작업 보호 (아무 영어·숫자 32자 이상) — 비밀. 없으면 청소가 돌지 않아요 |
+| `NEXT_PUBLIC_KAKAO_LOGIN` | `1` 이면 첫 화면에 "카카오로 계속하기" 버튼이 보여요. 비워 두면 버튼이 없어요. 빌드할 때 정해지니 바꾸면 다시 배포해요 (공개돼도 괜찮아요) |
 | `NEXT_PUBLIC_APPLE_LOGIN` | `1` 이면 첫 화면에 "Apple로 계속하기" 버튼이 보여요. 비워 두면 버튼이 없어요. 빌드할 때 정해지니 바꾸면 다시 배포해요 (공개돼도 괜찮아요) |
+
+### 카카오 로그인 켜기 (선택)
+
+1. [카카오 디벨로퍼스](https://developers.kakao.com)에서 앱(콕)을 만들고, 앱 아이콘을 넣어요.
+2. 앱 → 플랫폼 키 → REST API 키를 열어 **리다이렉트 URI** 에 `https://<프로젝트-ref>.supabase.co/auth/v1/callback` 을 넣고, **클라이언트 시크릿** 코드를 만들고 활성화해요.
+3. 카카오 로그인 → 사용 설정 → 상태 ON.
+4. 앱 → 일반 → 비즈니스 정보 → **개인 개발자 비즈 앱 전환** (본인인증과 카카오비즈니스 통합 서비스 약관 동의가 먼저 필요해요). Supabase 는 카카오에 이메일을 늘 함께 요청해서, 이메일 동의항목이 없으면 KOE205 오류가 나요. 이메일 항목은 비즈 앱만 켤 수 있어요.
+5. 카카오 로그인 → 동의항목: 닉네임·프로필 사진·카카오계정(이메일)을 **선택 동의**로 켜요.
+6. Supabase → Authentication → Sign In / Providers → Kakao 를 켜고, Client ID 에 REST API 키, Client Secret 에 클라이언트 시크릿 코드를 넣고, **Allow users without an email** 을 켜요 (이메일 제공을 거절한 사람도 가입할 수 있게).
+7. 위 순서를 다 마친 뒤 Vercel 에 `NEXT_PUBLIC_KAKAO_LOGIN=1` 을 넣고 다시 배포해요.
+
+이메일 없는 카카오 계정은 설정에 '카카오 계정'으로 보이고, 탈퇴 기록은 카카오 회원번호로도 남겨서 같은 날 다시 가입해도 무료 에너지를 또 받지 못해요. 관리자는 구글 로그인만 돼요.
 
 ### Apple 로그인 켜기 (선택)
 

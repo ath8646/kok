@@ -361,6 +361,55 @@ body {
   animation-delay: calc(min(var(--i, 0), 10) * 35ms);
 }
 
+/* 탭을 바꿀 때 새 화면이 살짝 떠오른다. 하루에도 여러 번 보니 짧게, 투명도만 (fixed 창의 위치를 흔들지 않게) */
+@keyframes kok-page-in {
+  from {
+    opacity: 0;
+  }
+}
+.kok-page {
+  animation: kok-page-in 180ms var(--ease-out) backwards;
+}
+
+/* 불러오는 동안의 자리 표시: 금방 끝나면 보이지 않게 조금 늦게 나타난다 */
+@keyframes kok-skel-in {
+  from {
+    opacity: 0;
+  }
+}
+.kok-skel {
+  animation: kok-skel-in 200ms ease-out 120ms backwards;
+}
+/* 자리 표시 안의 회색 줄 */
+.kok-bone {
+  display: block;
+  border-radius: 999px;
+  background: var(--surface-2);
+}
+
+/* 자리 표시 뒤에 내용이 들어올 때: 카드는 그 자리에 두고 글만 번진다 (조금씩 늦게) */
+@keyframes kok-fill {
+  from {
+    opacity: 0;
+    transform: translateY(3px);
+  }
+}
+.kok-fill {
+  animation: kok-fill 240ms var(--ease-out) backwards;
+  animation-delay: calc(min(var(--i, 0), 6) * 22ms);
+}
+
+/* 글이 바뀔 때 (제목·숫자): 새 글이 살짝 번지며 나타난다 */
+@keyframes kok-swap {
+  from {
+    opacity: 0;
+    filter: blur(2px);
+  }
+}
+.kok-swap {
+  animation: kok-swap 220ms var(--ease-out) backwards;
+}
+
 /* 새로 생긴 카드: 살짝 커지며 나타나고 테두리가 한 번 빛난다 */
 @keyframes kok-pop-in {
   from {

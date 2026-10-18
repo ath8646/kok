@@ -1,4 +1,4 @@
-// 구글·Apple 로그인에서 돌아오는 곳: 코드를 세션으로 바꾸고 앱으로 보낸다.
+// 구글·카카오·Apple 로그인에서 돌아오는 곳: 코드를 세션으로 바꾸고 앱으로 보낸다.
 // Apple 은 먼저 Supabase 로 돌아가고(form_post), Supabase 가 구글과 똑같이 ?code= 를 붙여 여기로 보낸다.
 // 로그인 방법에 따라 다르게 할 일은 없다: profiles 행은 DB 트리거가 만들고, 이름은 쓰지 않는다(닉네임은 가입 화면에서 정한다).
 import { NextResponse, type NextRequest } from 'next/server';
@@ -34,7 +34,7 @@ export async function GET(request: NextRequest) {
   }
   const oauthError = searchParams.get('error');
   if (oauthError) {
-    // 로그인 회사(구글·Apple)나 Supabase 가 붙여 보낸 오류. Apple 설정이 틀렸을 때 Vercel 로그에서 찾을 수 있게 남긴다
+    // 로그인 회사(구글·카카오·Apple)나 Supabase 가 붙여 보낸 오류. 설정이 틀렸을 때 Vercel 로그에서 찾을 수 있게 남긴다
     console.warn(
       '[kok] oauth error',
       oauthError.slice(0, 80),
@@ -42,7 +42,8 @@ export async function GET(request: NextRequest) {
       (searchParams.get('error_description') ?? '').slice(0, 200),
     );
     // Apple 화면에서 '취소'를 누른 것은 오류가 아니다
-    if (oauthError === 'user_cancelled_authorize') return toLanding(origin, next, false);
+    // 카카오·구글은 동의 화면에서 취소하면 access_denied 로 돌아온다
+    if (oauthError === 'user_cancelled_authorize' || oauthError === 'access_denied') return toLanding(origin, next, false);
   }
   return toLanding(origin, next, true);
 }

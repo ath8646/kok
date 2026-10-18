@@ -96,6 +96,8 @@ export default function HomePage() {
     ? pickToday(plan.cards, plan.planSubjects, { dailyMax: settings.dailyMax, doneToday: plan.doneToday, interleave: settings.interleave })
     : [];
   const streak = streakInfo(days);
+  // 복습 정보를 다 읽었는지 (못 읽었어도 자리 표시는 거둔다)
+  const loaded = !!plan || err;
   const week = weekDots(days);
   const nextDue = plan?.cards.length ? plan.cards.map((c) => c.due).sort()[0] : null;
   const exams = (plan?.subjects ?? []).filter((s) => s.exam_date && daysUntil(s.exam_date) >= 0).sort((a, b) => (a.exam_date! < b.exam_date! ? -1 : 1));
@@ -106,8 +108,8 @@ export default function HomePage() {
   const subjectOf = new Map((plan?.subjects ?? []).map((s) => [s.id, s]));
 
   const title = !plan ? '오늘' : today.length ? `오늘 복습 ${today.length}문제` : hasCards ? '오늘 할 일 끝!' : '첫 자료를 넣어 보세요';
-  const subtitle = !plan
-    ? ' '
+  const subtitleText = !plan
+    ? null
     : today.length
       ? `${me.nickname ?? ''}님, 잊어버리기 직전인 문제가 기다려요`
       : hasCards
@@ -118,10 +120,33 @@ export default function HomePage() {
           : '잘했어요!'
         : '자료를 넣으면 AI가 정리하고 문제를 만들어요';
 
+  const recentLink = (
+    <Link href="/library" className="press rounded-full px-3 py-1 text-sm font-semibold text-accent hover:bg-accent-soft">
+      자료함 →
+    </Link>
+  );
+  // 다 읽으면 제목·부제가 바뀐다: 새 글이 살짝 번지며 나타나고, 읽는 동안에도 부제 줄 높이를 지켜 제목이 튀지 않게 한다
+  const titleNode = (
+    <span key={title} className={plan ? 'kok-swap' : undefined}>
+      {title}
+    </span>
+  );
+  const subtitle =
+    subtitleText === null ? (
+      <span className="kok-skel inline-block h-6 align-top" aria-hidden="true">
+        <span className="kok-bone mt-[7px] h-2.5 w-52 max-w-full" />
+      </span>
+    ) : (
+      <span key={subtitleText} className="kok-swap">
+        {subtitleText}
+      </span>
+    );
+
   return (
     <div className="grid gap-3">
       <LargeHeader
-        title={title}
+        title={titleNode}
+        compactTitle={title}
         subtitle={subtitle}
         actions={
           <span className="md:hidden">
@@ -132,10 +157,11 @@ export default function HomePage() {
 
       {/* 5분 콕 */}
       {!plan && !err ? (
-        <div className="kok-card kok-shimmer h-[196px]" />
+        <TodaySkeleton />
       ) : hasCards ? (
-        <section className="kok-card kok-rise grid gap-4 p-5" style={{ ['--i' as string]: 0 }}>
-          <div className="flex items-center gap-4">
+        // 자리 표시와 같은 크기의 카드는 그 자리에 두고, 안의 글만 번지며 나타난다
+        <section className="kok-card grid gap-4 p-5">
+          <div className="kok-fill flex items-center gap-4" style={{ ['--i' as string]: 0 }}>
             <ProgressRing value={dayTotal ? (doneToday / dayTotal) * 100 : 100} size={76} stroke={7} label="오늘 복습 진행">
               {today.length ? (
                 <span className="text-center leading-none">
@@ -153,11 +179,11 @@ export default function HomePage() {
             </div>
           </div>
           {today.length ? (
-            <LinkButton href="/review" size="lg" className="w-full">
+            <LinkButton href="/review" size="lg" className="kok-fill w-full">
               {settings.session}분 콕 시작
             </LinkButton>
           ) : (
-            <LinkButton href="/review?mode=wrong" variant="secondary" className="w-full">
+            <LinkButton href="/review?mode=wrong" variant="secondary" className="kok-fill w-full">
               {wrongCount ? `오답 ${wrongCount}문제 다시 보기` : '더 풀고 싶으면 오답노트로'}
             </LinkButton>
           )}
@@ -182,8 +208,16 @@ export default function HomePage() {
           <div className="flex items-baseline justify-between gap-2">
             <span className="text-sm font-semibold text-muted">연속 공부</span>
             <span className="font-display text-2xl tabular-nums">
-              {streak.streak}
-              <span className="ml-0.5 text-sm text-muted">일</span>
+              {loaded ? (
+                <span key="n" className="kok-swap">
+                  {streak.streak}
+                  <span className="ml-0.5 text-sm text-muted">일</span>
+                </span>
+              ) : (
+                <span className="kok-skel inline-block h-[1.25em] align-top" aria-hidden="true">
+                  <span className="kok-bone mt-[0.35em] h-[0.6em] w-10" />
+                </span>
+              )}
             </span>
           </div>
           <ol className="flex justify-between" aria-label="이번 주 공부한 날">
@@ -191,7 +225,7 @@ export default function HomePage() {
               <li key={d.label} className="grid justify-items-center gap-1">
                 <span
                   className={cx(
-                    'grid h-[18px] w-[18px] place-items-center rounded-full text-[11px] font-bold',
+                    'grid h-[18px] w-[18px] place-items-center rounded-full text-[11px] font-bold transition-colors duration-200',
                     d.studied ? 'bg-fab text-fab-ink' : d.future ? 'bg-surface-2 text-muted/60' : 'bg-surface-2 text-muted',
                     d.today && !d.studied && 'ring-2 ring-fab ring-inset',
                   )}
@@ -203,7 +237,7 @@ export default function HomePage() {
               </li>
             ))}
           </ol>
-          <span className="text-xs text-muted">이번 주 쉬는 날 {streak.restUsedThisWeek}/2</span>
+          <span className="text-xs text-muted">이번 주 쉬는 날 {loaded ? `${streak.restUsedThisWeek}/2` : '–'}</span>
         </section>
         <Link href="/settings#energy" className="kok-card kok-card-hover press kok-rise grid content-between gap-1 p-4" style={{ ['--i' as string]: 2 }}>
           <span className="text-sm font-semibold text-muted">{energyPeriodLabel(me.energy.period)} AI 에너지</span>
@@ -242,19 +276,32 @@ export default function HomePage() {
         </div>
       ) : null}
 
-      <ProcessingList {...active} />
+      {/* 정리 중인 자료는 복습 정보와 함께 나타난다 (따로 먼저 나타나 아래 자리 표시를 밀어내지 않게) */}
+      {loaded ? <ProcessingList {...active} /> : null}
 
-      {recent && recent.length ? (
+      {recent === null && !err ? (
+        // 최근 노트를 읽는 동안: 같은 크기의 자리를 먼저 두어 아래 '바로 가기'가 밀려 내려가지 않게 한다
         <>
-          <SectionTitle
-            action={
-              <Link href="/library" className="press rounded-full px-3 py-1 text-sm font-semibold text-accent hover:bg-accent-soft">
-                자료함 →
-              </Link>
-            }
-          >
-            최근 노트
-          </SectionTitle>
+          <SectionTitle action={recentLink}>최근 노트</SectionTitle>
+          <div className="kok-skel no-scrollbar -mx-4 flex gap-3 overflow-hidden px-4 pb-1 md:mx-0 md:grid md:grid-cols-4 md:px-0" aria-hidden="true">
+            {[0, 1, 2, 3].map((i) => (
+              <div key={i} className="kok-card kok-shimmer flex h-[150px] w-[150px] shrink-0 flex-col justify-between p-3.5 md:w-auto">
+                <div className="grid gap-1.5 pt-0.5">
+                  <span className="kok-bone h-2 w-[90%]" />
+                  <span className="kok-bone h-2 w-[75%]" />
+                  <span className="kok-bone h-2 w-[60%]" />
+                </div>
+                <div className="grid gap-1.5">
+                  <span className="kok-bone h-3 w-[80%]" />
+                  <span className="kok-bone h-2 w-[40%]" />
+                </div>
+              </div>
+            ))}
+          </div>
+        </>
+      ) : recent && recent.length ? (
+        <>
+          <SectionTitle action={recentLink}>최근 노트</SectionTitle>
           <div className="no-scrollbar -mx-4 flex snap-x gap-3 overflow-x-auto px-4 pb-1 md:mx-0 md:grid md:grid-cols-4 md:overflow-visible md:px-0">
             {recent.map((s, i) => {
               const subj = subjectOf.get(s.subject_id);
@@ -263,10 +310,10 @@ export default function HomePage() {
                 <Link
                   key={s.id}
                   href={`/notes/${s.id}`}
-                  className="kok-card kok-card-hover press kok-rise flex h-[150px] w-[150px] shrink-0 snap-start flex-col overflow-hidden p-3.5 md:w-auto"
-                  style={{ ['--i' as string]: i + 3 }}
+                  className="kok-card kok-card-hover press flex h-[150px] w-[150px] shrink-0 snap-start flex-col overflow-hidden p-3.5 md:w-auto"
+                  style={{ ['--i' as string]: i }}
                 >
-                  <p className={cx('line-clamp-3 min-h-0 flex-1 text-xs leading-relaxed text-muted', busy && 'kok-shimmer rounded-lg')}>
+                  <p className={cx('kok-fill line-clamp-3 min-h-0 flex-1 text-xs leading-relaxed text-muted', busy && 'kok-shimmer rounded-lg')}>
                     {busy
                       ? '정리하는 중이에요…'
                       : s.status === 'error'
@@ -275,8 +322,8 @@ export default function HomePage() {
                           ? previewText(s.summary)
                           : '정리 노트가 준비됐어요.'}
                   </p>
-                  <p className="line-clamp-2 text-sm font-bold leading-snug">{s.title || '제목 없는 자료'}</p>
-                  <p className="mt-1 flex items-center gap-1.5 truncate text-[11px] text-muted">
+                  <p className="kok-fill line-clamp-2 text-sm font-bold leading-snug">{s.title || '제목 없는 자료'}</p>
+                  <p className="kok-fill mt-1 flex items-center gap-1.5 truncate text-[11px] text-muted">
                     {subj ? <span className="h-2 w-2 shrink-0 rounded-full" style={{ background: subjectVar(subj.color) }} aria-hidden="true" /> : null}
                     <span className="truncate">{subj?.name ?? ''}</span>
                   </p>
@@ -319,5 +366,23 @@ export default function HomePage() {
       </div>
       {err ? <p className="text-sm text-bad">복습 정보를 불러오지 못했어요. 새로 고침해 주세요.</p> : null}
     </div>
+  );
+}
+
+/** 오늘 복습 카드를 읽는 동안: 실제 카드와 같은 모양·크기 (고리, 글 세 줄, 큰 버튼) */
+function TodaySkeleton() {
+  return (
+    <section className="kok-card kok-skel grid gap-4 p-5" aria-busy="true">
+      <span className="sr-only">오늘 복습을 불러오는 중이에요</span>
+      <div className="flex items-center gap-4" aria-hidden="true">
+        <span className="kok-shimmer h-[76px] w-[76px] shrink-0 rounded-full border-[7px] border-surface-2" />
+        <div className="grid flex-1 gap-2.5">
+          <span className="kok-bone h-3 w-16" />
+          <span className="kok-bone h-5 w-40 max-w-full" />
+          <span className="kok-bone h-3 w-28" />
+        </div>
+      </div>
+      <span className="kok-bone h-[52px] w-full" aria-hidden="true" />
+    </section>
   );
 }

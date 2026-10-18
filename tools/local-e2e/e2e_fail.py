@@ -166,7 +166,8 @@ async def main():
         r = await opage.request.delete(BASE + "/api/account", headers={"origin": BASE}, data={"confirm": "탈퇴"})
         assert r.status == 200, r.status
         assert sql(f"select count(*) from public.profiles where id = '{other_id}'") == "0"
-        assert sql("select count(*) from public.account_tombstones") == "1"
+        # 이메일과 로그인 회사 계정 번호를 남긴다
+        assert sql("select count(*) from public.account_tombstones") == "2"
         new_id = "dddddddd-dddd-4ddd-8ddd-dddddddddddd"
         sql(
             "insert into auth.users (id, email, raw_app_meta_data) values "
@@ -183,6 +184,38 @@ async def main():
             data={"id": str(uuid.uuid4()), "subjectId": new_subj, "kind": "text", "title": "", "text": "탈퇴하고 바로 다시 가입한 사람의 글이에요. 오늘은 AI가 쉬어야 해요.", "files": []},
         )
         print("   rejoin create:", r.status)
+        assert r.status == 429 and "탈퇴한 날" in (await r.text()), (r.status, await r.text())
+
+        print("· a Kakao account without an email is also known again when it rejoins on the same day")
+        k_id, k2_id = "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee", "ffffffff-ffff-4fff-8fff-ffffffffffff"
+        meta = '{\"provider\": \"kakao\", \"provider_id\": \"4242\"}'
+        sql(f"insert into auth.users (id, email, raw_app_meta_data) values ('{k_id}', null, '{meta}')")
+        sql(f"update public.profiles set consented_at = now(), nickname = '카카오' where id = '{k_id}'")
+        assert sql(f"select provider from public.profiles where id = '{k_id}'") == "kakao"
+        kctx = await b.new_context()
+        await kctx.add_cookies([session_cookie(k_id, None)])
+        kpage = await kctx.new_page()
+        me = await (await kpage.request.get(BASE + "/api/me")).json()
+        assert me["email"] == "" and me["provider"] == "kakao", me
+        await kpage.goto(BASE + "/settings")
+        await kpage.get_by_text("로그인 계정: 카카오 계정").wait_for()
+        before = int(sql("select count(*) from public.account_tombstones"))
+        r = await kpage.request.delete(BASE + "/api/account", headers={"origin": BASE}, data={"confirm": "탈퇴"})
+        assert r.status == 200, r.status
+        # 이메일이 없으니 로그인 회사 계정 번호 하나만
+        assert int(sql("select count(*) from public.account_tombstones")) == before + 1
+        sql(f"insert into auth.users (id, email, raw_app_meta_data) values ('{k2_id}', null, '{meta}')")
+        sql(f"update public.profiles set consented_at = now(), nickname = '다시카카오' where id = '{k2_id}'")
+        k_subj = sql(f"insert into public.subjects (user_id, name) values ('{k2_id}', '다시') returning id").splitlines()[0]
+        k2ctx = await b.new_context()
+        await k2ctx.add_cookies([session_cookie(k2_id, None)])
+        k2page = await k2ctx.new_page()
+        r = await k2page.request.post(
+            BASE + "/api/sources",
+            headers={"origin": BASE},
+            data={"id": str(uuid.uuid4()), "subjectId": k_subj, "kind": "text", "title": "", "text": "카카오로 탈퇴하고 바로 다시 가입한 사람의 글이에요. 오늘은 AI가 쉬어야 해요.", "files": []},
+        )
+        print("   kakao rejoin create:", r.status)
         assert r.status == 429 and "탈퇴한 날" in (await r.text()), (r.status, await r.text())
         await b.close()
     print("FAIL-PATH OK")

@@ -1,11 +1,11 @@
 'use client';
-// 첫 화면의 로그인 버튼: 구글, 그리고 켜져 있으면 Apple (NEXT_PUBLIC_APPLE_LOGIN → src/lib/login.ts)
+// 첫 화면의 로그인 버튼: 구글, 그리고 켜져 있으면 카카오·Apple (NEXT_PUBLIC_KAKAO_LOGIN·NEXT_PUBLIC_APPLE_LOGIN → src/lib/login.ts)
 import { useEffect, useState } from 'react';
 import { supabaseBrowser } from '@/lib/supabase/client';
-import { APPLE_LOGIN } from '@/lib/login';
+import { APPLE_LOGIN, KAKAO_LOGIN } from '@/lib/login';
 import { Button } from './ui';
 
-type Provider = 'google' | 'apple';
+type Provider = 'google' | 'kakao' | 'apple';
 
 export function LoginButton({
   size = 'lg',
@@ -34,7 +34,7 @@ export function LoginButton({
   const signIn = async (provider: Provider) => {
     setBusy(provider);
     setErr(null);
-    // 구글과 Apple 모두 같은 곳(/auth/callback)으로 돌아온다
+    // 구글·카카오·Apple 모두 같은 곳(/auth/callback)으로 돌아온다
     const { error } = await supabaseBrowser().auth.signInWithOAuth({
       provider,
       options: { redirectTo: `${window.location.origin}/auth/callback?next=${encodeURIComponent(next)}` },
@@ -45,7 +45,7 @@ export function LoginButton({
     }
   };
 
-  // 두 버튼은 크기·모양이 같다 (Apple 안내: 다른 로그인 버튼보다 작지 않게)
+  // 버튼은 크기·모양이 같다 (Apple 안내: 다른 로그인 버튼보다 작지 않게)
   const cls = 'w-full min-w-64 shadow-[0_8px_24px_var(--shadow-strong)]';
   return (
     <div className="grid justify-items-center gap-2">
@@ -54,6 +54,12 @@ export function LoginButton({
           <GoogleLogo />
           {label}
         </Button>
+        {KAKAO_LOGIN ? (
+          // 카카오 로고는 그리지 않고 글자만 (카카오 안내의 노란 버튼 색)
+          <Button size={size} variant="kakao" busy={busy === 'kakao'} disabled={busy !== null} className={cls} onClick={() => signIn('kakao')}>
+            카카오로 계속하기
+          </Button>
+        ) : null}
         {APPLE_LOGIN ? (
           <Button size={size} variant="ink" busy={busy === 'apple'} disabled={busy !== null} className={cls} onClick={() => signIn('apple')}>
             <AppleLogo />

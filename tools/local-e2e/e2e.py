@@ -165,6 +165,9 @@ async def main():
         ctx, page = await new_ctx(browser)
         await page.goto(BASE + "/")
         await expect(page.get_by_role("button", name="구글로 시작하기")).to_be_visible()
+        # 카카오 버튼 (NEXT_PUBLIC_KAKAO_LOGIN=1 로 빌드). Apple 은 꺼져 있다
+        await expect(page.get_by_role("button", name="카카오로 계속하기")).to_be_visible()
+        assert await page.get_by_role("button", name="Apple로 계속하기").count() == 0
         await shot(page, "01-landing-phone")
         await no_hscroll(page, "landing")
         await page.goto(BASE + "/home")
@@ -175,6 +178,7 @@ async def main():
             await no_hscroll(page, path)
         await shot(page, "02-offline")
         await page.goto(BASE + "/privacy")
+        await expect(page.get_by_text("카카오로 로그인하면")).to_be_visible()
         await shot(page, "03-privacy-phone")
         await ctx.close()
         ctx, page = await new_ctx(browser, width=1280, scheme="dark")

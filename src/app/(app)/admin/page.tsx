@@ -8,6 +8,7 @@ import { Button, Card, Chip, EmptyState, Field, LargeHeader, SectionTitle, Segme
 import { costMultiplier } from '@/lib/ai/models';
 import { MAX_FILE_MB, type Limits, type ModelsConfig, type Notice } from '@/lib/settings';
 import type { QuestionRow } from '@/lib/types';
+import { accountLabel } from '@/lib/login';
 
 type Overview = {
   stats: {
@@ -29,6 +30,8 @@ type Overview = {
 type UserRow = {
   id: string;
   email: string | null;
+  /** 처음 가입한 로그인 회사 */
+  provider: string | null;
   nickname: string | null;
   role: string;
   plan: string;
@@ -334,7 +337,7 @@ export default function AdminPage() {
               <li key={u.id} className="grid gap-2 rounded-xl border border-line p-3">
                 <div className="flex flex-wrap items-center gap-2">
                   <span className="font-semibold">{u.nickname ?? '(닉네임 없음)'}</span>
-                  <span className="text-sm text-muted">{u.email}</span>
+                  <span className="text-sm text-muted">{accountLabel(u.email, u.provider)}</span>
                   {u.role === 'admin' ? <Chip tone="accent">관리자</Chip> : null}
                   {pro ? <Chip tone="hl">Pro ~{new Date(u.pro_until!).toLocaleDateString('ko-KR')}</Chip> : null}
                   {u.custom_plan ? (

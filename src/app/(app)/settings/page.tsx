@@ -26,7 +26,9 @@ import { supabaseBrowser } from '@/lib/supabase/client';
 import type { SubjectRow } from '@/lib/types';
 import { THEME_COLORS, THEME_FONTS, THEME_PAPERS, type ModelTier, type UserSettings } from '@/lib/settings';
 import { energyPeriodLabel, planLabel } from '@/lib/plans';
+import { accountLabel } from '@/lib/login';
 import { THEME_COLOR_INFO, THEME_FONT_INFO, THEME_PAPER_INFO, applyTheme, clearTheme, loadThemeFont } from '@/lib/theme';
+import { dropView } from '@/lib/view-cache';
 
 const TASKS: Array<{ key: keyof UserSettings['models']; label: string; hint: string }> = [
   { key: 'organize', label: '정리', hint: '자료를 읽고 정리 노트로 바꿔요' },
@@ -146,7 +148,7 @@ export default function SettingsPage() {
             </Button>
           </div>
         </Field>
-        <p className="text-sm text-muted">로그인 계정: {me.email}</p>
+        <p className="text-sm text-muted">로그인 계정: {accountLabel(me.email, me.provider)}</p>
         <div className="flex flex-wrap items-center gap-2">
           <span className="rounded-full bg-surface-2 px-3 py-1 text-sm font-bold">{planLabel(me.planInfo)}</span>
           <LinkButton href="/plan" size="sm" variant="secondary">
@@ -158,6 +160,7 @@ export default function SettingsPage() {
             onClick={async () => {
               await supabaseBrowser().auth.signOut();
               clearTheme();
+              dropView();
               router.replace('/');
               router.refresh();
             }}
@@ -664,6 +667,7 @@ export default function SettingsPage() {
                     .auth.signOut()
                     .catch(() => {});
                   clearTheme();
+                  dropView();
                   router.replace('/');
                   router.refresh();
                 } catch (err) {

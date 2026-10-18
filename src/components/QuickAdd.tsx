@@ -11,6 +11,7 @@ import { shrinkImage } from '@/lib/image';
 import { MIN_TEXT_CHARS, checkText, fileKind, groupFiles, isSubmitKey, splitComposer, titleFromName } from '@/lib/quick-add';
 import { SUBJECT_COLORS } from '@/lib/settings';
 import { subjectVar } from '@/lib/colors';
+import { SOURCES_CHANGED, SUBJECTS_CHANGED } from '@/lib/events';
 import { ApiError, Button, ICONS, Icon, Sheet, Spinner, api, cx, useToast } from './ui';
 
 /** 동시에 정리할 수 있는 자료 수 (서버와 같다) */
@@ -18,10 +19,8 @@ const MAX_PARALLEL = 3;
 /** 이보다 큰 PDF 는 브라우저에서 쪽수를 세지 않는다 (폰 메모리를 아끼고, 쪽수는 서버가 센다) */
 const BIG_PDF_BYTES = 30 * 1024 * 1024;
 const MB = 1024 * 1024;
-/** 자료 목록이 바뀌었다고 화면들에 알리는 이벤트 */
-export const SOURCES_CHANGED = 'kok:sources-changed';
-/** 과목이 바뀌었다고 알리는 이벤트 */
-export const SUBJECTS_CHANGED = 'kok:subjects-changed';
+/** 자료 목록·과목이 바뀌었다고 화면들에 알리는 이벤트 */
+export { SOURCES_CHANGED, SUBJECTS_CHANGED };
 
 type Job =
   | { kind: 'text'; text: string; title: string }

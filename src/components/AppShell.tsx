@@ -150,6 +150,8 @@ export function AppShell({ children }: { children: ReactNode }) {
   const bare = focus || pathname === '/welcome';
   const quickAdd = !bare && me.consented && QUICK_ADD_PAGES.some((p) => under(pathname, p));
   const wide = WIDE_PAGES.some((p) => under(pathname, p));
+  // 탭(주소의 첫 칸)이 바뀔 때만 새 화면이 살짝 떠오른다 (/library ↔ /library/과목 은 같은 화면)
+  const section = pathname.split('/')[1] ?? '';
   // 집중 모드로 바뀌어도 화면(children)이 다시 만들어지지 않도록, children 의 자리는 늘 같게 둔다
   return (
     <Ctx.Provider value={{ me, refresh, focus, setFocus }}>
@@ -206,7 +208,9 @@ export function AppShell({ children }: { children: ReactNode }) {
                 bare ? 'pb-10 pt-[calc(16px+env(safe-area-inset-top))]' : 'pb-[calc(170px+env(safe-area-inset-bottom))] md:pb-28',
               )}
             >
-              {children}
+              <div key={section} className="kok-page">
+                {children}
+              </div>
             </main>
           </div>
 

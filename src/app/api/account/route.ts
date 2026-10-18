@@ -6,7 +6,7 @@ import { z } from 'zod';
 import { assertSameOrigin, readJson, requireAccount } from '@/lib/server/auth';
 import { UserFacingError, errorResponse } from '@/lib/server/errors';
 import { removeFolder } from '@/lib/server/files';
-import { recordDeletion } from '@/lib/server/tombstone';
+import { accountKeys, recordDeletion } from '@/lib/server/tombstone';
 
 export const maxDuration = 120;
 
@@ -19,7 +19,8 @@ export async function DELETE(req: NextRequest) {
     if (!Body.safeParse(await readJson(req, 2_000)).success) {
       throw new UserFacingError('confirm', '확인 글자 "탈퇴"를 적어 주세요.', 400);
     }
-    await recordDeletion(admin, acc.email);
+    // 이메일이 없는 카카오 계정도 다시 가입했을 때 알아보게 로그인 회사 계정 번호까지 남긴다 (계정을 지우기 전에 읽는다)
+    await recordDeletion(admin, await accountKeys(admin, acc.userId, acc.email));
     await removeFolder(admin, acc.userId);
     const { error } = await admin.auth.admin.deleteUser(acc.userId);
     if (error) throw error;

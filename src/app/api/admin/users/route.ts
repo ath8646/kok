@@ -35,6 +35,7 @@ export async function GET(req: NextRequest) {
       return {
         id: u.id,
         email: u.email ?? null,
+        provider: u.provider ?? null,
         nickname: u.nickname ?? null,
         role: u.role ?? 'student',
         plan: u.plan ?? 'free',

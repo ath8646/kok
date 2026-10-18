@@ -20,7 +20,7 @@ import {
 } from '@/lib/plans';
 
 import { UserFacingError } from './errors';
-import { deletedSince } from './tombstone';
+import { accountKeys, deletedSince } from './tombstone';
 
 export type { PlanInfo, PlanLimits };
 export { refillText };
@@ -33,6 +33,8 @@ export function limitsFor(acc: Pick<Account, 'plan' | 'custom'>, L: Limits): Pla
 export type Account = {
   userId: string;
   email: string;
+  /** 처음 가입한 로그인 회사 (google·kakao·apple) */
+  provider: string | null;
   nickname: string | null;
   isAdmin: boolean;
   /** 지금 적용되는 플랜이 Pro 인지 (테스트 플랜이 켜져 있으면 false) */
@@ -98,6 +100,7 @@ export async function getAccount(admin: SupabaseClient, userId: string, email?: 
   return {
     userId,
     email: mail,
+    provider: (row.provider as string | null) ?? provider ?? null,
     nickname: row.nickname ?? null,
     isAdmin,
     isPro: plan.kind === 'pro',
@@ -247,9 +250,13 @@ export async function assertAiAllowed(
     if (Number(data ?? 0) >= app.limits.freeMonthlyBudgetUsd) {
       throw new UserFacingError('free_pool_empty', '이번 달 무료 AI가 모두 쓰였어요. 다음 달 1일에 다시 열려요. 복습은 그대로 할 수 있어요.', 429);
     }
-    // 오늘 가입한 계정이 오늘 같은 이메일로 탈퇴한 적이 있으면, 오늘은 AI를 쓸 수 없다 (에너지 다시 받기 막기)
+    // 오늘 가입한 계정이 오늘 같은 이메일·같은 로그인 계정으로 탈퇴한 적이 있으면, 오늘은 AI를 쓸 수 없다 (에너지 다시 받기 막기)
     const dayStart = kstDayStart();
-    if (acc.createdAt && Date.parse(acc.createdAt) >= dayStart.getTime() && (await deletedSince(admin, acc.email, dayStart))) {
+    if (
+      acc.createdAt &&
+      Date.parse(acc.createdAt) >= dayStart.getTime() &&
+      (await deletedSince(admin, await accountKeys(admin, acc.userId, acc.email), dayStart))
+    ) {
       throw new UserFacingError('rejoin_cooldown', '탈퇴한 날에는 다시 가입해도 AI를 쓸 수 없어요. 내일부터 쓸 수 있어요. 복습은 그대로 할 수 있어요.', 429);
     }
   }

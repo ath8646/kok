@@ -13,10 +13,18 @@ import type { SubjectRow } from '@/lib/types';
 import { subjectVar } from '@/lib/colors';
 import { previewText } from '@/lib/richtext';
 import { daysUntil } from '@/lib/time';
+import { dropView, readView, writeView } from '@/lib/view-cache';
 
 type LibSource = SourceRowWithUnit & { summary: string | null };
+type LibData = { subjects: SubjectRow[]; sources: LibSource[] };
 
-async function fetchLibrary(): Promise<{ subjects: SubjectRow[]; sources: LibSource[] }> {
+/** 자료함 목록을 기억해 두는 이름 (다시 들어오면 바로 보이고, 뒤에서 새로 읽는다) */
+export const LIBRARY_VIEW = 'library';
+
+/** 카드가 나타나는 방법: 기억해 둔 목록이면 그대로(none), 그 밖에는 카드 자리에서 글만 번진다(fill) */
+type Enter = 'none' | 'fill';
+
+async function fetchLibrary(): Promise<LibData> {
   const [subjects, sources, notes] = await Promise.all([
     fetchSubjects(),
     fetchAll<SourceRowWithUnit>((a, b) =>
@@ -71,7 +79,11 @@ export function LibraryView() {
   const quick = useQuickAdd();
   const active = useActiveSources();
   const reloadActive = active.reload;
-  const [data, setData] = useState<{ subjects: SubjectRow[]; sources: LibSource[] } | null>(null);
+  const owner = me?.userId;
+  // 방금 본 목록이 있으면 바로 보여 주고(빈 자리 없이), 뒤에서 새로 읽어 덮는다
+  const [data, setData] = useState<LibData | null>(() => readView<LibData>(LIBRARY_VIEW, owner) ?? null);
+  // 처음 새로 읽은 목록이 들어온 뒤부터는 새로 생기는 카드가 자리에서 번지며 나타난다
+  const [painted, setPainted] = useState(false);
   const [selected, setSelected] = useState<string | null>(() => subjectFromPath(pathname));
   // 뒤로 가기 등으로 주소가 바뀌면 고른 과목도 따라간다
   const [seenPath, setSeenPath] = useState(pathname);
@@ -94,17 +106,21 @@ export function LibraryView() {
     let alive = true;
     fetchLibrary()
       .then((r) => {
-        if (alive) setData(r);
+        if (!alive) return;
+        writeView(LIBRARY_VIEW, owner, r);
+        setData(r);
+        setPainted(true);
       })
       .catch(() => {
         if (!alive) return;
         toast('자료함을 불러오지 못했어요.', 'bad');
         setData((d) => d ?? { subjects: [], sources: [] });
+        setPainted(true);
       });
     return () => {
       alive = false;
     };
-  }, [version, active.doneCount, toast]);
+  }, [version, active.doneCount, toast, owner]);
 
   // 새로 넣은 자료는 카드가 반짝이며 나타난다
   useEffect(() => {
@@ -219,16 +235,21 @@ export function LibraryView() {
 
   const exam = subject?.exam_date ? daysUntil(subject.exam_date) : null;
   const total = selected ? (counts.get(selected) ?? 0) : (data?.sources.length ?? 0);
+  // 읽는 동안에도 줄 높이를 지켜서, 다 읽었을 때 제목이 위로 튀지 않게 한다
   const subtitle = data ? (
-    <span className="flex flex-wrap items-center gap-x-2">
+    <span key={`${total}:${exam ?? ''}`} className="kok-swap flex flex-wrap items-center gap-x-2">
       <span>자료 {total}개</span>
       {exam !== null && exam >= 0 ? (
         <span className={cx('font-semibold', exam <= 3 ? 'text-bad' : 'text-accent')}>· 시험 {exam === 0 ? 'D-DAY' : `D-${exam}`}</span>
       ) : null}
     </span>
   ) : (
-    ' '
+    <span className="kok-skel inline-block h-6 align-top" aria-hidden="true">
+      <span className="kok-bone mt-[7px] h-2.5 w-16" />
+    </span>
   );
+  // 기억해 둔 목록으로 처음 그린 카드는 그대로, 새로 읽은 뒤에 생기는 카드는 자리에서 글이 번진다
+  const enter: Enter = painted ? 'fill' : 'none';
 
   const headerMenu: MenuItem[] = subject
     ? [
@@ -244,7 +265,16 @@ export function LibraryView() {
   return (
     <div className="grid gap-1">
       <LargeHeader
-        title={subject?.name ?? (selected && !data ? ' ' : '자료함')}
+        title={
+          subject?.name ??
+          (selected && !data ? (
+            <span className="kok-skel inline-block h-[1.25em] align-top" aria-hidden="true">
+              <span className="kok-bone mt-[0.3em] h-[0.65em] w-32" />
+            </span>
+          ) : (
+            '자료함'
+          ))
+        }
         subtitle={subtitle}
         actions={
           <>
@@ -288,7 +318,9 @@ export function LibraryView() {
 
       {/* 과목 칩 (폴더) */}
       <div ref={chipsRef} className="no-scrollbar relative -mx-4 mb-3 flex gap-2 overflow-x-auto px-4 pb-1 md:-mx-6 md:px-6" role="tablist" aria-label="과목">
-        <FolderChip id="all" on={!selected} onClick={() => select(null)} label="전체" count={data?.sources.length} />
+        <FolderChip id="all" on={!selected} onClick={() => select(null)} label="전체" count={data?.sources.length} loading={!data} />
+        {/* 과목을 읽는 동안: 과목 칩 자리 */}
+        {!data ? [0, 1].map((i) => <span key={i} className="kok-skel kok-bone h-10 w-20 shrink-0" aria-hidden="true" />) : null}
         {subjects.map((s) => {
           const d = s.exam_date ? daysUntil(s.exam_date) : null;
           return (
@@ -301,6 +333,7 @@ export function LibraryView() {
               count={counts.get(s.id) ?? 0}
               color={subjectVar(s.color)}
               badge={d !== null && d >= 0 && d <= 14 ? (d === 0 ? 'D-DAY' : `D-${d}`) : undefined}
+              enter={enter}
             />
           );
         })}
@@ -314,9 +347,10 @@ export function LibraryView() {
       </div>
 
       {data === null ? (
-        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
+        <div className="kok-skel grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4" aria-busy="true">
+          <span className="sr-only">자료를 불러오는 중이에요</span>
           {Array.from({ length: 6 }).map((_, i) => (
-            <div key={i} className="kok-card kok-shimmer h-[196px]" />
+            <CardSkeleton key={i} />
           ))}
         </div>
       ) : shown.length === 0 ? (
@@ -336,12 +370,14 @@ export function LibraryView() {
                   s={s}
                   index={i}
                   isNew={fresh.has(s.id)}
+                  enter={enter}
                   subject={selected ? null : (subjects.find((x) => x.id === s.subject_id) ?? null)}
                   onRename={() => setRenaming(s)}
                   onDelete={async () => {
                     if (!confirm(`'${s.title || '이 자료'}'와 노트·문제를 지울까요? 되돌릴 수 없어요.`)) return;
                     try {
                       await api(`/api/sources/${s.id}`, { method: 'DELETE' });
+                      dropView(LIBRARY_VIEW);
                       setData((cur) => (cur ? { ...cur, sources: cur.sources.filter((x) => x.id !== s.id) } : cur));
                       toast('지웠어요.');
                       reload();
@@ -352,6 +388,7 @@ export function LibraryView() {
                   onRetry={async () => {
                     try {
                       await api(`/api/sources/${s.id}/retry`, { method: 'POST', body: '{}' });
+                      dropView(LIBRARY_VIEW);
                       toast('다시 시작했어요.');
                       active.reload();
                       reload();
@@ -455,17 +492,24 @@ function FolderChip({
   onClick,
   label,
   count,
+  loading,
   color,
   badge,
+  enter = 'none',
 }: {
   id: string;
   on: boolean;
   onClick: () => void;
   label: string;
   count?: number;
+  /** 수를 읽는 중이면 그 자리를 남겨 둔다 (다 읽었을 때 옆 칩이 밀리지 않게) */
+  loading?: boolean;
   color?: string;
   badge?: string;
+  enter?: Enter;
 }) {
+  // 나타나는 방법은 처음 그릴 때 정한 그대로 (다시 그려도 움직임이 다시 돌지 않게)
+  const [mode] = useState(enter);
   return (
     <button
       type="button"
@@ -476,11 +520,18 @@ function FolderChip({
       className={cx(
         'press inline-flex h-10 shrink-0 items-center gap-2 rounded-full px-4 text-sm font-semibold transition-colors duration-200',
         on ? 'bg-ink text-surface' : 'bg-surface text-ink shadow-[0_1px_2px_var(--shadow)] hover:bg-surface-2',
+        mode === 'fill' && 'kok-fill',
       )}
     >
       {color ? <span className="h-2.5 w-2.5 rounded-full" style={{ background: color }} aria-hidden="true" /> : null}
       <span className="max-w-[9rem] truncate">{label}</span>
-      {typeof count === 'number' ? <span className={cx('tabular-nums', on ? 'opacity-70' : 'text-muted')}>{count}</span> : null}
+      {typeof count === 'number' ? (
+        <span key="n" className={cx('tabular-nums', on ? 'opacity-70' : 'text-muted', loading === false && 'kok-swap')}>
+          {count}
+        </span>
+      ) : loading ? (
+        <span className="inline-block h-2 w-3 rounded-full bg-current opacity-20" aria-hidden="true" />
+      ) : null}
       {badge ? <span className={cx('rounded-full px-1.5 text-[11px] font-bold', on ? 'bg-surface/20' : 'bg-bad-soft text-bad')}>{badge}</span> : null}
     </button>
   );
@@ -490,6 +541,7 @@ function NoteCard({
   s,
   index,
   isNew,
+  enter,
   subject,
   onRename,
   onDelete,
@@ -498,6 +550,7 @@ function NoteCard({
   s: LibSource;
   index: number;
   isNew: boolean;
+  enter: Enter;
   subject: SubjectRow | null;
   onRename: () => void;
   onDelete: () => void;
@@ -505,6 +558,10 @@ function NoteCard({
 }) {
   const processing = s.status === 'queued' || s.status === 'processing';
   const failed = s.status === 'error';
+  // 나타나는 방법과 '정리 중이던 카드인지'는 처음 그릴 때 정한 그대로 (다시 그려도 움직임이 다시 돌지 않게)
+  const [mode] = useState(enter);
+  const [startedBusy] = useState(processing);
+  const fill = !isNew && mode === 'fill' ? 'kok-fill' : undefined;
   const items: MenuItem[] = [
     ...(failed ? [{ label: '다시 하기', icon: ICONS.retry, onSelect: onRetry }] : []),
     { label: '이름·단원 바꾸기', icon: ICONS.edit, onSelect: onRename },
@@ -526,11 +583,11 @@ function NoteCard({
   );
   const fade = <div className="pointer-events-none absolute inset-x-0 bottom-0 h-8 bg-gradient-to-t from-surface to-transparent" aria-hidden="true" />;
   return (
-    <div className={cx('relative', isNew ? 'kok-new rounded-[22px]' : 'kok-rise')} style={{ ['--i' as string]: index }}>
+    <div className={cx('relative', isNew && 'kok-new rounded-[22px]')} style={{ ['--i' as string]: index }}>
       {failed ? (
         // 멈춘 자료: 카드 안에서 바로 다시 하기 (단추를 링크 안에 넣지 않도록 제목만 링크)
         <div className="kok-card flex h-[196px] flex-col overflow-hidden ring-2 ring-bad/40">
-          <div className="relative grid min-h-0 flex-1 content-start gap-1.5 overflow-hidden px-4 pt-4">
+          <div className={cx('relative grid min-h-0 flex-1 content-start gap-1.5 overflow-hidden px-4 pt-4', fill)}>
             <span className="pr-7 text-xs font-bold text-bad">멈췄어요 · 에너지는 돌려줬어요</span>
             <p className="line-clamp-2 text-[13px] leading-relaxed text-muted">{s.error ?? '정리하다가 문제가 생겼어요.'}</p>
             <button
@@ -542,7 +599,7 @@ function NoteCard({
               다시 하기
             </button>
           </div>
-          <Link href={href} className="press px-4 pb-3.5 pt-1.5" aria-label={`${s.title || '제목 없는 자료'} (멈췄어요)`}>
+          <Link href={href} className={cx('press px-4 pb-3.5 pt-1.5', fill)} aria-label={`${s.title || '제목 없는 자료'} (멈췄어요)`}>
             {footer}
           </Link>
         </div>
@@ -552,7 +609,7 @@ function NoteCard({
           className="kok-card kok-card-hover press flex h-[196px] flex-col overflow-hidden"
           aria-label={`${s.title || '제목 없는 자료'}${processing ? ` (${stepLabel(s)})` : ''}`}
         >
-          <div className="relative min-h-0 flex-1 overflow-hidden px-4 pt-4">
+          <div className={cx('relative min-h-0 flex-1 overflow-hidden px-4 pt-4', fill)}>
             {processing ? (
               <div className="grid gap-2">
                 <div className="flex items-center gap-2.5 pr-7">
@@ -564,18 +621,37 @@ function NoteCard({
                 <div className="kok-shimmer h-2.5 w-[80%] rounded-full bg-surface-2" />
               </div>
             ) : (
-              <p className="kok-fade line-clamp-5 text-[13px] leading-relaxed text-muted">
+              // 정리 중이던 카드가 끝나면 미리보기가 번지며 나타난다
+              <p className={cx('line-clamp-5 text-[13px] leading-relaxed text-muted', startedBusy && 'kok-fade')}>
                 <span className="float-right h-5 w-6" aria-hidden="true" />
                 {s.summary ? previewText(s.summary) : '정리 노트가 준비됐어요.'}
               </p>
             )}
             {fade}
           </div>
-          <div className="px-4 pb-3.5 pt-1.5">{footer}</div>
+          <div className={cx('px-4 pb-3.5 pt-1.5', fill)}>{footer}</div>
         </Link>
       )}
       <div className="absolute right-1.5 top-1.5 z-10">
         <Menu label={`${s.title || '자료'} 메뉴`} items={items} small />
+      </div>
+    </div>
+  );
+}
+
+/** 불러오는 동안 카드 자리: 실제 카드와 같은 크기·모양이라 다 읽었을 때 자리가 움직이지 않는다 */
+function CardSkeleton() {
+  return (
+    <div className="kok-card kok-shimmer flex h-[196px] flex-col justify-between px-4 pb-3.5 pt-4" aria-hidden="true">
+      <div className="grid gap-2 pt-1">
+        <span className="kok-bone h-2.5 w-[92%]" />
+        <span className="kok-bone h-2.5 w-[78%]" />
+        <span className="kok-bone h-2.5 w-[86%]" />
+        <span className="kok-bone h-2.5 w-[55%]" />
+      </div>
+      <div className="grid gap-2">
+        <span className="kok-bone h-3.5 w-[70%]" />
+        <span className="kok-bone h-2.5 w-[45%]" />
       </div>
     </div>
   );

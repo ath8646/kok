@@ -4,7 +4,10 @@ import type { PlanInfo } from './plans';
 
 export type MeResponse = {
   userId: string;
+  /** 로그인 이메일 (이메일 제공에 동의하지 않은 카카오 계정은 빈 글) */
   email: string;
+  /** 처음 가입한 로그인 회사 (google·kakao·apple) */
+  provider: string | null;
   nickname: string | null;
   isAdmin: boolean;
   /** 지금 적용되는 플랜이 Pro 인지 (테스트 플랜이 켜져 있으면 false) */

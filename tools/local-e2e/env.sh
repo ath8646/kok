@@ -9,3 +9,5 @@ export CRON_SECRET=local-cron-secret-for-tests-only-123
 # 큰 PDF 나누기를 작은 시험 파일로 확인하려고 조각 한도를 아주 작게 둔다 (실제 서비스는 20MB)
 export KOK_PDF_PART_MAX_BYTES=12000
 export NEXT_TELEMETRY_DISABLED=1
+# 카카오 로그인 버튼이 보이는지 시험한다 (가짜 서버라 눌러도 로그인은 되지 않는다)
+export NEXT_PUBLIC_KAKAO_LOGIN=1

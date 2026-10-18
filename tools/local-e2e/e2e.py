@@ -562,7 +562,10 @@ async def main():
         await apage.get_by_role("button", name="+ 새 플랜").click()
         sheet = apage.get_by_role("dialog", name="새 테스트 플랜")
         await expect(sheet).to_be_visible()
-        await sheet.get_by_label("플랜 이름").fill("베타 테스터")
+        # 한 글자씩 쳐도 입력칸 초점이 그대로여야 한다 (창이 초점을 빼앗던 문제)
+        await sheet.get_by_label("플랜 이름").click()
+        await apage.keyboard.type("베타 테스터")
+        await expect(sheet.get_by_label("플랜 이름")).to_have_value("베타 테스터")
         await sheet.get_by_label("번개(⚡) 총량").fill("100")
         await sheet.get_by_label("PDF 쪽수 (한 번에)").fill("33")
         await sheet.get_by_text("꼼꼼 모델 쓰기").click()  # 끈다

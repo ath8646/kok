@@ -416,15 +416,21 @@ export function Sheet({
   footer?: ReactNode;
 }) {
   const ref = useRef<HTMLDivElement>(null);
+  // onClose 는 화면이 새로 그려질 때마다 새 함수일 수 있다: 열 때 한 번만 창에 초점을 두고,
+  // 글자를 칠 때마다 입력칸의 초점을 빼앗지 않게 최신 onClose 는 ref 로 부른다
+  const closeRef = useRef(onClose);
+  useEffect(() => {
+    closeRef.current = onClose;
+  }, [onClose]);
   useEffect(() => {
     if (!open) return;
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose();
+      if (e.key === 'Escape') closeRef.current();
     };
     window.addEventListener('keydown', onKey);
     ref.current?.focus();
     return () => window.removeEventListener('keydown', onKey);
-  }, [open, onClose]);
+  }, [open]);
   if (!open) return null;
   return (
     <div className="fixed inset-0 z-50 flex items-end justify-center sm:items-center" role="dialog" aria-modal="true" aria-label={title}>

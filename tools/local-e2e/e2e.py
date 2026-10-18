@@ -420,10 +420,13 @@ async def main():
         step("pasting text anywhere opens the composer with that text")
         await page.goto(BASE + "/library")
         await expect(page.locator("main a[href^='/notes/']").first).to_be_visible()
+        # 엑셀·PPT처럼 글과 함께 그 글의 그림도 들어 있는 붙여 넣기 → 그림이 아니라 글로 받는다
         await page.evaluate(
             """(text) => {
               const dt = new DataTransfer();
               dt.setData('text/plain', text);
+              dt.setData('text/html', '<p>' + text + '</p>');
+              dt.items.add(new File([new Uint8Array([137, 80, 78, 71])], 'image.png', { type: 'image/png' }));
               document.body.dispatchEvent(new ClipboardEvent('paste', { clipboardData: dt, bubbles: true, cancelable: true }));
             }""",
             "엽록체는 빛에너지를 화학 에너지로 바꾸는 세포 소기관이에요.",
@@ -431,9 +434,31 @@ async def main():
         composer = page.get_by_role("dialog", name="자료 넣기")
         await expect(composer).to_be_visible()
         await expect(composer.get_by_label("공부한 내용")).to_have_value(re.compile("엽록체는 빛에너지"))
+        assert await composer.get_by_role("list", name="붙인 파일").count() == 0, "picture of the text must not be attached"
+        assert await page.get_by_label("넣는 중인 자료").count() == 0, "nothing must be uploaded"
         await composer.get_by_label("공부한 내용").fill("")
         await page.keyboard.press("Escape")
         await expect(composer).to_be_hidden()
+        assert await page.evaluate("document.activeElement && document.activeElement.getAttribute('aria-label')") == "자료 넣기", "focus goes back to +"
+
+        step("the composer does not come back after leaving for a page without +")
+        await page.goto(BASE + "/review")
+        await page.get_by_role("navigation", name="주 메뉴").get_by_role("link", name="자료함").first.click()
+        await page.wait_for_url(re.compile(r"/library"))
+        await page.get_by_role("button", name="자료 넣기", exact=True).click()
+        await expect(composer).to_be_visible()
+        await page.go_back()
+        await page.wait_for_url(re.compile(r"/review"))
+        await page.go_forward()
+        await page.wait_for_url(re.compile(r"/library"))
+        await page.wait_for_timeout(400)
+        await expect(composer).to_be_hidden()
+
+        step("dragging a file over a page without + explains where to drop it")
+        await page.goto(BASE + "/settings")
+        await expect(page.get_by_role("heading", name="설정", exact=True)).to_be_visible()
+        await drag_files(page, [("메모.pdf", "application/pdf", b"%PDF-1.4")])
+        await expect(page.get_by_text("자료함이나 홈 화면에 끌어다 놓아 주세요.")).to_be_visible()
 
         step("old /add address opens the composer")
         await page.goto(BASE + "/add")
@@ -525,6 +550,26 @@ async def main():
         await page.get_by_role("tab", name="그림").click()
         await page.wait_for_timeout(500)
         await shot(page, "33-mindmap-dark", full=False)
+
+        step("mind map step reveal keeps every branch in its place")
+        subprocess.run(
+            [
+                "psql", "-d", "kokapp", "-qc",
+                "update public.profiles set settings = settings || jsonb_build_object('visual', coalesce(settings->'visual', '{}'::jsonb) || '{\"reveal\": \"step\"}'::jsonb) "
+                "where id = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'",
+            ],
+            check=True,
+        )
+        await page.reload()
+        await page.get_by_role("tab", name="그림").click()
+        await page.wait_for_timeout(2500)
+        centers = await page.evaluate(
+            "() => [...document.querySelectorAll('svg g.mm-step')].map((g) => { const r = g.getBoundingClientRect(); return [r.x + r.width / 2, r.y + r.height / 2]; })"
+        )
+        xs = [c[0] for c in centers]
+        ys = [c[1] for c in centers]
+        assert len(centers) > 3 and (max(xs) - min(xs)) + (max(ys) - min(ys)) > 150, centers
+        await shot(page, "34-mindmap-step", full=False)
         await ctx.close()
         await browser.close()
 

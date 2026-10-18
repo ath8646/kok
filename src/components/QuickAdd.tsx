@@ -25,7 +25,7 @@ type Job =
   | { kind: 'pdf'; file: File; title: string }
   | { kind: 'image'; files: File[]; title: string };
 
-type Status = 'waiting' | 'preparing' | 'slot' | 'uploading' | 'starting' | 'done' | 'error';
+type Status = 'waiting' | 'preparing' | 'slot' | 'busy' | 'uploading' | 'starting' | 'done' | 'error';
 
 type Item = {
   key: string;
@@ -36,7 +36,16 @@ type Item = {
   done: number;
   total: number;
   error?: string;
+  /** 이 자료 번호로 다 올린 파일 (있으면 '다시 하기'는 올리기를 건너뛰고 같은 번호로 만들기만 다시 한다) */
+  files?: string[];
 };
+
+/** 올리기 전에 한 번 준비한 것 (다시 하기에서 사진을 또 줄이지 않게) */
+type Prepared = { kind: 'text' | 'pdf' | 'image'; text: string; pages: number; blobs: Blob[] };
+
+/** 입력창에 붙인 파일 (같은 이름의 사진이 여러 장이어도 구별되게 번호를 붙인다) */
+type Attachment = { id: string; file: File };
+const toAttachments = (files: File[]): Attachment[] => files.map((file) => ({ id: newId(), file }));
 
 type Ctx = {
   /** 입력창 열기 (과목을 정해서 열 수도 있다) */
@@ -55,7 +64,9 @@ export function useQuickAdd() {
 }
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
-const newId = () => crypto.randomUUID();
+function newId() {
+  return crypto.randomUUID();
+}
 
 function lastKey(userId: string) {
   return `kok:last-subject:${userId}`;
@@ -106,6 +117,8 @@ function statusText(it: Item): string {
       return it.job.kind === 'image' ? `사진 줄이는 중 ${it.done}/${it.total}` : it.job.kind === 'pdf' ? 'PDF 확인하는 중' : '준비하는 중';
     case 'slot':
       return '정리 중인 자료가 끝나면 시작해요';
+    case 'busy':
+      return '요청이 많아서 잠깐 기다려요';
     case 'uploading':
       return `올리는 중 ${it.done}/${it.total}`;
     case 'starting':
@@ -186,114 +199,165 @@ export function QuickAddProvider({
   const update = useCallback((key: string, patch: Partial<Item>) => commit(itemsRef.current.map((i) => (i.key === key ? { ...i, ...patch } : i))), [commit]);
   const remove = useCallback((key: string) => commit(itemsRef.current.filter((i) => i.key !== key)), [commit]);
 
-  /** 동시에 정리하는 자료가 3개면 하나가 끝날 때까지 기다린다 (올리기 전에 기다려야 파일이 오래 남지 않는다) */
+  /**
+   * 동시에 정리하는 자료가 3개면 하나가 끝날 때까지 기다린다 (올리기 전에 기다려야 파일이 오래 남지 않는다).
+   * Supabase 에서 직접 세어 보므로 AI 요청 한도를 쓰지 않는다. 서버가 막 '꽉 찼다'고 했으면(after) 한 번은 쉬고 센다.
+   */
   const waitForSlot = useCallback(
-    async (key: string) => {
+    async (key: string, after = false) => {
       if (meRef.current.isAdmin) return;
       for (let i = 0; i < 720; i++) {
-        let busy = 0;
+        if (after || i > 0) await sleep(5000);
+        let busy: number | null = null;
         try {
           const rows = await fetchSources({ active: true, limit: 20 });
           busy = rows.filter((r) => r.status === 'queued' || r.status === 'processing').length;
         } catch {
-          busy = 0;
+          busy = null; // 셀 수 없으면 조금 뒤에 다시 센다
         }
-        if (busy < MAX_PARALLEL) return;
+        if (busy !== null && busy < MAX_PARALLEL) return;
         update(key, { status: 'slot' });
-        await sleep(5000);
       }
+      throw new Error('정리 중인 자료가 오래 끝나지 않아요. 잠시 뒤에 다시 해 주세요.');
     },
     [update],
   );
 
+  const prepared = useRef(new Map<string, Prepared>());
+
+  const prepare = useCallback(
+    async (key: string, job: Job): Promise<Prepared> => {
+      const m = meRef.current;
+      update(key, { status: 'preparing', done: 0, total: job.kind === 'image' ? job.files.length : 1 });
+      if (job.kind === 'text') return { kind: 'text', text: job.text, pages: 0, blobs: [] };
+      if (job.kind === 'textfile') {
+        const c = checkText(await job.file.text(), m.plan);
+        if (!c.ok) throw new Error(`'${job.file.name}': ${c.reason}`);
+        return { kind: 'text', text: c.text, pages: 0, blobs: [] };
+      }
+      if (job.kind === 'pdf') {
+        const pages = await countPdfPages(job.file);
+        if (pages > m.plan.pdfPages) throw new Error(`PDF가 ${pages}쪽이에요. 한 번에 ${m.plan.pdfPages}쪽까지 넣을 수 있어요. 나눠서 넣어 주세요.`);
+        return { kind: 'pdf', text: '', pages, blobs: [job.file] };
+      }
+      const blobs: Blob[] = [];
+      for (let i = 0; i < job.files.length; i++) {
+        blobs.push(await shrinkImage(job.files[i]));
+        update(key, { done: i + 1 });
+      }
+      return { kind: 'image', text: '', pages: 0, blobs };
+    },
+    [update],
+  );
+
+  /** 한 번짜리 올리기 주소를 받아 파일을 올린다 → 올린 경로 */
+  const upload = useCallback(
+    async (key: string, sourceId: string, prep: Prepared): Promise<string[]> => {
+      update(key, { status: 'uploading', done: 0, total: prep.blobs.length });
+      const { uploads } = await api<{ uploads: Array<{ path: string; token: string }> }>('/api/uploads', {
+        method: 'POST',
+        body: JSON.stringify({ sourceId, kind: prep.kind, files: prep.blobs.map((b) => ({ size: b.size })) }),
+      });
+      const bucket = sb().storage.from('sources');
+      for (let i = 0; i < uploads.length; i++) {
+        const { error } = await bucket.uploadToSignedUrl(uploads[i].path, uploads[i].token, prep.blobs[i], {
+          contentType: prep.kind === 'pdf' ? 'application/pdf' : 'image/jpeg',
+        });
+        if (error) throw new Error('파일을 올리지 못했어요. 인터넷 연결을 확인해 주세요.');
+        update(key, { done: i + 1 });
+      }
+      return uploads.map((u) => u.path);
+    },
+    [update],
+  );
+
+  /**
+   * 자료 만들기. 자리가 없으면(too_many_running) AI 요청을 쓰지 않는 방법으로 기다렸다 다시 보내고,
+   * 앞선 요청이 이미 만들었으면(duplicate: 응답만 못 받음) 성공으로 본다. 파일이 지워졌으면 'files_gone'.
+   */
+  const create = useCallback(
+    async (it: Item, sourceId: string, prep: Prepared, files: string[]): Promise<'ok' | 'files_gone'> => {
+      let slotWaits = 0;
+      let rateWaits = 0;
+      for (;;) {
+        update(it.key, { status: 'starting' });
+        try {
+          await api('/api/sources', {
+            method: 'POST',
+            body: JSON.stringify({
+              id: sourceId,
+              subjectId: it.subjectId,
+              kind: prep.kind,
+              title: it.job.title,
+              text: prep.kind === 'text' ? prep.text : undefined,
+              files,
+            }),
+          });
+          return 'ok';
+        } catch (e) {
+          if (!(e instanceof ApiError)) throw e;
+          if (e.code === 'duplicate') return 'ok';
+          if (e.code === 'file_missing') return 'files_gone';
+          if (e.code === 'too_many_running' && slotWaits++ < 120) {
+            await waitForSlot(it.key, true);
+            continue;
+          }
+          if (e.code === 'rate_limited' && rateWaits++ < 6) {
+            update(it.key, { status: 'busy' });
+            await sleep(20_000);
+            continue;
+          }
+          throw e;
+        }
+      }
+    },
+    [update, waitForSlot],
+  );
+
   const runItem = useCallback(
     async (it: Item) => {
-      const job = it.job;
       try {
         const m = meRef.current;
-        update(it.key, { status: 'preparing', done: 0, total: job.kind === 'image' ? job.files.length : 1, error: undefined });
-        let kind: 'text' | 'pdf' | 'image' = 'text';
-        let text = '';
-        let pages = 0;
-        let blobs: Blob[] = [];
-        if (job.kind === 'text') {
-          text = job.text;
-        } else if (job.kind === 'textfile') {
-          const c = checkText(await job.file.text(), m.plan);
-          if (!c.ok) throw new Error(`'${job.file.name}': ${c.reason}`);
-          text = c.text;
-        } else if (job.kind === 'pdf') {
-          kind = 'pdf';
-          pages = await countPdfPages(job.file);
-          if (pages > m.plan.pdfPages) throw new Error(`PDF가 ${pages}쪽이에요. 한 번에 ${m.plan.pdfPages}쪽까지 넣을 수 있어요. 나눠서 넣어 주세요.`);
-          blobs = [job.file];
-        } else {
-          kind = 'image';
-          for (let i = 0; i < job.files.length; i++) {
-            blobs.push(await shrinkImage(job.files[i]));
-            update(it.key, { done: i + 1 });
+        let prep = prepared.current.get(it.key);
+        if (!prep) {
+          prep = await prepare(it.key, it.job);
+          prepared.current.set(it.key, prep);
+        }
+        let sourceId = it.sourceId;
+        let files = it.files;
+        if (!files) {
+          // 에너지가 모자라면 올리기 전에 멈춘다 (마지막 검사는 서버가 한다)
+          const model = clientModel(m, m.settings.models.organize);
+          const est = estimateEnergy({ kind: prep.kind, pages: prep.pages, images: prep.blobs.length, chars: prep.text.length }, model, m.usdPerEnergy);
+          const left = m.energy.unlimited ? Infinity : (m.energy.remaining ?? 0);
+          if (est > left) {
+            throw new Error(`에너지가 부족해요. 필요: 약 ${est}, 남음: ${Math.floor(left)}. ${m.energy.period === 'day' ? '내일' : '다음 달'} 다시 채워져요.`);
           }
         }
-        // 에너지가 모자라면 올리기 전에 멈춘다
-        const model = clientModel(m, m.settings.models.organize);
-        const est = estimateEnergy({ kind, pages, images: blobs.length, chars: text.length }, model, m.usdPerEnergy);
-        const left = m.energy.unlimited ? Infinity : (m.energy.remaining ?? 0);
-        if (est > left) {
-          throw new Error(`에너지가 부족해요. 필요: 약 ${est}, 남음: ${Math.floor(left)}. ${m.energy.period === 'day' ? '내일' : '다음 달'} 다시 채워져요.`);
-        }
-
-        await waitForSlot(it.key);
-
-        let files: string[] = [];
-        if (blobs.length) {
-          update(it.key, { status: 'uploading', done: 0, total: blobs.length });
-          const { uploads } = await api<{ uploads: Array<{ path: string; token: string }> }>('/api/uploads', {
-            method: 'POST',
-            body: JSON.stringify({ sourceId: it.sourceId, kind, files: blobs.map((b) => ({ size: b.size })) }),
-          });
-          const bucket = sb().storage.from('sources');
-          for (let i = 0; i < uploads.length; i++) {
-            const { error } = await bucket.uploadToSignedUrl(uploads[i].path, uploads[i].token, blobs[i], {
-              contentType: kind === 'pdf' ? 'application/pdf' : 'image/jpeg',
-            });
-            if (error) throw new Error('파일을 올리지 못했어요. 인터넷 연결을 확인해 주세요.');
-            update(it.key, { done: i + 1 });
+        for (let round = 0; ; round++) {
+          if (!files) {
+            await waitForSlot(it.key);
+            files = prep.blobs.length ? await upload(it.key, sourceId, prep) : [];
+            update(it.key, { files });
           }
-          files = uploads.map((u) => u.path);
+          const r = await create(it, sourceId, prep, files);
+          if (r === 'ok') break;
+          // 올린 파일이 없어졌다 (거절된 뒤 지워짐 등): 새 번호로 한 번만 다시 올린다
+          if (round >= 1) throw new Error('올린 파일을 찾을 수 없어요. 다시 넣어 주세요.');
+          sourceId = newId();
+          files = undefined;
+          update(it.key, { sourceId, files: undefined });
         }
-
-        update(it.key, { status: 'starting' });
-        for (let attempt = 0; ; attempt++) {
-          try {
-            await api('/api/sources', {
-              method: 'POST',
-              body: JSON.stringify({ id: it.sourceId, subjectId: it.subjectId, kind, title: job.title, text: kind === 'text' ? text : undefined, files }),
-            });
-            break;
-          } catch (e) {
-            // 그사이 다른 자료가 먼저 자리를 차지했다: 조금 기다렸다 다시
-            if (e instanceof ApiError && e.code === 'too_many_running' && attempt < 240) {
-              update(it.key, { status: 'slot' });
-              await sleep(6000);
-              update(it.key, { status: 'starting' });
-              continue;
-            }
-            if (e instanceof ApiError && e.code === 'rate_limited' && attempt < 20) {
-              await sleep(15000);
-              continue;
-            }
-            throw e;
-          }
-        }
-        update(it.key, { status: 'done' });
-        window.dispatchEvent(new CustomEvent(SOURCES_CHANGED, { detail: { id: it.sourceId } }));
+        prepared.current.delete(it.key);
+        update(it.key, { status: 'done', sourceId });
+        window.dispatchEvent(new CustomEvent(SOURCES_CHANGED, { detail: { id: sourceId } }));
         refreshMe().catch(() => {});
         setTimeout(() => remove(it.key), 2600);
       } catch (e) {
         update(it.key, { status: 'error', error: (e as Error).message || '넣지 못했어요.' });
       }
     },
-    [update, remove, waitForSlot, refreshMe],
+    [update, remove, waitForSlot, prepare, upload, create, refreshMe],
   );
 
   const running = useRef(false);
@@ -324,11 +388,23 @@ export function QuickAddProvider({
 
   const retry = useCallback(
     (key: string) => {
-      // 같은 자료 번호로는 다시 올릴 수 없어서 새 번호로
-      update(key, { status: 'waiting', sourceId: newId(), error: undefined, done: 0 });
+      const it = itemsRef.current.find((i) => i.key === key);
+      if (!it) return;
+      // 파일을 다 올렸거나 글이면 같은 번호로 다시 (이미 만들어졌으면 서버가 duplicate 로 알려 준다),
+      // 올리다 멈췄으면 그 번호의 올리기 표가 남아 있으니 새 번호로 처음부터
+      const sameId = !!it.files || it.job.kind === 'text' || it.job.kind === 'textfile';
+      update(key, { status: 'waiting', error: undefined, done: 0, ...(sameId ? {} : { sourceId: newId(), files: undefined }) });
       pump();
     },
     [update, pump],
+  );
+
+  const dismiss = useCallback(
+    (key: string) => {
+      prepared.current.delete(key);
+      remove(key);
+    },
+    [remove],
   );
 
   /** 파일 → 할 일 (PDF 하나씩, 사진 묶음, 글 파일) */
@@ -359,7 +435,7 @@ export function QuickAddProvider({
   const [closing, setClosing] = useState(false);
   const [composerSubject, setComposerSubject] = useState('');
   const [text, setText] = useState('');
-  const [attachments, setAttachments] = useState<File[]>([]);
+  const [attachments, setAttachments] = useState<Attachment[]>([]);
 
   const closeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const fabRef = useRef<HTMLButtonElement>(null);
@@ -429,6 +505,7 @@ export function QuickAddProvider({
       return;
     }
     const { textAsSource, titleForFiles } = splitComposer(text, attachments.length);
+    const attachedFiles = attachments.map((a) => a.file);
     const jobs: Job[] = [];
     if (textAsSource !== null) {
       const c = checkText(textAsSource, meRef.current.plan);
@@ -438,7 +515,7 @@ export function QuickAddProvider({
       }
       jobs.push({ kind: 'text', text: c.text, title: '' });
     }
-    jobs.push(...filesToJobs(attachments, titleForFiles));
+    jobs.push(...filesToJobs(attachedFiles, titleForFiles));
     if (!jobs.length) return;
     enqueue(jobs, subjectId);
     setText('');
@@ -450,6 +527,17 @@ export function QuickAddProvider({
   const [dragging, setDragging] = useState(false);
   const [dropSubjectName, setDropSubjectName] = useState('');
   const dragDepth = useRef(0);
+
+  // + 버튼을 쓰지 않는 화면으로 가면 입력창과 끌기 안내를 닫는다 (뒤로 가기로 돌아와도 다시 열리지 않게)
+  const [prevEnabled, setPrevEnabled] = useState(enabled);
+  if (prevEnabled !== enabled) {
+    setPrevEnabled(enabled);
+    if (!enabled) {
+      setOpen(false);
+      setClosing(false);
+      setDragging(false);
+    }
+  }
   const openRef = useRef(open);
   useEffect(() => {
     openRef.current = open;
@@ -457,6 +545,7 @@ export function QuickAddProvider({
 
   useEffect(() => {
     if (!enabled) return;
+    dragDepth.current = 0;
     const hasFiles = (e: DragEvent) => Array.from(e.dataTransfer?.types ?? []).includes('Files');
     const onEnter = (e: DragEvent) => {
       if (!hasFiles(e)) return;
@@ -486,14 +575,19 @@ export function QuickAddProvider({
       const files = Array.from(e.dataTransfer?.files ?? []);
       if (!files.length) return;
       // 입력창이 열려 있으면 그 안에 붙이고, 아니면 바로 정리
-      if (openRef.current) setAttachments((a) => [...a, ...files]);
+      if (openRef.current) setAttachments((a) => [...a, ...toAttachments(files)]);
       else addFiles(files);
     };
     const onPaste = (e: ClipboardEvent) => {
-      const files = Array.from(e.clipboardData?.files ?? []);
+      const cd = e.clipboardData;
+      const pasted = cd?.getData('text/plain') ?? '';
+      let files = Array.from(cd?.files ?? []);
+      // 엑셀·PPT·원노트는 글을 복사하면 그 글의 그림도 같이 넣는다: 글이 있으면 글을 붙여 넣는 것으로 본다
+      const textWithPicture = !!pasted.trim() && Array.from(cd?.types ?? []).includes('text/html') && files.every((f) => f.type.startsWith('image/'));
+      if (textWithPicture) files = [];
       if (files.length && openRef.current) {
         e.preventDefault();
-        setAttachments((a) => [...a, ...files]);
+        setAttachments((a) => [...a, ...toAttachments(files)]);
         return;
       }
       const t = e.target as HTMLElement | null;
@@ -504,7 +598,6 @@ export function QuickAddProvider({
         return;
       }
       // 글을 붙여 넣으면 입력창을 열어 그 글을 넣어 둔다 (엔터를 누르면 정리)
-      const pasted = e.clipboardData?.getData('text/plain') ?? '';
       if (!openRef.current && pasted.trim().length >= MIN_TEXT_CHARS) {
         e.preventDefault();
         setText((cur) => (cur.trim() ? `${cur}\n${pasted}` : pasted));
@@ -525,23 +618,30 @@ export function QuickAddProvider({
     };
   }, [enabled, addFiles, resolveSubject, openComposer]);
 
-  // + 버튼이 없는 화면(복습·설정 등)에 파일을 놓으면 브라우저가 파일을 열어 버리지 않게 막는다
+  // + 버튼이 없는 화면(복습·설정 등): 파일을 끌고 오면 어디에 놓으면 되는지 알려 주고,
+  // 놓기는 막아서 브라우저가 파일을 열어 버리지 않게 한다
+  const lastHint = useRef(0);
   useEffect(() => {
     if (enabled) return;
     const hasFiles = (e: DragEvent) => Array.from(e.dataTransfer?.types ?? []).includes('Files');
+    const onEnter = (e: DragEvent) => {
+      if (!hasFiles(e) || Date.now() - lastHint.current < 4000) return;
+      lastHint.current = Date.now();
+      toast('자료함이나 홈 화면에 끌어다 놓아 주세요.');
+    };
     const onOver = (e: DragEvent) => {
       if (!hasFiles(e)) return;
       e.preventDefault();
       if (e.dataTransfer) e.dataTransfer.dropEffect = 'none';
     };
     const onDrop = (e: DragEvent) => {
-      if (!hasFiles(e)) return;
-      e.preventDefault();
-      toast('자료함이나 홈 화면에 끌어다 놓아 주세요.');
+      if (hasFiles(e)) e.preventDefault();
     };
+    window.addEventListener('dragenter', onEnter);
     window.addEventListener('dragover', onOver);
     window.addEventListener('drop', onDrop);
     return () => {
+      window.removeEventListener('dragenter', onEnter);
       window.removeEventListener('dragover', onOver);
       window.removeEventListener('drop', onDrop);
     };
@@ -555,7 +655,8 @@ export function QuickAddProvider({
 
   return (
     <QuickAddCtx.Provider value={ctx}>
-      {children}
+      {/* 입력창이 열려 있으면 뒤 화면은 누르거나 Tab 으로 갈 수 없다 */}
+      <div inert={open}>{children}</div>
       {enabled ? (
         <>
           <button
@@ -573,7 +674,7 @@ export function QuickAddProvider({
               <Icon d={ICONS.plus} size={28} strokeWidth={2.4} />
             </span>
           </button>
-          <Tray items={items} subjects={subjects ?? []} onRetry={retry} onRemove={remove} />
+          <Tray items={items} subjects={subjects ?? []} onRetry={retry} onRemove={dismiss} />
           {open ? (
             <Composer
               me={me}
@@ -591,8 +692,8 @@ export function QuickAddProvider({
               text={text}
               onText={setText}
               attachments={attachments}
-              onAttach={(fs) => setAttachments((a) => [...a, ...fs])}
-              onDetach={(i) => setAttachments((a) => a.filter((_, j) => j !== i))}
+              onAttach={(fs) => setAttachments((a) => [...a, ...toAttachments(fs)])}
+              onDetach={(id) => setAttachments((a) => a.filter((x) => x.id !== id))}
               onSubmit={submitComposer}
               onClose={closeComposer}
             />
@@ -628,9 +729,9 @@ function Composer({
   onSubjectsChanged: () => Promise<void>;
   text: string;
   onText: (t: string) => void;
-  attachments: File[];
+  attachments: Attachment[];
   onAttach: (files: File[]) => void;
-  onDetach: (i: number) => void;
+  onDetach: (id: string) => void;
   onSubmit: () => void;
   onClose: () => void;
 }) {
@@ -712,33 +813,34 @@ function Composer({
               </span>
             </button>
             {picking ? (
-              <div
-                className="kok-pop absolute left-0 top-10 z-10 grid max-h-72 w-60 origin-top-left gap-0.5 overflow-y-auto rounded-2xl bg-surface p-1.5 shadow-[0_12px_32px_var(--shadow-strong)] ring-1 ring-line sm:bottom-10 sm:top-auto sm:origin-bottom-left"
-                role="listbox"
-                aria-label="과목"
-              >
-                {subjects.map((s) => (
-                  <button
-                    key={s.id}
-                    type="button"
-                    role="option"
-                    aria-selected={s.id === subjectId}
-                    className={cx('flex items-center gap-2.5 rounded-xl px-3 py-2 text-left text-[15px] hover:bg-surface-2', s.id === subjectId && 'font-bold')}
-                    onClick={() => {
-                      onSubject(s.id);
-                      setPicking(false);
-                      area.current?.focus();
-                    }}
-                  >
-                    <span className="h-2.5 w-2.5 shrink-0 rounded-full" style={{ background: subjectVar(s.color) }} aria-hidden="true" />
-                    <span className="min-w-0 flex-1 truncate">{s.name}</span>
-                    {s.id === subjectId ? <Icon d={ICONS.check} size={16} className="text-accent" /> : null}
-                  </button>
-                ))}
+              <div className="kok-pop absolute left-0 top-10 z-10 grid w-60 origin-top-left rounded-2xl bg-surface p-1.5 shadow-[0_12px_32px_var(--shadow-strong)] ring-1 ring-line sm:bottom-10 sm:top-auto sm:origin-bottom-left">
+                <div className="grid max-h-60 gap-0.5 overflow-y-auto" role="listbox" aria-label="과목">
+                  {subjects.map((s) => (
+                    <button
+                      key={s.id}
+                      type="button"
+                      role="option"
+                      aria-selected={s.id === subjectId}
+                      className={cx(
+                        'flex items-center gap-2.5 rounded-xl px-3 py-2 text-left text-[15px] hover:bg-surface-2',
+                        s.id === subjectId && 'font-bold',
+                      )}
+                      onClick={() => {
+                        onSubject(s.id);
+                        setPicking(false);
+                        area.current?.focus();
+                      }}
+                    >
+                      <span className="h-2.5 w-2.5 shrink-0 rounded-full" style={{ background: subjectVar(s.color) }} aria-hidden="true" />
+                      <span className="min-w-0 flex-1 truncate">{s.name}</span>
+                      {s.id === subjectId ? <Icon d={ICONS.check} size={16} className="text-accent" /> : null}
+                    </button>
+                  ))}
+                </div>
                 <div className="mt-1 flex gap-1.5 border-t border-line px-1 pt-2">
                   <input
                     aria-label="새 과목 이름"
-                    className="min-w-0 flex-1 rounded-xl bg-surface-2 px-3 py-1.5 text-sm focus:outline-none"
+                    className="min-w-0 flex-1 rounded-xl bg-surface-2 px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-accent"
                     placeholder="새 과목"
                     value={newName}
                     maxLength={40}
@@ -788,8 +890,8 @@ function Composer({
 
         {attachments.length ? (
           <ul className="no-scrollbar -mx-1 flex gap-2 overflow-x-auto px-1 pb-0.5" aria-label="붙인 파일">
-            {attachments.map((f, i) => (
-              <AttachmentChip key={`${f.name}-${i}`} file={f} onRemove={() => onDetach(i)} />
+            {attachments.map((a) => (
+              <AttachmentChip key={a.id} file={a.file} onRemove={() => onDetach(a.id)} />
             ))}
           </ul>
         ) : null}

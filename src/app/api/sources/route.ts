@@ -27,6 +27,7 @@ export async function POST(req: NextRequest) {
   let uploaded: string[] = [];
   let cleanup = false;
   let ownerId = '';
+  let sourceId = '';
   try {
     assertSameOrigin(req);
     const { admin, acc } = await requireAccount();
@@ -34,6 +35,7 @@ export async function POST(req: NextRequest) {
     const parsed = Body.safeParse(await readJson(req, 600_000));
     if (!parsed.success) throw new UserFacingError('bad_body', '보낸 내용이 올바르지 않아요.', 400);
     const b = parsed.data;
+    sourceId = b.id;
     const app = await getAppSettings(admin);
     const L = app.limits;
     const pro = acc.isPro || acc.isAdmin;
@@ -122,13 +124,18 @@ export async function POST(req: NextRequest) {
     after(() => driveSource(b.id, origin));
     return Response.json({ ok: true, id: b.id, estimate });
   } catch (e) {
-    if (cleanup && ownerId && uploaded.length) {
-      // 받지 못한 자료의 파일은 바로 지운다
+    // 잠깐 기다리면 되는 거절(요청이 너무 빠름, 정리 중인 자료가 꽉 참)은 파일을 남겨 둔다:
+    // 브라우저가 같은 파일로 다시 보낸다 (끝내 안 보내면 1시간 뒤 청소가 지운다)
+    const retryLater = e instanceof UserFacingError && (e.code === 'rate_limited' || e.code === 'too_many_running');
+    if (cleanup && !retryLater && ownerId && uploaded.length) {
+      // 받지 못한 자료의 파일은 바로 지우고, '아직 정리하지 않은 파일' 수에서도 뺀다
       try {
+        const admin = adminClient();
         await removePaths(
-          adminClient(),
+          admin,
           uploaded.filter((p) => p.startsWith(`${ownerId}/`)),
         );
+        await admin.from('upload_tickets').update({ swept: true }).eq('user_id', ownerId).eq('source_id', sourceId);
       } catch {
         /* 무시 */
       }

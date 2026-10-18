@@ -472,19 +472,20 @@ body {
   transition: stroke-dashoffset 500ms var(--ease-out);
 }
 
-/* 마인드맵 펼치기 움직임 */
-@keyframes kok-pop {
+/* 마인드맵 펼치기 움직임. 가지(<g>)는 transform 속성으로 자리를 잡으므로 transform 대신 scale 속성을 움직이고,
+   끝난 뒤에는 아무것도 붙잡지 않는다 (backwards) */
+@keyframes kok-mm-pop {
   from {
     opacity: 0;
-    transform: scale(0.92);
+    scale: 0.92;
   }
   to {
     opacity: 1;
-    transform: scale(1);
+    scale: 1;
   }
 }
 .mm-step {
-  animation: kok-pop 0.35s ease both;
+  animation: kok-mm-pop 0.35s var(--ease-out) backwards;
   transform-box: fill-box;
   transform-origin: center;
 }

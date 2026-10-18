@@ -1,7 +1,7 @@
 """실패·환불·다시 하기, 비상 스위치 시험."""
 import asyncio, base64, re, subprocess, urllib.request, json, time, pathlib, uuid
 from playwright.async_api import async_playwright, expect
-from e2e import new_ctx, BASE, ERRORS, shot, wait_ready, USERS, session_cookie, LIBRARY_SUBJECT
+from e2e import new_ctx, BASE, ERRORS, shot, wait_ready, USERS, session_cookie, LIBRARY_SUBJECT, make_pdf
 
 PSQL = ["psql", "-d", "kokapp", "-tA", "-c"]  # PGHOST·PGPORT·PGUSER 환경변수를 따른다
 
@@ -131,6 +131,35 @@ async def main():
         codes = sorted(r.status for r in rs)
         print("   statuses:", codes)
         assert codes.count(200) == 3 and codes.count(429) == 2, codes
+
+        print("· refused while 3 are running → the uploaded files stay, the same files work once a slot frees, a re-send makes no copy")
+        sql(f"delete from public.energy_ledger where user_id = '{student_id}'")
+        sql("truncate public.rate_hits")
+        pdf = make_pdf(2)
+        sid4 = str(uuid.uuid4())
+        r = await page.request.post(BASE + "/api/uploads", headers={"origin": BASE}, data={"sourceId": sid4, "kind": "pdf", "files": [{"size": len(pdf)}]})
+        assert r.status == 200, (r.status, await r.text())
+        up = (await r.json())["uploads"][0]
+        r = await page.request.put(
+            f"http://localhost:54321/storage/v1/object/upload/sign/sources/{up['path']}?token={up['token']}",
+            headers={"content-type": "application/pdf"},
+            data=pdf,
+        )
+        assert r.status == 200, (r.status, await r.text())
+        create = lambda: page.request.post(
+            BASE + "/api/sources",
+            headers={"origin": BASE},
+            data={"id": sid4, "subjectId": subj, "kind": "pdf", "title": "기다린 PDF", "files": [up["path"]]},
+        )
+        r = await create()
+        body4 = await r.json()
+        assert r.status == 429 and body4["error"] == "too_many_running", (r.status, body4)
+        sql(f"update public.sources set status = 'error' where user_id = '{student_id}' and title = '동시'")
+        r = await create()
+        assert r.status == 200, (r.status, await r.text())
+        r = await create()
+        assert r.status == 409, r.status
+        assert sql(f"select count(*) from public.sources where id = '{sid4}'") == "1"
         fake("/__fail?task=")
 
         print("· rejoining on the day you deleted your account gives no new AI energy")

@@ -4,6 +4,7 @@ import { getAppSettings } from '@/lib/server/account';
 import { errorResponse } from '@/lib/server/errors';
 import { keyHint } from '@/lib/server/claude';
 import { kstDayStart, kstMonthStart } from '@/lib/time';
+import { cloudflareReady } from '@/lib/server/cloudflare';
 
 export async function GET() {
   try {
@@ -25,6 +26,8 @@ export async function GET() {
           supabaseSecret: !!process.env.SUPABASE_SECRET_KEY,
           adminEmails: !!process.env.ADMIN_EMAILS,
           cronSecret: !!process.env.CRON_SECRET,
+          // 테마 AI 그림 (없으면 무늬로 대신한다)
+          cloudflare: cloudflareReady(),
         },
       },
       { headers: { 'Cache-Control': 'private, no-store' } },

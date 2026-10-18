@@ -129,6 +129,8 @@ export type Features = {
   chat: boolean;
   /** 테스트 플랜마다 자료 더하기·테마 켜기 (custom_plans.can_append·can_theme) */
   planFlags: boolean;
+  /** 내가 만든 테마·배경 그림 (user_themes, theme_images, app_counters) */
+  themes: boolean;
 };
 
 let featuresCache: { at: number; value: Features } | null = null;
@@ -139,14 +141,23 @@ let featuresCache: { at: number; value: Features } | null = null;
  */
 export async function getFeatures(admin: SupabaseClient): Promise<Features> {
   if (featuresCache && Date.now() - featuresCache.at < 60_000) return featuresCache.value;
-  const [v, p, r, c, f] = await Promise.all([
+  const [v, p, r, c, f, t, ti, ac] = await Promise.all([
     admin.from('note_versions').select('id').limit(1),
     admin.from('sources').select('parent_id').limit(1),
     admin.from('questions').select('rested_hidden').limit(1),
     admin.from('chat_messages').select('id').limit(1),
     admin.from('custom_plans').select('can_append, can_theme').limit(1),
+    admin.from('user_themes').select('id').limit(1),
+    admin.from('theme_images').select('id').limit(1),
+    admin.from('app_counters').select('day').limit(1),
   ]);
-  const value: Features = { versions: !v.error && !p.error, restedHidden: !r.error, chat: !c.error, planFlags: !f.error };
+  const value: Features = {
+    versions: !v.error && !p.error,
+    restedHidden: !r.error,
+    chat: !c.error,
+    planFlags: !f.error,
+    themes: !t.error && !ti.error && !ac.error,
+  };
   featuresCache = { at: Date.now(), value };
   return value;
 }

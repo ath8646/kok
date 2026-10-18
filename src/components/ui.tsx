@@ -114,6 +114,7 @@ export const ICONS = {
   edit: 'M4 20h4L19 9l-4-4L4 16z',
   grid: 'M4 4h7v7H4zM13 4h7v7h-7zM4 13h7v7H4zM13 13h7v7h-7z',
   upload: 'M12 16V4M7 9l5-5 5 5M5 20h14',
+  sparkle: 'M12 3.5l1.9 5.1 5.1 1.9-5.1 1.9L12 17.5l-1.9-5.1L5 10.5l5.1-1.9zM18.5 15.5l.8 2.2 2.2.8-2.2.8-.8 2.2-.8-2.2-2.2-.8 2.2-.8z',
 };
 
 export function Spinner({ className }: { className?: string }) {

@@ -7,6 +7,7 @@ import { assertSameOrigin, readJson, requireAccount } from '@/lib/server/auth';
 import { UserFacingError, errorResponse } from '@/lib/server/errors';
 import { removeFolder } from '@/lib/server/files';
 import { accountKeys, recordDeletion } from '@/lib/server/tombstone';
+import { THEME_IMAGES_BUCKET } from '@/lib/server/themes';
 
 export const maxDuration = 120;
 
@@ -22,6 +23,8 @@ export async function DELETE(req: NextRequest) {
     // 이메일이 없는 카카오 계정도 다시 가입했을 때 알아보게 로그인 회사 계정 번호까지 남긴다 (계정을 지우기 전에 읽는다)
     await recordDeletion(admin, await accountKeys(admin, acc.userId, acc.email));
     await removeFolder(admin, acc.userId);
+    // 테마 배경 그림 (버킷이 아직 없으면 지울 것도 없다)
+    await removeFolder(admin, acc.userId, THEME_IMAGES_BUCKET);
     const { error } = await admin.auth.admin.deleteUser(acc.userId);
     if (error) throw error;
     return Response.json({ ok: true });

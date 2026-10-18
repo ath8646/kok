@@ -527,6 +527,47 @@ create trigger reports_guard before insert on public.reports
   for each row execute function public.kok_guard_rows('100', 'reporter_id', 'created_at');
 
 -- ---------------------------------------------------------------------
+-- 테마 (Pro): 내가 만든 테마와 배경 그림. 쓰기는 서버만 (색·그림을 검사하고 넣는다), 읽기는 내 것만.
+-- spec: { light: {bg, surface, accent}, dark: {...}, image: {kind:'file', id} | {kind:'pattern', svg} | null, dim, font, paper }
+-- ---------------------------------------------------------------------
+create table if not exists public.user_themes (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references auth.users(id) on delete cascade,
+  name text not null check (char_length(name) between 1 and 20),
+  spec jsonb not null check (pg_column_size(spec) <= 32768),
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+create index if not exists user_themes_user_idx on public.user_themes (user_id, created_at);
+drop trigger if exists user_themes_touch on public.user_themes;
+create trigger user_themes_touch before update on public.user_themes
+  for each row execute function public.kok_touch_updated_at();
+
+-- 배경 그림 파일 ('theme-images' 버킷의 내id/그림id.확장자). 올린 것(upload)과 AI 가 그린 것(ai)
+create table if not exists public.theme_images (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references auth.users(id) on delete cascade,
+  kind text not null check (kind in ('upload', 'ai')),
+  path text not null check (char_length(path) <= 300),
+  mime text not null check (mime in ('image/jpeg', 'image/png', 'image/webp')),
+  bytes int not null check (bytes > 0),
+  width int,
+  height int,
+  -- AI 그림을 다시 그릴 때 쓰는 프롬프트 (영어)
+  prompt text check (prompt is null or char_length(prompt) <= 600),
+  created_at timestamptz not null default now()
+);
+create index if not exists theme_images_user_idx on public.theme_images (user_id, created_at);
+
+-- 서비스 전체의 하루 수 (예: AI 그림 무료 몫). 날짜는 UTC (Cloudflare 무료 몫이 UTC 0시에 다시 찬다). 서버만
+create table if not exists public.app_counters (
+  day date not null,
+  kind text not null,
+  n int not null default 0,
+  primary key (day, kind)
+);
+
+-- ---------------------------------------------------------------------
 -- 내 것끼리만 이어지게: 문제는 내 노트·과목에, 카드와 푼 기록은 내 문제에만 붙는다.
 -- (남의 노트 번호를 적은 문제를 만들어 남의 노트를 AI로 읽어 내는 것을 막는다)
 -- ---------------------------------------------------------------------
@@ -582,7 +623,7 @@ revoke all on
   public.questions, public.cards, public.review_logs, public.energy_ledger,
   public.coupons, public.coupon_redemptions, public.reports, public.app_settings, public.rate_hits,
   public.upload_tickets, public.account_tombstones, public.custom_plans,
-  public.note_versions, public.chat_messages
+  public.note_versions, public.chat_messages, public.user_themes, public.theme_images, public.app_counters
 from anon, authenticated;
 
 grant all on
@@ -590,7 +631,7 @@ grant all on
   public.questions, public.cards, public.review_logs, public.energy_ledger,
   public.coupons, public.coupon_redemptions, public.reports, public.app_settings, public.rate_hits,
   public.upload_tickets, public.account_tombstones, public.custom_plans,
-  public.note_versions, public.chat_messages
+  public.note_versions, public.chat_messages, public.user_themes, public.theme_images, public.app_counters
 to service_role;
 grant usage, select on all sequences in schema public to service_role;
 
@@ -640,6 +681,9 @@ grant usage, select on sequence public.reports_id_seq to authenticated;
 -- 운영 설정: 보기만
 grant select on public.app_settings to authenticated;
 
+-- user_themes: 내 테마 읽기만 (만들기·고치기·지우기는 서버가 검사하고 한다). theme_images 는 서버만
+grant select (id, user_id, name, spec, created_at, updated_at) on public.user_themes to authenticated;
+
 -- =====================================================================
 -- RLS: 행마다 "내 것"인지 데이터베이스가 직접 검사한다
 -- =====================================================================
@@ -662,6 +706,9 @@ alter table public.account_tombstones enable row level security;
 alter table public.custom_plans enable row level security;
 alter table public.note_versions enable row level security;
 alter table public.chat_messages enable row level security;
+alter table public.user_themes enable row level security;
+alter table public.theme_images enable row level security;
+alter table public.app_counters enable row level security;
 
 -- profiles
 drop policy if exists "profiles: read own" on public.profiles;
@@ -727,6 +774,10 @@ create policy "chat: delete own" on public.chat_messages
   for delete to authenticated using (user_id = (select auth.uid()));
 
 -- questions
+drop policy if exists "user_themes: read own" on public.user_themes;
+create policy "user_themes: read own" on public.user_themes
+  for select to authenticated using (user_id = (select auth.uid()));
+
 drop policy if exists "questions: own" on public.questions;
 create policy "questions: own" on public.questions
   for all to authenticated using (user_id = (select auth.uid())) with check (user_id = (select auth.uid()));
@@ -831,6 +882,53 @@ begin
   insert into public.rate_hits (user_id, kind) values (p_user, p_kind);
   return true;
 end;
+$$;
+
+-- 서비스 전체의 하루 수를 하나 올린다 (오늘 p_max 에 닿았으면 올리지 않고 false). 날짜는 UTC
+create or replace function public.kok_bump_counter(p_kind text, p_max int)
+returns boolean
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_day date := (now() at time zone 'utc')::date;
+  v_n int;
+begin
+  insert into public.app_counters as c (day, kind, n) values (v_day, p_kind, 1)
+  on conflict (day, kind) do update set n = c.n + 1 where c.n < p_max
+  returning n into v_n;
+  -- 오래된 날은 지운다
+  delete from public.app_counters where day < v_day - 7;
+  return v_n is not null;
+end;
+$$;
+
+-- 어느 테마도 쓰지 않는 배경 그림 행을 지우고 파일 경로를 돌려준다 (서버가 저장소에서 파일을 지운다).
+-- p_before 보다 오래된 것만 (새로 올리고 아직 테마에 저장하지 않은 그림은 둔다), p_user 를 주면 그 사람 것만, 오래된 것부터 p_limit 개
+create or replace function public.kok_take_unused_theme_images(p_before timestamptz, p_user uuid, p_limit int)
+returns setof text
+language sql
+security definer
+set search_path = public
+as $$
+  with gone as (
+    select i.id
+    from public.theme_images i
+    where i.created_at < p_before
+      and (p_user is null or i.user_id = p_user)
+      and not exists (
+        select 1 from public.user_themes t
+        where t.user_id = i.user_id
+          and t.spec -> 'image' ->> 'kind' = 'file'
+          and t.spec -> 'image' ->> 'id' = i.id::text
+      )
+    order by i.created_at
+    limit greatest(1, least(coalesce(p_limit, 100), 1000))
+    for update of i skip locked
+  )
+  delete from public.theme_images d using gone where d.id = gone.id
+  returning d.path;
 $$;
 
 -- 정리 중인 자료가 앞으로 더 쓸 에너지 (예상 - 지금까지 쓴 것)
@@ -1458,6 +1556,8 @@ revoke execute on function public.kok_claim_source(uuid, int) from public, anon,
 revoke execute on function public.kok_energy_since(uuid, timestamptz) from public, anon, authenticated;
 revoke execute on function public.kok_free_usd_since(timestamptz) from public, anon, authenticated;
 revoke execute on function public.kok_hit_rate(uuid, int, int, text) from public, anon, authenticated;
+revoke execute on function public.kok_bump_counter(text, int) from public, anon, authenticated;
+revoke execute on function public.kok_take_unused_theme_images(timestamptz, uuid, int) from public, anon, authenticated;
 revoke execute on function public.kok_redeem_coupon(text, uuid, boolean) from public, anon, authenticated;
 revoke execute on function public.kok_end_custom_plan(uuid, uuid) from public, anon, authenticated;
 revoke execute on function public.kok_admin_stats(timestamptz, timestamptz) from public, anon, authenticated;
@@ -1473,6 +1573,8 @@ grant execute on function public.kok_claim_source(uuid, int) to service_role;
 grant execute on function public.kok_energy_since(uuid, timestamptz) to service_role;
 grant execute on function public.kok_free_usd_since(timestamptz) to service_role;
 grant execute on function public.kok_hit_rate(uuid, int, int, text) to service_role;
+grant execute on function public.kok_bump_counter(text, int) to service_role;
+grant execute on function public.kok_take_unused_theme_images(timestamptz, uuid, int) to service_role;
 grant execute on function public.kok_redeem_coupon(text, uuid, boolean) to service_role;
 grant execute on function public.kok_end_custom_plan(uuid, uuid) to service_role;
 grant execute on function public.kok_admin_stats(timestamptz, timestamptz) to service_role;
@@ -1489,6 +1591,14 @@ values (
   'sources', 'sources', false, 209715200,
   array['application/pdf', 'image/jpeg', 'image/png', 'image/webp']
 )
+on conflict (id) do update
+  set public = false,
+      file_size_limit = excluded.file_size_limit,
+      allowed_mime_types = excluded.allowed_mime_types;
+
+-- 테마 배경 그림 (비공개, 3MB). 올리기·보기 모두 서버가 한다 (학생 정책 없음: 보기는 /api/themes/images 가 한 번짜리 주소로 보낸다)
+insert into storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
+values ('theme-images', 'theme-images', false, 3145728, array['image/jpeg', 'image/png', 'image/webp'])
 on conflict (id) do update
   set public = false,
       file_size_limit = excluded.file_size_limit,

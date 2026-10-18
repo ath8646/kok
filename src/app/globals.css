@@ -1,12 +1,24 @@
 @import 'tailwindcss';
 
+/* Tailwind 의 dark: 도 화면 밝기(<html data-mode>, Pro 테마)를 따른다: 고정하지 않았으면 기기 설정대로 */
+@custom-variant dark {
+  @media (prefers-color-scheme: dark) {
+    &:where(:root:not([data-mode='light']) *) {
+      @slot;
+    }
+  }
+  &:where(:root[data-mode='dark'] *) {
+    @slot;
+  }
+}
+
 /*
  * 콕 디자인: 노트 앱(One UI) 느낌
  * - 밝은 회색 바탕 + 흰 둥근 카드, 다크는 검정 바탕
  * - 넓은 큰 제목이 스크롤하면 위 띠로 작아진다
  * - 주황 포인트, 오른쪽 아래 + 버튼
  * - 움직임은 짧고(300ms 안) 끝이 부드럽게. transform·opacity 만 움직인다
- * 주황 글자·버튼 색은 흰 바탕에서 읽기 좋게(명암비 4.5 이상) 조금 진하게 잡았다.
+ * 주황 글자·버튼 색은 흰 바탕·회색 바탕·연한 주황 바탕 모두에서 읽기 좋게(명암비 4.5 이상) 조금 진하게 잡았다.
  */
 :root {
   --bg: #f3f3f6;
@@ -18,7 +30,7 @@
   --ink: #17171a;
   --muted: #6b6b74;
   --line: #e1e1e7;
-  --accent: #c2510a;
+  --accent: #b84c08;
   --accent-soft: #fff0e3;
   --accent-ink: #ffffff;
   --fab: #eb6a0f;
@@ -49,8 +61,9 @@
   color-scheme: light;
 }
 
+/* 어두운 화면: 기기 설정이 어두우면 (밝게로 고정한 Pro 테마는 빼고), 또는 어둡게로 고정했을 때 (<html data-mode>) */
 @media (prefers-color-scheme: dark) {
-  :root {
+  :root:not([data-mode='light']) {
     --bg: #000000;
     --surface: #17171a;
     --surface-2: #222226;
@@ -84,123 +97,78 @@
     --b6: #b19cff;
     --b7: #4fd1e3;
     --b8: #e6c35c;
+    --paper-line: rgba(255, 255, 255, 0.07);
+    --paper-dot: rgba(255, 255, 255, 0.16);
     color-scheme: dark;
   }
 }
+:root[data-mode='dark'] {
+  --bg: #000000;
+  --surface: #17171a;
+  --surface-2: #222226;
+  --surface-3: #2d2d32;
+  --raised: #3a3a41;
+  --ink: #f2f2f4;
+  --muted: #9c9ca6;
+  --line: #2b2b30;
+  --accent: #ff9b45;
+  --accent-soft: #3a240f;
+  --accent-ink: #1d0f00;
+  --fab: #ff9b45;
+  --fab-ink: #1d0f00;
+  --hl: #edcb3a;
+  --hl-ink: #241c00;
+  --hl-mark: rgba(237, 203, 58, 0.34);
+  --ok: #3bc488;
+  --ok-soft: #10301f;
+  --bad: #ff7a7a;
+  --bad-soft: #3b1d21;
+  --warn: #f0b44c;
+  --warn-soft: #33270f;
+  --shadow: rgba(0, 0, 0, 0);
+  --shadow-strong: rgba(0, 0, 0, 0.6);
+  --scrim: rgba(0, 0, 0, 0.6);
+  --b1: #7c9dff;
+  --b2: #ff9b5e;
+  --b3: #45d39a;
+  --b4: #9db4ff;
+  --b5: #ff7aa8;
+  --b6: #b19cff;
+  --b7: #4fd1e3;
+  --b8: #e6c35c;
+  --paper-line: rgba(255, 255, 255, 0.07);
+  --paper-dot: rgba(255, 255, 255, 0.16);
+  color-scheme: dark;
+}
 
 /* ------------------------------------------------------------ 테마 (Pro)
-   <html data-theme data-font data-paper> 로 바꾼다 (src/lib/theme.ts).
+   색은 src/lib/theme.ts 가 고른 테마(밝을 때·어두울 때)로 만든 CSS 를 <style id="kok-theme"> 에 넣어 바꾼다
+   (기본 테마 색은 src/lib/themes/presets.ts). 글꼴·종이 무늬는 <html data-font data-paper>, 배경 그림은 data-bg.
    글자로 쓰는 포인트 색(--accent)은 흰 바탕·회색 바탕·연한 포인트 바탕 모두에서 명암비 4.5 이상,
-   버튼 글자(--accent-ink)도 4.5 이상, + 버튼 아이콘(--fab-ink)은 3 이상으로 골랐다. */
+   버튼 글자(--accent-ink)도 4.5 이상, + 버튼 아이콘(--fab-ink)은 3 이상이 되게 맞춘다. */
 :root {
   --paper-line: rgba(40, 60, 110, 0.085);
   --paper-dot: rgba(40, 60, 110, 0.2);
 }
-:root[data-theme='ocean'] {
-  --accent: #1a5fc2;
-  --accent-soft: #e7f0fd;
-  --fab: #2b6fe0;
+
+/* 배경 그림 (Pro 테마): 화면 뒤에 그림을 깔고, 그 위를 바탕색으로 덮어(--theme-dim) 글자가 잘 보이게 한다 */
+:root[data-bg] body::before,
+:root[data-bg] body::after {
+  content: '';
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
 }
-:root[data-theme='forest'] {
-  --accent: #2b7a3a;
-  --accent-soft: #e6f4e8;
-  --fab: #2f8a43;
+:root[data-bg] body::before {
+  background-image: var(--theme-image, none);
+  background-size: var(--theme-image-size, cover);
+  background-position: center;
+  background-repeat: var(--theme-image-repeat, no-repeat);
 }
-:root[data-theme='lavender'] {
-  --accent: #6a48c7;
-  --accent-soft: #f0ebfd;
-  --fab: #7656e0;
-}
-:root[data-theme='cherry'] {
-  --accent: #c0185a;
-  --accent-soft: #fde8f0;
-  --fab: #df3f77;
-}
-:root[data-theme='mint'] {
-  --accent: #0b7a6b;
-  --accent-soft: #dff5f1;
-  --fab: #119c88;
-}
-:root[data-theme='mocha'] {
-  --accent: #8a5524;
-  --accent-soft: #f6ece1;
-  --fab: #a46a34;
-  --bg: #f6f2ed;
-  --surface-2: #f0e9e1;
-  --surface-3: #e6ddd2;
-  --line: #e6ddd2;
-}
-:root[data-theme='night'] {
-  --accent: #3a45b8;
-  --accent-soft: #eaecfd;
-  --fab: #4552d6;
-}
-@media (prefers-color-scheme: dark) {
-  :root {
-    --paper-line: rgba(255, 255, 255, 0.07);
-    --paper-dot: rgba(255, 255, 255, 0.16);
-  }
-  :root[data-theme='ocean'] {
-    --accent: #7cb0ff;
-    --accent-soft: #132541;
-    --accent-ink: #04122b;
-    --fab: #7cb0ff;
-    --fab-ink: #04122b;
-  }
-  :root[data-theme='forest'] {
-    --accent: #6ccf86;
-    --accent-soft: #12291a;
-    --accent-ink: #03210d;
-    --fab: #6ccf86;
-    --fab-ink: #03210d;
-  }
-  :root[data-theme='lavender'] {
-    --accent: #b8a2ff;
-    --accent-soft: #251c3e;
-    --accent-ink: #170b35;
-    --fab: #b8a2ff;
-    --fab-ink: #170b35;
-  }
-  :root[data-theme='cherry'] {
-    --accent: #ff8db4;
-    --accent-soft: #3b1625;
-    --accent-ink: #2c0615;
-    --fab: #ff8db4;
-    --fab-ink: #2c0615;
-  }
-  :root[data-theme='mint'] {
-    --accent: #5adfc8;
-    --accent-soft: #0e2b27;
-    --accent-ink: #032520;
-    --fab: #5adfc8;
-    --fab-ink: #032520;
-  }
-  :root[data-theme='mocha'] {
-    --accent: #e2b388;
-    --accent-soft: #33261a;
-    --accent-ink: #2a1706;
-    --fab: #e2b388;
-    --fab-ink: #2a1706;
-    --bg: #0b0806;
-    --surface-2: #231e1a;
-    --surface-3: #2e2823;
-    --line: #2e2823;
-  }
-  /* 밤하늘: 다크 모드에서는 바탕도 남색으로 */
-  :root[data-theme='night'] {
-    --accent: #9ca6ff;
-    --accent-soft: #1d2042;
-    --accent-ink: #0b0f33;
-    --fab: #9ca6ff;
-    --fab-ink: #0b0f33;
-    --bg: #04050d;
-    --surface: #12142a;
-    --surface-2: #1b1e38;
-    --surface-3: #252949;
-    --raised: #2e3358;
-    --line: #22264a;
-    --muted: #a3a7c4;
-  }
+:root[data-bg] body::after {
+  background: var(--bg);
+  opacity: var(--theme-dim, 0.6);
 }
 
 /* 테마 글꼴 (글꼴 파일은 고른 사람만 받는다). 제목(font-display)도 같은 글꼴로 */

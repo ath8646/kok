@@ -1,9 +1,10 @@
 // 매일 한 번 청소 (Vercel Cron): 기간이 지난 원본 파일 지우기, 정리를 시작하지 않은 올리기 지우기,
-// 멈춘 처리 정리, 오래된 요청·탈퇴 기록 지우기
+// 멈춘 처리 정리, 오래된 요청·탈퇴 기록 지우기, 어느 테마도 쓰지 않는 배경 그림 지우기
 import type { NextRequest } from 'next/server';
 import { timingSafeEqual } from 'node:crypto';
 import { adminClient } from '@/lib/supabase/admin';
-import { refundSource } from '@/lib/server/account';
+import { getFeatures, refundSource } from '@/lib/server/account';
+import { sweepUnusedImages } from '@/lib/server/themes';
 import { removeFolder, sweepOrphanUploads } from '@/lib/server/files';
 import { errorResponse } from '@/lib/server/errors';
 import { TOMBSTONE_KEEP_MS } from '@/lib/server/tombstone';
@@ -73,7 +74,22 @@ export async function GET(req: NextRequest) {
       .delete()
       .lt('deleted_at', new Date(now.getTime() - TOMBSTONE_KEEP_MS).toISOString());
 
-    return Response.json({ ok: true, filesRemoved, orphans, stuck });
+    // 5) 테마: 하루 넘게 어느 테마도 쓰지 않은 배경 그림 (테마를 지웠거나 그림을 바꿈)
+    let themeImages = 0;
+    if ((await getFeatures(admin)).themes) {
+      try {
+        for (let i = 0; i < 10; i++) {
+          const n = await sweepUnusedImages(admin, { olderThanMs: 86400_000, limit: 200 });
+          themeImages += n;
+          if (n < 200) break;
+        }
+      } catch (e) {
+        // 그림 청소가 안 돼도 다른 청소는 끝났다 (내일 다시 한다)
+        console.warn('[kok] theme image sweep failed', (e as Error).message);
+      }
+    }
+
+    return Response.json({ ok: true, filesRemoved, orphans, stuck, themeImages });
   } catch (e) {
     return errorResponse(e);
   }

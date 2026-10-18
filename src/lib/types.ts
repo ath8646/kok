@@ -22,7 +22,7 @@ export type MeResponse = {
   /** 테마를 쓸 수 있는지 (Pro 기능) */
   canTheme: boolean;
   /** DB 에 새 표가 있는지 (schema.sql 을 다시 실행하기 전에는 false) */
-  features: { versions: boolean; restedHidden: boolean; chat: boolean; planFlags: boolean };
+  features: { versions: boolean; restedHidden: boolean; chat: boolean; planFlags: boolean; themes: boolean };
   consented: boolean;
   settings: UserSettings;
   energy: {

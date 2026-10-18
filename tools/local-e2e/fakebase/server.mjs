@@ -780,6 +780,42 @@ function fakeQuiz() {
   };
 }
 
+// ------------------------------------------------------------------ 테마 (가짜 AI·가짜 Cloudflare)
+/** 96×96 그라데이션 JPEG (가짜 AI 그림) */
+const TINY_JPEG = '/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAAoHBwgHBgoICAgLCgoLDhgQDg0NDh0VFhEYIx8lJCIfIiEmKzcvJik0KSEiMEExNDk7Pj4+JS5ESUM8SDc9Pjv/2wBDAQoLCw4NDhwQEBw7KCIoOzs7Ozs7Ozs7Ozs7Ozs7Ozs7Ozs7Ozs7Ozs7Ozs7Ozs7Ozs7Ozs7Ozs7Ozs7Ozs7Ozv/wAARCABgAGADASIAAhEBAxEB/8QAHwAAAQUBAQEBAQEAAAAAAAAAAAECAwQFBgcICQoL/8QAtRAAAgEDAwIEAwUFBAQAAAF9AQIDAAQRBRIhMUEGE1FhByJxFDKBkaEII0KxwRVS0fAkM2JyggkKFhcYGRolJicoKSo0NTY3ODk6Q0RFRkdISUpTVFVWV1hZWmNkZWZnaGlqc3R1dnd4eXqDhIWGh4iJipKTlJWWl5iZmqKjpKWmp6ipqrKztLW2t7i5usLDxMXGx8jJytLT1NXW19jZ2uHi4+Tl5ufo6erx8vP09fb3+Pn6/8QAHwEAAwEBAQEBAQEBAQAAAAAAAAECAwQFBgcICQoL/8QAtREAAgECBAQDBAcFBAQAAQJ3AAECAxEEBSExBhJBUQdhcRMiMoEIFEKRobHBCSMzUvAVYnLRChYkNOEl8RcYGRomJygpKjU2Nzg5OkNERUZHSElKU1RVVldYWVpjZGVmZ2hpanN0dXZ3eHl6goOEhYaHiImKkpOUlZaXmJmaoqOkpaanqKmqsrO0tba3uLm6wsPExcbHyMnK0tPU1dbX2Nna4uPk5ebn6Onq8vP09fb3+Pn6/9oADAMBAAIRAxEAPwDVApcUuKdivSbPOixuKdilxSgVk2axYmKUClApcVk2bRYgFLinAUuKybNosTFLilxSgVk2bRYgFLilApwFYtm0WVAKUClApcV67Z89FiYpcUoFOArJs2ixAKXFLilxWTZtFiYpcUuKdismzaLG4p2KUClArJs2ixMUuKXFLismzaLKmKdilApQK9ds+eixAKUClxSgVk2bRYmKXFOApcVk2bRYgFKBSgUuKxbNYsQClxSgU7FZNm0WNxTsUuKXFZNm0WVAKXFKBTgK9ds+eixAKUClApcVk2bRYmKXFLinYrJs2ixuKdilApQKybNosQClApcUuKybNosTFKBTgKXFZNm0WVAKUClApQK9Zs+eixAKXFOxS4rJs2ixMUoFLilArJs2ixAKXFKBTgKybNosbinAUoFKBWTZtFiYpcUuKUCsmzWLKmKdilApcV67Z8/FiYpcUuKUCsmzaLEAp2KXFKBWTZtFiAUoFLilxWLZrFiYpcU7FKBWTZtFiYpQKXFLismzaLP/2Q==';
+let cfMode = 'ok';
+
+function fakeTheme(text) {
+  const req = (text.match(/<request>\n([\s\S]*?)\n<\/request>/) || [])[1] || '테마';
+  const wantPattern = /pattern_svg: a soft, repeating/.test(text);
+  return {
+    name: `${req.slice(0, 8)} 테마`,
+    summary: '차분하고 따뜻한 분위기예요.',
+    light: { bg: '#f4f1ea', surface: '#ffffff', accent: '#3a7d5c' },
+    // 어두운 모드에 너무 밝은 바탕을 보내도 서버가 어둡게 맞추는지 본다
+    dark: { bg: '#eeeeee', surface: '#151a17', accent: '#7fd1a8' },
+    font: 'round',
+    paper: 'dots',
+    image_prompt: 'soft watercolor rain on a quiet cafe window, calm, no people, no text',
+    // 무늬: 스크립트·이벤트·링크를 섞어 보내도 서버가 깨끗하게 거르는지 본다
+    pattern_svg: wantPattern
+      ? '<svg xmlns="http://www.w3.org/2000/svg" width="240" height="240" onload="alert(1)"><script>alert(2)</script><circle cx="60" cy="60" r="8" fill="#3a7d5c" opacity="0.3"/><a href="https://evil.example"><rect x="1" y="1" width="9" height="9"/></a><circle cx="180" cy="180" r="6" fill="#7fd1a8" opacity="0.3"/></svg>'
+      : '',
+  };
+}
+
+async function handleCloudflare(req, res, url) {
+  stats.cf = (stats.cf || 0) + 1;
+  if (req.headers.authorization !== 'Bearer fake-cf-token') return send(res, 401, { success: false, errors: [{ code: 10000, message: 'Authentication error' }] });
+  if (!/\/ai\/run\/@cf\/black-forest-labs\/flux-1-schnell$/.test(url.pathname)) return send(res, 404, { success: false, errors: [{ code: 7003, message: 'No route' }] });
+  const body = JSON.parse((await readBody(req)).toString() || '{}');
+  stats.cfPrompts = [...(stats.cfPrompts || []), String(body.prompt || '').slice(0, 80)].slice(-5);
+  if (cfMode === 'quota') return send(res, 429, { success: false, errors: [{ code: 4006, message: 'you have used up your daily free allocation of 10,000 neurons' }] });
+  if (cfMode === 'fail') return send(res, 500, { success: false, errors: [{ code: 7000, message: 'internal error' }] });
+  await new Promise((r) => setTimeout(r, 200));
+  return send(res, 200, { success: true, errors: [], messages: [], result: { image: TINY_JPEG } });
+}
+
 async function handleClaude(req, res) {
   const body = JSON.parse((await readBody(req)).toString() || '{}');
   stats.messages++;
@@ -821,6 +857,12 @@ async function handleClaude(req, res) {
     task = 'grade';
     const ans = (textOf.match(/<answer>\n([\s\S]*?)\n<\/answer>/) || [])[1] || '';
     out = /기공|stoma/i.test(ans) ? { result: 'correct', score: 1, feedback: '정확해요.', missing_points: [] } : /구멍/.test(ans) ? { result: 'partial', score: 0.6, feedback: '뜻은 맞아요. 용어 "기공"을 써 보세요.', missing_points: ['기공'] } : { result: 'wrong', score: 0, feedback: '기공이 정답이에요.', missing_points: ['기공'] };
+  } else if (props.pattern_svg) {
+    task = 'theme';
+    out = fakeTheme(textOf);
+  } else if (props.image_prompt) {
+    task = 'theme_image';
+    out = { image_prompt: 'calm pastel hills at sunrise, soft gradient, no people, no text' };
   } else {
     task = 'other';
     out = { ok: true };
@@ -859,6 +901,11 @@ const server = http.createServer(async (req, res) => {
     if (url.pathname.startsWith('/storage/v1/')) return await handleStorage(req, res, url, auth);
     if (url.pathname.startsWith('/auth/v1/')) return await handleAuth(req, res, url, auth);
     if (url.pathname === '/v1/messages') return await handleClaude(req, res);
+    if (url.pathname === '/__cf') {
+      cfMode = url.searchParams.get('mode') || 'ok';
+      return send(res, 200, { cfMode });
+    }
+    if (url.pathname.startsWith('/cf/')) return await handleCloudflare(req, res, url);
     return send(res, 404, { message: `no route ${url.pathname}` });
   } catch (e) {
     console.error('[fake] crash', req.method, url.pathname, e);

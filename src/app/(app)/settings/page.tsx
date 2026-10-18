@@ -4,30 +4,15 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useEffect, useRef, useState } from 'react';
 import { useMe } from '@/components/AppShell';
-import {
-  Button,
-  Card,
-  Chip,
-  Field,
-  ICONS,
-  Icon,
-  LargeHeader,
-  LinkButton,
-  Segmented,
-  SectionTitle,
-  Toggle,
-  api,
-  cx,
-  inputClass,
-  useToast,
-} from '@/components/ui';
+import { Button, Card, Chip, Field, LargeHeader, LinkButton, Segmented, SectionTitle, Toggle, api, cx, inputClass, useToast } from '@/components/ui';
 import { fetchSubjects, sb } from '@/lib/data';
 import { supabaseBrowser } from '@/lib/supabase/client';
 import type { SubjectRow } from '@/lib/types';
-import { THEME_COLORS, THEME_FONTS, THEME_PAPERS, type ModelTier, type UserSettings } from '@/lib/settings';
+import { THEME_FONTS, type ModelTier, type UserSettings } from '@/lib/settings';
 import { energyPeriodLabel, planLabel } from '@/lib/plans';
 import { accountLabel } from '@/lib/login';
-import { THEME_COLOR_INFO, THEME_FONT_INFO, THEME_PAPER_INFO, applyTheme, clearTheme, loadThemeFont } from '@/lib/theme';
+import { applyTheme, clearTheme, loadThemeFont } from '@/lib/theme';
+import { ThemeSettings } from '@/components/ThemeSettings';
 import { dropView } from '@/lib/view-cache';
 
 const TASKS: Array<{ key: keyof UserSettings['models']; label: string; hint: string }> = [
@@ -46,6 +31,7 @@ const TASK_NAME: Record<string, string> = {
   grade: '채점',
   fix: '문제 고치기',
   chat: '노트 채팅',
+  theme: '테마 만들기',
   refund: '돌려받음',
 };
 
@@ -112,7 +98,7 @@ export default function SettingsPage() {
   const pickTheme = (patch: Partial<UserSettings['theme']>) => {
     if (!canTheme) return toast('테마는 Pro에서 쓸 수 있어요.');
     set('theme', patch);
-    applyTheme({ ...draft.theme, ...patch });
+    applyTheme({ ...draft.theme, ...patch }, { allowMissing: true });
   };
 
   return (
@@ -288,103 +274,7 @@ export default function SettingsPage() {
         </span>
       </SectionTitle>
       <Card className="grid gap-5">
-        {!canTheme ? (
-          <div className="flex flex-wrap items-center justify-between gap-2 rounded-2xl bg-surface-2 px-3.5 py-3">
-            <p className="text-sm">테마는 Pro에서 쓸 수 있어요. 색·글꼴·노트 종이 무늬를 내 마음대로 바꿔요.</p>
-            <LinkButton href="/plan" size="sm" variant="secondary">
-              요금제 보기
-            </LinkButton>
-          </div>
-        ) : null}
-        <Field label="색">
-          <div className="grid grid-cols-4 gap-1.5 sm:grid-cols-8" role="radiogroup" aria-label="테마 색">
-            {THEME_COLORS.map((c) => {
-              const info = THEME_COLOR_INFO[c];
-              const on = draft.theme.color === c;
-              return (
-                <button
-                  key={c}
-                  type="button"
-                  role="radio"
-                  aria-checked={on}
-                  disabled={!canTheme}
-                  onClick={() => pickTheme({ color: c })}
-                  className={cx(
-                    'press grid justify-items-center gap-1.5 rounded-2xl px-1 py-2 text-xs font-semibold disabled:cursor-not-allowed disabled:opacity-50',
-                    on ? 'bg-surface-2 text-ink' : 'text-muted hover:bg-surface-2',
-                  )}
-                >
-                  <span
-                    className={cx(
-                      'relative grid h-10 w-10 place-items-center rounded-full ring-2 ring-offset-2 ring-offset-surface',
-                      on ? 'ring-ink' : 'ring-transparent',
-                    )}
-                  >
-                    <span className="absolute inset-0 rounded-full dark:hidden" style={{ background: info.light }} aria-hidden="true" />
-                    <span className="absolute inset-0 hidden rounded-full dark:block" style={{ background: info.dark }} aria-hidden="true" />
-                    {on ? <Icon d={ICONS.check} size={18} strokeWidth={2.8} className="relative text-white dark:text-black" /> : null}
-                  </span>
-                  {info.label}
-                </button>
-              );
-            })}
-          </div>
-        </Field>
-        <Field label="글꼴">
-          <div className="grid grid-cols-2 gap-2 sm:grid-cols-4" role="radiogroup" aria-label="테마 글꼴">
-            {THEME_FONTS.map((f) => {
-              const info = THEME_FONT_INFO[f];
-              const on = draft.theme.font === f;
-              return (
-                <button
-                  key={f}
-                  type="button"
-                  role="radio"
-                  aria-checked={on}
-                  disabled={!canTheme}
-                  onClick={() => pickTheme({ font: f })}
-                  className={cx(
-                    'press grid gap-0.5 rounded-2xl border-2 px-3 py-2.5 text-left disabled:cursor-not-allowed disabled:opacity-50',
-                    on ? 'border-accent bg-accent-soft' : 'border-line hover:bg-surface-2',
-                  )}
-                >
-                  <span className="text-lg leading-snug" style={{ fontFamily: info.family }}>
-                    가나다 공부
-                  </span>
-                  <span className={cx('text-xs font-semibold', on ? 'text-accent' : 'text-muted')}>{info.label}</span>
-                </button>
-              );
-            })}
-          </div>
-        </Field>
-        <Field label="노트 종이 무늬">
-          <div className="grid grid-cols-4 gap-2" role="radiogroup" aria-label="노트 종이 무늬">
-            {THEME_PAPERS.map((p) => {
-              const on = draft.theme.paper === p;
-              return (
-                <button
-                  key={p}
-                  type="button"
-                  role="radio"
-                  aria-checked={on}
-                  disabled={!canTheme}
-                  onClick={() => pickTheme({ paper: p })}
-                  className={cx(
-                    'press grid gap-1.5 rounded-2xl p-1.5 text-xs font-semibold disabled:cursor-not-allowed disabled:opacity-50',
-                    on ? 'bg-surface-2 text-ink' : 'text-muted hover:bg-surface-2',
-                  )}
-                >
-                  <span
-                    className={cx('block h-12 rounded-xl bg-surface ring-1 ring-line', p !== 'none' && `kok-paper-${p}`, on && 'ring-2 ring-accent')}
-                    aria-hidden="true"
-                  />
-                  {THEME_PAPER_INFO[p].label}
-                </button>
-              );
-            })}
-          </div>
-        </Field>
-        <p className="text-xs text-muted">테마는 이 계정의 모든 기기에 같이 적용돼요. Pro가 끝나면 기본 모양으로 돌아가고, 고른 테마는 남아 있어요.</p>
+        <ThemeSettings me={me} theme={draft.theme} onChange={pickTheme} />
       </Card>
 
       <SectionTitle>시각화</SectionTitle>

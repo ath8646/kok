@@ -19,7 +19,7 @@
 - 테스트 플랜: 관리자가 번개(⚡) 총량·하루 최대·쪽수·사진·글자·파일 크기·꼼꼼 모델을 정해 만들고, 그 플랜의 코드를 나눠 준다. 코드를 쓴 계정은 정한 날수 동안 그 플랜(관리자 > 테스트 플랜 > Pro > 무료)을 쓰고, 끝나면 원래 요금제로 돌아간다
 - 관리자 화면: 키 상태·시험, 숫자, 모델·effort, 한도, 사용자(테스트 플랜 끝내기), 테스트 플랜, 쿠폰(Pro·테스트 플랜 코드), 신고함, 공지, 운영자 정보
 - 설정: 모델(빠름/꼼꼼), AI 채팅, 테마, 시각화, 복습, 문제, 내 데이터 내려받기, 탈퇴
-- 테마 (Pro): 색 8가지, 글꼴 4가지(고운돋움·개구·고운바탕, 고른 사람만 글꼴 파일을 받음), 노트 종이 무늬(줄·모눈·점). Pro가 끝나면 기본 모양으로
+- 테마 (Pro): 화면 밝기(기기 설정·밝게·어둡게), 밝을 때·어두울 때 테마를 따로 고르기(기본 8가지 + 내 테마), 내 테마 20개까지 — **AI로 만들기**(느낌을 적으면 두 모드의 색·글꼴·종이·배경 그림을 골라 줌)와 **직접 만들기**(모드마다 바탕·카드·포인트 색, 배경은 사진 올리기·AI 그림·무늬, 그림 위를 덮는 정도). 글꼴 4가지(고운돋움·개구·고운바탕, 고른 사람만 글꼴 파일을 받음), 노트 종이 무늬(줄·모눈·점). 색은 글자가 잘 보이게(명암비 4.5 이상) 맞춰요. Pro가 끝나면 기본 모양으로 돌아가고 고른 테마는 남아요
 - 테스트 플랜마다 꼼꼼 모델·노트에 자료 더하기·테마를 켜고 끌 수 있어요
 - PWA(홈 화면에 설치), 밝은/어두운 화면, 노트 앱(One UI) 느낌의 디자인과 움직임(움직임 줄이기 설정을 따름)
 
@@ -30,6 +30,7 @@
 | 화면 + 서버 | Next.js 16 (App Router, `src/`), React 19, Tailwind CSS 4 |
 | 로그인·데이터·파일 | Supabase (Auth + Postgres RLS + Storage `sources` 버킷) |
 | AI | Claude API (`@anthropic-ai/sdk`), 서버에서만 호출, JSON 스키마로 답 받기 |
+| 테마 배경 그림 | Cloudflare Workers AI (FLUX.1 schnell, 무료 몫 안에서), 서버에서만 호출. 그림은 비공개 `theme-images` 버킷 |
 | 복습 알고리즘 | ts-fsrs (브라우저에서 계산, RLS로 내 카드만 저장) |
 | 호스팅 | Vercel (함수 지역 서울 `icn1`, 매일 청소 Cron) |
 
@@ -37,12 +38,13 @@
 src/
   app/                 화면과 API (route.ts)
     (app)/             로그인한 뒤 화면: home, library, notes, review, wrong, questions, settings, plan, admin, welcome (add 는 자료함으로 보내기만)
-    api/               서버 API: sources(자료 처리·노트에 더하기), notes(그림·문제 다시 만들기, chat, versions), grade, coupon, account, admin, cron, internal
+    api/               서버 API: sources(자료 처리·노트에 더하기), notes(그림·문제 다시 만들기, chat, versions), themes(내 테마·AI 테마·배경 그림), grade, coupon, account, admin, cron, internal
     auth/callback/     구글·카카오·Apple 로그인에서 돌아오는 곳
   components/          화면 조각 (QuickAdd: + 버튼·끌어다 놓기, LibraryView: 자료함, MindMap, NoteView, QuestionCard …)
   lib/
     ai/                요금표·에너지, 프롬프트, JSON 스키마
-    server/            서버 전용 (계정·에너지, Claude 호출, 처리 파이프라인)
+    server/            서버 전용 (계정·에너지, Claude·Cloudflare 호출, 처리 파이프라인, 테마)
+    themes/            테마 색 계산(명암비), 기본 테마 색, 테마 모양 검사, CSS 만들기, 무늬 SVG 거르기
     supabase/          Supabase 클라이언트 (브라우저·서버·proxy·관리자)
   proxy.ts             로그인 세션 새로 고침, 로그인 안 하면 첫 화면으로
 supabase/
@@ -68,6 +70,8 @@ Vercel → Settings → Environment Variables 에만 넣어요. 이 저장소는
 | `CRON_SECRET` | 매일 청소 작업 보호 (아무 영어·숫자 32자 이상) — 비밀. 없으면 청소가 돌지 않아요 |
 | `NEXT_PUBLIC_KAKAO_LOGIN` | `1` 이면 첫 화면에 "카카오로 계속하기" 버튼이 보여요. 비워 두면 버튼이 없어요. 빌드할 때 정해지니 바꾸면 다시 배포해요 (공개돼도 괜찮아요) |
 | `NEXT_PUBLIC_APPLE_LOGIN` | `1` 이면 첫 화면에 "Apple로 계속하기" 버튼이 보여요. 비워 두면 버튼이 없어요. 빌드할 때 정해지니 바꾸면 다시 배포해요 (공개돼도 괜찮아요) |
+| `CLOUDFLARE_ACCOUNT_ID` | Cloudflare 계정 ID (32자리). AI 테마의 배경 그림을 그릴 때 써요. 비워 두면 그림 대신 무늬를 넣어요 |
+| `CLOUDFLARE_API_TOKEN` | Cloudflare Workers AI 토큰 — 비밀. 계정 ID 와 같이 넣어야 그림을 그려요 |
 
 ### 카카오 로그인 켜기 (선택)
 
@@ -81,6 +85,14 @@ Vercel → Settings → Environment Variables 에만 넣어요. 이 저장소는
 
 이메일 없는 카카오 계정은 설정에 '카카오 계정'으로 보이고, 탈퇴 기록은 카카오 회원번호로도 남겨서 같은 날 다시 가입해도 무료 에너지를 또 받지 못해요. 관리자는 구글 로그인만 돼요.
 
+### AI 테마 배경 그림 켜기 (선택)
+
+1. [Cloudflare](https://dash.cloudflare.com) 에 가입해요 (무료, 카드 없이).
+2. AI → Workers AI → **Use REST API** → **Create a Workers AI API Token** → 만들기 → 토큰을 복사해요. 같은 화면의 **Account ID** 도 복사해요.
+3. Vercel 에 `CLOUDFLARE_ACCOUNT_ID`, `CLOUDFLARE_API_TOKEN` 을 넣고 다시 배포해요.
+
+무료 몫은 하루 10,000 뉴런(UTC 0시에 다시 참, 그림 약 170장)이고, 콕은 서비스 전체에서 하루 150장까지만 그려요. 몫을 다 쓰거나 실패하면 코드로 만든 무늬를 대신 넣고 알려 줘요. 한 사람은 하루에 AI 테마 10개·AI 그림 10장·사진 20장까지예요.
+
 ### Apple 로그인 켜기 (선택)
 
 1. Apple Developer Program(유료, 해마다)에서 App ID(Sign in with Apple 켜기), Services ID, 키(`.p8`)를 만들어요. Services ID 의 Return URL 은 `https://<프로젝트-ref>.supabase.co/auth/v1/callback` 이에요.
@@ -90,7 +102,7 @@ Vercel → Settings → Environment Variables 에만 넣어요. 이 저장소는
 
 ## 처음 설치
 
-1. Supabase SQL Editor 에 `supabase/schema.sql` 전체를 붙여 넣고 실행해요. 여러 번 실행해도 안전해요. **코드를 새로 올릴 때마다 한 번 더 실행해요.** 새 표·칸이 생기기 전에는 새 기능(노트 채팅, 자료 더하기와 버전)이 꺼진 채로 예전처럼 동작해요.
+1. Supabase SQL Editor 에 `supabase/schema.sql` 전체를 붙여 넣고 실행해요. 여러 번 실행해도 안전해요. **코드를 새로 올릴 때마다 한 번 더 실행해요.** 새 표·칸이 생기기 전에는 새 기능(노트 채팅, 자료 더하기와 버전, 내 테마)이 꺼진 채로 예전처럼 동작해요.
 2. Vercel 에 이 저장소를 가져오고 위 환경변수를 넣어 배포해요.
 3. Supabase → Authentication → URL Configuration 에 사이트 주소(Site URL)와 `https://<사이트>/**`(Redirect URLs)를 넣어요.
 

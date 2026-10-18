@@ -775,4 +775,89 @@ do $$ begin
 end $$;
 reset role;
 
+-- ---------- 테마 (Pro): 내 테마만 읽고, 쓰기·그림·하루 수는 서버만 ----------
+insert into public.user_themes (user_id, name, spec) values
+  ('11111111-1111-1111-1111-111111111111', 'A 테마', '{"light":{"bg":"#f3f3f6","surface":"#ffffff","accent":"#1a5fc2"},"dark":{"bg":"#000000","surface":"#17171a","accent":"#7cb0ff"}}'),
+  ('22222222-2222-2222-2222-222222222222', 'B 테마', '{"light":{"bg":"#f3f3f6","surface":"#ffffff","accent":"#c0185a"},"dark":{"bg":"#000000","surface":"#17171a","accent":"#ff8db4"}}');
+insert into public.theme_images (user_id, kind, path, mime, bytes) values
+  ('11111111-1111-1111-1111-111111111111', 'upload', '11111111-1111-1111-1111-111111111111/x.jpg', 'image/jpeg', 100);
+set role authenticated;
+select set_config('request.jwt.claim.sub', '11111111-1111-1111-1111-111111111111', false);
+do $$ begin
+  if (select count(*) from public.user_themes) <> 1 then raise exception 'A sees only own theme'; end if;
+  if (select name from public.user_themes limit 1) <> 'A 테마' then raise exception 'A theme name'; end if;
+  begin
+    insert into public.user_themes (user_id, name, spec) values (auth.uid(), '몰래', '{}'::jsonb);
+    raise exception 'theme insert should be denied';
+  exception when insufficient_privilege then null;
+  end;
+  begin
+    update public.user_themes set spec = '{"light":"x"}'::jsonb;
+    raise exception 'theme update should be denied';
+  exception when insufficient_privilege then null;
+  end;
+  begin
+    delete from public.user_themes;
+    raise exception 'theme delete should be denied';
+  exception when insufficient_privilege then null;
+  end;
+  begin
+    perform 1 from public.theme_images;
+    raise exception 'theme_images read should be denied';
+  exception when insufficient_privilege then null;
+  end;
+  begin
+    perform 1 from public.app_counters;
+    raise exception 'app_counters read should be denied';
+  exception when insufficient_privilege then null;
+  end;
+  begin
+    perform public.kok_bump_counter('cf_image', 100);
+    raise exception 'bump counter should be denied';
+  exception when insufficient_privilege then null;
+  end;
+  begin
+    perform public.kok_take_unused_theme_images(now(), null, 10);
+    raise exception 'taking unused theme images should be denied';
+  exception when insufficient_privilege then null;
+  end;
+end $$;
+reset role;
+-- 하루 수: 한도까지만 올라간다
+do $$ begin
+  if not public.kok_bump_counter('test_kind', 2) then raise exception 'first bump'; end if;
+  if not public.kok_bump_counter('test_kind', 2) then raise exception 'second bump'; end if;
+  if public.kok_bump_counter('test_kind', 2) then raise exception 'third bump should be refused'; end if;
+  if (select n from public.app_counters where kind = 'test_kind') <> 2 then raise exception 'counter should stop at 2'; end if;
+end $$;
+-- 안 쓰는 그림 청소: 테마가 쓰는 그림·새 그림·다른 사람 테마가 같은 번호를 적은 그림은 남긴다
+do $$
+declare
+  a uuid := '11111111-1111-1111-1111-111111111111';
+  b uuid := '22222222-2222-2222-2222-222222222222';
+  used uuid := gen_random_uuid();
+  old_unused uuid := gen_random_uuid();
+  fresh uuid := gen_random_uuid();
+  b_old uuid := gen_random_uuid();
+  taken text[];
+begin
+  delete from public.theme_images;
+  insert into public.theme_images (id, user_id, kind, path, mime, bytes, created_at) values
+    (used, a, 'upload', a || '/used.jpg', 'image/jpeg', 10, now() - interval '3 days'),
+    (old_unused, a, 'ai', a || '/old.jpg', 'image/jpeg', 10, now() - interval '2 days'),
+    (fresh, a, 'upload', a || '/fresh.jpg', 'image/jpeg', 10, now()),
+    (b_old, b, 'upload', b || '/b.jpg', 'image/jpeg', 10, now() - interval '2 days');
+  update public.user_themes set spec = spec || jsonb_build_object('image', jsonb_build_object('kind', 'file', 'id', used::text)) where user_id = a;
+  -- B 의 테마가 A 의 그림 번호를 적어도 A 의 그림을 지키지 않는다 (같은 사람 테마만 본다)
+  update public.user_themes set spec = spec || jsonb_build_object('image', jsonb_build_object('kind', 'file', 'id', old_unused::text)) where user_id = b;
+  taken := array(select public.kok_take_unused_theme_images(now() - interval '1 day', a, 10));
+  if taken <> array[a || '/old.jpg'] then raise exception 'A sweep took %', taken; end if;
+  if not exists (select 1 from public.theme_images where id = used) then raise exception 'used image must stay'; end if;
+  if not exists (select 1 from public.theme_images where id = fresh) then raise exception 'fresh image must stay'; end if;
+  if not exists (select 1 from public.theme_images where id = b_old) then raise exception 'B image must stay in A sweep'; end if;
+  taken := array(select public.kok_take_unused_theme_images(now() - interval '1 day', null, 10));
+  if taken <> array[b || '/b.jpg'] then raise exception 'all sweep took %', taken; end if;
+  if (select count(*) from public.theme_images) <> 2 then raise exception 'two images should stay'; end if;
+end $$;
+
 select 'ALL RLS TESTS PASSED' as result;

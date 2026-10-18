@@ -24,7 +24,7 @@ case "${1:-reset}" in
     $P -d kokapp -f "$SUPA/test/stub.sql" >/dev/null 2>&1
     $P -d kokapp -c "truncate auth.users cascade; truncate public.coupons cascade; truncate storage.objects; delete from public.app_settings;" >/dev/null 2>&1
     $P -d kokapp -f "$SUPA/schema.sql" >/dev/null 2>&1
-    $P -d kokapp -c "truncate public.account_tombstones, public.upload_tickets; truncate public.custom_plans cascade;" >/dev/null
+    $P -d kokapp -c "truncate public.account_tombstones, public.upload_tickets, public.app_counters; truncate public.custom_plans cascade;" >/dev/null
     $P -d kokapp -c "$USERS" >/dev/null
     rm -rf "$HERE/fakebase/files"
     ;;

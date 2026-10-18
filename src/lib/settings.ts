@@ -2,7 +2,7 @@
 import { z } from 'zod';
 
 export type Effort = 'low' | 'medium' | 'high';
-export type AiTask = 'organize' | 'merge' | 'visual' | 'quiz' | 'check' | 'grade' | 'chat';
+export type AiTask = 'organize' | 'merge' | 'visual' | 'quiz' | 'check' | 'grade' | 'chat' | 'theme';
 
 // ------------------------------------------------------------- 운영 설정 (app_settings)
 /**
@@ -45,8 +45,9 @@ export const zModelsConfig = z.object({
       check: zEffort.catch('low'),
       grade: zEffort.catch('low'),
       chat: zEffort.catch('low'),
+      theme: zEffort.catch('low'),
     })
-    .catch({ organize: 'medium', merge: 'low', visual: 'low', quiz: 'medium', check: 'low', grade: 'low', chat: 'low' }),
+    .catch({ organize: 'medium', merge: 'low', visual: 'low', quiz: 'medium', check: 'low', grade: 'low', chat: 'low', theme: 'low' }),
 });
 export type ModelsConfig = z.infer<typeof zModelsConfig>;
 export const DEFAULT_MODELS: ModelsConfig = zModelsConfig.parse({});
@@ -67,7 +68,20 @@ export const THEME_FONTS = ['default', 'round', 'hand', 'serif'] as const;
 export type ThemeFont = (typeof THEME_FONTS)[number];
 export const THEME_PAPERS = ['none', 'lined', 'grid', 'dots'] as const;
 export type ThemePaper = (typeof THEME_PAPERS)[number];
-export const DEFAULT_THEME = { color: 'default', font: 'default', paper: 'none' } as const satisfies { color: ThemeColor; font: ThemeFont; paper: ThemePaper };
+/** 화면 밝기: 기기 설정 따르기·늘 밝게·늘 어둡게 */
+export const THEME_MODES = ['system', 'light', 'dark'] as const;
+export type ThemeMode = (typeof THEME_MODES)[number];
+/** 밝을 때·어두울 때 쓸 테마: 기본 테마('preset:ocean') 또는 내가 만든 테마('custom:<번호>') */
+export const THEME_REF = new RegExp(`^(preset:(${THEME_COLORS.join('|')})|custom:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$`);
+export type ThemeRef = string;
+export const DEFAULT_THEME = {
+  color: 'default',
+  font: 'default',
+  paper: 'none',
+  mode: 'system',
+  light: null,
+  dark: null,
+} as const satisfies { color: ThemeColor; font: ThemeFont; paper: ThemePaper; mode: ThemeMode; light: ThemeRef | null; dark: ThemeRef | null };
 export type VisualType = (typeof VISUAL_TYPES)[number];
 
 export const zUserSettings = z.object({
@@ -89,9 +103,13 @@ export const zUserSettings = z.object({
     .catch({ allowQuestions: true, allowNote: true }),
   theme: z
     .object({
+      // 예전 한 가지 테마 색 (밝을 때·어두울 때 테마를 따로 고르기 전에는 이것을 둘 다에 쓴다)
       color: z.enum(THEME_COLORS).catch('default'),
       font: z.enum(THEME_FONTS).catch('default'),
       paper: z.enum(THEME_PAPERS).catch('none'),
+      mode: z.enum(THEME_MODES).catch('system'),
+      light: z.string().regex(THEME_REF).nullable().catch(null),
+      dark: z.string().regex(THEME_REF).nullable().catch(null),
     })
     .catch({ ...DEFAULT_THEME }),
   visual: z

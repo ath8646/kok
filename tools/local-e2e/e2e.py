@@ -1,7 +1,7 @@
 """콕 v0.1 끝-끝 시험 (가짜 Supabase·Claude + 로컬 Postgres).
 사용: python3 e2e.py  (앱: localhost:3000, 가짜 백엔드: localhost:54321)
 """
-import asyncio, base64, json, os, pathlib, sys, time, io, re, urllib.request
+import asyncio, base64, json, os, pathlib, sys, time, io, re, urllib.parse, urllib.request
 from playwright.async_api import async_playwright, expect
 
 # 로컬 Postgres 접속 (db.sh 와 같은 기본값)
@@ -146,6 +146,49 @@ async def wait_ready(page, timeout=60):
             return True
         await page.wait_for_timeout(700)
     return False
+
+
+async def css_var(page, name):
+    return (await page.evaluate("(n) => getComputedStyle(document.documentElement).getPropertyValue(n).trim()", name)).lower()
+
+
+async def wait_css(page, name, want, timeout=6000):
+    t0 = time.time()
+    got = None
+    while (time.time() - t0) * 1000 < timeout:
+        got = await css_var(page, name)
+        if got == want:
+            return
+        await page.wait_for_timeout(100)
+    raise AssertionError(f"{name}: {got!r} != {want!r}")
+
+
+async def wait_js(page, script, timeout=6000):
+    t0 = time.time()
+    while (time.time() - t0) * 1000 < timeout:
+        if await page.evaluate(script):
+            return
+        await page.wait_for_timeout(100)
+    raise AssertionError(f"timed out: {script}")
+
+
+def luminance(hexv):
+    h = hexv.lstrip("#")
+    def f(c):
+        return c / 12.92 if c <= 0.03928 else ((c + 0.055) / 1.055) ** 2.4
+    r, g, b = (int(h[i:i + 2], 16) / 255 for i in (0, 2, 4))
+    return 0.2126 * f(r) + 0.7152 * f(g) + 0.0722 * f(b)
+
+
+def make_png(w=900, h=600) -> bytes:
+    from PIL import Image, ImageDraw
+    im = Image.new("RGB", (w, h), (200, 220, 240))
+    d = ImageDraw.Draw(im)
+    for x in range(0, w, 60):
+        d.ellipse([x, h // 3, x + 40, h // 3 + 40], fill=(90, 130, 200))
+    b = io.BytesIO()
+    im.save(b, "PNG")
+    return b.getvalue()
 
 
 async def main():
@@ -1112,25 +1155,76 @@ async def main():
         await ctx.close()
 
         # ---------------- 테마 (Pro)
-        step("themes (Pro): colour, font and note paper")
+        student_id = USERS["student"][0]
+
+        def sql(q):
+            return subprocess.run(["psql", "-d", "kokapp", "-Atc", q], check=True, capture_output=True, text=True).stdout.strip()
+
+        def saved_theme():
+            return json.loads(sql(f"select settings->'theme' from public.profiles where id = '{student_id}'") or "{}")
+
+        async def wait_saved(want, timeout=8):
+            t0 = time.time()
+            got = None
+            while time.time() - t0 < timeout:
+                got = saved_theme()
+                if all(got.get(k) == v for k, v in want.items()):
+                    return got
+                await asyncio.sleep(0.2)
+            raise AssertionError(f"theme settings {got} != {want}")
+
+        def image_id(css):
+            m = re.search(r"/api/themes/images/([0-9a-f-]{36})", css)
+            assert m, css[:200]
+            return m.group(1)
+
+        step("themes (Pro): light/dark mode and a theme for each")
         ctx, page = await new_ctx(browser, "student")
         await page.goto(BASE + "/settings#theme")
-        await page.get_by_role("radiogroup", name="테마 색").get_by_role("radio", name="바다").click()
-        await expect(page.locator("html")).to_have_attribute("data-theme", "ocean")
+        brightness = page.get_by_role("radiogroup", name="화면 밝기")
+        await page.get_by_role("radiogroup", name="테마", exact=True).get_by_role("radio", name="바다", exact=True).click()
+        await wait_css(page, "--accent", "#1a5fc2")
+        await brightness.get_by_role("radio", name="어둡게").click()
+        await expect(page.locator("html")).to_have_attribute("data-mode", "dark")
+        await wait_css(page, "--accent", "#7cb0ff")
+        assert await css_var(page, "--bg") == "#000000"
+        # 밝은 기기에서도 어둡게 (Tailwind dark: 와 브라우저 기본 색도 같이)
+        await wait_js(page, "getComputedStyle(document.documentElement).colorScheme === 'dark'")
+        await page.locator("#theme").scroll_into_view_if_needed()
+        await shot(page, "48-settings-theme-dark", full=False)
+        await page.get_by_text("밝을 때와 어두울 때 테마를 따로 고르기").click()
+        await page.get_by_role("radiogroup", name="어두울 때 테마").get_by_role("radio", name="밤하늘", exact=True).click()
+        await wait_css(page, "--accent", "#9ca6ff")
+        assert await css_var(page, "--bg") == "#04050d"
+        await brightness.get_by_role("radio", name="밝게").click()
+        await expect(page.locator("html")).to_have_attribute("data-mode", "light")
+        await wait_css(page, "--accent", "#1a5fc2")
+        await page.get_by_role("radiogroup", name="밝을 때 테마").get_by_role("radio", name="벚꽃", exact=True).click()
+        await wait_css(page, "--accent", "#c0185a")
+        await brightness.get_by_role("radio", name="기기 설정").click()
+        await wait_js(page, "!document.documentElement.hasAttribute('data-mode')")
+        await wait_css(page, "--accent", "#c0185a")
         await page.get_by_role("radiogroup", name="테마 글꼴").get_by_role("radio", name=re.compile("둥근 글씨")).click()
         await expect(page.locator("html")).to_have_attribute("data-font", "round")
         await page.get_by_role("radiogroup", name="노트 종이 무늬").get_by_role("radio", name="줄 노트").click()
         await expect(page.locator("html")).to_have_attribute("data-paper", "lined")
-        await expect(page.get_by_text("저장됨")).to_be_visible(timeout=5000)
+        await wait_saved({"mode": "system", "light": "preset:cherry", "dark": "preset:night", "font": "round", "paper": "lined"})
         await page.locator("#theme").scroll_into_view_if_needed()
         await shot(page, "48-settings-theme", full=False)
         await no_hscroll(page, "settings theme")
-        await page.goto(BASE + f"/notes/{note_sid}")
-        # 다시 열면 화면을 그리기 전에 붙는다
-        assert await page.evaluate("document.documentElement.dataset.theme") == "ocean"
+
+        step("themes (Pro): the saved look is on before the app loads")
+
+        async def slow_me(route):
+            await asyncio.sleep(3)
+            await route.continue_()
+
+        await page.route("**/api/me", slow_me)
+        await page.goto(BASE + f"/notes/{note_sid}", wait_until="domcontentloaded")
+        assert await page.evaluate("!!document.getElementById('kok-theme')"), "THEME_BOOT did not add the theme style"
+        assert await css_var(page, "--accent") == "#c0185a"
+        assert await page.evaluate("[document.documentElement.dataset.font, document.documentElement.dataset.paper].join()") == "round,lined"
         assert await wait_ready(page)
-        accent = await page.evaluate("getComputedStyle(document.documentElement).getPropertyValue('--accent').trim()")
-        assert accent.lower() == "#1a5fc2", accent
         font = await page.evaluate("getComputedStyle(document.body).fontFamily")
         assert "Gowun Dodum" in font, font
         await shot(page, "49-note-theme")
@@ -1138,13 +1232,158 @@ async def main():
         ctx, page = await new_ctx(browser, "student", scheme="dark")
         await page.goto(BASE + f"/notes/{note_sid}")
         assert await wait_ready(page)
-        await expect(page.locator("html")).to_have_attribute("data-theme", "ocean")
+        await wait_css(page, "--bg", "#04050d")
+        assert await css_var(page, "--accent") == "#9ca6ff"
         await shot(page, "49-note-theme-dark", full=False)
+        await ctx.close()
+
+        step("themes (Pro): AI theme with a background picture")
+        ctx, page = await new_ctx(browser, "student")
+        await page.goto(BASE + "/settings#theme")
+        brightness = page.get_by_role("radiogroup", name="화면 밝기")
+        maker = page.get_by_role("dialog", name="AI로 테마 만들기")
+        await page.get_by_role("button", name=re.compile("AI로 만들기")).click()
+        await maker.locator("#theme-prompt").fill("비 오는 날 카페")
+        await maker.get_by_role("button", name=re.compile("^만들기")).click()
+        await expect(page.get_by_text(re.compile("테마를 만들어 썼어요"))).to_be_visible(timeout=30000)
+        await expect(maker).to_be_hidden()
+        await expect(page.locator("html")).to_have_attribute("data-bg", "1")
+        await expect(page.locator("html")).to_have_attribute("data-paper", "dots")
+        ai_image = image_id(await css_var(page, "--theme-image"))
+        r = await page.request.get(BASE + f"/api/themes/images/{ai_image}")
+        assert r.ok and r.headers.get("content-type", "").startswith("image/"), (r.status, r.headers)
+        assert sql(f"select kind || ' ' || coalesce(prompt, '') from public.theme_images where id = '{ai_image}'").startswith("ai soft watercolor"), "AI picture row"
+        ai_theme = sql(f"select id from public.user_themes where user_id = '{student_id}' order by created_at desc limit 1")
+        await wait_saved({"light": f"custom:{ai_theme}", "dark": f"custom:{ai_theme}", "font": "round", "paper": "dots"})
+        # 어두울 때 바탕: AI 가 밝은 색을 보내도 서버가 어둡게 맞춘다
+        await brightness.get_by_role("radio", name="어둡게").click()
+        await expect(page.locator("html")).to_have_attribute("data-mode", "dark")
+        dark_bg = await css_var(page, "--bg")
+        assert luminance(dark_bg) < 0.05, dark_bg
+        await page.evaluate("window.scrollTo(0, 0)")
+        await shot(page, "50-theme-ai-dark", full=False)
+        await brightness.get_by_role("radio", name="기기 설정").click()
+        await wait_js(page, "!document.documentElement.hasAttribute('data-mode')")
+        await page.goto(BASE + "/home")
+        await page.wait_for_timeout(1200)
+        await shot(page, "50-home-ai-picture", full=False)
+        await no_hscroll(page, "home with a theme picture")
+
+        step("themes (Pro): a pattern when the free pictures run out")
+        await page.goto(BASE + "/settings#theme")
+        urllib.request.urlopen("http://localhost:54321/__cf?mode=quota")
+        try:
+            await page.get_by_role("button", name=re.compile("AI로 만들기")).click()
+            await maker.locator("#theme-prompt").fill("밤하늘 별빛")
+            await maker.get_by_role("button", name=re.compile("^만들기")).click()
+            await expect(page.get_by_text(re.compile("무늬를 대신 넣었어요"))).to_be_visible(timeout=30000)
+        finally:
+            urllib.request.urlopen("http://localhost:54321/__cf?mode=ok")
+        await wait_js(page, "getComputedStyle(document.documentElement).getPropertyValue('--theme-image').includes('data:image/svg+xml')")
+        await expect(page.locator("html")).to_have_attribute("data-bg", "1")
+        assert sql(f"select count(*) from public.theme_images where user_id = '{student_id}'") == "1", "no picture for the pattern theme"
+
+        step("themes (Pro): edit a theme — name, pattern, photo — then delete it")
+        editor = page.get_by_role("dialog", name="테마 고치기")
+        await page.get_by_role("button", name="고치기", exact=True).last.click()
+        await expect(editor).to_be_visible()
+        await editor.locator("#theme-name").fill("물결 테마")
+        await editor.get_by_role("radiogroup", name="배경 그림").get_by_role("radio", name="무늬").click()
+        await editor.get_by_role("radiogroup", name="무늬", exact=True).get_by_role("radio", name="물결").click()
+        await editor.get_by_role("button", name="저장하고 쓰기").click()
+        await expect(editor).to_be_hidden()
+        await expect(page.get_by_role("radiogroup", name="테마", exact=True).get_by_role("radio", name="물결 테마", exact=True)).to_be_visible()
+        wave_svg = sql(f"select spec->'image'->>'svg' from public.user_themes where user_id = '{student_id}' and name = '물결 테마'")
+        assert wave_svg.startswith("<svg"), wave_svg[:80]
+        want = ('url("data:image/svg+xml,' + urllib.parse.quote(wave_svg, safe="-_.!~*'()") + '")').lower()
+        await wait_js(page, f"getComputedStyle(document.documentElement).getPropertyValue('--theme-image').trim().toLowerCase() === {json.dumps(want)}")
+        await page.get_by_role("button", name="고치기", exact=True).last.click()
+        await expect(editor).to_be_visible()
+        await editor.get_by_role("radiogroup", name="배경 그림").get_by_role("radio", name="사진").click()
+        await editor.get_by_label("배경 사진 고르기").set_input_files(files=[{"name": "bg.png", "mimeType": "image/png", "buffer": make_png()}])
+        await expect(editor.locator('[style*="/api/themes/images/"]').first).to_be_attached(timeout=15000)
+        await shot(page, "51-theme-editor", full=False)
+        await editor.get_by_role("button", name="저장하고 쓰기").click()
+        await expect(editor).to_be_hidden()
+        await wait_js(page, "getComputedStyle(document.documentElement).getPropertyValue('--theme-image').includes('/api/themes/images/')")
+        photo = image_id(await css_var(page, "--theme-image"))
+        assert photo != ai_image
+        row = sql(f"select concat_ws(' ', kind, mime, width, height) from public.theme_images where id = '{photo}'")
+        assert row == "upload image/jpeg 900 600", row
+        await page.goto(BASE + "/library")
+        await page.wait_for_timeout(1200)
+        await shot(page, "51-library-photo", full=False)
+        await page.goto(BASE + "/settings#theme")
+        await page.get_by_role("button", name="고치기", exact=True).last.click()
+        await expect(editor).to_be_visible()
+        page.once("dialog", lambda d: asyncio.ensure_future(d.accept()))
+        await editor.get_by_role("button", name="지우기").click()
+        await expect(editor).to_be_hidden()
+        await wait_js(page, "!document.documentElement.hasAttribute('data-bg') && !document.getElementById('kok-theme')")
+        await wait_css(page, "--accent", "#b84c08")
+        await wait_saved({"light": "preset:default", "dark": "preset:default"})
+        assert sql(f"select count(*) from public.user_themes where user_id = '{student_id}' and name = '물결 테마'") == "0"
+
+        step("themes (Pro): unused pictures are cleaned up after a day")
+        sql(f"update public.theme_images set created_at = now() - interval '2 days' where user_id = '{student_id}'")
+        req = urllib.request.Request(BASE + "/api/cron/cleanup", headers={"Authorization": "Bearer " + os.environ["CRON_SECRET"]})
+        out = json.loads(urllib.request.urlopen(req).read())
+        assert out.get("themeImages") == 1, out
+        assert sql(f"select string_agg(id::text, ',') from public.theme_images where user_id = '{student_id}'") == ai_image
+        assert sql("select count(*) from storage.objects where bucket_id = 'theme-images'") == "1"
+
+        step("themes (Pro): a theme deleted on another device falls back to the default look")
+        sql(
+            "update public.profiles set settings = jsonb_set(jsonb_set(settings, '{theme,light}', '\"custom:00000000-0000-4000-8000-000000000000\"'), '{theme,dark}', to_jsonb('custom:' || "
+            f"'{ai_theme}'::text)) where id = '{student_id}'"
+        )
+        await page.goto(BASE + "/home")
+        await wait_js(page, "getComputedStyle(document.documentElement).getPropertyValue('--accent').trim() === '#b84c08'", timeout=10000)
+        await expect(page.locator("html")).to_have_attribute("data-bg", "1")
+        await ctx.close()
+
+        step("themes: server checks — clean patterns, own pictures only, Pro only")
+        ctx, page = await new_ctx(browser, "student")
+        await page.goto(BASE + "/home")
+        spec = {"light": {"bg": "#f4f1ea", "surface": "#ffffff", "accent": "#3a7d5c"}, "dark": {"bg": "#101412", "surface": "#1a201c", "accent": "#7fd1a8"}, "dim": 0.4}
+        evil = (
+            '<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" onload="alert(1)"><script>alert(2)</script>'
+            '<circle cx="5" cy="5" r="3" fill="#3a7d5c"/><a href="https://evil.example"><rect width="2" height="2"/></a>'
+            '<image href="https://evil.example/x.png"/><rect width="1" height="1" fill="url(https://evil.example/#x)"/>'
+            '<style>@import url(https://evil.example/a.css)</style></svg>'
+        )
+        r = await page.request.post(BASE + "/api/themes", headers={"origin": BASE}, data={"name": "무늬 시험", "spec": {**spec, "image": {"kind": "pattern", "svg": evil}}})
+        assert r.ok, (r.status, await r.text())
+        made = (await r.json())["theme"]
+        clean = made["spec"]["image"]["svg"]
+        for bad in ("script", "onload", "evil", "<a", "<image", "href", "style", "@import"):
+            assert bad not in clean, (bad, clean)
+        assert "<circle" in clean, clean
+        r = await page.request.get(BASE + "/api/themes/images/00000000-0000-4000-8000-000000000000")
+        assert r.status == 404, r.status
+        r = await page.request.post(BASE + "/api/themes/images", headers={"origin": BASE, "content-type": "image/jpeg"}, data=b"<svg onload=alert(1)>")
+        assert r.status == 400, r.status
+        actx, apage = await new_ctx(browser, "admin")
+        r = await apage.request.post(BASE + "/api/themes", headers={"origin": BASE}, data={"name": "남의 그림", "spec": {**spec, "image": {"kind": "file", "id": ai_image}}})
+        assert r.status == 404, (r.status, await r.text())
+        r = await apage.request.get(BASE + f"/api/themes/images/{ai_image}")
+        assert r.status == 404, r.status
+        r = await apage.request.patch(BASE + f"/api/themes/{made['id']}", headers={"origin": BASE}, data={"name": "뺏기"})
+        assert r.status == 404, r.status
+        await apage.request.delete(BASE + f"/api/themes/{made['id']}", headers={"origin": BASE})
+        assert sql(f"select name from public.user_themes where id = '{made['id']}'") == "무늬 시험"
+        r = await apage.request.post(BASE + "/api/themes", headers={"origin": "https://evil.example"}, data={"name": "x", "spec": spec})
+        assert r.status == 403, r.status
+        await actx.close()
         await ctx.close()
         octx, opage = await new_ctx(browser, "other")
         await opage.goto(BASE + "/settings#theme")
-        await expect(opage.get_by_role("radiogroup", name="테마 색").get_by_role("radio", name="바다")).to_be_disabled()
-        assert await opage.evaluate("document.documentElement.dataset.theme || ''") == ""
+        await expect(opage.get_by_role("radiogroup", name="테마", exact=True).get_by_role("radio", name="바다", exact=True)).to_be_disabled()
+        assert await opage.evaluate("document.documentElement.hasAttribute('data-mode') || !!document.getElementById('kok-theme')") is False
+        r = await opage.request.post(BASE + "/api/themes", headers={"origin": BASE}, data={"name": "x", "spec": spec})
+        assert r.status == 403, r.status
+        r = await opage.request.post(BASE + "/api/themes/generate", headers={"origin": BASE}, data={"prompt": "비 오는 날", "image": True})
+        assert r.status == 403, r.status
         await octx.close()
         await browser.close()
 

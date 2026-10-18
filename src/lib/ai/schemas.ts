@@ -217,6 +217,36 @@ export const zChat = z.object({
 });
 export type ChatResult = z.infer<typeof zChat>;
 
+// ---------------------------------------------------------------- 테마 (Pro)
+const palette = obj({ bg: str, surface: str, accent: str });
+export const themeJsonSchema: JsonSchema = obj({
+  name: str,
+  summary: str,
+  light: palette,
+  dark: palette,
+  font: { type: 'string', enum: ['default', 'round', 'hand', 'serif'] },
+  paper: { type: 'string', enum: ['none', 'lined', 'grid', 'dots'] },
+  image_prompt: str,
+  pattern_svg: str,
+});
+const zPaletteAi = z
+  .object({ bg: z.string().catch(''), surface: z.string().catch(''), accent: z.string().catch('') })
+  .catch({ bg: '', surface: '', accent: '' });
+export const zThemeAi = z.object({
+  name: z.string().catch(''),
+  summary: z.string().catch(''),
+  light: zPaletteAi,
+  dark: zPaletteAi,
+  font: z.enum(['default', 'round', 'hand', 'serif']).catch('default'),
+  paper: z.enum(['none', 'lined', 'grid', 'dots']).catch('none'),
+  image_prompt: z.string().catch(''),
+  pattern_svg: z.string().catch(''),
+});
+export type ThemeAi = z.infer<typeof zThemeAi>;
+
+export const themeImageJsonSchema: JsonSchema = obj({ image_prompt: str });
+export const zThemeImageAi = z.object({ image_prompt: z.string().catch('') });
+
 // ---------------------------------------------------------------- 자기 검사
 export const checkJsonSchema: JsonSchema = obj({
   verdicts: { type: 'array', items: obj({ index: int, keep: { type: 'boolean' }, reason: str }) },

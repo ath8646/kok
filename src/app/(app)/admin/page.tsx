@@ -25,7 +25,7 @@ type Overview = {
   };
   key: { connected: boolean; hint: string | null };
   settings: { limits: Limits; models: ModelsConfig; notice: Notice; aiEnabled: boolean; site: { contactEmail: string; operatorName: string } };
-  env: { supabaseSecret: boolean; adminEmails: boolean; cronSecret: boolean };
+  env: { supabaseSecret: boolean; adminEmails: boolean; cronSecret: boolean; cloudflare?: boolean };
 };
 type UserRow = {
   id: string;
@@ -70,6 +70,7 @@ const EFFORT_TASKS: Array<[keyof ModelsConfig['effort'], string]> = [
   ['check', '검사'],
   ['grade', '채점'],
   ['chat', '채팅'],
+  ['theme', '테마 만들기'],
 ];
 
 export default function AdminPage() {
@@ -165,6 +166,7 @@ export default function AdminPage() {
           {ov.key.connected ? <Chip tone="ok">연결됨 {ov.key.hint}</Chip> : <Chip tone="bad">키 없음</Chip>}
           {ov.env.supabaseSecret ? <Chip tone="ok">Supabase 비밀 키 있음</Chip> : <Chip tone="bad">Supabase 비밀 키 없음</Chip>}
           {ov.env.adminEmails ? <Chip tone="ok">관리자 이메일 설정됨</Chip> : <Chip tone="warn">ADMIN_EMAILS 없음</Chip>}
+          {ov.env.cloudflare ? <Chip tone="ok">테마 AI 그림(Cloudflare) 있음</Chip> : <Chip tone="warn">Cloudflare 없음 · AI 그림 대신 무늬</Chip>}
         </div>
         <div className="flex flex-wrap items-center gap-2">
           <Segmented

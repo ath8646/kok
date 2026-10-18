@@ -19,6 +19,7 @@ import {
 } from '@/lib/mindmap-layout';
 import { Button, cx, inputClass } from './ui';
 import { SUBJECT_COLOR_INDEX } from '@/lib/colors';
+import { subscribeTheme, themeSnapshot } from '@/lib/theme';
 
 type VisualSettings = UserSettings['visual'];
 
@@ -50,21 +51,9 @@ function readPalette(): Palette {
   };
 }
 
-const DARK_QUERY = '(prefers-color-scheme: dark)';
-
-function subscribeScheme(cb: () => void) {
-  const mq = window.matchMedia(DARK_QUERY);
-  mq.addEventListener('change', cb);
-  return () => mq.removeEventListener('change', cb);
-}
-
-/** 화면 색(밝은/어두운)이 바뀌면 다시 읽는다. 서버에서는 null */
+/** 화면 색(밝은/어두운, 테마)이 바뀌면 다시 읽는다. 서버에서는 null */
 function usePalette(): Palette | null {
-  const scheme = useSyncExternalStore(
-    subscribeScheme,
-    () => (window.matchMedia(DARK_QUERY).matches ? 'dark' : 'light'),
-    () => 'server',
-  );
+  const scheme = useSyncExternalStore(subscribeTheme, themeSnapshot, () => 'server');
   return useMemo(() => (scheme === 'server' ? null : readPalette()), [scheme]);
 }
 

@@ -6,7 +6,8 @@ import { usePathname, useRouter } from 'next/navigation';
 import { createContext, useCallback, useContext, useEffect, useState, type ReactNode } from 'react';
 import type { MeResponse } from '@/lib/types';
 import { QuickAddProvider } from './QuickAdd';
-import { applyTheme, type Theme } from '@/lib/theme';
+import { applyTheme, missingCustomIds, rememberCustomThemes, type CustomTheme, type Theme } from '@/lib/theme';
+import { sb } from '@/lib/data';
 import { Button, Icon, Spinner, cx } from './ui';
 
 type MeCtx = {
@@ -116,10 +117,35 @@ export function AppShell({ children }: { children: ReactNode }) {
   // 테마 (Pro·테스트 플랜에서 켠 경우): 쓸 수 없게 되면 기본으로 돌아간다 (고른 테마는 설정에 남는다)
   const theme = me ? (me.canTheme ? me.settings.theme : null) : undefined;
   const themeKey = theme === undefined ? '' : JSON.stringify(theme);
+  const themesOn = !!me?.features.themes;
   useEffect(() => {
     if (!themeKey) return;
-    applyTheme(JSON.parse(themeKey) as Theme | null);
-  }, [themeKey]);
+    const t = JSON.parse(themeKey) as Theme | null;
+    if (!t) {
+      applyTheme(null);
+      return;
+    }
+    if (applyTheme(t)) return;
+    // 내가 만든 테마를 아직 읽지 않았다: 읽은 뒤에 붙인다 (그동안은 THEME_BOOT 가 붙인 지난번 모습 그대로)
+    if (!themesOn) {
+      applyTheme(t, { allowMissing: true });
+      return;
+    }
+    let alive = true;
+    sb()
+      .from('user_themes')
+      .select('id, name, spec')
+      .in('id', missingCustomIds(t))
+      .then(({ data, error }) => {
+        if (!alive || error) return;
+        rememberCustomThemes((data ?? []) as CustomTheme[]);
+        // 지워진 테마는 기본 색으로
+        applyTheme(t, { allowMissing: true });
+      });
+    return () => {
+      alive = false;
+    };
+  }, [themeKey, themesOn]);
 
   // 다른 화면으로 가면 집중 모드를 끈다
   const [prevPath, setPrevPath] = useState(pathname);

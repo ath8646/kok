@@ -45,8 +45,8 @@ export async function downloadOwn(admin: SupabaseClient, path: string): Promise<
 }
 
 /** 사용자 폴더 안의 파일을 모두 지운다 (prefix 예: `${userId}/${sourceId}` 또는 `${userId}`) */
-export async function removeFolder(admin: SupabaseClient, prefix: string): Promise<number> {
-  const bucket = admin.storage.from(SOURCES_BUCKET);
+export async function removeFolder(admin: SupabaseClient, prefix: string, bucketName: string = SOURCES_BUCKET): Promise<number> {
+  const bucket = admin.storage.from(bucketName);
   let removed = 0;
   const walk = async (dir: string): Promise<string[]> => {
     const out: string[] = [];

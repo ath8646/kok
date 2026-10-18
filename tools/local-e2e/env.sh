@@ -11,3 +11,7 @@ export KOK_PDF_PART_MAX_BYTES=12000
 export NEXT_TELEMETRY_DISABLED=1
 # 카카오 로그인 버튼이 보이는지 시험한다 (가짜 서버라 눌러도 로그인은 되지 않는다)
 export NEXT_PUBLIC_KAKAO_LOGIN=1
+# 테마 AI 그림: 가짜 Cloudflare (가짜 서버의 /cf). 실제 값은 Vercel 에만 둔다
+export CLOUDFLARE_ACCOUNT_ID=0123456789abcdef0123456789abcdef
+export CLOUDFLARE_API_TOKEN=fake-cf-token
+export CLOUDFLARE_API_BASE=http://localhost:54321/cf

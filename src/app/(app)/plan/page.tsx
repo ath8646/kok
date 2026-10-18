@@ -2,10 +2,19 @@
 // 요금제: 무료와 Pro 비교, 지금 쓰는 테스트 플랜, 쿠폰 입력 (결제는 v0.4)
 import { useState } from 'react';
 import { useMe } from '@/components/AppShell';
-import { Button, Card, Chip, Field, LargeHeader, api, inputClass, useToast } from '@/components/ui';
+import { ApiError, Button, Card, Chip, Field, LargeHeader, api, inputClass, useToast } from '@/components/ui';
 import { planLabel } from '@/lib/plans';
 
 const day = (iso: string) => new Date(iso).toLocaleDateString('ko-KR', { timeZone: 'Asia/Seoul' });
+
+type Redeemed = {
+  until: string;
+  plan: { kind: 'pro' | 'custom'; name: string };
+  /** Pro 코드: 켜진 테스트 플랜이 끝난 뒤에 시작하면 그 시각 */
+  proStarts?: string | null;
+  /** 테스트 플랜 코드: 남은 Pro 가 플랜 뒤에 이어지면 그 끝나는 때 */
+  proAfter?: string | null;
+};
 
 export default function PlanPage() {
   const { me, refresh } = useMe();
@@ -73,15 +82,27 @@ export default function PlanPage() {
             e.preventDefault();
             if (!code.trim()) return;
             setBusy(true);
+            const redeem = (replace: boolean) => api<Redeemed>('/api/coupon', { method: 'POST', body: JSON.stringify({ code: code.trim(), replace }) });
             try {
-              const r = await api<{ until: string; plan?: { kind: 'pro' | 'custom'; name: string } }>('/api/coupon', {
-                method: 'POST',
-                body: JSON.stringify({ code: code.trim() }),
-              });
+              let r: Redeemed;
+              try {
+                r = await redeem(false);
+              } catch (err) {
+                // 다른 테스트 플랜을 쓰는 중이면 바꿀지 묻는다 (바꾸면 지금 플랜의 남은 기간·번개는 없어진다)
+                if (!(err instanceof ApiError && err.code === 'plan_active')) throw err;
+                const cur = me.planInfo;
+                const ok = confirm(
+                  `지금 쓰는 '${cur.name}' 플랜${cur.until ? `(${day(cur.until)}까지)` : ''}이 이 코드의 플랜으로 바뀌어요. 지금 플랜의 남은 기간과 번개는 없어져요. 바꿀까요?`,
+                );
+                if (!ok) return;
+                r = await redeem(true);
+              }
               const until = day(r.until);
-              if (r.plan?.kind === 'custom') toast(`'${r.plan.name}' 플랜이 켜졌어요! ${until}까지예요.`, 'ok');
-              else if (me.planInfo.kind === 'custom') toast(`Pro가 ${until}까지 켜졌어요. 지금 쓰는 테스트 플랜이 끝나면 Pro가 적용돼요.`, 'ok');
-              else toast(`Pro가 켜졌어요! ${until}까지예요.`, 'ok');
+              if (r.plan.kind === 'custom') {
+                toast(`'${r.plan.name}' 플랜이 켜졌어요! ${until}까지예요.${r.proAfter ? ' 남은 Pro는 플랜이 끝난 뒤 이어져요.' : ''}`, 'ok');
+              } else if (r.proStarts) {
+                toast(`Pro 쿠폰을 썼어요. 지금 쓰는 테스트 플랜이 끝나면 ${until}까지 Pro예요.`, 'ok');
+              } else toast(`Pro가 켜졌어요! ${until}까지예요.`, 'ok');
               setCode('');
               await refresh();
             } catch (err) {
@@ -124,7 +145,7 @@ function CustomPlanCard() {
     ['글 한 번에', `${me.plan.textChars.toLocaleString('ko-KR')}자`],
     ['파일 한 개 크기', `${me.plan.fileMb}MB`],
     ['AI 모델', me.canCareful ? '빠름 + 꼼꼼' : '빠름'],
-    ['원본 파일 보관', me.plan.fileDays === null ? '계속' : `처리 후 ${me.plan.fileDays}일`],
+    ['원본 파일 보관', me.plan.fileDays === null ? '계속' : `플랜이 끝나고 ${me.plan.fileDays}일`],
   ];
   return (
     <Card className="grid gap-3">

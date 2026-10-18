@@ -856,17 +856,24 @@ begin
 end;
 $$;
 
--- 쿠폰 사용: 한 번에 검사하고, Pro 코드면 Pro 기간을 늘리고
--- 테스트 플랜 코드면 지금부터 정한 기간 동안 그 플랜을 켠다 (번개 총량은 지금부터 새로 센다)
-create or replace function public.kok_redeem_coupon(p_code text, p_user uuid)
-returns timestamptz
+-- 쿠폰 사용: 한 번에 검사하고 Pro 또는 테스트 플랜을 켠다.
+-- 테스트 플랜이 켜져 있는 동안 Pro 는 멈춘다:
+--   * Pro 코드는 켜진 테스트 플랜이 끝난 뒤에 이어 붙인다
+--   * 테스트 플랜 코드는 남은 Pro 기간을 플랜이 끝난 뒤로 미룬다 (Pro 가 숨어 있는 동안 줄지 않게)
+--   * 다른 테스트 플랜이 켜져 있으면 p_replace 가 true 일 때만 바꾼다 ('plan_active')
+-- 번개 총량은 테스트 플랜을 켠 때부터 새로 센다
+drop function if exists public.kok_redeem_coupon(text, uuid);
+create or replace function public.kok_redeem_coupon(p_code text, p_user uuid, p_replace boolean default false)
+returns jsonb
 language plpgsql
 security definer
 set search_path = public
 as $$
 declare
   c public.coupons%rowtype;
-  new_until timestamptz;
+  p public.profiles%rowtype;
+  plan_end timestamptz;
+  new_end timestamptz;
 begin
   select * into c from public.coupons where code = upper(trim(p_code)) for update;
   if not found then
@@ -882,26 +889,65 @@ begin
     raise exception 'coupon_already_used';
   end if;
 
+  select * into p from public.profiles where id = p_user for update;
+  if not found then
+    raise exception 'profile_not_found';
+  end if;
+  -- 지금 켜진 테스트 플랜이 끝나는 때 (없으면 지금)
+  plan_end := case when p.custom_plan_id is not null and p.custom_plan_until > now() then p.custom_plan_until else now() end;
+  if c.plan_id is not null and plan_end > now() and not coalesce(p_replace, false) then
+    raise exception 'plan_active';
+  end if;
+
   insert into public.coupon_redemptions (code, user_id) values (c.code, p_user);
   update public.coupons set used = used + 1 where code = c.code;
 
   if c.plan_id is null then
     update public.profiles
        set plan = 'pro',
-           pro_until = greatest(coalesce(pro_until, now()), now()) + make_interval(days => c.days)
+           pro_until = greatest(coalesce(pro_until, now()), plan_end) + make_interval(days => c.days)
      where id = p_user
-    returning pro_until into new_until;
-  else
-    update public.profiles
-       set custom_plan_id = c.plan_id,
-           custom_plan_start = now(),
-           custom_plan_until = now() + make_interval(days => c.days)
-     where id = p_user
-    returning custom_plan_until into new_until;
+    returning * into p;
+    return jsonb_build_object('kind', 'pro', 'until', p.pro_until, 'starts', plan_end);
   end if;
 
-  return new_until;
+  new_end := now() + make_interval(days => c.days);
+  update public.profiles
+     set custom_plan_id = c.plan_id,
+         custom_plan_start = now(),
+         custom_plan_until = new_end,
+         pro_until = case when plan = 'pro' and pro_until > plan_end then pro_until + (new_end - plan_end) else pro_until end
+   where id = p_user
+  returning * into p;
+  return jsonb_build_object(
+    'kind', 'custom',
+    'until', new_end,
+    'pro_until', case when p.plan = 'pro' and p.pro_until > new_end then p.pro_until end
+  );
 end;
+$$;
+
+-- 테스트 플랜을 지금 끝낸다 (한 사람 또는 한 플랜을 쓰는 모든 사람). 플랜 뒤로 미뤘던 Pro 는 다시 당긴다.
+-- 끝난 시각은 custom_plan_until 에 남겨, 그 뒤의 무료·Pro 에너지를 플랜에서 쓴 것과 따로 센다
+create or replace function public.kok_end_custom_plan(p_user uuid default null, p_plan uuid default null)
+returns int
+language sql
+security definer
+set search_path = public
+as $$
+  with ended as (
+    update public.profiles
+       set pro_until = case when plan = 'pro' and pro_until > custom_plan_until then pro_until - (custom_plan_until - now()) else pro_until end,
+           custom_plan_id = null,
+           custom_plan_until = now()
+     where custom_plan_id is not null
+       and custom_plan_until > now()
+       and (p_user is not null or p_plan is not null)
+       and (p_user is null or id = p_user)
+       and (p_plan is null or custom_plan_id = p_plan)
+    returning 1
+  )
+  select count(*)::int from ended;
 $$;
 
 -- 관리자 화면 숫자
@@ -1044,7 +1090,8 @@ revoke execute on function public.kok_claim_source(uuid, int) from public, anon,
 revoke execute on function public.kok_energy_since(uuid, timestamptz) from public, anon, authenticated;
 revoke execute on function public.kok_free_usd_since(timestamptz) from public, anon, authenticated;
 revoke execute on function public.kok_hit_rate(uuid, int, int, text) from public, anon, authenticated;
-revoke execute on function public.kok_redeem_coupon(text, uuid) from public, anon, authenticated;
+revoke execute on function public.kok_redeem_coupon(text, uuid, boolean) from public, anon, authenticated;
+revoke execute on function public.kok_end_custom_plan(uuid, uuid) from public, anon, authenticated;
 revoke execute on function public.kok_admin_stats(timestamptz, timestamptz) from public, anon, authenticated;
 revoke execute on function public.kok_handle_new_user() from public, anon, authenticated;
 revoke execute on function public.kok_inflight_energy(uuid) from public, anon, authenticated;
@@ -1058,7 +1105,8 @@ grant execute on function public.kok_claim_source(uuid, int) to service_role;
 grant execute on function public.kok_energy_since(uuid, timestamptz) to service_role;
 grant execute on function public.kok_free_usd_since(timestamptz) to service_role;
 grant execute on function public.kok_hit_rate(uuid, int, int, text) to service_role;
-grant execute on function public.kok_redeem_coupon(text, uuid) to service_role;
+grant execute on function public.kok_redeem_coupon(text, uuid, boolean) to service_role;
+grant execute on function public.kok_end_custom_plan(uuid, uuid) to service_role;
 grant execute on function public.kok_admin_stats(timestamptz, timestamptz) to service_role;
 
 -- =====================================================================

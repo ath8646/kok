@@ -319,7 +319,9 @@ async function stepCheckAndFinish(ctx: Ctx): Promise<'done'> {
     visuals.push({ type: 'timeline', spec: { title: visual.timeline.title, events: visual.timeline.events } });
   }
   const noteBody = { ...note, recommended: visual.recommended };
-  const expire = ctx.acc.keepFiles || ctx.src.kind === 'text' ? null : new Date(Date.now() + ctx.app.limits.freeFileDays * 86400_000).toISOString();
+  // 원본 파일: Pro·관리자는 계속, 무료는 처리 뒤 freeFileDays 일, 테스트 플랜은 플랜이 끝나고 freeFileDays 일
+  const keepFrom = ctx.acc.plan.kind === 'custom' && ctx.acc.plan.until ? Math.max(Date.parse(ctx.acc.plan.until), Date.now()) : Date.now();
+  const expire = ctx.acc.keepFiles || ctx.src.kind === 'text' ? null : new Date(keepFrom + ctx.app.limits.freeFileDays * 86400_000).toISOString();
 
   const { error } = await ctx.admin.rpc('kok_finalize_source', {
     p_source: ctx.src.id,

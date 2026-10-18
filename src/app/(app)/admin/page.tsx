@@ -80,6 +80,7 @@ export default function AdminPage() {
   const [testResult, setTestResult] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [q, setQ] = useState('');
+  const [plansKey, setPlansKey] = useState(0);
   const [users, setUsers] = useState<UserRow[]>([]);
   const [reports, setReports] = useState<{
     reports: Report[];
@@ -369,6 +370,7 @@ export default function AdminPage() {
                           await api(`/api/admin/users/${u.id}`, { method: 'PATCH', body: JSON.stringify({ endCustomPlan: true }) });
                           toast('테스트 플랜을 끝냈어요.', 'ok');
                           loadUsers(q);
+                          setPlansKey((k) => k + 1);
                         } catch (e) {
                           toast((e as Error).message, 'bad');
                         }
@@ -400,7 +402,7 @@ export default function AdminPage() {
         </ul>
       </Card>
 
-      <AdminPlans limits={ov.settings.limits} onChanged={() => loadUsers(q).catch(() => {})} />
+      <AdminPlans limits={ov.settings.limits} refreshKey={plansKey} onChanged={() => loadUsers(q).catch(() => {})} />
 
       <SectionTitle>신고함</SectionTitle>
       <Card className="grid gap-3">

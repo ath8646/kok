@@ -117,7 +117,8 @@ function toBody(f: PlanForm): { body: Record<string, unknown> } | { error: strin
   return { body: out };
 }
 
-export function AdminPlans({ limits, onChanged }: { limits: Limits; onChanged?: () => void }) {
+/** refreshKey: 바뀌면 플랜 목록(쓰는 사람 수)을 다시 읽는다 (사용자 목록에서 테스트 플랜을 끝냈을 때) */
+export function AdminPlans({ limits, onChanged, refreshKey = 0 }: { limits: Limits; onChanged?: () => void; refreshKey?: number }) {
   const toast = useToast();
   const [plans, setPlans] = useState<PlanRow[] | null>(null);
   const [schemaHint, setSchemaHint] = useState<string | null>(null);
@@ -168,6 +169,13 @@ export function AdminPlans({ limits, onChanged }: { limits: Limits; onChanged?: 
       alive = false;
     };
   }, [toast]);
+
+  const seenKey = useRef(refreshKey);
+  useEffect(() => {
+    if (seenKey.current === refreshKey) return;
+    seenKey.current = refreshKey;
+    loadPlans();
+  }, [refreshKey, loadPlans]);
 
   const planName = (id: string | null) => (id ? (plans?.find((p) => p.id === id)?.name ?? '테스트 플랜') : 'Pro');
 

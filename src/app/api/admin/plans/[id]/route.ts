@@ -28,6 +28,9 @@ export async function DELETE(req: NextRequest, ctx: RouteContext<'/api/admin/pla
     const { id } = await ctx.params;
     assertUuid(id);
     const { admin } = await requireAccount({ admin: true });
+    // 쓰는 사람의 플랜을 먼저 끝낸다 (끝난 시각을 남기고, 플랜 뒤로 미뤘던 Pro 를 당긴다)
+    const { error: endErr } = await admin.rpc('kok_end_custom_plan', { p_user: null, p_plan: id });
+    if (endErr) throw schemaMissing(endErr) ?? endErr;
     const { error } = await admin.from('custom_plans').delete().eq('id', id);
     if (error) throw schemaMissing(error) ?? error;
     return Response.json({ ok: true });

@@ -21,6 +21,11 @@ export async function PATCH(req: NextRequest, ctx: RouteContext<'/api/admin/user
     if (!parsed.success) throw new UserFacingError('bad_body', '값이 올바르지 않아요.', 400);
     const b = parsed.data;
     if (b.banned && id === acc.userId) throw new UserFacingError('self', '자기 계정은 정지할 수 없어요.', 400);
+    // 테스트 플랜 끝내기: 플랜 뒤로 미뤘던 Pro 도 다시 당긴다 (DB 함수가 한 번에)
+    if (b.endCustomPlan) {
+      const { error } = await admin.rpc('kok_end_custom_plan', { p_user: id, p_plan: null });
+      if (error) throw error;
+    }
     const patch: Record<string, unknown> = {};
     if (typeof b.banned === 'boolean') patch.banned = b.banned;
     if (typeof b.proDays === 'number') {
@@ -28,14 +33,13 @@ export async function PATCH(req: NextRequest, ctx: RouteContext<'/api/admin/user
         patch.plan = 'free';
         patch.pro_until = null;
       } else {
+        // 테스트 플랜이 켜져 있으면 Pro 는 플랜이 끝난 뒤부터 센다 (플랜 동안 Pro 는 멈춘다)
+        const { data: row } = await admin.from('profiles').select('*').eq('id', id).maybeSingle();
+        const planUntil = row?.custom_plan_id && row.custom_plan_until ? Date.parse(row.custom_plan_until as string) : NaN;
+        const from = Number.isFinite(planUntil) && planUntil > Date.now() ? planUntil : Date.now();
         patch.plan = 'pro';
-        patch.pro_until = new Date(Date.now() + b.proDays * 86400_000).toISOString();
+        patch.pro_until = new Date(from + b.proDays * 86400_000).toISOString();
       }
-    }
-    if (b.endCustomPlan) {
-      patch.custom_plan_id = null;
-      patch.custom_plan_start = null;
-      patch.custom_plan_until = null;
     }
     if (!Object.keys(patch).length) return Response.json({ ok: true });
     const { error } = await admin.from('profiles').update(patch).eq('id', id);

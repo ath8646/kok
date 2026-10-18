@@ -40,8 +40,8 @@ export function planRow(b: PlanInput) {
   };
 }
 
-/** 표·칸이 없다는 오류 (Postgres 42P01·42703, PostgREST PGRST204·PGRST205) */
-const MISSING_CODES = new Set(['42P01', '42703', 'PGRST204', 'PGRST205']);
+/** 표·칸·함수가 없다는 오류 (Postgres 42P01·42703·42883, PostgREST PGRST202·PGRST204·PGRST205) */
+const MISSING_CODES = new Set(['42P01', '42703', '42883', 'PGRST202', 'PGRST204', 'PGRST205']);
 
 /**
  * DB 에 테스트 플랜 표·칸이 아직 없으면 (schema.sql 을 다시 실행하지 않았으면) 알아듣기 쉽게.
@@ -50,7 +50,7 @@ const MISSING_CODES = new Set(['42P01', '42703', 'PGRST204', 'PGRST205']);
 export function schemaMissing(error: { code?: string; message?: string }): UserFacingError | null {
   const msg = error.message ?? '';
   const missing = MISSING_CODES.has(error.code ?? '') || /does not exist|schema cache/i.test(msg);
-  if (missing && /custom_plans|plan_id|custom_plan_/.test(msg)) {
+  if (missing && /custom_plans|plan_id|custom_plan_|kok_end_custom_plan/.test(msg)) {
     return new UserFacingError('schema_outdated', '테스트 플랜 표가 아직 없어요. Supabase SQL Editor 에서 supabase/schema.sql 을 다시 실행해 주세요.', 503);
   }
   return null;

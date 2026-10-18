@@ -79,6 +79,11 @@ do $$ begin
     raise exception 'coupon function should be denied';
   exception when insufficient_privilege then null;
   end;
+  begin
+    perform public.kok_end_custom_plan(auth.uid(), null);
+    raise exception 'end plan function should be denied';
+  exception when insufficient_privilege then null;
+  end;
 end $$;
 
 -- 직접 만든 문제 + 카드 + 푼 기록
@@ -180,6 +185,56 @@ begin
     if sqlerrm <> 'coupon_used_up' then raise; end if;
   end;
 end $$;
+-- Pro 와 테스트 플랜이 겹치면: 플랜 동안 Pro 는 멈추고, 플랜이 끝나면 남은 Pro 가 이어진다
+-- (사용자 1111 은 위에서 Pro 30일을 받았다)
+insert into public.coupons (code, days, max_uses, plan_id) values
+  ('TPA', 7, 5, '44444444-4444-4444-4444-444444444444'),
+  ('TPB', 3, 5, '44444444-4444-4444-4444-444444444444');
+insert into public.coupons (code, days, max_uses) values ('PRO10', 10, 5);
+do $$
+declare
+  p public.profiles%rowtype;
+  r jsonb;
+begin
+  r := public.kok_redeem_coupon('TPA', '11111111-1111-1111-1111-111111111111');
+  select * into p from public.profiles where id = '11111111-1111-1111-1111-111111111111';
+  if p.custom_plan_until not between now() + interval '6 days 23 hours' and now() + interval '7 days 1 hour' then raise exception 'plan A period wrong'; end if;
+  if p.pro_until not between now() + interval '36 days 23 hours' and now() + interval '37 days 1 hour' then raise exception 'pro should be pushed past plan A: %', p.pro_until; end if;
+  if (r->>'pro_until')::timestamptz is distinct from p.pro_until then raise exception 'redeem should report the remaining pro'; end if;
+
+  -- 다른 플랜 코드는 바꾸겠다고 할 때만
+  begin
+    perform public.kok_redeem_coupon('TPB', '11111111-1111-1111-1111-111111111111');
+    raise exception 'second plan code should ask first';
+  exception when raise_exception then
+    if sqlerrm <> 'plan_active' then raise; end if;
+  end;
+  if exists (select 1 from public.coupon_redemptions where code = 'TPB') then raise exception 'refused code must not be used up'; end if;
+  perform public.kok_redeem_coupon('TPB', '11111111-1111-1111-1111-111111111111', true);
+  select * into p from public.profiles where id = '11111111-1111-1111-1111-111111111111';
+  if p.custom_plan_until not between now() + interval '2 days 23 hours' and now() + interval '3 days 1 hour' then raise exception 'plan B period wrong'; end if;
+  if p.pro_until not between now() + interval '32 days 23 hours' and now() + interval '33 days 1 hour' then raise exception 'pro after plan B wrong: %', p.pro_until; end if;
+
+  -- Pro 코드는 플랜이 끝난 뒤에 이어 붙는다
+  r := public.kok_redeem_coupon('PRO10', '11111111-1111-1111-1111-111111111111');
+  if (r->>'starts')::timestamptz not between now() + interval '2 days 23 hours' and now() + interval '3 days 1 hour' then raise exception 'pro code should start after the plan'; end if;
+  select * into p from public.profiles where id = '11111111-1111-1111-1111-111111111111';
+  if p.pro_until not between now() + interval '42 days 23 hours' and now() + interval '43 days 1 hour' then raise exception 'pro code during plan wrong: %', p.pro_until; end if;
+
+  -- 관리자가 플랜을 일찍 끝내면 미뤘던 Pro 를 당기고, 끝난 시각을 남긴다
+  if public.kok_end_custom_plan('11111111-1111-1111-1111-111111111111', null) <> 1 then raise exception 'end plan should end one'; end if;
+  select * into p from public.profiles where id = '11111111-1111-1111-1111-111111111111';
+  if p.custom_plan_id is not null or p.custom_plan_until > now() then raise exception 'ended plan should be off'; end if;
+  if p.pro_until not between now() + interval '39 days 23 hours' and now() + interval '40 days 1 hour' then raise exception 'pro should be pulled back: %', p.pro_until; end if;
+  if public.kok_end_custom_plan(null, null) <> 0 then raise exception 'end plan without target must do nothing'; end if;
+end $$;
+
+-- 플랜을 지울 때는 먼저 쓰는 사람의 플랜을 끝낸다 (끝난 시각이 남는다)
+do $$ begin
+  if public.kok_end_custom_plan(null, '44444444-4444-4444-4444-444444444444') <> 1 then raise exception 'end by plan should end one'; end if;
+  if (select custom_plan_until from public.profiles where id = '22222222-2222-2222-2222-222222222222') > now() then raise exception 'plan end time should be now'; end if;
+end $$;
+
 -- 플랜을 지우면 그 플랜의 코드도 지워지고, 쓰던 사람은 원래 플랜으로 돌아간다
 delete from public.custom_plans where id = '44444444-4444-4444-4444-444444444444';
 do $$ begin

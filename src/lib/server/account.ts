@@ -5,9 +5,11 @@ import { costUsd, usdToEnergy, type Usage } from '@/lib/ai/models';
 import { readLimits, readModels, readUserSettings, zNotice, type Limits, type ModelsConfig, type Notice, type UserSettings } from '@/lib/settings';
 import { kstDayStart, kstMonthStart } from '@/lib/time';
 import {
+  countFrom,
   customPlanActive,
   energyWindow,
   planFlags,
+  planEndedAt,
   planLimits,
   refillText,
   resolvePlan,
@@ -17,6 +19,9 @@ import {
   type PlanLimits,
 } from '@/lib/plans';
 
+import { UserFacingError } from './errors';
+import { deletedSince } from './tombstone';
+
 export type { PlanInfo, PlanLimits };
 export { refillText };
 
@@ -24,8 +29,6 @@ export { refillText };
 export function limitsFor(acc: Pick<Account, 'plan' | 'custom'>, L: Limits): PlanLimits {
   return planLimits(acc.plan.kind, acc.custom, L);
 }
-import { UserFacingError } from './errors';
-import { deletedSince } from './tombstone';
 
 export type Account = {
   userId: string;
@@ -43,6 +46,8 @@ export type Account = {
   canCareful: boolean;
   /** 원본 파일을 기한 없이 보관하는지 */
   keepFiles: boolean;
+  /** 마지막 테스트 플랜이 끝난 시각 (무료·Pro 에너지는 이 뒤부터 센다, 켜져 있으면 null) */
+  planEndedAt: string | null;
   banned: boolean;
   consented: boolean;
   settings: UserSettings;
@@ -97,6 +102,7 @@ export async function getAccount(admin: SupabaseClient, userId: string, email?: 
     custom,
     canCareful: caps.canCareful,
     keepFiles: caps.keepFiles,
+    planEndedAt: plan.kind === 'custom' ? null : planEndedAt(row),
     banned: !!row.banned,
     consented: !!row.consented_at,
     settings: readUserSettings(row.settings),
@@ -160,7 +166,11 @@ async function sumEnergy(admin: SupabaseClient, userId: string, since: Date): Pr
 }
 
 export async function energyStatus(admin: SupabaseClient, acc: Account, limits: Limits): Promise<EnergyStatus> {
-  const [usedToday, usedMonth] = await Promise.all([sumEnergy(admin, acc.userId, kstDayStart()), sumEnergy(admin, acc.userId, kstMonthStart())]);
+  // 테스트 플랜이 오늘·이번 달 안에 끝났으면, 무료·Pro 에너지는 플랜이 끝난 뒤부터 센다 (energyWindows 와 같게)
+  const [usedToday, usedMonth] = await Promise.all([
+    sumEnergy(admin, acc.userId, countFrom(kstDayStart(), acc.planEndedAt)),
+    sumEnergy(admin, acc.userId, countFrom(kstMonthStart(), acc.planEndedAt)),
+  ]);
   if (acc.isAdmin) {
     return { unlimited: true, remaining: Infinity, limit: Infinity, period: 'day', usedToday, usedMonth };
   }
@@ -233,9 +243,9 @@ export const MAX_PARALLEL_SOURCES = 3;
  * 자료 만들기·다시 하기에서 DB 가 검사할 에너지 한도 (null = 검사 안 함).
  * 두 번째 창(p_month_*)은 Pro 는 이번 달, 테스트 플랜은 플랜을 켠 때부터 끝날 때까지다.
  */
-export function energyWindows(acc: Pick<Account, 'isAdmin' | 'isPro' | 'plan' | 'custom'>, limits: Limits) {
-  const day = kstDayStart().toISOString();
-  const month = kstMonthStart().toISOString();
+export function energyWindows(acc: Pick<Account, 'isAdmin' | 'isPro' | 'plan' | 'custom' | 'planEndedAt'>, limits: Limits) {
+  const day = countFrom(kstDayStart(), acc.planEndedAt).toISOString();
+  const month = countFrom(kstMonthStart(), acc.planEndedAt).toISOString();
   if (acc.isAdmin) return { p_day_start: day, p_day_limit: null, p_month_start: month, p_month_limit: null };
   if (acc.plan.kind === 'custom' && acc.custom && acc.plan.start) {
     // 하루 창도 플랜을 켠 뒤부터 (energyStatus 와 같게)
@@ -321,21 +331,33 @@ export async function refundSource(admin: SupabaseClient, userId: string, source
   const { data, error } = await admin.from('energy_ledger').select('energy, created_at').eq('user_id', userId).eq('source_id', sourceId);
   if (error) throw error;
   const rows = data ?? [];
-  const net = Math.round(rows.reduce((a, r) => a + Number(r.energy ?? 0), 0) * 1000) / 1000;
-  if (net <= 0) return;
-  const lastCharge = rows
-    .filter((r) => Number(r.energy) > 0)
-    .map((r) => Date.parse(r.created_at as string))
-    .filter(Number.isFinite)
-    .reduce((a, b) => Math.max(a, b), 0);
-  const { error: insErr } = await admin.from('energy_ledger').insert({
-    user_id: userId,
-    task: 'refund',
-    usd: 0,
-    energy: -net,
-    plan: null,
-    source_id: sourceId,
-    ...(lastCharge ? { created_at: new Date(Math.min(lastCharge + 1, Date.now())).toISOString() } : {}),
-  });
+  let left = Math.round(rows.reduce((a, r) => a + Number(r.energy ?? 0), 0) * 1000) / 1000;
+  if (left <= 0) return;
+  // 돌려줄 만큼을 가장 최근에 쓴 기록부터 나눠, 각 기록 바로 뒤 시각으로 적는다.
+  // 그래야 오늘·이번 달·테스트 플랜 기간 어디에서 세도 그 기간에 쓴 만큼만 돌아간다
+  const charges = rows
+    .map((r) => ({ energy: Number(r.energy ?? 0), at: Date.parse(r.created_at as string) }))
+    .filter((r) => r.energy > 0 && Number.isFinite(r.at))
+    .sort((a, b) => b.at - a.at);
+  const now = Date.now();
+  const refunds: Array<{ user_id: string; task: string; usd: number; energy: number; plan: null; source_id: string; created_at: string }> = [];
+  for (const c of charges) {
+    if (left <= 0) break;
+    const amount = Math.min(c.energy, left);
+    left = Math.round((left - amount) * 1000) / 1000;
+    refunds.push({
+      user_id: userId,
+      task: 'refund',
+      usd: 0,
+      energy: -amount,
+      plan: null,
+      source_id: sourceId,
+      created_at: new Date(Math.min(c.at + 1, now)).toISOString(),
+    });
+  }
+  if (left > 0) {
+    refunds.push({ user_id: userId, task: 'refund', usd: 0, energy: -left, plan: null, source_id: sourceId, created_at: new Date(now).toISOString() });
+  }
+  const { error: insErr } = await admin.from('energy_ledger').insert(refunds);
   if (insErr) throw insErr;
 }

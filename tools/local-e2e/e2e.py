@@ -591,12 +591,14 @@ async def main():
         await expect(opage.get_by_text("테스트 플랜", exact=True)).to_be_visible()
         await expect(opage.get_by_text("⚡ 100 / 100")).to_be_visible()
         await expect(opage.get_by_text("33쪽")).to_be_visible()
+        await expect(opage.get_by_text("플랜이 끝나고 7일")).to_be_visible()
         await shot(opage, "37-plan-custom")
         await no_hscroll(opage, "plan (test plan)")
         me = await (await opage.request.get(BASE + "/api/me")).json()
         assert me["planInfo"]["kind"] == "custom" and me["planInfo"]["name"] == "베타 테스터", me["planInfo"]
         assert me["energy"]["period"] == "plan" and me["energy"]["limit"] == 100 and me["energy"]["remaining"] == 100, me["energy"]
-        assert me["plan"]["pdfPages"] == 33 and me["canCareful"] is False and me["plan"]["fileDays"] is None, me
+        # 원본은 플랜이 끝나고 무료 보관 일수(7일) 뒤에 지운다
+        assert me["plan"]["pdfPages"] == 33 and me["canCareful"] is False and me["plan"]["fileDays"] == 7, me
         from datetime import datetime
         span = datetime.fromisoformat(me["planInfo"]["until"].replace("Z", "+00:00")) - datetime.fromisoformat(me["planInfo"]["start"].replace("Z", "+00:00"))
         assert abs(span.total_seconds() / 86400 - 7) < 0.01, span
@@ -650,15 +652,51 @@ async def main():
         await expect(opage.get_by_text(re.compile("플랜 에너지는 기간 동안 다시 채워지지 않아요")).first).to_be_visible()
         await shot(opage, "39-test-plan-empty", full=False)
 
+        step("test plan: a second plan code asks before replacing the running plan")
+        await plan_item.get_by_role("button", name="코드 만들기", exact=True).click()
+        await apage.get_by_label("기간(일)").fill("3")
+        await apage.get_by_role("button", name="'베타 테스터' 코드 만들기").click()
+        await expect(apage.get_by_text(re.compile("새 코드 · 베타 테스터 3일"))).to_be_visible()
+        code2 = (await apage.locator("button.font-mono").first.inner_text()).strip()
+        assert code2 != plan_code
+        dialog_msgs = []
+
+        async def accept_dialog(d):
+            dialog_msgs.append(d.message)
+            await d.accept()
+
+        await opage.goto(BASE + "/plan")
+        opage.once("dialog", accept_dialog)
+        n0 = len(ERRORS)
+        await opage.get_by_label("쿠폰 번호").fill(code2)
+        await opage.get_by_role("button", name="쿠폰 쓰기").click()
+        await expect(opage.get_by_text(re.compile("'베타 테스터' 플랜이 켜졌어요!"))).to_be_visible()
+        assert dialog_msgs and "바뀌어요" in dialog_msgs[0], dialog_msgs
+        # 먼저 물어보려고 받은 409 는 오류 목록에서 뺀다
+        assert all("/api/coupon" in e or "status of 409" in e for e in ERRORS[n0:]), ERRORS[n0:]
+        del ERRORS[n0:]
+        me = await (await opage.request.get(BASE + "/api/me")).json()
+        # 새 플랜은 번개를 처음부터 센다 (총량 1, 쓴 것 0)
+        assert me["energy"]["usedPlan"] == 0 and me["energy"]["remaining"] == 1, me["energy"]
+        span = datetime.fromisoformat(me["planInfo"]["until"].replace("Z", "+00:00")) - datetime.fromisoformat(me["planInfo"]["start"].replace("Z", "+00:00"))
+        assert abs(span.total_seconds() / 86400 - 3) < 0.01, span
+
         step("test plan: admin ends it early, then deletes the plan and its codes")
         await apage.get_by_label("사용자 찾기").fill("other@example.com")
         await apage.get_by_role("button", name="찾기", exact=True).click()
         await expect(apage.get_by_text(re.compile("^베타 테스터 ~"))).to_be_visible()
+        await apage.reload()
+        await expect(plan_item.get_by_text("쓰는 사람 1명")).to_be_visible()
+        await apage.get_by_label("사용자 찾기").fill("other@example.com")
+        await apage.get_by_role("button", name="찾기", exact=True).click()
         apage.once("dialog", lambda d: d.accept())
         await apage.get_by_role("button", name="테스트 플랜 끝내기").click()
         await expect(apage.get_by_text("테스트 플랜을 끝냈어요.")).to_be_visible()
+        await expect(plan_item.get_by_text("쓰는 사람 0명")).to_be_visible()  # 플랜 목록도 다시 읽는다
         me = await (await opage.request.get(BASE + "/api/me")).json()
         assert me["planInfo"]["kind"] == "free" and me["energy"]["period"] == "day", me["planInfo"]
+        # 플랜에서 쓴 번개는 무료 오늘 몫에서 빼지 않는다
+        assert me["energy"]["usedToday"] == 0 and me["energy"]["remaining"] == me["energy"]["limit"], me["energy"]
         apage.once("dialog", lambda d: d.accept())
         await plan_item.get_by_role("button", name="지우기").click()
         await expect(apage.get_by_text("플랜을 지웠어요.")).to_be_visible()

@@ -82,6 +82,21 @@ export function customPlanActive(profile: { custom_plan_id?: string | null; cust
   return Number.isFinite(until) && until > now;
 }
 
+/**
+ * 마지막 테스트 플랜이 끝난 시각 (지금 켜져 있으면 null).
+ * 무료·Pro 에너지는 이 뒤에 쓴 것만 센다: 플랜에서 쓴 번개가 원래 요금제의 오늘·이번 달 몫을 먹지 않게.
+ */
+export function planEndedAt(profile: { custom_plan_until?: string | null }, now: number = Date.now()): string | null {
+  const until = profile.custom_plan_until ? Date.parse(profile.custom_plan_until) : NaN;
+  return Number.isFinite(until) && until <= now ? profile.custom_plan_until! : null;
+}
+
+/** 에너지를 세기 시작하는 때: 기간 시작과 마지막 테스트 플랜이 끝난 때 중 늦은 쪽 */
+export function countFrom(start: Date, endedAt: string | null): Date {
+  const ended = endedAt ? Date.parse(endedAt) : NaN;
+  return Number.isFinite(ended) && ended > start.getTime() ? new Date(ended) : start;
+}
+
 export type PlanLimits = {
   pdfPages: number;
   images: number;
@@ -89,14 +104,14 @@ export type PlanLimits = {
   fileMb: number;
   /** 꼼꼼 모델 */
   canCareful: boolean;
-  /** 원본 파일을 기한 없이 보관 (아니면 처리 뒤 freeFileDays 일) */
+  /** 원본 파일을 기한 없이 보관 (아니면 처리 뒤 freeFileDays 일, 테스트 플랜은 플랜이 끝나고 freeFileDays 일) */
   keepFiles: boolean;
 };
 
 /** 꼼꼼 모델·원본 보관처럼 숫자가 아닌 혜택 */
 export function planFlags(plan: PlanKind, custom: CustomPlan | null): { canCareful: boolean; keepFiles: boolean } {
   if (plan === 'admin' || plan === 'pro') return { canCareful: true, keepFiles: true };
-  if (plan === 'custom' && custom) return { canCareful: custom.careful, keepFiles: true };
+  if (plan === 'custom' && custom) return { canCareful: custom.careful, keepFiles: false };
   return { canCareful: false, keepFiles: false };
 }
 

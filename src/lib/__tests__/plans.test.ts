@@ -1,5 +1,17 @@
 import { describe, expect, it } from 'vitest';
-import { customPlanActive, energyWindow, planFlags, planLabel, planLimits, refillText, resolvePlan, toCustomPlan, type CustomPlan } from '@/lib/plans';
+import {
+  countFrom,
+  customPlanActive,
+  energyWindow,
+  planEndedAt,
+  planFlags,
+  planLabel,
+  planLimits,
+  refillText,
+  resolvePlan,
+  toCustomPlan,
+  type CustomPlan,
+} from '@/lib/plans';
 import { DEFAULT_LIMITS, MAX_FILE_MB } from '@/lib/settings';
 import { schemaMissing } from '@/app/api/admin/plans/shared';
 
@@ -60,13 +72,27 @@ describe('테스트 플랜 판단', () => {
   it('한도: 테스트 플랜은 플랜 값, 파일 크기는 저장소 한도까지만', () => {
     const L = DEFAULT_LIMITS;
     const c = planLimits('custom', custom, L);
-    expect(c).toMatchObject({ pdfPages: 80, images: 12, textChars: 50000, fileMb: MAX_FILE_MB, canCareful: false, keepFiles: true });
+    // 테스트 플랜 원본은 계속 두지 않는다 (플랜이 끝나고 무료 보관 일수 뒤에 지움)
+    expect(c).toMatchObject({ pdfPages: 80, images: 12, textChars: 50000, fileMb: MAX_FILE_MB, canCareful: false, keepFiles: false });
     expect(planLimits('pro', null, L)).toMatchObject({ pdfPages: L.pdfPagesPro, fileMb: L.fileMbPro, canCareful: true, keepFiles: true });
     expect(planLimits('free', null, L)).toMatchObject({ pdfPages: L.pdfPagesFree, fileMb: L.fileMbFree, canCareful: false, keepFiles: false });
     expect(planLimits('admin', null, L).canCareful).toBe(true);
     // 'custom' 인데 플랜 행이 없으면 무료 한도
     expect(planLimits('custom', null, L).pdfPages).toBe(L.pdfPagesFree);
     expect(planFlags('custom', { ...custom, careful: true }).canCareful).toBe(true);
+  });
+
+  it('끝난 테스트 플랜 뒤부터 무료·Pro 에너지를 센다', () => {
+    expect(planEndedAt({ custom_plan_until: earlier }, NOW)).toBe(earlier);
+    expect(planEndedAt({ custom_plan_until: later }, NOW)).toBeNull(); // 아직 켜져 있음
+    expect(planEndedAt({ custom_plan_until: null }, NOW)).toBeNull();
+    const dayStart = new Date(NOW - 3 * 3600_000);
+    // 오늘 안에 끝났으면 끝난 때부터
+    const endedToday = new Date(NOW - 3600_000).toISOString();
+    expect(countFrom(dayStart, endedToday).toISOString()).toBe(endedToday);
+    // 어제 끝났으면 오늘 시작부터
+    expect(countFrom(dayStart, earlier)).toBe(dayStart);
+    expect(countFrom(dayStart, null)).toBe(dayStart);
   });
 
   it('이름과 끝나는 날', () => {

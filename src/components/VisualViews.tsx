@@ -34,7 +34,7 @@ export function TableView({
     return (
       <div className="grid gap-3">
         <input aria-label="표 제목" className={inputClass} value={draft.title} maxLength={60} onChange={(e) => setDraft({ ...draft, title: e.target.value })} />
-        <div className="overflow-x-auto rounded-2xl border border-line bg-surface">
+        <div className="overflow-x-auto kok-card">
           <table className="w-full border-collapse text-sm">
             <thead>
               <tr>
@@ -136,7 +136,7 @@ export function TableView({
           </Button>
         ) : null}
       </div>
-      <div className="overflow-x-auto rounded-2xl border border-line bg-surface">
+      <div className="overflow-x-auto kok-card">
         <table className="w-full min-w-[480px] border-collapse text-[15px]">
           <thead className="bg-surface-2">
             <tr>
@@ -217,7 +217,7 @@ export function TimelineView({
           onChange={(e) => setDraft({ ...draft, title: e.target.value })}
         />
         {draft.events.map((ev, i) => (
-          <div key={i} className="grid gap-2 rounded-2xl border border-line bg-surface p-3 sm:grid-cols-[120px_1fr_auto]">
+          <div key={i} className="grid gap-2 kok-card p-3 sm:grid-cols-[120px_1fr_auto]">
             <input aria-label="때" placeholder="때" className={inputClass} value={ev.date} maxLength={30} onChange={(e) => setEv(i, 'date', e.target.value)} />
             <div className="grid gap-2">
               <input

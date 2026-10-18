@@ -2,7 +2,7 @@
 // 문제 모아 보기: 과목·단원·유형·틀린 횟수로 거르기, 고치기·잠그기·쉬게 하기·지우기
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { QuestionList, type CardInfo } from '@/components/QuestionList';
-import { Segmented, inputClass } from '@/components/ui';
+import { LargeHeader, Segmented, inputClass } from '@/components/ui';
 import { fetchAll, fetchSubjects, sb } from '@/lib/data';
 import type { QuestionRow, SubjectRow } from '@/lib/types';
 
@@ -75,9 +75,13 @@ export default function QuestionsPage() {
   }, [questions, subject, unit, type, wrong, q, cards, unitOf]);
 
   return (
-    <div className="grid gap-4">
-      <h1 className="font-display text-2xl">문제 모아 보기</h1>
-      <div className="grid gap-2 rounded-2xl border border-line bg-surface p-3">
+    <div className="grid gap-3">
+      <LargeHeader
+        title="문제 모아 보기"
+        subtitle={questions === null ? ' ' : `${filtered.length}문제`}
+        back={{ href: subject ? `/library/${subject}` : '/library', label: '자료함으로' }}
+      />
+      <div className="kok-card grid gap-2 p-3">
         <div className="grid grid-cols-2 gap-2">
           <select
             aria-label="과목"
@@ -129,10 +133,9 @@ export default function QuestionsPage() {
         <input aria-label="문제 찾기" className={inputClass} placeholder="문제 글자로 찾기" value={q} onChange={(e) => setQ(e.target.value)} />
       </div>
       {questions === null ? (
-        <div className="h-40 animate-pulse rounded-2xl bg-surface-2" />
+        <div className="kok-card kok-shimmer h-40" />
       ) : (
         <>
-          <p className="text-sm text-muted">{filtered.length}문제</p>
           <QuestionList questions={filtered.slice(0, 300)} cards={cards} onChanged={load} emptyText="조건에 맞는 문제가 없어요." />
           {filtered.length > 300 ? <p className="text-sm text-muted">처음 300문제만 보여요. 조건을 좁혀 주세요.</p> : null}
         </>

@@ -354,7 +354,7 @@ export function MindMap({
         ) : null}
         <div
           ref={boxRef}
-          className={cx('relative overflow-auto rounded-2xl border border-line bg-surface', compact && onOpen ? 'cursor-pointer' : '')}
+          className={cx('relative overflow-auto kok-card', compact && onOpen ? 'cursor-pointer' : '')}
           style={{ maxHeight: compact ? '240px' : '70dvh', touchAction: drag ? 'none' : 'pan-x pan-y pinch-zoom' }}
           onClick={compact && onOpen ? onOpen : undefined}
         >
@@ -490,7 +490,7 @@ export function MindMap({
       </div>
 
       {hideMode && sel && revealed.has(sel.id) && sel.depth > 0 ? (
-        <div className="flex flex-wrap items-center gap-2 rounded-2xl border border-line bg-surface p-3">
+        <div className="flex flex-wrap items-center gap-2 kok-card p-3">
           <span className="text-sm font-semibold">“{sel.label}” 기억났나요?</span>
           <Button size="sm" variant="secondary" className="border-ok text-ok" onClick={() => setRecall((m) => new Map(m).set(sel.id, true))}>
             기억났어요
@@ -512,7 +512,7 @@ export function MindMap({
       ) : null}
 
       {editable && !hideMode && sel ? (
-        <div className="grid gap-3 rounded-2xl border border-line bg-surface p-4">
+        <div className="grid gap-3 kok-card p-4">
           <div className="flex gap-2">
             <input
               aria-label="가지 글자"

@@ -46,7 +46,7 @@ export default function WelcomePage() {
       subjectId = data.id;
     }
     await refresh();
-    router.replace(`/add?subject=${subjectId}`);
+    router.replace(`/library/${subjectId}?compose=1`);
   };
 
   const check = (k: keyof typeof agree, children: React.ReactNode) => (
@@ -62,15 +62,15 @@ export default function WelcomePage() {
   );
 
   return (
-    <div className="mx-auto grid max-w-lg gap-5 py-6">
+    <div className="mx-auto grid max-w-lg gap-4 pb-6 pt-[calc(28px+env(safe-area-inset-top))]">
       <div className="text-center">
-        <p className="font-display text-5xl text-accent">
+        <p className="font-brand text-6xl text-accent">
           <span className="hl-mark">콕</span>
         </p>
         <h1 className="mt-3 font-display text-2xl">반가워요! 세 가지만 정하면 시작해요</h1>
       </div>
 
-      <Card className="grid gap-1">
+      <Card className="kok-rise grid gap-1" style={{ ['--i' as string]: 1 }}>
         <h2 className="mb-1 font-bold">1. 안내 확인</h2>
         <button
           type="button"
@@ -108,7 +108,7 @@ export default function WelcomePage() {
         )}
       </Card>
 
-      <Card className="grid gap-3">
+      <Card className="kok-rise grid gap-3" style={{ ['--i' as string]: 2 }}>
         <h2 className="font-bold">2. 닉네임</h2>
         <Field label="콕에서 쓸 이름 (실명이 아니어도 돼요)" htmlFor="nick">
           <input
@@ -122,7 +122,7 @@ export default function WelcomePage() {
         </Field>
       </Card>
 
-      <Card className="grid gap-3">
+      <Card className="kok-rise grid gap-3" style={{ ['--i' as string]: 3 }}>
         <h2 className="font-bold">3. 첫 과목</h2>
         <div className="flex flex-wrap gap-2">
           {SUGGEST.map((s) => (
@@ -131,8 +131,8 @@ export default function WelcomePage() {
               type="button"
               onClick={() => setSubject(s)}
               className={cx(
-                'rounded-full border px-3 py-1 text-sm font-semibold',
-                subject === s ? 'border-accent bg-accent-soft text-accent' : 'border-line bg-surface',
+                'press rounded-full px-3.5 py-1.5 text-sm font-semibold',
+                subject === s ? 'bg-ink text-surface' : 'bg-surface-2 text-ink hover:bg-surface-3',
               )}
             >
               {s}

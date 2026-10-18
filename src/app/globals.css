@@ -1,26 +1,40 @@
 @import 'tailwindcss';
 
-/* 콕 디자인: 모눈 공책 바탕 + 파란 펜 + 형광펜 노랑 */
+/*
+ * 콕 디자인: 노트 앱(One UI) 느낌
+ * - 밝은 회색 바탕 + 흰 둥근 카드, 다크는 검정 바탕
+ * - 넓은 큰 제목이 스크롤하면 위 띠로 작아진다
+ * - 주황 포인트, 오른쪽 아래 + 버튼
+ * - 움직임은 짧고(300ms 안) 끝이 부드럽게. transform·opacity 만 움직인다
+ * 주황 글자·버튼 색은 흰 바탕에서 읽기 좋게(명암비 4.5 이상) 조금 진하게 잡았다.
+ */
 :root {
-  --bg: #f2f5f9;
-  --grid: rgba(36, 86, 232, 0.05);
+  --bg: #f3f3f6;
   --surface: #ffffff;
-  --surface-2: #f6f8fc;
-  --ink: #18212e;
-  --muted: #566378;
-  --line: #d6deea;
-  --accent: #2456e8;
-  --accent-soft: #e8eeff;
+  --surface-2: #efeff3;
+  --surface-3: #e5e5eb;
+  /* 회색 판 위에 올라온 것 (고른 탭 등) */
+  --raised: #ffffff;
+  --ink: #17171a;
+  --muted: #6b6b74;
+  --line: #e1e1e7;
+  --accent: #c2510a;
+  --accent-soft: #fff0e3;
   --accent-ink: #ffffff;
+  --fab: #eb6a0f;
+  --fab-ink: #ffffff;
   --hl: #ffd93d;
   --hl-ink: #3a2e00;
-  --ok: #138a55;
-  --ok-soft: #e2f4eb;
-  --bad: #cc3535;
-  --bad-soft: #fcebeb;
-  --warn: #b26a00;
+  --hl-mark: #ffd93d;
+  --ok: #128250;
+  --ok-soft: #e3f4eb;
+  --bad: #cf3434;
+  --bad-soft: #fdecec;
+  --warn: #a96300;
   --warn-soft: #fff3dc;
-  --shadow: rgba(24, 33, 46, 0.08);
+  --shadow: rgba(20, 20, 30, 0.06);
+  --shadow-strong: rgba(20, 20, 30, 0.14);
+  --scrim: rgba(12, 12, 16, 0.38);
   --b1: #2456e8;
   --b2: #e8590c;
   --b3: #0f9d6a;
@@ -29,30 +43,39 @@
   --b6: #7048e8;
   --b7: #0c8599;
   --b8: #a67c00;
+  --ease-out: cubic-bezier(0.23, 1, 0.32, 1);
+  --ease-in-out: cubic-bezier(0.77, 0, 0.175, 1);
+  --ease-drawer: cubic-bezier(0.32, 0.72, 0, 1);
   color-scheme: light;
 }
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --bg: #0e131a;
-    --grid: rgba(122, 156, 255, 0.045);
-    --surface: #161d27;
-    --surface-2: #1b2431;
-    --ink: #e7ecf4;
-    --muted: #9da9bc;
-    --line: #2c3748;
-    --accent: #7c9dff;
-    --accent-soft: #1d2846;
-    --accent-ink: #0e131a;
+    --bg: #000000;
+    --surface: #17171a;
+    --surface-2: #222226;
+    --surface-3: #2d2d32;
+    --raised: #3a3a41;
+    --ink: #f2f2f4;
+    --muted: #9c9ca6;
+    --line: #2b2b30;
+    --accent: #ff9b45;
+    --accent-soft: #3a240f;
+    --accent-ink: #1d0f00;
+    --fab: #ff9b45;
+    --fab-ink: #1d0f00;
     --hl: #edcb3a;
     --hl-ink: #241c00;
+    --hl-mark: rgba(237, 203, 58, 0.34);
     --ok: #3bc488;
-    --ok-soft: #12322a;
+    --ok-soft: #10301f;
     --bad: #ff7a7a;
     --bad-soft: #3b1d21;
     --warn: #f0b44c;
     --warn-soft: #33270f;
-    --shadow: rgba(0, 0, 0, 0.35);
+    --shadow: rgba(0, 0, 0, 0);
+    --shadow-strong: rgba(0, 0, 0, 0.6);
+    --scrim: rgba(0, 0, 0, 0.6);
     --b1: #7c9dff;
     --b2: #ff9b5e;
     --b3: #45d39a;
@@ -69,12 +92,16 @@
   --color-bg: var(--bg);
   --color-surface: var(--surface);
   --color-surface-2: var(--surface-2);
+  --color-surface-3: var(--surface-3);
+  --color-raised: var(--raised);
   --color-ink: var(--ink);
   --color-muted: var(--muted);
   --color-line: var(--line);
   --color-accent: var(--accent);
   --color-accent-soft: var(--accent-soft);
   --color-accent-ink: var(--accent-ink);
+  --color-fab: var(--fab);
+  --color-fab-ink: var(--fab-ink);
   --color-hl: var(--hl);
   --color-hl-ink: var(--hl-ink);
   --color-ok: var(--ok);
@@ -83,7 +110,8 @@
   --color-bad-soft: var(--bad-soft);
   --color-warn: var(--warn);
   --color-warn-soft: var(--warn-soft);
-  --font-display: 'Jua', 'Apple SD Gothic Neo', 'Malgun Gothic', 'Noto Sans KR', sans-serif;
+  --font-display: 'Pretendard Variable', 'Pretendard', 'Apple SD Gothic Neo', 'Malgun Gothic', 'Noto Sans KR', system-ui, sans-serif;
+  --font-brand: 'Jua', 'Apple SD Gothic Neo', 'Malgun Gothic', 'Noto Sans KR', sans-serif;
   --font-sans: 'Pretendard Variable', 'Pretendard', 'Apple SD Gothic Neo', 'Malgun Gothic', 'Noto Sans KR', system-ui, sans-serif;
   --font-mono: ui-monospace, 'SFMono-Regular', Menlo, Consolas, monospace;
 }
@@ -95,8 +123,6 @@ body {
 
 body {
   background-color: var(--bg);
-  background-image: linear-gradient(var(--grid) 1px, transparent 1px), linear-gradient(90deg, var(--grid) 1px, transparent 1px);
-  background-size: 24px 24px;
   color: var(--ink);
   font-family: var(--font-sans);
   line-height: 1.6;
@@ -104,20 +130,346 @@ body {
   -webkit-text-size-adjust: 100%;
 }
 
+/* 제목 글꼴: 굵고 촘촘하게. font-bold 같은 유틸리티가 있으면 그쪽이 이긴다 */
+@layer components {
+  .font-display {
+    font-weight: 800;
+    letter-spacing: -0.02em;
+  }
+}
+
 /* 형광펜 밑줄 */
 .hl-mark {
-  background: linear-gradient(transparent 58%, var(--hl) 58%);
+  background: linear-gradient(transparent 58%, var(--hl-mark) 58%);
   padding: 0 0.15em;
 }
 
-.focus-ring:focus-visible,
-button:focus-visible,
-a:focus-visible,
-input:focus-visible,
-textarea:focus-visible,
-select:focus-visible {
-  outline: 3px solid var(--accent);
-  outline-offset: 2px;
+/* 키보드로 옮겨 다닐 때 보이는 테두리. base 층이라 focus:outline-none 으로 끌 수 있다 */
+@layer base {
+  .focus-ring:focus-visible,
+  button:focus-visible,
+  a:focus-visible,
+  input:focus-visible,
+  textarea:focus-visible,
+  select:focus-visible,
+  [role='button']:focus-visible {
+    outline: 3px solid var(--accent);
+    outline-offset: 2px;
+  }
+}
+
+/* ------------------------------------------------------------ 누르는 느낌
+   누르면 살짝 작아진다 (손가락 아래에서 반응하는 느낌) */
+.press {
+  transition:
+    transform 160ms var(--ease-out),
+    background-color 200ms ease,
+    color 200ms ease,
+    border-color 200ms ease,
+    box-shadow 200ms ease,
+    opacity 200ms ease;
+}
+.press:active:not(:disabled) {
+  transform: scale(0.97);
+}
+
+/* ------------------------------------------------------------ 카드
+   components 층에 두어서 rounded-*, shadow-*, ring-*, bg-* 유틸리티로 덮어쓸 수 있다 */
+@layer components {
+  .kok-card {
+    border-radius: 22px;
+    background: var(--surface);
+    box-shadow: 0 1px 2px var(--shadow);
+  }
+  @media (hover: hover) and (pointer: fine) {
+    .kok-card-hover {
+      transition:
+        transform 200ms var(--ease-out),
+        box-shadow 200ms var(--ease-out);
+    }
+    .kok-card-hover:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 10px 28px var(--shadow-strong);
+    }
+  }
+}
+
+/* 처음 나타날 때: 아래에서 살짝 올라오며 (조금씩 늦게) */
+@keyframes kok-rise {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+/* backwards: 끝난 뒤에는 transform 을 붙잡지 않아서 누르기·올라오기 움직임이 그대로 된다 */
+.kok-rise {
+  animation: kok-rise 320ms var(--ease-out) backwards;
+  animation-delay: calc(min(var(--i, 0), 10) * 35ms);
+}
+
+/* 새로 생긴 카드: 살짝 커지며 나타나고 테두리가 한 번 빛난다 */
+@keyframes kok-pop-in {
+  from {
+    opacity: 0;
+    transform: scale(0.94);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+@keyframes kok-ring {
+  0% {
+    box-shadow: 0 0 0 0 color-mix(in srgb, var(--fab) 55%, transparent);
+  }
+  100% {
+    box-shadow: 0 0 0 10px color-mix(in srgb, var(--fab) 0%, transparent);
+  }
+}
+.kok-new {
+  animation:
+    kok-pop-in 280ms var(--ease-out) backwards,
+    kok-ring 900ms var(--ease-out) 200ms 1;
+}
+
+/* 정리 중인 카드의 반짝이는 미리보기 */
+@keyframes kok-shimmer {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(100%);
+  }
+}
+.kok-shimmer {
+  position: relative;
+  overflow: hidden;
+}
+.kok-shimmer::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(90deg, transparent, color-mix(in srgb, var(--surface) 70%, transparent), transparent);
+  animation: kok-shimmer 1.4s linear infinite;
+}
+
+/* ------------------------------------------------------------ 큰 제목 머리 */
+.kok-topbar {
+  background: transparent;
+  transition:
+    background-color 200ms ease,
+    box-shadow 200ms ease;
+}
+.kok-topbar.is-collapsed,
+.kok-subbar {
+  background: color-mix(in srgb, var(--bg) 94%, transparent);
+  backdrop-filter: saturate(1.6) blur(14px);
+  -webkit-backdrop-filter: saturate(1.6) blur(14px);
+  box-shadow: 0 1px 0 var(--line);
+}
+.kok-topbar.is-flush {
+  box-shadow: none;
+}
+.kok-topbar-title {
+  opacity: 0;
+  transform: translateY(6px);
+  transition:
+    opacity 200ms var(--ease-out),
+    transform 200ms var(--ease-out);
+}
+.kok-topbar.is-collapsed .kok-topbar-title {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+/* ------------------------------------------------------------ 시트(아래에서 올라오는 창) */
+.kok-scrim {
+  background: var(--scrim);
+  transition: opacity 240ms ease;
+  @starting-style {
+    opacity: 0;
+  }
+}
+.kok-sheet {
+  transition:
+    transform 320ms var(--ease-drawer),
+    opacity 200ms ease;
+  @starting-style {
+    transform: translateY(40%);
+    opacity: 0;
+  }
+}
+@media (min-width: 640px) {
+  .kok-sheet {
+    transition:
+      transform 220ms var(--ease-out),
+      opacity 180ms ease;
+    @starting-style {
+      transform: scale(0.96);
+      opacity: 0;
+    }
+  }
+}
+
+/* 폰에서 + 버튼이 있으면 알림은 + 버튼 왼쪽에 뜬다 (버튼을 가리지 않게) */
+@media (max-width: 767px) {
+  body:has(.kok-fab) .kok-toasts {
+    align-items: flex-start;
+    padding-right: 92px;
+    bottom: calc(87px + env(safe-area-inset-bottom));
+  }
+}
+
+/* 알림(토스트): 아래에서 올라온다 */
+.kok-toast {
+  transition:
+    transform 260ms var(--ease-out),
+    opacity 200ms ease;
+  @starting-style {
+    transform: translateY(12px);
+    opacity: 0;
+  }
+}
+
+/* ------------------------------------------------------------ + 버튼과 빠른 추가 창 */
+.kok-fab {
+  box-shadow:
+    0 6px 16px color-mix(in srgb, var(--fab) 35%, transparent),
+    0 2px 4px var(--shadow-strong);
+  transition:
+    transform 180ms var(--ease-out),
+    box-shadow 180ms var(--ease-out);
+}
+.kok-fab:active {
+  transform: scale(0.94);
+}
+.kok-fab-icon {
+  transition: transform 240ms var(--ease-out);
+}
+.kok-fab[aria-expanded='true'] .kok-fab-icon {
+  transform: rotate(45deg);
+}
+
+/* 빠른 추가 창: + 버튼 쪽에서 커지며 나온다 (폰은 위쪽에서 내려온다) */
+.kok-composer {
+  transform-origin: bottom right;
+  transition:
+    transform 240ms var(--ease-out),
+    opacity 180ms ease;
+  @starting-style {
+    transform: scale(0.92) translateY(8px);
+    opacity: 0;
+  }
+}
+.kok-composer[data-closing='true'] {
+  transform: scale(0.96) translateY(6px);
+  opacity: 0;
+  transition-duration: 140ms;
+}
+@media (max-width: 639px) {
+  .kok-composer {
+    transform-origin: top center;
+    @starting-style {
+      transform: translateY(-14px);
+      opacity: 0;
+    }
+  }
+  .kok-composer[data-closing='true'] {
+    transform: translateY(-10px);
+  }
+}
+
+/* 작은 펼침 목록(메뉴, 과목 고르기): 누른 곳에서 커지며 나온다. 기준점은 origin-* 유틸리티로 */
+.kok-pop {
+  transition:
+    transform 180ms var(--ease-out),
+    opacity 140ms ease;
+  @starting-style {
+    transform: scale(0.96);
+    opacity: 0;
+  }
+}
+
+/* 내용이 바뀌어 새로 나타날 때 (정리가 끝난 카드의 미리보기 등) */
+@keyframes kok-fade {
+  from {
+    opacity: 0;
+  }
+}
+.kok-fade {
+  animation: kok-fade 360ms ease backwards;
+}
+
+/* 붙인 파일 조각 */
+.kok-attach {
+  transition:
+    transform 200ms var(--ease-out),
+    opacity 160ms ease;
+  @starting-style {
+    transform: scale(0.9);
+    opacity: 0;
+  }
+}
+
+/* 올리는 중 띠(오른쪽 아래) */
+.kok-tray-item {
+  transition:
+    transform 260ms var(--ease-out),
+    opacity 200ms ease;
+  @starting-style {
+    transform: translateY(12px) scale(0.98);
+    opacity: 0;
+  }
+}
+
+/* 파일을 끌고 왔을 때 화면 전체에 뜨는 안내 */
+.kok-drop {
+  transition: opacity 160ms ease;
+  @starting-style {
+    opacity: 0;
+  }
+}
+.kok-drop-card {
+  transition: transform 220ms var(--ease-out);
+  @starting-style {
+    transform: scale(0.96);
+  }
+}
+@keyframes kok-float {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-8px);
+  }
+}
+.kok-float {
+  animation: kok-float 1.6s var(--ease-in-out) infinite;
+}
+@keyframes kok-dash {
+  to {
+    stroke-dashoffset: -24;
+  }
+}
+.kok-dash {
+  animation: kok-dash 1s linear infinite;
+}
+
+/* 아래 탭: 고른 탭 뒤 알약 모양 */
+.kok-tab-pill {
+  transition:
+    background-color 200ms ease,
+    transform 200ms var(--ease-out);
+}
+
+/* 진행 고리 */
+.kok-ring-progress {
+  transition: stroke-dashoffset 500ms var(--ease-out);
 }
 
 /* 마인드맵 펼치기 움직임 */
@@ -137,13 +489,23 @@ select:focus-visible {
   transform-origin: center;
 }
 
+/* 움직임 줄이기: 옮겨 다니는 움직임은 빼고 바로 보여 준다 */
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,
   *::after {
     animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
     transition-duration: 0.001ms !important;
   }
+}
+
+/* 가로로 미는 줄: 스크롤 막대를 숨긴다 */
+.no-scrollbar {
+  scrollbar-width: none;
+}
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
 }
 
 /* KaTeX 글자 크기 */

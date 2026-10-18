@@ -17,7 +17,10 @@
 
 - Next.js 16: `middleware` 대신 `src/proxy.ts`, 라우트의 `ctx.params`는 Promise, `cacheComponents`는 끔. 새 API를 쓰기 전에 `node_modules/next/dist/docs/`를 읽는다.
 - 로그인한 화면(`src/app/(app)/`)은 클라이언트 컴포넌트이고, Supabase를 브라우저에서 직접 읽고 쓴다(RLS가 막아 준다). AI·파일 검사·관리자 기능만 `src/app/api/`를 거친다.
+- 자료 넣기는 `src/components/QuickAdd.tsx` 하나로 한다: + 버튼 입력창(엔터 = 정리, 한글 조합 중 엔터는 무시 `isSubmitKey`), 화면 어디든 끌어다 놓기·붙여 넣기. 파일을 자료로 나누는 규칙은 `src/lib/quick-add.ts`(시험 있음). 줄을 세워 하나씩 올리고, 동시에 정리 중인 자료가 3개면 기다린다. `/add` 는 `/library?compose=1` 로 보내기만 한다.
 - 파일 올리기: `POST /api/uploads`(검사 + 한 번짜리 올리기 주소, `upload_tickets`) → 브라우저가 `uploadToSignedUrl`. 학생은 저장소에 직접 올리거나 지울 수 없다(저장소 정책은 읽기만).
+- 디자인: 노트 앱(One UI) 느낌. 색·움직임 값은 `src/app/globals.css` 맨 위 변수, 화면 조각은 `src/components/ui.tsx`(`LargeHeader` 큰 제목, `kok-card`, `Sheet`, `Menu`). 움직임은 transform·opacity 만, 300ms 안, `prefers-reduced-motion` 을 따른다. 삼성 로고·상표·그림은 쓰지 않는다.
+- 자료함은 `/library` 와 `/library/[과목]` 이 같은 `LibraryView` 다. 과목 칩을 바꾸면 `history.replaceState` 로 주소만 바꾼다.
 - 자료 처리: `POST /api/sources` → `kok_create_source`(한 사람씩 줄 세워 동시 처리 수·에너지 검사 후 행 만들기) → `after()`로 `driveSource` → `runSteps`(90초까지 새 단계 시작) → 남으면 서명된 `/api/internal/process`로 이어 달리기. 상태는 `sources` 표(step, progress, partials, draft, locked_until). `partials`·`draft`는 학생에게 보이지 않는다(칸 단위 SELECT).
 - AI에 노트를 보낼 때는 `noteForPrompt`(길이 제한)를 쓰고, 작은 작업의 예상 에너지는 `runTask`가 보낼 내용 길이로 계산한다. 라우트 `maxDuration`보다 `timeoutMs`를 짧게 잡는다.
 - 복습: `src/lib/srs.ts`(ts-fsrs), `src/lib/review-plan.ts`(오늘 문제 고르기·시험 모드·연속 기록·약점 개념).

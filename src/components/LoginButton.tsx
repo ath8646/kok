@@ -22,7 +22,7 @@ export function LoginButton({
         size={size}
         variant="ink"
         busy={busy}
-        className="min-w-60 shadow-[0_3px_0_var(--accent)]"
+        className="min-w-64 shadow-[0_8px_24px_var(--shadow-strong)]"
         onClick={async () => {
           setBusy(true);
           setErr(null);

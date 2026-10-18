@@ -83,10 +83,7 @@ export function QuestionList({
         const c = cards?.get(q.id);
         const isOpen = open === q.id;
         return (
-          <div
-            key={q.id}
-            className={cx('rounded-2xl border bg-surface p-4', q.status === 'suspended' ? 'border-dashed border-line opacity-70' : 'border-line')}
-          >
+          <div key={q.id} className={cx('kok-card p-4', q.status === 'suspended' && 'opacity-70 outline-1 outline-dashed outline-line')}>
             <button type="button" className="flex w-full items-start gap-3 text-left" onClick={() => setOpen(isOpen ? null : q.id)} aria-expanded={isOpen}>
               <span className="min-w-0 flex-1">
                 <span className="mb-1 flex flex-wrap items-center gap-1.5">

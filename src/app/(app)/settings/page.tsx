@@ -4,7 +4,7 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useEffect, useRef, useState } from 'react';
 import { useMe } from '@/components/AppShell';
-import { Button, Card, Field, LinkButton, Segmented, SectionTitle, Toggle, api, cx, inputClass, useToast } from '@/components/ui';
+import { Button, Card, Field, LargeHeader, LinkButton, Segmented, SectionTitle, Toggle, api, cx, inputClass, useToast } from '@/components/ui';
 import { fetchSubjects, sb } from '@/lib/data';
 import { supabaseBrowser } from '@/lib/supabase/client';
 import type { SubjectRow } from '@/lib/types';
@@ -85,10 +85,15 @@ export default function SettingsPage() {
 
   return (
     <div className="grid gap-2 pb-8">
-      <div className="flex items-center justify-between">
-        <h1 className="font-display text-2xl">설정</h1>
-        <span className="text-xs text-muted">{saved === 'saving' ? '저장 중…' : saved === 'saved' ? '저장됨' : ''}</span>
-      </div>
+      <LargeHeader
+        title="설정"
+        subtitle={`${me.nickname ?? '나'} · ${me.isAdmin ? '관리자' : me.isPro ? 'Pro' : '무료'}`}
+        actions={
+          <span className="mr-2 text-xs font-semibold text-muted" aria-live="polite">
+            {saved === 'saving' ? '저장 중…' : saved === 'saved' ? '저장됨 ✓' : ''}
+          </span>
+        }
+      />
 
       <SectionTitle>계정</SectionTitle>
       <Card className="grid gap-3">
@@ -134,7 +139,9 @@ export default function SettingsPage() {
       </Card>
 
       <SectionTitle>
-        <span id="energy">AI 에너지</span>
+        <span id="energy" className="scroll-mt-24">
+          AI 에너지
+        </span>
       </SectionTitle>
       <Card className="grid gap-3">
         <p className="text-lg font-bold">

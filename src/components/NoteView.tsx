@@ -106,7 +106,7 @@ export function NoteView({
   return (
     <div className="grid gap-5">
       {/* 한 줄 요약 */}
-      <section className="rounded-2xl border border-line bg-surface p-4">
+      <section className="kok-card p-4">
         <div className="mb-1 flex items-center justify-between gap-2">
           <h3 className="text-sm font-bold text-muted">한 줄 요약</h3>
           {editable && editing !== 'summary' ? <PencilButton label="요약 고치기" onClick={() => setEditing('summary')} /> : null}
@@ -135,7 +135,7 @@ export function NoteView({
             <article
               key={kp.id}
               id={`kp-${kp.id}`}
-              className={cx('rounded-2xl border bg-surface p-4 transition-shadow', hl ? 'border-hl shadow-[0_0_0_3px_var(--hl)]' : 'border-line')}
+              className={cx('kok-card p-4 transition-shadow', hl && 'shadow-[0_0_0_3px_var(--hl)]')}
               onClick={() => onSelectKeyPoint?.(hl ? null : kp.id)}
             >
               <div className="flex items-start gap-3">
@@ -245,7 +245,7 @@ export function NoteView({
         <section className="grid gap-2">
           <h3 className="font-display text-lg">공식</h3>
           {note.formulas.map((f, i) => (
-            <div key={i} className="overflow-x-auto rounded-2xl border border-line bg-surface p-4">
+            <div key={i} className="overflow-x-auto kok-card p-4">
               {f.label ? <p className="mb-1 text-sm font-semibold text-muted">{f.label}</p> : null}
               <Tex tex={f.latex} display />
             </div>
@@ -257,7 +257,7 @@ export function NoteView({
       {note.terms.length || editable ? (
         <section className="grid gap-2">
           <h3 className="font-display text-lg">용어</h3>
-          <dl className="divide-y divide-line overflow-hidden rounded-2xl border border-line bg-surface">
+          <dl className="divide-y divide-line overflow-hidden kok-card">
             {note.terms.map((t, i) =>
               editing === `term-${i}` ? (
                 <div key={i} className="p-3">
@@ -314,7 +314,7 @@ export function NoteView({
         </section>
       ) : null}
       {note.changes.length ? (
-        <section className="rounded-2xl border border-line bg-surface p-4">
+        <section className="kok-card p-4">
           <button
             type="button"
             className="flex w-full items-center justify-between text-left font-bold"

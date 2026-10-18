@@ -7,7 +7,8 @@
 ## 들어 있는 기능 (v0.1)
 
 - 구글 로그인, 약관 동의, 닉네임, 과목·단원
-- 자료 넣기: 글(직접 쓰기·붙여넣기), PDF(15쪽씩 나눠 처리), 사진(올리기 전 긴 변 2000px로 줄임)
+- 자료 넣기: 어느 화면에서나 오른쪽 아래 **+ 버튼** → 입력창에 적고 **엔터**(Shift+엔터는 줄바꿈)면 바로 AI 정리. PDF·사진·글 파일은 화면 아무 데나 **끌어다 놓거나 붙여 넣으면** 검사하고 알아서 정리(PDF는 하나씩, 사진은 묶어서 한 자료, 한글·워드는 PDF로 저장하라고 안내). PDF는 15쪽씩 나눠 처리, 사진은 올리기 전 긴 변 2000px로 줄임
+- 자료함: 노트 앱처럼 과목(폴더) 칩 + 노트 카드 격자, 큰 제목이 스크롤하면 위 띠로 작아짐, 정리 중인 카드는 진행 고리, 멈춘 카드는 바로 다시 하기
 - AI 정리 노트: 한 줄 요약, 핵심 개념(중요도·시험 포인트·출처 쪽), 용어, 공식(KaTeX), 함정, 예시, 내가 쓴 글이면 "확인해 보세요"와 바뀐 점
 - 그림: 마인드맵(퍼지기·오른쪽·아래로, 고치기, 끌어서 옮기기, 가리기 모드, PNG 저장), 표, 연표 — 다시 그리기는 미리보기 후 적용, 내가 고친 가지는 잠김
 - 핵심 문제: 객관식·OX·빈칸·단답, AI 자기 검사, 직접 만들기·고치기·잠그기·쉬게 하기, "이상해요" 신고와 AI 수정 제안
@@ -15,7 +16,7 @@
 - AI 에너지: 무료 하루 20 / Pro 한 달 2,000(하루 300), 무료 전체 월 예산, 분당 제한, 비상 스위치, 실패하면 돌려주기
 - 관리자 화면: 키 상태·시험, 숫자, 모델·effort, 한도, 사용자, Pro 쿠폰, 신고함, 공지, 운영자 정보
 - 설정: 모델(빠름/꼼꼼), 시각화, 복습, 문제, 내 데이터 내려받기, 탈퇴
-- PWA(홈 화면에 설치), 밝은/어두운 화면
+- PWA(홈 화면에 설치), 밝은/어두운 화면, 노트 앱(One UI) 느낌의 디자인과 움직임(움직임 줄이기 설정을 따름)
 
 ## 구조
 
@@ -30,10 +31,10 @@
 ```
 src/
   app/                 화면과 API (route.ts)
-    (app)/             로그인한 뒤 화면: home, library, add, notes, review, wrong, questions, settings, plan, admin, welcome
+    (app)/             로그인한 뒤 화면: home, library, notes, review, wrong, questions, settings, plan, admin, welcome (add 는 자료함으로 보내기만)
     api/               서버 API: sources(자료 처리), notes(그림·문제 다시 만들기), grade, coupon, account, admin, cron, internal
     auth/callback/     구글 로그인에서 돌아오는 곳
-  components/          화면 조각 (MindMap, NoteView, QuestionCard …)
+  components/          화면 조각 (QuickAdd: + 버튼·끌어다 놓기, LibraryView: 자료함, MindMap, NoteView, QuestionCard …)
   lib/
     ai/                요금표·에너지, 프롬프트, JSON 스키마
     server/            서버 전용 (계정·에너지, Claude 호출, 처리 파이프라인)

@@ -4,7 +4,7 @@ import Link from 'next/link';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { SourceRowWithUnit } from '@/lib/data';
 import { fetchSources } from '@/lib/data';
-import { Button, Card, Chip, ProgressBar, api, useToast } from './ui';
+import { Button, ICONS, Icon, ProgressRing, api, cx, useToast } from './ui';
 
 export function stepLabel(s: Pick<SourceRowWithUnit, 'status' | 'step' | 'chunk_index' | 'chunk_total'>): string {
   if (s.status === 'error') return '멈췄어요';
@@ -25,10 +25,13 @@ export function stepLabel(s: Pick<SourceRowWithUnit, 'status' | 'step' | 'chunk_
 }
 
 const KIND_LABEL = { text: '글', pdf: 'PDF', image: '사진' } as const;
+const KIND_ICON = { text: ICONS.pen, pdf: ICONS.file, image: ICONS.image } as const;
 
 export function useActiveSources(subjectId?: string) {
   const [items, setItems] = useState<SourceRowWithUnit[] | null>(null);
   const [justDone, setJustDone] = useState<SourceRowWithUnit[]>([]);
+  /** 정리가 끝난 자료 수 (화면이 다시 불러올 때 쓴다) */
+  const [doneCount, setDoneCount] = useState(0);
   const prev = useRef<Map<string, string>>(new Map());
   const nudged = useRef<Map<string, number>>(new Map());
 
@@ -39,6 +42,7 @@ export function useActiveSources(subjectId?: string) {
       const nowIds = new Set(rows.map((r) => r.id));
       const finished = [...prev.current.keys()].filter((id) => !nowIds.has(id));
       if (finished.length) {
+        setDoneCount((c) => c + finished.length);
         const all = await fetchSources({ subjectId, limit: 30 });
         setJustDone((d) => [...all.filter((r) => finished.includes(r.id) && r.status === 'ready'), ...d].slice(0, 5));
       }
@@ -68,82 +72,90 @@ export function useActiveSources(subjectId?: string) {
     return () => clearInterval(t);
   }, [load]);
 
-  return { items, justDone, reload: load };
+  return { items, justDone, doneCount, reload: load };
 }
 
-export function ProcessingList({ items, justDone, reload }: ReturnType<typeof useActiveSources>) {
+export function ProcessingList({ items, justDone, reload }: Pick<ReturnType<typeof useActiveSources>, 'items' | 'justDone' | 'reload'>) {
   const toast = useToast();
   const [busy, setBusy] = useState<string | null>(null);
   if (!items) return null;
   if (!items.length && !justDone.length) return null;
   return (
-    <div className="grid gap-2">
+    <section className="grid gap-2" aria-label="정리 중인 자료">
       {justDone.map((s) => (
-        <Link
-          key={`done-${s.id}`}
-          href={`/notes/${s.id}`}
-          className="flex items-center justify-between gap-3 rounded-2xl border-2 border-ok bg-ok-soft px-4 py-3"
-        >
-          <span className="min-w-0">
-            <span className="block text-sm font-bold text-ok">정리 끝! 🎉</span>
+        <Link key={`done-${s.id}`} href={`/notes/${s.id}`} className="kok-new kok-card press flex items-center gap-3 p-3.5 pr-4">
+          <span className="grid h-11 w-11 shrink-0 place-items-center rounded-2xl bg-ok-soft text-ok">
+            <Icon d={ICONS.check} size={22} strokeWidth={2.6} />
+          </span>
+          <span className="min-w-0 flex-1">
+            <span className="block text-xs font-bold text-ok">정리 끝! 🎉</span>
             <span className="block truncate font-semibold">{s.title || '새 자료'}</span>
           </span>
-          <span className="shrink-0 text-sm font-bold text-ok">보러 가기 →</span>
+          <span className="shrink-0 text-sm font-bold text-accent">보러 가기</span>
         </Link>
       ))}
-      {items.map((s) => (
-        <Card key={s.id} className="grid gap-2">
-          <div className="flex items-center justify-between gap-3">
-            <Link href={`/notes/${s.id}`} className="min-w-0">
-              <span className="block truncate font-semibold">{s.title || `${KIND_LABEL[s.kind]} 자료`}</span>
-              <span className="text-sm text-muted">{stepLabel(s)}</span>
-            </Link>
-            <Chip tone={s.status === 'error' ? 'bad' : 'accent'}>{KIND_LABEL[s.kind]}</Chip>
-          </div>
-          {s.status === 'error' ? (
-            <div className="grid gap-2">
-              <p className="text-sm text-bad">{s.error ?? '정리하다가 멈췄어요.'} 쓴 에너지는 돌려줬어요.</p>
-              <div className="flex gap-2">
-                <Button
-                  size="sm"
-                  busy={busy === s.id}
-                  onClick={async () => {
-                    setBusy(s.id);
-                    try {
-                      await api(`/api/sources/${s.id}/retry`, { method: 'POST', body: '{}' });
-                      toast('다시 시작했어요.');
-                      await reload();
-                    } catch (e) {
-                      toast((e as Error).message, 'bad');
-                    } finally {
-                      setBusy(null);
-                    }
-                  }}
-                >
-                  다시 하기
-                </Button>
-                <Button
-                  size="sm"
-                  variant="ghost"
-                  onClick={async () => {
-                    if (!confirm('이 자료를 지울까요?')) return;
-                    try {
-                      await api(`/api/sources/${s.id}`, { method: 'DELETE' });
-                      await reload();
-                    } catch (e) {
-                      toast((e as Error).message, 'bad');
-                    }
-                  }}
-                >
-                  지우기
-                </Button>
-              </div>
+      {items.map((s) => {
+        const failed = s.status === 'error';
+        return (
+          <div key={s.id} className={cx('kok-card kok-rise grid gap-2.5 p-3.5', failed && 'ring-2 ring-bad/30')}>
+            <div className="flex items-center gap-3">
+              {failed ? (
+                <span className="grid h-11 w-11 shrink-0 place-items-center rounded-2xl bg-bad-soft text-bad">
+                  <Icon d={ICONS.retry} size={20} />
+                </span>
+              ) : (
+                <ProgressRing value={s.progress} size={44} stroke={5} label={`${s.title || '자료'} 진행`}>
+                  <Icon d={KIND_ICON[s.kind]} size={16} className="text-muted" />
+                </ProgressRing>
+              )}
+              <Link href={`/notes/${s.id}`} className="min-w-0 flex-1">
+                <span className="block truncate font-semibold">{s.title || `${KIND_LABEL[s.kind]} 자료`}</span>
+                <span className={cx('block truncate text-sm', failed ? 'text-bad' : 'text-muted')}>{stepLabel(s)}</span>
+              </Link>
             </div>
-          ) : (
-            <ProgressBar value={s.progress} label={`${s.title} 진행`} />
-          )}
-        </Card>
-      ))}
-    </div>
+            {failed ? (
+              <div className="grid gap-2 pl-14">
+                <p className="text-sm text-muted">{s.error ?? '정리하다가 멈췄어요.'} 쓴 에너지는 돌려줬어요.</p>
+                <div className="flex gap-2">
+                  <Button
+                    size="sm"
+                    busy={busy === s.id}
+                    onClick={async () => {
+                      setBusy(s.id);
+                      try {
+                        await api(`/api/sources/${s.id}/retry`, { method: 'POST', body: '{}' });
+                        toast('다시 시작했어요.');
+                        await reload();
+                      } catch (e) {
+                        toast((e as Error).message, 'bad');
+                      } finally {
+                        setBusy(null);
+                      }
+                    }}
+                  >
+                    다시 하기
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    onClick={async () => {
+                      if (!confirm('이 자료를 지울까요?')) return;
+                      try {
+                        await api(`/api/sources/${s.id}`, { method: 'DELETE' });
+                        await reload();
+                      } catch (e) {
+                        toast((e as Error).message, 'bad');
+                      }
+                    }}
+                  >
+                    지우기
+                  </Button>
+                </div>
+              </div>
+            ) : null}
+          </div>
+        );
+      })}
+    </section>
   );
 }

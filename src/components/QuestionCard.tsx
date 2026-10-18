@@ -157,7 +157,7 @@ export function QuestionCard({
         {q.created_by === 'ai' ? <Chip>AI</Chip> : <Chip tone="ok">내가 만듦</Chip>}
       </div>
 
-      <div className="rounded-3xl border border-line bg-surface p-5 shadow-[0_2px_0_var(--shadow)]">
+      <div className="kok-card rounded-[28px] p-5">
         <p className="text-[19px] font-semibold leading-relaxed">
           <Prompt q={q} />
         </p>

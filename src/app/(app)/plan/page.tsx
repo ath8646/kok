@@ -2,7 +2,7 @@
 // 요금제: 무료와 Pro 비교, 쿠폰 입력 (결제는 v0.4)
 import { useState } from 'react';
 import { useMe } from '@/components/AppShell';
-import { Button, Card, Field, api, inputClass, useToast } from '@/components/ui';
+import { Button, Card, Field, LargeHeader, api, inputClass, useToast } from '@/components/ui';
 
 export default function PlanPage() {
   const { me, refresh } = useMe();
@@ -24,7 +24,7 @@ export default function PlanPage() {
 
   return (
     <div className="grid gap-4">
-      <h1 className="font-display text-2xl">요금제</h1>
+      <LargeHeader title="요금제" subtitle="무료로 충분히 쓰고, 더 필요하면 Pro" back={{ href: '/settings', label: '설정으로' }} />
       <Card className="flex flex-wrap items-center justify-between gap-2">
         <span className="font-semibold">지금 요금제</span>
         <span className="rounded-full bg-surface-2 px-3 py-1 font-bold">
@@ -32,7 +32,7 @@ export default function PlanPage() {
         </span>
       </Card>
 
-      <div className="overflow-x-auto rounded-2xl border border-line bg-surface">
+      <div className="kok-card overflow-x-auto">
         <table className="w-full min-w-[440px] border-collapse text-[15px]">
           <thead className="bg-surface-2">
             <tr>

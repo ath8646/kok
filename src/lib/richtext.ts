@@ -72,3 +72,117 @@ export function plainText(input: string): string {
     .map((p) => (p.kind === 'text' ? p.text : p.tex))
     .join('');
 }
+
+const SUB: Record<string, string> = {
+  '0': '₀',
+  '1': '₁',
+  '2': '₂',
+  '3': '₃',
+  '4': '₄',
+  '5': '₅',
+  '6': '₆',
+  '7': '₇',
+  '8': '₈',
+  '9': '₉',
+  '+': '₊',
+  '-': '₋',
+  '=': '₌',
+  '(': '₍',
+  ')': '₎',
+  a: 'ₐ',
+  e: 'ₑ',
+  o: 'ₒ',
+  x: 'ₓ',
+  n: 'ₙ',
+  i: 'ᵢ',
+  m: 'ₘ',
+};
+const SUP: Record<string, string> = {
+  '0': '⁰',
+  '1': '¹',
+  '2': '²',
+  '3': '³',
+  '4': '⁴',
+  '5': '⁵',
+  '6': '⁶',
+  '7': '⁷',
+  '8': '⁸',
+  '9': '⁹',
+  '+': '⁺',
+  '-': '⁻',
+  '=': '⁼',
+  '(': '⁽',
+  ')': '⁾',
+  n: 'ⁿ',
+  i: 'ⁱ',
+  x: 'ˣ',
+};
+const TEX_SYMBOLS: Array<[RegExp, string]> = [
+  [/\\(?:times)\b/g, '×'],
+  [/\\(?:cdot)\b/g, '·'],
+  [/\\(?:div)\b/g, '÷'],
+  [/\\(?:pm)\b/g, '±'],
+  [/\\(?:rightleftharpoons|leftrightarrow|Leftrightarrow)\b/g, '⇄'],
+  [/\\(?:rightarrow|longrightarrow|Rightarrow|to)\b/g, '→'],
+  [/\\(?:leftarrow|Leftarrow)\b/g, '←'],
+  [/\\(?:leq|le)\b/g, '≤'],
+  [/\\(?:geq|ge)\b/g, '≥'],
+  [/\\(?:neq|ne)\b/g, '≠'],
+  [/\\(?:approx)\b/g, '≈'],
+  [/\\(?:infty)\b/g, '∞'],
+  [/\^\s*\{?\\circ\}?/g, '°'],
+  [/\\(?:degree)\b/g, '°'],
+  [/\\(?:pi)\b/g, 'π'],
+  [/\\(?:alpha)\b/g, 'α'],
+  [/\\(?:beta)\b/g, 'β'],
+  [/\\(?:gamma)\b/g, 'γ'],
+  [/\\(?:Delta)\b/g, 'Δ'],
+  [/\\(?:delta)\b/g, 'δ'],
+  [/\\(?:theta)\b/g, 'θ'],
+  [/\\(?:lambda)\b/g, 'λ'],
+  [/\\(?:mu)\b/g, 'μ'],
+  [/\\(?:sigma)\b/g, 'σ'],
+  [/\\(?:omega)\b/g, 'ω'],
+  [/\\(?:Omega)\b/g, 'Ω'],
+];
+
+function mapAll(s: string, table: Record<string, string>): string | null {
+  let out = '';
+  for (const ch of s) {
+    const m = table[ch];
+    if (!m) return null;
+    out += m;
+  }
+  return out;
+}
+
+/** 수식 한 조각을 글자로 대강 바꾼다 (CO_2 → CO₂, x^2 → x², \times → ×) */
+export function texToText(tex: string): string {
+  let t = tex;
+  t = t.replace(/\\(?:text|mathrm|textbf|mathbf|operatorname)\{([^{}]*)\}/g, '$1');
+  t = t.replace(/\\frac\{([^{}]*)\}\{([^{}]*)\}/g, '$1/$2');
+  t = t.replace(/\\sqrt\{([^{}]*)\}/g, '√($1)');
+  for (const [re, s] of TEX_SYMBOLS) t = t.replace(re, s);
+  t = t.replace(/_\{([^{}]*)\}|_([^\s{}\\])/g, (m, a: string | undefined, b: string | undefined) => {
+    const raw = a ?? b ?? '';
+    return mapAll(raw.replace(/\s+/g, ''), SUB) ?? raw;
+  });
+  t = t.replace(/\^\{([^{}]*)\}|\^([^\s{}\\])/g, (m, a: string | undefined, b: string | undefined) => {
+    const raw = a ?? b ?? '';
+    return mapAll(raw.replace(/\s+/g, ''), SUP) ?? `^${raw}`;
+  });
+  t = t.replace(/\\left|\\right/g, '');
+  t = t.replace(/\\[a-zA-Z]+/g, '');
+  t = t.replace(/[{}]/g, '').replace(/\\,|\;|\\!|\\ /g, ' ');
+  return t.replace(/\s+/g, ' ').trim();
+}
+
+/** 카드 미리보기용: 수식은 읽을 수 있는 글자로, 줄바꿈과 마크다운 기호는 정리 */
+export function previewText(input: string): string {
+  return splitMath(input ?? '')
+    .map((p) => (p.kind === 'text' ? p.text : texToText(p.tex)))
+    .join('')
+    .replace(/\*\*|__|`/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+}

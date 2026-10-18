@@ -6,7 +6,7 @@ import { useMe } from '@/components/AppShell';
 import { MindMap } from '@/components/MindMap';
 import { QuestionCard, type GradeOutcome, type ReviewQuestion } from '@/components/QuestionCard';
 import { ReportSheet } from '@/components/QuestionList';
-import { Button, Card, EmptyState, LinkButton, Segmented, Sheet, api, useToast } from '@/components/ui';
+import { Button, Card, EmptyState, LargeHeader, LinkButton, Segmented, Sheet, api, useToast } from '@/components/ui';
 import { fetchPlanData, fetchQuestionsByIds, fetchStudyDays, sb, type PlanData } from '@/lib/data';
 import { autoGrade, autoRating, type Rating } from '@/lib/grading';
 import { pickToday, streakInfo } from '@/lib/review-plan';
@@ -275,13 +275,19 @@ export default function ReviewPage() {
   };
 
   // ------------------------------------------------------------ 화면
-  if (phase === 'loading') return <div className="h-48 animate-pulse rounded-2xl bg-surface-2" />;
+  if (phase === 'loading')
+    return (
+      <div className="grid gap-3">
+        <LargeHeader title={MODE_TITLE[mode.kind]} subtitle=" " />
+        <div className="kok-card kok-shimmer h-56" />
+      </div>
+    );
 
   if (phase === 'start') {
     const n = queue.length;
     return (
-      <div className="grid gap-4">
-        <h1 className="font-display text-2xl">{MODE_TITLE[mode.kind]}</h1>
+      <div className="grid gap-3">
+        <LargeHeader title={MODE_TITLE[mode.kind]} subtitle={n ? `${n}문제가 준비됐어요` : '지금은 풀 문제가 없어요'} />
         {n === 0 ? (
           <EmptyState
             title={mode.kind === 'today' ? '오늘 할 일 끝! 🎉' : '풀 문제가 없어요'}
@@ -309,10 +315,7 @@ export default function ReviewPage() {
             }
           />
         ) : (
-          <Card className="grid gap-4 p-5">
-            <p className="text-lg">
-              <b>{n}문제</b>가 준비됐어요.
-            </p>
+          <Card className="kok-rise grid gap-4 p-5">
             <div className="grid gap-2">
               <span className="text-sm font-semibold">세션 길이</span>
               <Segmented
@@ -357,8 +360,8 @@ export default function ReviewPage() {
           )
         : 0;
     return (
-      <div className="grid gap-4 py-4">
-        <div className="text-center">
+      <div className="grid gap-4 pb-4 pt-[calc(28px+env(safe-area-inset-top))] md:pt-10">
+        <div className="kok-rise text-center">
           <p className="text-5xl" aria-hidden="true">
             {total && right / total >= 0.8 ? '🎉' : '👏'}
           </p>
@@ -366,7 +369,7 @@ export default function ReviewPage() {
           {streak ? <p className="mt-1 text-muted">연속 {streak}일째 공부했어요.</p> : null}
         </div>
         {total ? (
-          <Card className="grid grid-cols-3 gap-2 text-center">
+          <Card className="kok-rise grid grid-cols-3 gap-2 text-center" style={{ ['--i' as string]: 1 }}>
             <div>
               <p className="font-display text-3xl">{total}</p>
               <p className="text-sm text-muted">푼 문제</p>

@@ -18,12 +18,12 @@ export default async function Landing({ searchParams }: PageProps<'/'>) {
   const next = safeNext(sp.next);
   const authError = sp.error === 'auth';
   return (
-    <main className="mx-auto grid min-h-dvh max-w-3xl content-center gap-10 px-5 py-12">
-      <section className="grid justify-items-center gap-5 text-center">
-        <p className="font-display text-6xl text-accent sm:text-7xl">
+    <main className="mx-auto grid min-h-dvh max-w-3xl content-center gap-10 px-5 pb-12 pt-[calc(48px+env(safe-area-inset-top))]">
+      <section className="kok-rise grid justify-items-center gap-5 text-center">
+        <p className="font-brand text-7xl text-accent sm:text-8xl">
           <span className="hl-mark">콕</span>
         </p>
-        <h1 className="font-display text-3xl leading-snug sm:text-4xl">
+        <h1 className="font-display text-[32px] leading-snug sm:text-[40px]">
           준비는 AI가,
           <br />
           외우기는 내가
@@ -49,19 +49,19 @@ export default async function Landing({ searchParams }: PageProps<'/'>) {
         </p>
       </section>
 
-      <section className="grid gap-3 sm:grid-cols-2">
-        {FEATURES.map((f) => (
-          <div key={f.title} className="rounded-2xl border border-line bg-surface p-5">
-            <p className="text-2xl" aria-hidden="true">
+      <section className="grid grid-cols-2 gap-3">
+        {FEATURES.map((f, i) => (
+          <div key={f.title} className="kok-card kok-rise grid content-start gap-2 p-4 sm:p-5" style={{ ['--i' as string]: i + 1 }}>
+            <span className="grid h-11 w-11 place-items-center rounded-2xl bg-accent-soft text-2xl" aria-hidden="true">
               {f.emoji}
-            </p>
-            <h2 className="mt-2 font-display text-xl">{f.title}</h2>
-            <p className="mt-1 text-[15px] text-muted">{f.body}</p>
+            </span>
+            <h2 className="font-display text-lg leading-snug sm:text-xl">{f.title}</h2>
+            <p className="text-sm text-muted sm:text-[15px]">{f.body}</p>
           </div>
         ))}
       </section>
 
-      <section className="rounded-2xl border border-dashed border-line bg-surface/70 p-5 text-sm text-muted">
+      <section className="kok-rise rounded-[22px] bg-surface-2 p-5 text-sm text-muted" style={{ ['--i' as string]: 5 }}>
         <p>
           <b className="text-ink">콕은 오래 붙잡는 앱이 아니에요.</b> 끝없는 피드, 광고, 랭킹이 없어요. 오늘 할 공부를 빨리 끝내도록 돕고, 끝나면 놓아 줘요.
         </p>

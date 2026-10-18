@@ -1,16 +1,16 @@
 'use client';
 // 노트: 탭 정리 · 그림 · 문제 · 원본 (처리 중이면 진행 상태)
-import Link from 'next/link';
-import { useParams } from 'next/navigation';
+import { useParams, useRouter } from 'next/navigation';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useMe } from '@/components/AppShell';
+import { useQuickAdd } from '@/components/QuickAdd';
 import { NoteView, type NoteBody } from '@/components/NoteView';
 import { ProcessingView } from '@/components/note/ProcessingView';
 import { OriginalPanel } from '@/components/note/OriginalPanel';
 import { QuestionsPanel } from '@/components/note/QuestionsPanel';
 import { VisualPanel, type NoteView as NoteViewPrefs, type Visuals } from '@/components/note/VisualPanel';
 import type { CardInfo } from '@/components/QuestionList';
-import { Button, Chip, EmptyState, LinkButton, Sheet, cx, inputClass, useToast } from '@/components/ui';
+import { Button, Chip, EmptyState, ICONS, LargeHeader, LinkButton, Menu, STICKY_BELOW_TOPBAR, Sheet, cx, inputClass, useToast } from '@/components/ui';
 import { SOURCE_COLS, sb, type SourceRowWithUnit } from '@/lib/data';
 import { zMindmap, zNote, zTable, zTimeline } from '@/lib/ai/schemas';
 import type { QuestionRow, SubjectRow } from '@/lib/types';
@@ -82,6 +82,7 @@ function initialParam(name: string): string | null {
 export default function NotePage() {
   const { sourceId } = useParams<{ sourceId: string }>();
   const { me } = useMe();
+  const router = useRouter();
   const toast = useToast();
   const [bundle, setBundle] = useState<Bundle | null | undefined>(undefined);
   const [version, setVersion] = useState(0);
@@ -118,6 +119,14 @@ export default function NotePage() {
   const subject = bundle?.subject ?? null;
   const noteId = note?.id;
 
+  // + 버튼과 끌어다 놓기는 이 노트의 과목에 넣는다
+  const quick = useQuickAdd();
+  const contextSubject = note?.subject_id ?? (source ? source.subject_id : null);
+  useEffect(() => {
+    quick.setContextSubject(contextSubject);
+    return () => quick.setContextSubject(null);
+  }, [quick, contextSubject]);
+
   // 약점 개념에서 왔으면 그 개념으로 스크롤
   useEffect(() => {
     const target = initialParam('kp');
@@ -139,30 +148,42 @@ export default function NotePage() {
   };
 
   if (!me) return null;
-  if (source === undefined) return <div className="h-48 animate-pulse rounded-2xl bg-surface-2" />;
-  if (source === null) return <EmptyState title="자료를 찾을 수 없어요" action={<LinkButton href="/library">자료함으로</LinkButton>} />;
+  const back = { href: subject ? `/library/${subject.id}` : source?.subject_id ? `/library/${source.subject_id}` : '/library', label: '자료함으로' };
+  if (source === undefined)
+    return (
+      <div className="grid gap-3">
+        <LargeHeader size="compact" back={back} title=" " />
+        <div className="kok-card kok-shimmer h-48" />
+      </div>
+    );
+  if (source === null)
+    return (
+      <div className="grid gap-3">
+        <LargeHeader size="compact" back={{ href: '/library', label: '자료함으로' }} title="자료를 찾을 수 없어요" />
+        <EmptyState title="지워졌거나 없는 자료예요" action={<LinkButton href="/library">자료함으로</LinkButton>} />
+      </div>
+    );
 
-  const header = (
-    <div className="grid gap-1">
-      <Link href={subject ? `/library/${subject.id}` : '/library'} className="text-sm font-semibold text-muted">
-        ‹ {subject?.name ?? '자료함'}
-      </Link>
-      <div className="flex flex-wrap items-center gap-2">
-        {subject ? <span className="h-6 w-1.5 rounded-full" style={{ background: subjectVar(subject.color) }} aria-hidden="true" /> : null}
-        <h1 className="font-display text-2xl">{note?.title || source.title || '새 자료'}</h1>
-      </div>
-      <div className="flex flex-wrap items-center gap-1.5 text-sm text-muted">
-        {source.unit ? <Chip>{source.unit}</Chip> : null}
-        <Chip>AI 정리</Chip>
-        <span>{source.kind === 'pdf' ? `PDF ${source.page_count ?? ''}쪽` : source.kind === 'image' ? `사진 ${source.page_count ?? ''}장` : '직접 쓴 글'}</span>
-      </div>
-    </div>
+  const ready = source.status === 'ready' && !!note && !!body;
+  const title = note?.title || source.title || (ready ? '새 자료' : '정리하는 중…');
+  const meta = (
+    <span className="flex flex-wrap items-center gap-1.5 text-sm">
+      {subject ? (
+        <span className="inline-flex items-center gap-1.5 font-semibold text-ink">
+          <span className="h-2.5 w-2.5 rounded-full" style={{ background: subjectVar(subject.color) }} aria-hidden="true" />
+          {subject.name}
+        </span>
+      ) : null}
+      {source.unit ? <Chip>{source.unit}</Chip> : null}
+      <span>· {source.kind === 'pdf' ? `PDF ${source.page_count ?? ''}쪽` : source.kind === 'image' ? `사진 ${source.page_count ?? ''}장` : '직접 쓴 글'}</span>
+      <span>· AI 정리</span>
+    </span>
   );
 
-  if (source.status !== 'ready' || !note || !body) {
+  if (!ready) {
     return (
-      <div className="grid gap-4">
-        {header}
+      <div className="grid gap-3">
+        <LargeHeader size="compact" back={back} title={title} subtitle={meta} />
         <ProcessingView source={source} onReload={reload} />
       </div>
     );
@@ -170,9 +191,24 @@ export default function NotePage() {
 
   return (
     <div className="grid gap-4">
-      {header}
-      <div className="sticky top-[calc(52px+env(safe-area-inset-top))] z-20 -mx-4 border-b border-line bg-bg/90 px-4 py-2 backdrop-blur md:top-0">
-        <div className="grid grid-cols-4 gap-1 rounded-xl bg-surface-2 p-1" role="tablist" aria-label="노트 보기">
+      <LargeHeader
+        size="compact"
+        flush
+        back={back}
+        title={title}
+        subtitle={meta}
+        actions={
+          <Menu
+            label="노트 메뉴"
+            items={[
+              { label: '이 노트 문제 풀기', icon: ICONS.retry, onSelect: () => router.push(`/review?note=${note.id}`) },
+              { label: '이상해요 (신고)', icon: ICONS.edit, onSelect: () => setReporting(true) },
+            ]}
+          />
+        }
+      />
+      <div className={cx(STICKY_BELOW_TOPBAR, 'kok-subbar z-20 -mx-4 -mt-4 px-4 pb-2.5 pt-1 md:-mx-6 md:px-6')}>
+        <div className="grid grid-cols-4 gap-1 rounded-full bg-surface-2 p-1" role="tablist" aria-label="노트 보기">
           {TABS.map((t) => (
             <button
               key={t.id}
@@ -180,10 +216,13 @@ export default function NotePage() {
               role="tab"
               aria-selected={tab === t.id}
               onClick={() => setTab(t.id)}
-              className={cx('rounded-lg py-2 text-sm font-bold', tab === t.id ? 'bg-surface text-ink shadow-sm' : 'text-muted')}
+              className={cx(
+                'press rounded-full py-2 text-sm font-bold',
+                tab === t.id ? 'bg-raised text-ink shadow-[0_1px_3px_var(--shadow-strong)]' : 'text-muted hover:text-ink',
+              )}
             >
               {t.label}
-              {t.id === 'questions' ? ` ${questions.length}` : ''}
+              {t.id === 'questions' ? <span className="ml-1 tabular-nums opacity-60">{questions.length}</span> : null}
             </button>
           ))}
         </div>
@@ -192,7 +231,7 @@ export default function NotePage() {
       {tab === 'note' ? (
         <div className="grid gap-4">
           {visuals.mindmap || visuals.table || visuals.timeline ? (
-            <section className="rounded-2xl border border-line bg-surface p-3">
+            <section className="kok-card kok-rise p-3">
               <button
                 type="button"
                 className="flex w-full items-center justify-between px-1 font-display text-lg"

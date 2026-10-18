@@ -1,7 +1,7 @@
 """실패·환불·다시 하기, 비상 스위치 시험."""
 import asyncio, base64, re, subprocess, urllib.request, json, time, pathlib, uuid
 from playwright.async_api import async_playwright, expect
-from e2e import new_ctx, BASE, ERRORS, shot, wait_ready, USERS, session_cookie
+from e2e import new_ctx, BASE, ERRORS, shot, wait_ready, USERS, session_cookie, LIBRARY_SUBJECT
 
 PSQL = ["psql", "-d", "kokapp", "-tA", "-c"]  # PGHOST·PGPORT·PGUSER 환경변수를 따른다
 
@@ -25,13 +25,17 @@ async def main():
         await page.get_by_label(re.compile("콕에서 쓸 이름")).fill("실패시험")
         await page.get_by_label("과목 이름").fill("과학")
         await page.get_by_role("button", name="시작하기").click()
-        await page.wait_for_url("**/add?subject=*")
+        await page.wait_for_url(LIBRARY_SUBJECT)
 
         print("· quiz step fails 3 times → error + refund")
         fake("/__fail?task=quiz")
-        await page.get_by_role("radio", name=re.compile("직접 쓰기")).click()
-        await page.get_by_label("공부한 내용을 쓰거나 붙여 넣어 주세요").fill("광합성은 엽록체에서 일어난다. 재료는 물과 이산화탄소이고 결과물은 포도당과 산소다.")
-        await page.get_by_role("button", name="완료하고 정리하기").click()
+        box = page.get_by_role("dialog", name="자료 넣기").get_by_label("공부한 내용")
+        await box.fill("광합성은 엽록체에서 일어난다. 재료는 물과 이산화탄소이고 결과물은 포도당과 산소다.")
+        await box.press("Enter")
+        await expect(page.locator("main a[href^='/notes/']").first).to_be_visible(timeout=15000)
+        await expect(page.get_by_text("멈췄어요 · 에너지는 돌려줬어요")).to_be_visible(timeout=60000)
+        await shot(page, "40-failed-card", full=False)
+        await page.locator("main a[href^='/notes/']").first.click()
         await page.wait_for_url("**/notes/*")
         await expect(page.get_by_text("정리하다가 멈췄어요")).to_be_visible(timeout=60000)
         await shot(page, "40-failed", full=False)
@@ -56,14 +60,17 @@ async def main():
         await apage.get_by_label(re.compile("콕에서 쓸 이름")).fill("운영자")
         await apage.get_by_label("과목 이름").fill("수학")
         await apage.get_by_role("button", name="시작하기").click()
-        await apage.wait_for_url("**/add?subject=*")
+        await apage.wait_for_url(LIBRARY_SUBJECT)
         await apage.goto(BASE + "/admin")
         apage.once("dialog", lambda d: asyncio.ensure_future(d.accept()))
         await apage.get_by_role("button", name="AI 전체 끄기").click()
         await expect(apage.get_by_role("button", name="AI 다시 켜기")).to_be_visible()
-        await page.goto(BASE + "/add?kind=text")
-        await expect(page.get_by_text("지금은 AI 기능을 잠깐 쉬고 있어요.").first).to_be_visible()
-        await expect(page.get_by_role("button", name="완료하고 정리하기")).to_be_disabled()
+        await page.goto(BASE + "/add")
+        composer = page.get_by_role("dialog", name="자료 넣기")
+        await expect(composer).to_be_visible()
+        await expect(composer.get_by_text("지금은 AI 기능을 잠깐 쉬고 있어요.")).to_be_visible()
+        await composer.get_by_label("공부한 내용").fill("AI가 꺼져 있을 때 넣어 보는 글이에요. 보내지면 안 돼요.")
+        await expect(composer.get_by_role("button", name="AI 정리 시작")).to_be_disabled()
         # API 도 막힌다
         r = await page.request.post(BASE + "/api/grade", data={"questionId": "00000000-0000-4000-8000-000000000000", "answer": "x"}, headers={"origin": BASE})
         print("   grade when off:", r.status)

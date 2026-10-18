@@ -1,10 +1,12 @@
 'use client';
-// 로그인한 뒤의 화면 틀: 위쪽 띠(로고·에너지), 공지, 아래쪽 탭(폰) / 왼쪽 메뉴(컴퓨터)
+// 로그인한 뒤의 화면 틀: 공지, 아래쪽 탭(폰) / 왼쪽 메뉴(컴퓨터), 빠른 추가(+ 버튼·끌어다 놓기)
+// 화면마다 위쪽에 큰 제목(LargeHeader)이 있어서, 폰에서는 따로 위 띠를 두지 않는다.
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import { createContext, useCallback, useContext, useEffect, useState, type ReactNode } from 'react';
 import type { MeResponse } from '@/lib/types';
-import { Button, Spinner, cx } from './ui';
+import { QuickAddProvider } from './QuickAdd';
+import { Button, Icon, Spinner, cx } from './ui';
 
 type MeCtx = {
   me: MeResponse | null;
@@ -21,9 +23,9 @@ export function useMe() {
 
 const TABS = [
   { href: '/home', label: '홈', icon: 'M3 10.5 12 3l9 7.5V20a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z' },
-  { href: '/library', label: '자료함', icon: 'M4 4h6l2 2h8v13a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1zM4 9h16' },
+  { href: '/library', label: '자료함', icon: 'M3 6.5A1.5 1.5 0 0 1 4.5 5h4.6l2 2h8.4A1.5 1.5 0 0 1 21 8.5v9a1.5 1.5 0 0 1-1.5 1.5h-15A1.5 1.5 0 0 1 3 17.5z' },
   { href: '/review', label: '복습', icon: 'M12 3a9 9 0 1 0 9 9M12 7v5l3 2M21 3v6h-6' },
-  { href: '/wrong', label: '오답', icon: 'M5 4h14v16H5zM9 9l6 6M15 9l-6 6' },
+  { href: '/wrong', label: '오답', icon: 'M6 3h12a1 1 0 0 1 1 1v17l-7-4-7 4V4a1 1 0 0 1 1-1zM9.5 8.5l5 5M14.5 8.5l-5 5' },
   {
     href: '/settings',
     label: '설정',
@@ -31,23 +33,12 @@ const TABS = [
   },
 ];
 
-function TabIcon({ d }: { d: string }) {
-  return (
-    <svg
-      aria-hidden="true"
-      width="22"
-      height="22"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.8"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-    >
-      <path d={d} />
-    </svg>
-  );
-}
+/** + 버튼과 끌어다 놓기를 쓰는 화면 */
+const QUICK_ADD_PAGES = ['/home', '/library', '/notes', '/wrong', '/questions'];
+/** 넓게 쓰는 화면 (카드 격자) */
+const WIDE_PAGES = ['/library'];
+
+const under = (pathname: string, base: string) => pathname === base || pathname.startsWith(`${base}/`);
 
 export function EnergyPill({ me }: { me: MeResponse }) {
   const e = me.energy;
@@ -57,8 +48,8 @@ export function EnergyPill({ me }: { me: MeResponse }) {
     <Link
       href="/settings#energy"
       className={cx(
-        'inline-flex items-center gap-1 rounded-full border px-3 py-1 text-sm font-bold',
-        low ? 'border-warn bg-warn-soft text-warn' : 'border-line bg-surface text-ink',
+        'press inline-flex h-9 items-center gap-1 rounded-full px-3 text-sm font-bold',
+        low ? 'bg-warn-soft text-warn' : 'bg-surface text-ink shadow-[0_1px_2px_var(--shadow)]',
       )}
       aria-label={`남은 AI 에너지 ${label}`}
     >
@@ -132,7 +123,7 @@ export function AppShell({ children }: { children: ReactNode }) {
     return (
       <div className="mx-auto grid min-h-dvh max-w-md place-items-center px-6 text-center">
         <div className="grid gap-3">
-          <p className="font-display text-3xl text-accent">콕</p>
+          <p className="font-brand text-4xl text-accent">콕</p>
           <p>{error}</p>
           <Button onClick={() => refresh()}>다시 하기</Button>
         </div>
@@ -148,100 +139,93 @@ export function AppShell({ children }: { children: ReactNode }) {
   }
 
   const bare = focus || pathname === '/welcome';
+  const quickAdd = !bare && me.consented && QUICK_ADD_PAGES.some((p) => under(pathname, p));
+  const wide = WIDE_PAGES.some((p) => under(pathname, p));
   // 집중 모드로 바뀌어도 화면(children)이 다시 만들어지지 않도록, children 의 자리는 늘 같게 둔다
   return (
     <Ctx.Provider value={{ me, refresh, focus, setFocus }}>
-      <div className={bare ? '' : 'md:flex'}>
-        {!bare ? (
-          <nav
-            className="sticky top-0 hidden h-dvh w-56 shrink-0 flex-col gap-1 border-r border-line bg-surface/80 p-4 backdrop-blur md:flex"
-            aria-label="주 메뉴"
-          >
-            <Link href="/home" className="mb-4 px-2 font-display text-3xl text-accent">
-              콕
-            </Link>
-            {TABS.map((t) => {
-              const on = pathname === t.href || pathname.startsWith(`${t.href}/`);
-              return (
-                <Link
-                  key={t.href}
-                  href={t.href}
-                  aria-current={on ? 'page' : undefined}
-                  className={cx(
-                    'flex items-center gap-3 rounded-xl px-3 py-2.5 font-semibold',
-                    on ? 'bg-accent-soft text-accent' : 'text-ink hover:bg-surface-2',
-                  )}
-                >
-                  <TabIcon d={t.icon} />
-                  {t.label}
-                </Link>
-              );
-            })}
-            <div className="mt-auto grid gap-2 text-sm">
-              <EnergyPill me={me} />
-              {me.isAdmin ? (
-                <Link href="/admin" className="rounded-xl px-3 py-2 font-semibold text-muted hover:bg-surface-2">
-                  관리자
-                </Link>
-              ) : null}
-            </div>
-          </nav>
-        ) : null}
-
-        <div className="min-w-0 flex-1">
+      <QuickAddProvider me={me} refreshMe={refresh} enabled={quickAdd}>
+        <div className={bare ? '' : 'md:flex'}>
           {!bare ? (
-            <header className="sticky top-0 z-30 flex items-center justify-between border-b border-line bg-bg/85 px-4 pb-2 pt-[calc(8px+env(safe-area-inset-top))] backdrop-blur md:hidden">
-              <Link href="/home" className="font-display text-2xl text-accent">
+            <nav className="sticky top-0 hidden h-dvh w-60 shrink-0 flex-col gap-1 px-4 pb-6 pt-7 md:flex" aria-label="주 메뉴">
+              <Link href="/home" className="mb-6 px-3 font-brand text-4xl text-accent">
                 콕
               </Link>
-              <div className="flex items-center gap-2">
-                {me.isPro ? <span className="rounded-full bg-hl px-2 py-0.5 text-xs font-bold text-hl-ink">Pro</span> : null}
+              {TABS.map((t) => {
+                const on = under(pathname, t.href);
+                return (
+                  <Link
+                    key={t.href}
+                    href={t.href}
+                    aria-current={on ? 'page' : undefined}
+                    className={cx(
+                      'press flex items-center gap-3 rounded-full px-4 py-3 text-[15px] font-semibold transition-colors',
+                      on ? 'bg-surface text-ink shadow-[0_1px_2px_var(--shadow)]' : 'text-muted hover:bg-surface-2 hover:text-ink',
+                    )}
+                  >
+                    <Icon d={t.icon} size={21} className={on ? 'text-accent' : undefined} />
+                    {t.label}
+                  </Link>
+                );
+              })}
+              <div className="mt-auto grid gap-2 px-1 text-sm">
                 <EnergyPill me={me} />
+                {me.isAdmin ? (
+                  <Link href="/admin" className="rounded-full px-3 py-2 font-semibold text-muted hover:bg-surface-2">
+                    관리자
+                  </Link>
+                ) : null}
               </div>
-            </header>
+            </nav>
           ) : null}
-          {!bare && me.notice.active && me.notice.text ? (
-            <div className="border-b border-warn/30 bg-warn-soft px-4 py-2 text-center text-sm font-semibold text-warn" role="status">
-              {me.notice.text}
-            </div>
-          ) : null}
-          {!bare && !me.aiEnabled ? (
-            <div className="border-b border-line bg-surface-2 px-4 py-2 text-center text-sm text-muted" role="status">
-              지금은 AI 기능을 잠깐 쉬고 있어요. 복습은 그대로 할 수 있어요.
-            </div>
-          ) : null}
-          <main
-            className={cx(
-              'mx-auto w-full max-w-3xl px-4',
-              bare ? 'pb-10 pt-[calc(16px+env(safe-area-inset-top))]' : 'pb-[calc(96px+env(safe-area-inset-bottom))] pt-4 md:pb-12 md:pt-8',
-            )}
-          >
-            {children}
-          </main>
-        </div>
 
-        {!bare ? (
-          <nav
-            className="fixed inset-x-0 bottom-0 z-40 grid grid-cols-5 border-t border-line bg-surface/95 pb-[env(safe-area-inset-bottom)] backdrop-blur md:hidden"
-            aria-label="주 메뉴"
-          >
-            {TABS.map((t) => {
-              const on = pathname === t.href || pathname.startsWith(`${t.href}/`);
-              return (
-                <Link
-                  key={t.href}
-                  href={t.href}
-                  aria-current={on ? 'page' : undefined}
-                  className={cx('flex flex-col items-center gap-0.5 py-2 text-[11px] font-semibold', on ? 'text-accent' : 'text-muted')}
-                >
-                  <TabIcon d={t.icon} />
-                  {t.label}
-                </Link>
-              );
-            })}
-          </nav>
-        ) : null}
-      </div>
+          <div className="min-w-0 flex-1">
+            {!bare && me.notice.active && me.notice.text ? (
+              <div className="bg-warn-soft px-4 pb-2 pt-[calc(8px+env(safe-area-inset-top))] text-center text-sm font-semibold text-warn md:pt-2" role="status">
+                {me.notice.text}
+              </div>
+            ) : null}
+            {!bare && !me.aiEnabled ? (
+              <div className="bg-surface-2 px-4 pb-2 pt-[calc(8px+env(safe-area-inset-top))] text-center text-sm text-muted md:pt-2" role="status">
+                지금은 AI 기능을 잠깐 쉬고 있어요. 복습은 그대로 할 수 있어요.
+              </div>
+            ) : null}
+            <main
+              className={cx(
+                'mx-auto w-full px-4 md:px-6',
+                wide ? 'max-w-6xl' : 'max-w-3xl',
+                bare ? 'pb-10 pt-[calc(16px+env(safe-area-inset-top))]' : 'pb-[calc(170px+env(safe-area-inset-bottom))] md:pb-28',
+              )}
+            >
+              {children}
+            </main>
+          </div>
+
+          {!bare ? (
+            <nav
+              className="fixed inset-x-0 bottom-0 z-40 grid grid-cols-5 bg-[color-mix(in_srgb,var(--surface)_92%,transparent)] px-1 pb-[env(safe-area-inset-bottom)] pt-1 shadow-[0_-1px_0_var(--line)] backdrop-blur-xl md:hidden"
+              aria-label="주 메뉴"
+            >
+              {TABS.map((t) => {
+                const on = under(pathname, t.href);
+                return (
+                  <Link
+                    key={t.href}
+                    href={t.href}
+                    aria-current={on ? 'page' : undefined}
+                    className={cx('flex flex-col items-center gap-0.5 pb-1.5 pt-1 text-[11px] font-semibold', on ? 'text-ink' : 'text-muted')}
+                  >
+                    <span className={cx('kok-tab-pill grid h-8 w-14 place-items-center rounded-full', on ? 'bg-accent-soft text-accent' : '')}>
+                      <Icon d={t.icon} size={21} />
+                    </span>
+                    {t.label}
+                  </Link>
+                );
+              })}
+            </nav>
+          ) : null}
+        </div>
+      </QuickAddProvider>
     </Ctx.Provider>
   );
 }

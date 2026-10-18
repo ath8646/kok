@@ -3,7 +3,7 @@
 import Link from 'next/link';
 import { useEffect, useState } from 'react';
 import { QuestionPreview } from '@/components/QuestionList';
-import { Button, Card, Chip, EmptyState, LinkButton, SectionTitle, buttonClass, useToast } from '@/components/ui';
+import { Button, Card, Chip, EmptyState, ICONS, Icon, LargeHeader, LinkButton, SectionTitle, buttonClass, useToast } from '@/components/ui';
 import { fetchImportance, fetchPlanData, fetchQuestionsByIds, sb } from '@/lib/data';
 import { weakConcepts, type WeakConcept } from '@/lib/review-plan';
 import type { QuestionRow } from '@/lib/types';
@@ -62,29 +62,44 @@ export default function WrongPage() {
     };
   }, [toast]);
 
-  if (loading) return <div className="h-48 animate-pulse rounded-2xl bg-surface-2" />;
-
   return (
-    <div className="grid gap-4">
-      <div className="flex items-center justify-between gap-3">
-        <h1 className="font-display text-2xl">오답노트</h1>
-        {items.length ? <LinkButton href="/review?mode=wrong">전부 다시 풀기</LinkButton> : null}
-      </div>
-      <p className="text-sm text-muted">틀린 문제가 모여요. 3번 연속 맞히면 졸업해요.</p>
+    <div className="grid gap-3">
+      <LargeHeader
+        title="오답노트"
+        subtitle={loading ? ' ' : items.length ? `틀린 문제 ${items.length}개 · 3번 연속 맞히면 졸업해요` : '틀린 문제가 모이는 곳이에요'}
+        actions={
+          items.length ? (
+            <LinkButton href="/review?mode=wrong" size="sm" className="mr-1">
+              전부 다시 풀기
+            </LinkButton>
+          ) : null
+        }
+      />
 
-      {!items.length ? (
-        <EmptyState title="오답노트가 비어 있어요" body="틀린 문제가 생기면 여기에 모여요." action={<LinkButton href="/home">홈으로</LinkButton>} />
+      {loading ? (
+        <div className="grid gap-2">
+          {[0, 1, 2].map((i) => (
+            <div key={i} className="kok-card kok-shimmer h-24" />
+          ))}
+        </div>
+      ) : !items.length ? (
+        <EmptyState
+          icon={<Icon d={ICONS.check} size={34} strokeWidth={2.2} />}
+          title="오답노트가 비어 있어요"
+          body="틀린 문제가 생기면 여기에 모여요."
+          action={<LinkButton href="/home">홈으로</LinkButton>}
+        />
       ) : (
         <>
           {weak.length ? (
             <>
               <SectionTitle>약점 개념 {weak.length}개</SectionTitle>
               <div className="grid gap-2">
-                {weak.map((w) => {
+                {weak.map((w, i) => {
                   const n = notes.get(w.note_id);
                   const t = titles.get(w.note_id)?.get(w.key_point_id)?.title ?? w.key_point_id;
                   return (
-                    <Card key={`${w.note_id}:${w.key_point_id}`} className="grid gap-2">
+                    <Card key={`${w.note_id}:${w.key_point_id}`} className="kok-rise grid gap-2" style={{ ['--i' as string]: i }}>
                       <div className="flex flex-wrap items-center justify-between gap-2">
                         <div className="min-w-0">
                           <p className="truncate font-bold">{t}</p>
@@ -116,8 +131,8 @@ export default function WrongPage() {
 
           <SectionTitle>틀린 문제 {items.length}개</SectionTitle>
           <div className="grid gap-2">
-            {items.map(({ q, lapses }) => (
-              <Card key={q.id} className="grid gap-2">
+            {items.map(({ q, lapses }, i) => (
+              <Card key={q.id} className="kok-rise grid gap-2" style={{ ['--i' as string]: i }}>
                 <button
                   type="button"
                   className="flex items-start gap-2 text-left"

@@ -111,6 +111,30 @@ def make_jpeg(color=(240, 240, 230), w=1600, h=1200) -> bytes:
     return b.getvalue()
 
 
+LIBRARY_SUBJECT = re.compile(r"/library/[0-9a-f-]{36}")
+
+
+async def drag_files(page, files):
+    """파일을 화면 위로 끌고 온다 (놓기 전). files: [(이름, 종류, 내용 bytes)]"""
+    payload = [[n, t, base64.b64encode(b).decode()] for n, t, b in files]
+    await page.evaluate(
+        """(files) => {
+          const dt = new DataTransfer();
+          for (const [name, type, b64] of files) {
+            const bytes = Uint8Array.from(atob(b64), (c) => c.charCodeAt(0));
+            dt.items.add(new File([bytes], name, { type }));
+          }
+          window.__kokDrag = dt;
+          for (const t of ['dragenter', 'dragover']) window.dispatchEvent(new DragEvent(t, { dataTransfer: dt, bubbles: true, cancelable: true }));
+        }""",
+        payload,
+    )
+
+
+async def drop_files(page):
+    await page.evaluate("() => window.dispatchEvent(new DragEvent('drop', { dataTransfer: window.__kokDrag, bubbles: true, cancelable: true }))")
+
+
 async def wait_ready(page, timeout=60):
     t0 = time.time()
     while time.time() - t0 < timeout:
@@ -165,15 +189,29 @@ async def main():
         await page.get_by_label(re.compile("콕에서 쓸 이름")).fill("공부하는 고래")
         await page.get_by_role("button", name="과학", exact=True).click()
         await page.get_by_role("button", name="시작하기").click()
-        await page.wait_for_url("**/add?subject=*")
-        step("add text source")
-        await page.get_by_role("radio", name=re.compile("직접 쓰기")).click()
+        await page.wait_for_url(LIBRARY_SUBJECT)
+        step("quick add: + composer opens, type, Enter")
+        composer = page.get_by_role("dialog", name="자료 넣기")
+        await expect(composer).to_be_visible()
+        assert "compose=1" not in page.url, page.url
+        await shot(page, "06-composer-empty", full=False)
         text = "내가 쓴 광합성 정리. 광합성은 식물이 빛을 받아 물과 이산화탄소로 포도당과 산소를 만드는 과정이다. 엽록체에서 일어난다. 밤에도 광합성을 한다."
-        await page.get_by_label("공부한 내용을 쓰거나 붙여 넣어 주세요").fill(text)
-        await expect(page.get_by_text(re.compile("약 \\d+"))).to_be_visible()
-        await shot(page, "06-add-text")
-        await no_hscroll(page, "add")
-        await page.get_by_role("button", name="완료하고 정리하기").click()
+        box = composer.get_by_label("공부한 내용")
+        await box.fill("짧은 글")
+        await box.press("Enter")  # 20자 안 되면 보내지 않는다
+        await expect(composer).to_be_visible()
+        await box.fill(text)
+        await expect(composer.get_by_text(re.compile("약 \\d+"))).to_be_visible()
+        await shot(page, "06-composer-text", full=False)
+        await no_hscroll(page, "composer")
+        await box.press("Shift+Enter")  # 줄바꿈만
+        await expect(composer).to_be_visible()
+        await box.press("Enter")
+        await expect(composer).to_be_hidden()
+        card = page.locator("main a[href^='/notes/']").first
+        await expect(card).to_be_visible(timeout=15000)
+        await shot(page, "07-library-new-card", full=False)
+        await card.click()
         await page.wait_for_url("**/notes/*")
         await shot(page, "07-processing", full=False)
         ok = await wait_ready(page)
@@ -322,37 +360,87 @@ async def main():
         await page.goto(BASE + "/library")
         await page.wait_for_timeout(600)
         await shot(page, "22-library")
-        await page.get_by_text("과학").first.click()
-        await page.wait_for_url("**/library/*")
+        await no_hscroll(page, "library")
+        await page.get_by_role("tab", name=re.compile("^과학")).click()
+        await page.wait_for_url(LIBRARY_SUBJECT)
+        await expect(page.get_by_role("heading", name="과학", exact=True)).to_be_visible()
         await page.wait_for_timeout(600)
         await shot(page, "23-subject")
+        await page.get_by_role("tab", name=re.compile("^전체")).click()
+        await page.wait_for_url(re.compile(r"/library$"))
         await page.goto(BASE + "/questions")
         await page.wait_for_timeout(800)
         await shot(page, "24-questions-all")
 
-        step("add PDF + photos")
+        step("drop a PDF anywhere → organized automatically")
         import subprocess
         subprocess.run(["psql", "-d", "kokapp", "-qc", "delete from public.energy_ledger where user_id = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'"], check=True)
-        await page.goto(BASE + "/add")
-        await page.get_by_role("radio", name=re.compile("PDF")).click()
-        await page.locator("input[type=file][accept*='pdf']").set_input_files(str(tmp / "sample.pdf"))
-        await expect(page.get_by_text(re.compile("3쪽"))).to_be_visible(timeout=10000)
-        await shot(page, "25-add-pdf", full=False)
-        await page.get_by_role("button", name="정리 시작").click()
-        await page.wait_for_url("**/notes/*")
+        await page.goto(BASE + "/library")
+        await expect(page.locator("main a[href^='/notes/']").first).to_be_visible()
+        await drag_files(page, [("3단원_광합성.pdf", "application/pdf", (tmp / "sample.pdf").read_bytes())])
+        await expect(page.get_by_text("여기에 놓으면 콕이 정리해요")).to_be_visible()
+        await shot(page, "25-drop-overlay", full=False)
+        await drop_files(page)
+        await expect(page.get_by_text("여기에 놓으면 콕이 정리해요")).to_be_hidden()
+        await expect(page.get_by_label("넣는 중인 자료")).to_be_visible()
+        await shot(page, "25-drop-tray", full=False)
+        pdf_card = page.get_by_role("link", name="3단원 광합성", exact=True)
+        await expect(pdf_card).to_be_visible(timeout=60000)
+        await shot(page, "25-library-after-drop", full=False)
+        await pdf_card.click()
         assert await wait_ready(page), "pdf note not ready"
         await page.get_by_role("tab", name="원본").click()
         await expect(page.get_by_role("link", name=re.compile("PDF 열기|쪽 열기"))).to_be_visible()
-        await page.goto(BASE + "/add?kind=image")
-        await page.locator("input[type=file][multiple]").set_input_files([str(tmp / "p1.jpg"), str(tmp / "p2.jpg")])
-        await expect(page.get_by_alt_text("사진 2")).to_be_visible()
-        await shot(page, "26-add-photos", full=False)
-        await page.get_by_role("button", name="정리 시작").click()
-        await page.wait_for_url("**/notes/*", timeout=20000)
+
+        step("unsupported file is refused with a reason")
+        await page.goto(BASE + "/library")
+        await expect(page.locator("main a[href^='/notes/']").first).to_be_visible()
+        await drag_files(page, [("발표.pptx", "application/vnd.openxmlformats-officedocument.presentationml.presentation", b"PK fake")])
+        await drop_files(page)
+        await expect(page.get_by_text(re.compile("PDF로 저장해서 넣어 주세요"))).to_be_visible()
+
+        step("photos attached in the composer, short text becomes the title")
+        await page.get_by_role("button", name="자료 넣기", exact=True).click()
+        composer = page.get_by_role("dialog", name="자료 넣기")
+        await expect(composer).to_be_visible()
+        await composer.locator("input[type=file][multiple]").set_input_files([str(tmp / "p1.jpg"), str(tmp / "p2.jpg")])
+        await expect(composer.get_by_role("list", name="붙인 파일").locator("li")).to_have_count(2)
+        await composer.get_by_label("공부한 내용").fill("세포 학습지")
+        await shot(page, "26-composer-photos", full=False)
+        await composer.get_by_label("공부한 내용").press("Enter")
+        await expect(composer).to_be_hidden()
+        photo_card = page.get_by_role("link", name="세포 학습지", exact=True)
+        await expect(photo_card).to_be_visible(timeout=60000)
+        await photo_card.click()
         assert await wait_ready(page), "photo note not ready"
         await page.get_by_role("tab", name="원본").click()
         await expect(page.get_by_alt_text("원본 사진 1")).to_be_visible()
         await shot(page, "27-photo-original", full=False)
+
+        step("pasting text anywhere opens the composer with that text")
+        await page.goto(BASE + "/library")
+        await expect(page.locator("main a[href^='/notes/']").first).to_be_visible()
+        await page.evaluate(
+            """(text) => {
+              const dt = new DataTransfer();
+              dt.setData('text/plain', text);
+              document.body.dispatchEvent(new ClipboardEvent('paste', { clipboardData: dt, bubbles: true, cancelable: true }));
+            }""",
+            "엽록체는 빛에너지를 화학 에너지로 바꾸는 세포 소기관이에요.",
+        )
+        composer = page.get_by_role("dialog", name="자료 넣기")
+        await expect(composer).to_be_visible()
+        await expect(composer.get_by_label("공부한 내용")).to_have_value(re.compile("엽록체는 빛에너지"))
+        await composer.get_by_label("공부한 내용").fill("")
+        await page.keyboard.press("Escape")
+        await expect(composer).to_be_hidden()
+
+        step("old /add address opens the composer")
+        await page.goto(BASE + "/add")
+        await page.wait_for_url(re.compile(r"/library"))
+        await expect(page.get_by_role("dialog", name="자료 넣기")).to_be_visible()
+        await page.keyboard.press("Escape")
+        await expect(page.get_by_role("dialog", name="자료 넣기")).to_be_hidden()
 
         step("settings")
         await page.goto(BASE + "/settings")
@@ -379,7 +467,7 @@ async def main():
         await page.get_by_label(re.compile("콕에서 쓸 이름")).fill("운영자")
         await page.get_by_label("과목 이름").fill("수학")
         await page.get_by_role("button", name="시작하기").click()
-        await page.wait_for_url("**/add?subject=*")
+        await page.wait_for_url(LIBRARY_SUBJECT)
         await page.goto(BASE + "/admin")
         await expect(page.get_by_text(re.compile("연결됨"))).to_be_visible()
         await page.get_by_role("button", name="키 시험").click()
@@ -413,7 +501,7 @@ async def main():
         await page.get_by_label(re.compile("콕에서 쓸 이름")).fill("다른학생")
         await page.get_by_label("과목 이름").fill("영어")
         await page.get_by_role("button", name="시작하기").click()
-        await page.wait_for_url("**/add?subject=*")
+        await page.wait_for_url(LIBRARY_SUBJECT)
         await page.goto(BASE + "/library")
         await page.wait_for_timeout(800)
         body = await page.locator("main").inner_text()
@@ -427,8 +515,10 @@ async def main():
         step("dark phone note")
         ctx, page = await new_ctx(browser, "student", scheme="dark")
         await page.goto(BASE + "/library")
-        await page.get_by_text("과학").first.click()
-        await page.wait_for_url("**/library/*")
+        await page.wait_for_timeout(500)
+        await shot(page, "32-library-dark")
+        await page.get_by_role("tab", name=re.compile("^과학")).click()
+        await page.wait_for_url(LIBRARY_SUBJECT)
         await page.get_by_role("link", name=re.compile("광합성")).first.click()
         await wait_ready(page)
         await shot(page, "32-note-dark")

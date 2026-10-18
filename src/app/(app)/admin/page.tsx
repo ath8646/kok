@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useMe } from '@/components/AppShell';
 import { QuestionPreview } from '@/components/QuestionList';
-import { Button, Card, Chip, EmptyState, Field, SectionTitle, Segmented, Toggle, api, cx, inputClass, useToast } from '@/components/ui';
+import { Button, Card, Chip, EmptyState, Field, LargeHeader, SectionTitle, Segmented, Toggle, api, cx, inputClass, useToast } from '@/components/ui';
 import { costMultiplier } from '@/lib/ai/models';
 import type { Limits, ModelsConfig, Notice } from '@/lib/settings';
 import type { QuestionRow } from '@/lib/types';
@@ -127,7 +127,13 @@ export default function AdminPage() {
 
   if (!me) return null;
   if (!me.isAdmin) return <EmptyState title="관리자만 볼 수 있어요" />;
-  if (!ov || !limits || !models || !notice || !site) return <div className="h-48 animate-pulse rounded-2xl bg-surface-2" />;
+  if (!ov || !limits || !models || !notice || !site)
+    return (
+      <div className="grid gap-3">
+        <LargeHeader title="관리자" subtitle=" " />
+        <div className="kok-card kok-shimmer h-48" />
+      </div>
+    );
 
   const saveSetting = async (key: string, value: unknown, label: string) => {
     setBusy(key);
@@ -148,7 +154,7 @@ export default function AdminPage() {
 
   return (
     <div className="grid gap-2 pb-10">
-      <h1 className="font-display text-2xl">관리자</h1>
+      <LargeHeader title="관리자" subtitle="키 상태 · 사용량 · 신고 · 운영 설정" />
 
       <SectionTitle>API 키 상태</SectionTitle>
       <Card className="grid gap-3">

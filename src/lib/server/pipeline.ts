@@ -25,7 +25,7 @@ import { appendMergePrompt, checkPrompt, mergePrompt, organizePrompt, quizPrompt
 import { growthOfParts, keepFromCurrent, mergeFits, noteForMerge, remergeState, MERGE_OUT_TOKENS, NOTE_TOO_LONG } from '@/lib/append-merge';
 import { modelForTier, type AiTask, type UserSettings } from '@/lib/settings';
 import { planChunks, slicePdf, splitPdfBySize, splitText, PdfError } from '@/lib/pdf';
-import { questionsForSolve, readSolution } from '@/lib/figure/solution';
+import { questionsForSolve, readSolution, stepsReachAnswer } from '@/lib/figure/solution';
 import { getAccount, getAppSettings, getFeatures, charge, refundSource, type Account, type AppSettings } from './account';
 import { AiCallError, callJson, imageBlock, pdfBlock, textBlock, usageOf, type ContentPart } from './claude';
 import { UserFacingError } from './errors';
@@ -466,6 +466,11 @@ async function solveRound(ctx: Ctx, note: Note, questions: QuestionDraftRow[]): 
     if (!open.includes(sol.index) || out[sol.index].steps) continue;
     const solution = readSolution(sol);
     if (!solution) continue;
+    // 마지막 단계가 표시된 정답과 분명히 다른 답을 말하면 붙이지 않는다 (다른 답으로 가는 풀이를 보여 주지 않게. 문제는 그대로)
+    if (!stepsReachAnswer(sol.steps, out[sol.index])) {
+      console.warn('[kok] solve: steps reach a different answer, solution dropped');
+      continue;
+    }
     out[sol.index] = { ...out[sol.index], figure: solution.figure, steps: solution.steps };
     added++;
   }

@@ -193,7 +193,7 @@ export const SOLVE_METHOD = [
 /** 단계 풀이를 쓰는 법 (figures: 그림과 이어지는 add·focus 를 쓰는지) */
 export function stepRules(figures: boolean): string {
   return [
-    '- steps: 2 to 6 steps. Each step is one small idea in 1 or 2 short Korean sentences (해요체), with math as $...$. The last step states the answer.',
+    '- steps: 2 to 6 steps. Each step is one small idea in 1 or 2 short Korean sentences (해요체), with math as $...$. The last step states the final answer plainly, like "정답은 ③ 5 cm예요." (multiple choice: the choice number and its value; O/X: "정답은 O예요.").',
     figures
       ? [
           '- add: ids of figure items that first appear in this step (helper lines, results, the answer). focus: ids of figure items to highlight in this step. Use [] when there is no figure.',
@@ -280,7 +280,7 @@ export function chatSolveRules(o: { figures: boolean; note: boolean }): string {
     '  - If there are several problems and the student did not say which one, solve the first one and say in reply that they can ask for the others.',
     '  - If the photo or file also shows an answer or a solution (an answer key, a note, an earlier reply), do not copy it and do not trust it: solve the problem yourself, then say in reply whether that answer is right.',
     '  - reply: one or two sentences with exactly the same final answer as your last step and solution.question (the same choice number and value); the steps hold the details. If your steps reached an answer you did not expect, recheck them and go with the checked steps. Never let the reply and the steps disagree.',
-    '  - solution.steps: 2 to 6 steps. Each step is one small idea in 1 or 2 short Korean sentences (해요체), with math as $...$. The last step states the answer.',
+    '  - solution.steps: 2 to 6 steps. Each step is one small idea in 1 or 2 short Korean sentences (해요체), with math as $...$. The last step states the final answer plainly, like "정답은 ③ 5 cm예요." (multiple choice: the choice number and its value; O/X: "정답은 O예요.").',
     o.figures
       ? [
           '  - In each step, add lists the ids of figure items that first appear in that step (helper lines, results, the answer), and focus lists the ids of figure items to highlight in that step. Use [] when there is no figure.',

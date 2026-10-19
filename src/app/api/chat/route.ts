@@ -7,7 +7,8 @@ import { getAppSettings, limitsFor } from '@/lib/server/account';
 import { UserFacingError, errorResponse } from '@/lib/server/errors';
 import { runTaskFull } from '@/lib/server/tasks';
 import { textBlock } from '@/lib/server/claude';
-import { chatFileBlocks, finishReply, readChatFiles, readChatSolution, zChatAttachments } from '@/lib/server/chat-input';
+import { chatFileBlocks, readChatFiles, zChatAttachments } from '@/lib/server/chat-input';
+import { readChatAnswer } from '@/lib/chat-solution';
 import { HOME_CHAT_SYSTEM, homeChatPrompt, wrap } from '@/lib/ai/prompts';
 import { homeChatJsonSchema, zHomeChat } from '@/lib/ai/schemas';
 import type { HomeChatReply } from '@/lib/chat';
@@ -74,9 +75,9 @@ export async function POST(req: NextRequest) {
       think: true,
     });
     const out = zHomeChat.parse(res.json);
-    const solution = readChatSolution(out.solution, { figures });
-    // 꾸밈 기호를 걷어 내고, 답 글이 풀이와 다른 답을 말하지 않게 맞춘다
-    const reply = finishReply(out.reply, solution);
+    // 풀이를 읽고 마지막 단계·넣을 문제의 정답·답 글이 같은 답을 말하게 맞춘다 (꾸밈 기호도 걷어 낸다)
+    const { solution, reply, check } = readChatAnswer(out.reply, out.solution, { figures });
+    if (check !== 'none') console.warn(`[kok] ask: steps and question disagreed (${check})`);
     const body: HomeChatReply = { reply, solution, energy: Math.round(res.energy * 1000) / 1000, model: res.model };
     return Response.json({ ok: true, ...body });
   } catch (e) {

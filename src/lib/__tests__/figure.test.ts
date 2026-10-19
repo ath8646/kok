@@ -238,3 +238,70 @@ describe('그림 풀이 받기 (readSolution)', () => {
     expect(back.figure?.items.map((i) => i.id)).toEqual(['A', 'B', 'C', 'BC']);
   });
 });
+
+describe('그림 풀이의 마지막 단계가 정답에 닿는지 (stepsReachAnswer)', () => {
+  const steps = (...texts: string[]) => texts.map((text) => ({ text, add: [], focus: [] }));
+  const mcq = (answer: number) => ({ type: 'mcq', choices: ['3 cm', '4 cm', '5 cm', '6 cm'], answer });
+
+  it('객관식: 마지막 단계가 다른 번호·다른 보기의 값을 말하면 false', async () => {
+    const { stepsReachAnswer } = await import('@/lib/figure/solution');
+    const s = steps('피타고라스 정리를 써요.', '$\\sqrt{3^2 + 4^2} = 5$예요. 정답은 ③ 5 cm예요.');
+    expect(stepsReachAnswer(s, mcq(2))).toBe(true);
+    expect(stepsReachAnswer(s, mcq(3))).toBe(false);
+    // 번호 없이 값만: 그 값이 다른 보기와 같으면 다른 답
+    expect(stepsReachAnswer(steps('식을 세워요.', '따라서 빗변은 $5$ cm예요.'), mcq(2))).toBe(true);
+    expect(stepsReachAnswer(steps('식을 세워요.', '따라서 빗변은 $5$ cm예요.'), mcq(1))).toBe(false);
+    // 번호와 값이 서로 다른 보기를 가리키면 (③ 6 cm) 믿을 수 없다
+    expect(stepsReachAnswer(steps('식을 세워요.', '정답은 ③ 6 cm예요.'), mcq(2))).toBe(false);
+  });
+
+  it('O/X·단답: 반대·다른 수를 분명히 말할 때만 false', async () => {
+    const { stepsReachAnswer } = await import('@/lib/figure/solution');
+    const ox = (answer: boolean) => ({ type: 'ox', choices: null, answer });
+    expect(stepsReachAnswer(steps('엽록체에서 일어나요.', '정답은 O예요.'), ox(true))).toBe(true);
+    expect(stepsReachAnswer(steps('엽록체에서 일어나요.', '정답은 O예요.'), ox(false))).toBe(false);
+    // '옳아요'·'틀려요' 만으로는 O/X 를 정하지 않는다
+    expect(stepsReachAnswer(steps('엽록체에서 일어나요.', '그래서 이 설명은 옳아요.'), ox(false))).toBe(true);
+    const short = (answer: string, accepted: string[] = []) => ({ type: 'short', choices: null, answer, accepted });
+    const x3 = steps('식을 정리해요.', '따라서 $x = 3$이에요.');
+    expect(stepsReachAnswer(x3, short('3'))).toBe(true);
+    expect(stepsReachAnswer(x3, short('x = 3'))).toBe(true);
+    expect(stepsReachAnswer(x3, short('4'))).toBe(false);
+    expect(stepsReachAnswer(x3, short('4', ['3']))).toBe(true);
+    // 말로 된 답은 같은 뜻인지 알 수 없어서 버리지 않는다
+    expect(stepsReachAnswer(steps('세포 호흡이 일어나요.', '따라서 정답은 미토콘드리아예요.'), short('사립체'))).toBe(true);
+  });
+
+  it('앞 단계의 중간 값은 보지 않고, 마지막 단계가 답을 분명히 말하지 않으면 그대로 둔다', async () => {
+    const { stepsReachAnswer } = await import('@/lib/figure/solution');
+    const key = { type: 'mcq', choices: ['0', '$\\frac{1}{6}$', '$\\frac{1}{3}$', '1', '발산'], answer: 3 };
+    expect(stepsReachAnswer(steps('$\\frac{1}{6}$ 과 $\\frac{1}{3}$ 이 나와요.', '따라서 극한값은 $1$이에요.'), key)).toBe(true);
+    expect(stepsReachAnswer(steps('분모를 전개해요.', '분자와 분모의 최고차항 계수가 같아요.'), key)).toBe(true);
+    // 다른 보기를 설명하는 문장, 값을 여럿 말한 문장, 서로 다른 답을 말한 단계는 읽지 않는다
+    expect(stepsReachAnswer(steps('계산해요.', '②는 분자를 잘못 나눈 값이라 틀려요.'), key)).toBe(true);
+    expect(stepsReachAnswer(steps('계산해요.', '따라서 $a = 2$, $b = 3$이에요.'), { type: 'short', choices: null, answer: '5' })).toBe(true);
+    expect(stepsReachAnswer(steps('계산해요.', '정답은 ②번이에요. 정답은 ④번이에요.'), key)).toBe(true);
+    expect(stepsReachAnswer([], key)).toBe(true);
+    expect(stepsReachAnswer(null, key)).toBe(true);
+  });
+
+  it('AI 가 준 그대로의 단계를 본다: 화면에서 잘리는 9번째 단계가 다른 답을 말해도 false', async () => {
+    const { stepsReachAnswer, readSolution } = await import('@/lib/figure/solution');
+    const raw = steps(...Array.from({ length: 8 }, (_, i) => `${i + 1}단계 계산이에요.`), '따라서 정답은 ② $\\frac{1}{6}$이에요.');
+    expect(readSolution({ steps: raw, figure: null })!.steps).toHaveLength(8);
+    expect(stepsReachAnswer(raw, { type: 'mcq', choices: ['0', '$\\frac{1}{6}$', '$\\frac{1}{3}$', '1'], answer: 3 })).toBe(false);
+  });
+
+  it('읽은 문제에 ①부터 적힌 보기', async () => {
+    const { listedChoices } = await import('@/lib/figure/solution');
+    expect([...listedChoices('값은? ① 0 ② 1/6 ③ 1/3 ④ 1 ⑤ 발산\n(단, n은 자연수)')]).toEqual([
+      [1, '0'],
+      [2, '1/6'],
+      [3, '1/3'],
+      [4, '1'],
+      [5, '발산'],
+    ]);
+    // 차례대로 적혀 있지 않으면 보기 목록으로 보지 않는다
+    expect(listedChoices('조건 ③ 을 쓰면 ① 이 돼요').size).toBe(0);
+  });
+});

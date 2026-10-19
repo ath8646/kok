@@ -8,7 +8,7 @@ import { runTaskFull } from '@/lib/server/tasks';
 import { textBlock } from '@/lib/server/claude';
 import { solvePrompt, wrap } from '@/lib/ai/prompts';
 import { solveJsonSchema, zNote, zSolve } from '@/lib/ai/schemas';
-import { questionsForSolve, readSolution } from '@/lib/figure/solution';
+import { questionsForSolve, readSolution, stepsReachAnswer } from '@/lib/figure/solution';
 import { THINK_OUT } from '@/lib/ai/models';
 
 // 먼저 생각하고 답해서 조금 오래 걸릴 수 있다 (AI 기다리기는 이보다 짧게)
@@ -27,7 +27,7 @@ export async function POST(req: NextRequest, ctx: RouteContext<'/api/questions/[
 
     const { data: q, error } = await admin
       .from('questions')
-      .select('id, user_id, note_id, type, prompt, choices, answer, explanation, steps, updated_at')
+      .select('id, user_id, note_id, type, prompt, choices, answer, accepted, explanation, steps, updated_at')
       .eq('id', id)
       .maybeSingle();
     if (error) throw error;
@@ -74,8 +74,14 @@ export async function POST(req: NextRequest, ctx: RouteContext<'/api/questions/[
       think: true,
     });
     const sols = zSolve.parse(json).solutions;
-    const solution = readSolution(sols.find((s) => s.index === 0) ?? sols[0]);
+    const picked = sols.find((s) => s.index === 0) ?? sols[0];
+    const solution = readSolution(picked);
     if (!solution) throw new UserFacingError('no_solution', '풀이를 만들지 못했어요. 다시 해 주세요.', 502);
+    // 마지막 단계가 이 문제의 정답과 분명히 다른 답을 말하면 넣지 않는다 (직접 만든 문제는 정답이 틀렸을 수도 있어서 알려 준다)
+    const key = { type: String(q.type), choices: (q.choices as string[] | null) ?? null, answer: q.answer, accepted: (q.accepted as string[] | null) ?? [] };
+    if (!stepsReachAnswer(picked?.steps, key)) {
+      throw new UserFacingError('solution_mismatch', '풀이의 답이 이 문제의 정답과 달라서 넣지 않았어요. 정답이 맞는지 확인하고 다시 해 주세요.', 422);
+    }
 
     // 그사이 문제를 고쳤으면 덮어쓰지 않는다 (고친 문제에 맞지 않는 풀이일 수 있다)
     const { data: saved, error: upErr } = await admin

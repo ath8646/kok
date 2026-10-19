@@ -10,16 +10,8 @@ import { loadOwnedNote, noteForPrompt } from '@/lib/server/notes';
 import { runTaskFull } from '@/lib/server/tasks';
 import { textBlock } from '@/lib/server/claude';
 import { removeFolder } from '@/lib/server/files';
-import {
-  chatAttachmentMetas,
-  chatFileBlocks,
-  chatFolder,
-  finishReply,
-  historyLine,
-  readChatFiles,
-  readChatSolution,
-  zChatAttachments,
-} from '@/lib/server/chat-input';
+import { chatAttachmentMetas, chatFileBlocks, chatFolder, historyLine, readChatFiles, zChatAttachments } from '@/lib/server/chat-input';
+import { readChatAnswer } from '@/lib/chat-solution';
 import { CHAT_SYSTEM, chatPrompt, wrap } from '@/lib/ai/prompts';
 import { noteChatJsonSchema, toQuestionRow, zChat, zQuizItem } from '@/lib/ai/schemas';
 import { FILE_ONLY_CONTENT, type ChatAttachmentMeta, type ChatProposal, type ChatSolution } from '@/lib/chat';
@@ -99,7 +91,9 @@ export async function POST(req: NextRequest, ctx: RouteContext<'/api/notes/[id]/
       think: true,
     });
     const out = zChat.parse(res.json);
-    const solution = solve ? readChatSolution(out.solution, { figures }) : null;
+    // 풀이를 읽고 마지막 단계·넣을 문제의 정답·답 글이 같은 답을 말하게 맞춘다 (화면은 굵은 글씨 같은 꾸밈 기호를 쓰지 않아서 걷어 낸다)
+    const { solution, reply, check } = readChatAnswer(out.reply, solve ? out.solution : undefined, { figures });
+    if (check !== 'none') console.warn(`[kok] chat: steps and question disagreed (${check})`);
 
     // 넣자고 한 것: 설정에서 켠 것만, 쓸 수 있는 것만 남긴다
     let proposal: ChatProposal = { kind: 'none', outside: out.outside_note };
@@ -127,8 +121,6 @@ export async function POST(req: NextRequest, ctx: RouteContext<'/api/notes/[id]/
       solve && files.length ? await chatAttachmentMetas(admin, files, acc.keepFiles ? { userId: acc.userId, sourceId: note.source_id } : null) : null;
 
     const now = Date.now();
-    // 화면은 굵은 글씨 같은 꾸밈 기호를 쓰지 않는다 (지시해도 가끔 붙여서 걷어 낸다). 답 글이 풀이와 다른 답을 말하지 않게 맞춘다
-    const reply = finishReply(out.reply, solution);
     // 여러 행을 한 번에 넣을 때 빠진 칸은 기본값이 아니라 null 이 되므로 칸을 모두 적는다
     const extra = (a: ChatAttachmentMeta[] | null, sol: ChatSolution | null) => (solve ? { attachments: a, solution: sol } : {});
     const { data: saved, error } = await admin

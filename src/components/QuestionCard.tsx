@@ -1,10 +1,12 @@
 'use client';
-// 복습 문제 한 개: 풀기 → 채점 → 해설 → 평가 고르기
+// 복습 문제 한 개: 풀기 → 채점 → 해설 → 평가 고르기.
+// 채점 움직임(globals.css '채점'): 맞으면 고른 칸이 살짝 부풀고 체크가 톡, 틀리면 고른 칸이 작게 흔들리고 조금 뒤 정답 칸에 체크.
+// 다음 문제는 살짝 떠오르며 나타난다 (첫 문제는 제자리에)
 import { useEffect, useRef, useState } from 'react';
 import type { Rating } from '@/lib/grading';
 import { QuestionFigure, StepsDisclosure, useSolution } from './figure/SolutionView';
 import { RichText } from './RichText';
-import { Button, Chip, cx, inputClass, Spinner } from './ui';
+import { Button, Chip, ICONS, Icon, cx, inputClass, Spinner } from './ui';
 import { pageLabel } from './NoteView';
 
 export type ReviewQuestion = {
@@ -40,6 +42,28 @@ export function answerText(q: ReviewQuestion): string {
   if (q.type === 'mcq') return q.choices?.[Number(q.answer)] ?? '';
   if (q.type === 'ox') return q.answer ? 'O (맞다)' : 'X (틀리다)';
   return String(q.answer ?? '');
+}
+
+/** 채점 뒤 보기 칸의 표시: right 내가 맞힌 정답, reveal 틀렸을 때 알려 주는 정답, wrong 내가 고른 틀린 답 */
+type MarkState = 'none' | 'right' | 'reveal' | 'wrong';
+
+/** 동그란 표시: 정답은 체크(톡 나타남, 틀렸을 때는 흔들림 뒤에), 내가 고른 틀린 답은 엑스 */
+function ResultMark({ state, className, size = 'sm' }: { state: Exclude<MarkState, 'none'>; className?: string; size?: 'sm' | 'lg' }) {
+  const ok = state !== 'wrong';
+  return (
+    <span
+      className={cx(
+        'grid shrink-0 place-items-center rounded-full text-surface',
+        size === 'lg' ? 'h-8 w-8' : 'h-6 w-6',
+        ok ? 'kok-check-in bg-ok' : 'bg-bad',
+        state === 'reveal' && 'is-late',
+        className,
+      )}
+      aria-hidden="true"
+    >
+      <Icon d={ok ? ICONS.check : ICONS.close} size={(size === 'lg' ? 18 : 14) - (ok ? 0 : 2)} strokeWidth={3} />
+    </span>
+  );
 }
 
 function Prompt({ q }: { q: ReviewQuestion }) {
@@ -95,7 +119,9 @@ export function QuestionCard({
   const [rating, setRating] = useState<Rating>(3);
   const [appealed, setAppealed] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
+  const resultTitle = useRef<HTMLParagraphElement>(null);
   const solution = useSolution(q);
+  const graded = !!outcome;
 
   useEffect(() => {
     started.current = Date.now();
@@ -119,6 +145,18 @@ export function QuestionCard({
       setBusy(false);
     }
   };
+
+  // 채점 결과가 화면 아래에 가려져 있으면 결과 제목이 보이게 부드럽게 내린다 (글로 답했으면 자판이 닫히는 것을 조금 기다린다)
+  useEffect(() => {
+    if (!graded) return;
+    const t = setTimeout(() => {
+      const r = resultTitle.current?.getBoundingClientRect();
+      if (!r || r.bottom <= window.innerHeight - 16) return;
+      const reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+      window.scrollBy({ top: r.top - window.innerHeight * 0.4, behavior: reduce ? 'auto' : 'smooth' });
+    }, 120);
+    return () => clearTimeout(t);
+  }, [graded]);
 
   const givenText =
     given === null ? '(모르겠어요)' : q.type === 'mcq' ? (q.choices?.[Number(given)] ?? '') : q.type === 'ox' ? (given ? 'O' : 'X') : String(given);
@@ -152,8 +190,11 @@ export function QuestionCard({
     return () => window.removeEventListener('keydown', onKey);
   });
 
+  const resultTitleText = outcome ? (outcome.correct ? (outcome.partial ? '거의 맞았어요!' : '맞았어요!') : '아쉬워요') : '';
+
   return (
-    <div className="grid gap-4">
+    // 다음 문제는 살짝 떠오르며 나타난다 (부모가 문제마다 key 를 바꿔 새로 만든다)
+    <div className={cx('grid gap-4', (index ?? 0) > 0 && 'kok-q-in')}>
       <div className="flex flex-wrap items-center gap-2 text-sm text-muted">
         {typeof index === 'number' && total ? (
           <span className="font-semibold text-ink">
@@ -176,8 +217,9 @@ export function QuestionCard({
           <div className="mt-4 grid gap-2">
             {q.choices.map((c, i) => {
               const picked = given === i;
-              const right = outcome && Number(q.answer) === i;
-              const wrong = outcome && picked && !right;
+              const right = !!outcome && Number(q.answer) === i;
+              const wrong = !!outcome && picked && !right;
+              const mark: MarkState = right ? (picked ? 'right' : 'reveal') : wrong ? 'wrong' : 'none';
               return (
                 <button
                   key={i}
@@ -185,12 +227,21 @@ export function QuestionCard({
                   disabled={!!outcome || busy}
                   onClick={() => submit(i)}
                   className={cx(
-                    'flex items-start gap-3 rounded-2xl border-2 px-4 py-3 text-left text-[16px] transition-colors',
+                    'flex items-start gap-3 rounded-2xl border-2 px-4 py-3 text-left text-[16px] transition-[color,background-color,border-color,opacity] duration-200',
                     right ? 'border-ok bg-ok-soft' : wrong ? 'border-bad bg-bad-soft' : 'border-line bg-surface hover:border-accent',
                     outcome && !right && !wrong ? 'opacity-60' : '',
+                    mark === 'right' && 'kok-boop',
+                    mark === 'wrong' && 'kok-shake',
                   )}
                 >
-                  <span className="mt-0.5 grid h-6 w-6 shrink-0 place-items-center rounded-full border border-line text-xs font-bold">{i + 1}</span>
+                  {mark === 'none' ? (
+                    <span className="mt-0.5 grid h-6 w-6 shrink-0 place-items-center rounded-full border border-line text-xs font-bold">{i + 1}</span>
+                  ) : (
+                    <>
+                      <ResultMark state={mark} className="mt-0.5" />
+                      <span className="sr-only">{mark === 'wrong' ? '내가 고른 답: ' : '정답: '}</span>
+                    </>
+                  )}
                   <span className="min-w-0">
                     <RichText text={c} />
                   </span>
@@ -204,8 +255,9 @@ export function QuestionCard({
           <div className="mt-4 grid grid-cols-2 gap-3">
             {[true, false].map((v) => {
               const picked = given === v;
-              const right = outcome && Boolean(q.answer) === v;
-              const wrong = outcome && picked && !right;
+              const right = !!outcome && Boolean(q.answer) === v;
+              const wrong = !!outcome && picked && !right;
+              const mark: MarkState = right ? (picked ? 'right' : 'reveal') : wrong ? 'wrong' : 'none';
               return (
                 <button
                   key={String(v)}
@@ -214,11 +266,15 @@ export function QuestionCard({
                   onClick={() => submit(v)}
                   aria-label={v ? 'O 맞다' : 'X 틀리다'}
                   className={cx(
-                    'rounded-2xl border-2 py-6 font-display text-4xl transition-colors',
+                    'relative rounded-2xl border-2 py-6 font-display text-4xl transition-[color,background-color,border-color,opacity] duration-200',
                     right ? 'border-ok bg-ok-soft text-ok' : wrong ? 'border-bad bg-bad-soft text-bad' : 'border-line bg-surface hover:border-accent',
+                    outcome && !right && !wrong ? 'opacity-60' : '',
+                    mark === 'right' && 'kok-boop',
+                    mark === 'wrong' && 'kok-shake',
                   )}
                 >
                   {v ? 'O' : 'X'}
+                  {mark === 'right' || mark === 'reveal' ? <ResultMark state={mark} className="absolute right-2.5 top-2.5" /> : null}
                 </button>
               );
             })}
@@ -227,24 +283,32 @@ export function QuestionCard({
 
         {q.type === 'cloze' || q.type === 'short' ? (
           <form
-            className="mt-4 flex gap-2"
+            // '모르겠어요'는 틀린 답을 낸 것이 아니라서 흔들지 않는다
+            className={cx('mt-4 flex gap-2', outcome && !outcome.correct && given !== null && 'kok-shake')}
             onSubmit={(e) => {
               e.preventDefault();
               if (text.trim()) submit(text.trim());
             }}
           >
-            <input
-              ref={inputRef}
-              aria-label="답"
-              className={inputClass}
-              value={outcome ? String(given ?? '') : text}
-              disabled={!!outcome || busy}
-              maxLength={200}
-              placeholder="답을 적어 주세요"
-              autoComplete="off"
-              autoCapitalize="off"
-              onChange={(e) => setText(e.target.value)}
-            />
+            <div className="relative min-w-0 flex-1">
+              <input
+                ref={inputRef}
+                aria-label="답"
+                className={cx(
+                  inputClass,
+                  'transition-[border-color,background-color] duration-200',
+                  outcome && given !== null && (outcome.correct ? 'border-ok! bg-ok-soft! pr-12' : 'border-bad! bg-bad-soft! pr-12'),
+                )}
+                value={outcome ? String(given ?? '') : text}
+                disabled={!!outcome || busy}
+                maxLength={200}
+                placeholder="답을 적어 주세요"
+                autoComplete="off"
+                autoCapitalize="off"
+                onChange={(e) => setText(e.target.value)}
+              />
+              {outcome && given !== null ? <ResultMark state={outcome.correct ? 'right' : 'wrong'} className="absolute right-3 top-1/2 -mt-3" /> : null}
+            </div>
             {!outcome ? (
               <Button type="submit" busy={busy} disabled={!text.trim()}>
                 확인
@@ -267,9 +331,15 @@ export function QuestionCard({
 
       {/* 채점 결과 */}
       {outcome ? (
-        <div className={cx('grid gap-3 rounded-3xl border-2 p-5', outcome.correct ? 'border-ok bg-ok-soft' : 'border-bad bg-bad-soft')} role="status">
-          <p className={cx('font-display text-2xl', outcome.correct ? 'text-ok' : 'text-bad')}>
-            {outcome.correct ? (outcome.partial ? '거의 맞았어요!' : '맞았어요!') : '아쉬워요'}
+        <div
+          className={cx('kok-result-in grid gap-3 rounded-3xl border-2 p-5', outcome.correct ? 'border-ok bg-ok-soft' : 'border-bad bg-bad-soft')}
+          role="status"
+        >
+          <p ref={resultTitle} className={cx('flex items-center gap-2.5 font-display text-2xl', outcome.correct ? 'text-ok' : 'text-bad')}>
+            <ResultMark key={outcome.correct ? 'ok' : 'bad'} state={outcome.correct ? 'reveal' : 'wrong'} size="lg" />
+            <span key={resultTitleText} className="kok-swap">
+              {resultTitleText}
+            </span>
           </p>
           {!outcome.correct || q.type === 'short' || q.type === 'cloze' ? (
             <p className="text-[15px]">

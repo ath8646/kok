@@ -240,6 +240,11 @@ export function ReviewSession({
     return () => setFocus(false);
   }, [practice, setFocus]);
 
+  // 다음 문제는 맨 위에서 시작한다 (긴 해설을 내려 읽었어도 새 문제가 처음부터 보이게. 새 문제가 나타나는 움직임이 있으니 스크롤은 바로)
+  useLayoutEffect(() => {
+    if (phase === 'run' && idx > 0 && window.scrollY > 0) window.scrollTo({ top: 0, behavior: 'instant' });
+  }, [idx, phase]);
+
   const applyLoaded = useCallback(
     (r: Loaded) => {
       setPlan(r.plan);

@@ -171,4 +171,4 @@ export async function removeChatFolders(admin: SupabaseClient, userId: string, s
   for (const id of found) await removeFolder(admin, chatFolder(userId, id));
 }
 
-export { historyLine, readChatSolution } from '@/lib/chat-solution';
+export { finishReply, historyLine, readChatSolution } from '@/lib/chat-solution';

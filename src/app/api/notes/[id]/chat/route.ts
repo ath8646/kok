@@ -10,7 +10,16 @@ import { loadOwnedNote, noteForPrompt } from '@/lib/server/notes';
 import { runTaskFull } from '@/lib/server/tasks';
 import { textBlock } from '@/lib/server/claude';
 import { removeFolder } from '@/lib/server/files';
-import { chatAttachmentMetas, chatFileBlocks, chatFolder, historyLine, readChatFiles, readChatSolution, zChatAttachments } from '@/lib/server/chat-input';
+import {
+  chatAttachmentMetas,
+  chatFileBlocks,
+  chatFolder,
+  finishReply,
+  historyLine,
+  readChatFiles,
+  readChatSolution,
+  zChatAttachments,
+} from '@/lib/server/chat-input';
 import { CHAT_SYSTEM, chatPrompt, wrap } from '@/lib/ai/prompts';
 import { noteChatJsonSchema, toQuestionRow, zChat, zQuizItem } from '@/lib/ai/schemas';
 import { FILE_ONLY_CONTENT, type ChatAttachmentMeta, type ChatProposal, type ChatSolution } from '@/lib/chat';
@@ -118,13 +127,8 @@ export async function POST(req: NextRequest, ctx: RouteContext<'/api/notes/[id]/
       solve && files.length ? await chatAttachmentMetas(admin, files, acc.keepFiles ? { userId: acc.userId, sourceId: note.source_id } : null) : null;
 
     const now = Date.now();
-    // 화면은 굵은 글씨 같은 꾸밈 기호를 쓰지 않는다 (지시해도 가끔 붙여서 걷어 낸다)
-    const reply =
-      out.reply
-        .replace(/\*\*([^*\n]+)\*\*/g, '$1')
-        .replace(/^#{1,6}\s+/gm, '')
-        .trim()
-        .slice(0, 8000) || (solution ? '풀이를 정리했어요.' : '답을 만들지 못했어요. 다시 물어봐 주세요.');
+    // 화면은 굵은 글씨 같은 꾸밈 기호를 쓰지 않는다 (지시해도 가끔 붙여서 걷어 낸다). 답 글이 풀이와 다른 답을 말하지 않게 맞춘다
+    const reply = finishReply(out.reply, solution);
     // 여러 행을 한 번에 넣을 때 빠진 칸은 기본값이 아니라 null 이 되므로 칸을 모두 적는다
     const extra = (a: ChatAttachmentMeta[] | null, sol: ChatSolution | null) => (solve ? { attachments: a, solution: sol } : {});
     const { data: saved, error } = await admin

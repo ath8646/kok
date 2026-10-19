@@ -221,20 +221,23 @@ const proposalSchema = obj({
   note_addition: obj({ key_point_id: str, title: str, text: str }),
 });
 
-/** 노트 채팅. solve: 문제 풀이 칸까지 (schema.sql 을 다시 실행하기 전에는 빼고 예전처럼) */
+/**
+ * 노트 채팅. solve: 문제 풀이 칸까지 (schema.sql 을 다시 실행하기 전에는 빼고 예전처럼).
+ * AI 는 JSON 을 칸 순서대로 쓴다: 풀이(단계)를 먼저 쓰고 답 글을 나중에 써야 답이 단계와 어긋나지 않는다
+ */
 export function noteChatJsonSchema(o: { solve: boolean; figures: boolean }): JsonSchema {
   return obj({
+    ...(o.solve ? { solution: chatSolutionSchema(o.figures) } : {}),
     reply: str,
     // 노트 밖 일반 지식을 보탰는지 (화면에 표시)
     outside_note: { type: 'boolean' },
     proposal: proposalSchema,
-    ...(o.solve ? { solution: chatSolutionSchema(o.figures) } : {}),
   });
 }
 
-/** 홈 AI 채팅 (노트 없이 아무 과목이나) */
+/** 홈 AI 채팅 (노트 없이 아무 과목이나). 풀이를 먼저, 답 글은 마지막에 */
 export function homeChatJsonSchema(figures: boolean): JsonSchema {
-  return obj({ reply: str, solution: chatSolutionSchema(figures) });
+  return obj({ solution: chatSolutionSchema(figures), reply: str });
 }
 
 /** 받은 풀이 (검사는 readChatSolution 이 한다) */

@@ -275,10 +275,11 @@ export type ChatOptions = {
 /** 채팅에서 문제를 풀어 줄 때의 규칙 (노트 채팅·홈 AI 채팅) */
 export function chatSolveRules(o: { figures: boolean; note: boolean }): string {
   return [
-    '- If the student sends a problem to solve (typed, or in an attached photo or file), solve it and set solution.include to true:',
+    '- If the student sends a problem to solve (typed, or in an attached photo or file), solve it and set solution.include to true. Write solution first and reply last: work the problem out in the steps, and only then state the answer in reply.',
     '  - solution.problem: the problem as you read it, in plain text with its choices, so the student can check that you read it right. If part of a photo is unclear, say in reply what you could not read.',
     '  - If there are several problems and the student did not say which one, solve the first one and say in reply that they can ask for the others.',
-    '  - reply: one or two sentences with the final answer; the steps hold the details.',
+    '  - If the photo or file also shows an answer or a solution (an answer key, a note, an earlier reply), do not copy it and do not trust it: solve the problem yourself, then say in reply whether that answer is right.',
+    '  - reply: one or two sentences with exactly the same final answer as your last step and solution.question (the same choice number and value); the steps hold the details. If your steps reached an answer you did not expect, recheck them and go with the checked steps. Never let the reply and the steps disagree.',
     '  - solution.steps: 2 to 6 steps. Each step is one small idea in 1 or 2 short Korean sentences (해요체), with math as $...$. The last step states the answer.',
     o.figures
       ? [

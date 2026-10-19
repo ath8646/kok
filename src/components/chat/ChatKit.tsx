@@ -5,7 +5,7 @@ import { RichText } from '@/components/RichText';
 import { StepPlayer } from '@/components/figure/StepPlayer';
 import { ICONS, Icon, Spinner, cx } from '@/components/ui';
 import { isSubmitKey } from '@/lib/quick-add';
-import { CHAT_FILE_LIMITS, type ChatSolution } from '@/lib/chat';
+import { CHAT_FILE_LIMITS, solutionAnswer, type ChatSolution } from '@/lib/chat';
 import { pickChatFiles, releasePicks, type ChatPick } from '@/lib/chat-files';
 import { pushFileSink } from '@/lib/file-sink';
 import type { ModelTier } from '@/lib/settings';
@@ -170,6 +170,8 @@ export function ThinkingRow({ label }: { label: string }) {
 export function SolutionCard({ solution, actions, className }: { solution: ChatSolution; actions?: ReactNode; className?: string }) {
   const [more, setMore] = useState(false);
   const long = solution.problem.length > 120 || solution.problem.split('\n').length > 3;
+  // 노트에 넣을 문제의 정답 (단계 끝의 답과 같아야 한다. 넣기 전에 학생이 확인할 수 있게)
+  const answer = solutionAnswer(solution.question);
   return (
     <div className={cx('grid w-full gap-2.5', className)}>
       {solution.problem ? (
@@ -197,6 +199,14 @@ export function SolutionCard({ solution, actions, className }: { solution: ChatS
         <div data-own-keys>
           <StepPlayer figure={solution.figure} steps={solution.steps} compact />
         </div>
+      ) : null}
+      {answer ? (
+        <p className="flex items-baseline gap-2 px-1 text-[15px] leading-relaxed">
+          <b className="shrink-0 text-sm text-ok">정답</b>
+          <span className="min-w-0 font-semibold">
+            <RichText text={answer} />
+          </span>
+        </p>
       ) : null}
       {actions ? <div className="flex flex-wrap items-center gap-2">{actions}</div> : null}
     </div>

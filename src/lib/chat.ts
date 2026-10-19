@@ -15,6 +15,21 @@ export type ChatQuestion = {
   key_point_id: string;
 };
 
+/** 객관식 보기 번호 표시 (①부터) */
+export const CIRCLED = '①②③④⑤⑥⑦⑧⑨⑩';
+
+/** 풀이의 정답 한 줄 (객관식은 '④ 1', OX 는 'O'·'X', 나머지는 답 그대로). 넣을 문제가 없으면 '' */
+export function solutionAnswer(q: ChatQuestion | null | undefined): string {
+  if (!q) return '';
+  if (q.type === 'mcq') {
+    const i = Number(q.answer);
+    const c = q.choices?.[i];
+    return c === undefined ? '' : `${CIRCLED[i] ?? `${i + 1}.`} ${c}`;
+  }
+  if (q.type === 'ox') return q.answer ? 'O' : 'X';
+  return String(q.answer ?? '').trim();
+}
+
 export type ProposalStatus = 'pending' | 'applied' | 'cancelled';
 
 /** AI 답에 붙는 것: 노트 밖 지식을 썼는지, 넣자고 한 것 (넣기 전에는 늘 학생에게 묻는다) */

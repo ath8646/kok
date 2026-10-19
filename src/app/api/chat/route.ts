@@ -7,7 +7,7 @@ import { getAppSettings, limitsFor } from '@/lib/server/account';
 import { UserFacingError, errorResponse } from '@/lib/server/errors';
 import { runTaskFull } from '@/lib/server/tasks';
 import { textBlock } from '@/lib/server/claude';
-import { chatFileBlocks, readChatFiles, readChatSolution, zChatAttachments } from '@/lib/server/chat-input';
+import { chatFileBlocks, finishReply, readChatFiles, readChatSolution, zChatAttachments } from '@/lib/server/chat-input';
 import { HOME_CHAT_SYSTEM, homeChatPrompt, wrap } from '@/lib/ai/prompts';
 import { homeChatJsonSchema, zHomeChat } from '@/lib/ai/schemas';
 import type { HomeChatReply } from '@/lib/chat';
@@ -75,12 +75,8 @@ export async function POST(req: NextRequest) {
     });
     const out = zHomeChat.parse(res.json);
     const solution = readChatSolution(out.solution, { figures });
-    const reply =
-      out.reply
-        .replace(/\*\*([^*\n]+)\*\*/g, '$1')
-        .replace(/^#{1,6}\s+/gm, '')
-        .trim()
-        .slice(0, 8000) || (solution ? '풀이를 정리했어요.' : '답을 만들지 못했어요. 다시 물어봐 주세요.');
+    // 꾸밈 기호를 걷어 내고, 답 글이 풀이와 다른 답을 말하지 않게 맞춘다
+    const reply = finishReply(out.reply, solution);
     const body: HomeChatReply = { reply, solution, energy: Math.round(res.energy * 1000) / 1000, model: res.model };
     return Response.json({ ok: true, ...body });
   } catch (e) {

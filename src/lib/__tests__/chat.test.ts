@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { homeChatJsonSchema, noteChatJsonSchema, zChat, zHomeChat, zSolve } from '@/lib/ai/schemas';
-import { historyLine, readChatSolution } from '@/lib/chat-solution';
+import { claimedChoice, finishReply, historyLine, readChatSolution } from '@/lib/chat-solution';
+import { solutionAnswer, type ChatSolution } from '@/lib/chat';
 import { chatKindOf } from '@/lib/chat-files';
 
 const question = {
@@ -133,5 +134,63 @@ describe('개념마다 기억 상태', () => {
     expect(m.get('k3')?.status).toBe('new');
     expect(m.get('k4')).toMatchObject({ status: 'good', total: 1 });
     expect(m.size).toBe(4);
+  });
+});
+
+describe('답 글과 단계 풀이가 같은 답을 말한다', () => {
+  it('풀이 칸이 답 글보다 먼저다 (AI 는 칸 순서대로 쓴다: 단계를 풀고 나서 답을 말하게)', () => {
+    expect(Object.keys(homeChatJsonSchema(true).properties as object)).toEqual(['solution', 'reply']);
+    expect(Object.keys(homeChatJsonSchema(false).properties as object)).toEqual(['solution', 'reply']);
+    expect(Object.keys(noteChatJsonSchema({ solve: true, figures: true }).properties as object)).toEqual(['solution', 'reply', 'outside_note', 'proposal']);
+    expect(Object.keys(noteChatJsonSchema({ solve: false, figures: false }).properties as object)).toEqual(['reply', 'outside_note', 'proposal']);
+  });
+
+  const limit: ChatSolution = {
+    problem: 'lim (6^n-5^n+1)/((3^n-2^n)(2^n-1)) 의 값은?',
+    steps: [
+      { text: '분모를 전개해요', add: [], focus: [] },
+      { text: '그래서 극한값은 1이에요.', add: [], focus: [] },
+    ],
+    figure: null,
+    question: {
+      type: 'mcq',
+      prompt: '극한값은?',
+      choices: ['0', '$\\frac{1}{6}$', '$\\frac{1}{3}$', '1', '발산'],
+      answer: 3,
+      accepted: [],
+      explanation: '',
+      difficulty: 'medium',
+      pages: [],
+      key_point_id: '',
+    },
+    subject: '수학',
+    unit: '수열의 극한',
+  };
+
+  it("답 글에서 '정답은 ②번'·'답은 3번'을 읽는다 (값은 보지 않는다)", () => {
+    expect(claimedChoice('정답은 ②번 1/6이에요.')).toBe(2);
+    expect(claimedChoice('답은 3번이에요')).toBe(3);
+    expect(claimedChoice('정답: ④')).toBe(4);
+    expect(claimedChoice('답은 1이에요')).toBeNull();
+    expect(claimedChoice('광합성은 엽록체에서 일어나요.')).toBeNull();
+  });
+
+  it('객관식 정답과 다른 번호를 말하면 풀이를 믿고 답 글을 고친다', () => {
+    const wrong =
+      '사진 속 문제를 풀어 봤어요. 정답은 ②번 $\\frac{1}{6}$이에요. 그런데 화면의 5단계 풀이에는 극한값이 1이라고 적혀 있는데, 이건 틀린 설명이에요.';
+    expect(finishReply(wrong, limit)).toBe('정답은 ④번이에요 (1). 아래 단계별 풀이를 확인해 보세요.');
+    expect(finishReply('정답은 **④번** 1이에요.', limit)).toBe('정답은 ④번 1이에요.');
+    expect(finishReply('극한값은 1이에요.', limit)).toBe('극한값은 1이에요.');
+    // 객관식이 아니거나 풀이가 없으면 꾸밈 기호만 걷어 낸다
+    expect(finishReply('## 답\n**5 cm** 예요.', null)).toBe('답\n5 cm 예요.');
+    expect(finishReply('  ', limit)).toBe('풀이를 정리했어요.');
+    expect(finishReply('', null)).toBe('답을 만들지 못했어요. 다시 물어봐 주세요.');
+  });
+
+  it('카드에 보여 줄 정답 한 줄', () => {
+    expect(solutionAnswer(limit.question)).toBe('④ 1');
+    expect(solutionAnswer({ ...limit.question!, type: 'ox', choices: null, answer: false })).toBe('X');
+    expect(solutionAnswer({ ...limit.question!, type: 'short', choices: null, answer: ' 5 ' })).toBe('5');
+    expect(solutionAnswer(null)).toBe('');
   });
 });

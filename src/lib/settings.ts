@@ -2,7 +2,8 @@
 import { z } from 'zod';
 
 export type Effort = 'low' | 'medium' | 'high';
-export type AiTask = 'organize' | 'merge' | 'visual' | 'quiz' | 'check' | 'grade' | 'chat' | 'theme';
+/** solve: 문제 그림·단계 풀이, 사진·파일로 보낸 문제 풀기 (홈 채팅) */
+export type AiTask = 'organize' | 'merge' | 'visual' | 'quiz' | 'check' | 'grade' | 'chat' | 'theme' | 'solve';
 
 // ------------------------------------------------------------- 운영 설정 (app_settings)
 /**
@@ -46,8 +47,9 @@ export const zModelsConfig = z.object({
       grade: zEffort.catch('low'),
       chat: zEffort.catch('low'),
       theme: zEffort.catch('low'),
+      solve: zEffort.catch('medium'),
     })
-    .catch({ organize: 'medium', merge: 'low', visual: 'low', quiz: 'medium', check: 'low', grade: 'low', chat: 'low', theme: 'low' }),
+    .catch({ organize: 'medium', merge: 'low', visual: 'low', quiz: 'medium', check: 'low', grade: 'low', chat: 'low', theme: 'low', solve: 'medium' }),
 });
 export type ModelsConfig = z.infer<typeof zModelsConfig>;
 export const DEFAULT_MODELS: ModelsConfig = zModelsConfig.parse({});
@@ -160,8 +162,10 @@ export const zUserSettings = z.object({
       perKeyPoint: z.union([z.literal('auto'), z.literal(1), z.literal(2), z.literal(3)]).catch('auto'),
       mix: z.object({ easy: z.number().catch(30), medium: z.number().catch(50), hard: z.number().catch(20) }).catch({ easy: 30, medium: 50, hard: 20 }),
       language: z.enum(['ko', 'material']).catch('ko'),
+      /** Pro: 노트를 만들 때 필요한 문제에 그림과 단계 풀이를 붙인다 */
+      figures: z.boolean().catch(true),
     })
-    .catch({ types: ['mcq', 'ox', 'cloze', 'short'], perKeyPoint: 'auto', mix: { easy: 30, medium: 50, hard: 20 }, language: 'ko' }),
+    .catch({ types: ['mcq', 'ox', 'cloze', 'short'], perKeyPoint: 'auto', mix: { easy: 30, medium: 50, hard: 20 }, language: 'ko', figures: true }),
 });
 export type UserSettings = z.infer<typeof zUserSettings>;
 export const DEFAULT_SETTINGS: UserSettings = zUserSettings.parse({});

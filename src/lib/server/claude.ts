@@ -48,13 +48,15 @@ export type JsonCall = {
   maxRetries?: number;
   /** 공통 지시(COMMON_SYSTEM) 대신 쓸 지시 (노트 채팅) */
   system?: string;
+  /** 문제 풀기: 빠른·꼼꼼 모델도 먼저 생각하고 답한다 (모델 기본값인 adaptive, 양은 effort 로 정해진다) */
+  think?: boolean;
 };
 
 export type JsonResult = { json: unknown; usage: Usage; model: string };
 
 export async function callJson(req: JsonCall): Promise<JsonResult> {
   const anthropic = getClient();
-  const thinking = thinkingFor(req.model);
+  const thinking = req.think ? undefined : thinkingFor(req.model);
   let res: Anthropic.Messages.Message;
   try {
     res = await anthropic.messages.create(

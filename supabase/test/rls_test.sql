@@ -714,6 +714,29 @@ reset role;
 insert into public.chat_messages (user_id, note_id, role, content)
   values ('11111111-1111-1111-1111-111111111111', current_setting('kok.v_note')::uuid, 'user', '전력량이 뭐야?');
 
+-- ---------- 그림 풀이: 문제 그림·단계는 서버 함수가 넣고, 칸 한도보다 크면 빼고 넣는다 (노트 저장이 멈추지 않게) ----------
+do $$
+declare nid uuid := current_setting('kok.v_note')::uuid;
+begin
+  perform public.kok_add_questions(nid, jsonb_build_array(
+    jsonb_build_object('type', 'short', 'prompt', '그림 문제', 'answer', '5', 'explanation', '',
+      'figure', '{"v":1,"items":[{"id":"A","type":"point"}]}'::jsonb, 'steps', '[{"text":"1단계","add":[],"focus":[]}]'::jsonb),
+    jsonb_build_object('type', 'short', 'prompt', '큰 그림', 'answer', '5', 'explanation', '',
+      'figure', jsonb_build_object('v', 1, 'big', repeat('가', 20000)), 'steps', '[]'::jsonb),
+    jsonb_build_object('type', 'short', 'prompt', '그림 없음', 'answer', '5', 'explanation', '')
+  ), false);
+  if (select count(*) from public.questions where note_id = nid and prompt = '그림 문제' and figure->>'v' = '1' and jsonb_array_length(steps) = 1) <> 1 then
+    raise exception 'figure question should keep figure and steps';
+  end if;
+  if (select count(*) from public.questions where note_id = nid and prompt = '큰 그림' and figure is null and steps is null) <> 1 then
+    raise exception 'oversize figure and empty steps should be dropped';
+  end if;
+  if (select count(*) from public.questions where note_id = nid and prompt = '그림 없음' and figure is null and steps is null) <> 1 then
+    raise exception 'question without figure';
+  end if;
+  delete from public.questions where note_id = nid and prompt in ('그림 문제', '큰 그림', '그림 없음');
+end $$;
+
 -- 학생: 내 버전·채팅만 보이고, 지난 버전의 정리는 고칠 수 있지만 번호·자료·지금 버전은 못 바꾼다
 set role authenticated;
 select set_config('request.jwt.claim.sub', '11111111-1111-1111-1111-111111111111', false);
@@ -758,6 +781,43 @@ do $$ begin
     raise exception 'chat update should be denied';
   exception when insufficient_privilege then null;
   end;
+  -- 채팅 풀이(넣었는지 표시)와 보관한 파일 경로는 서버만 바꾼다
+  begin
+    update public.chat_messages set solution = '{"saved": true}'::jsonb;
+    raise exception 'chat solution update should be denied';
+  exception when insufficient_privilege then null;
+  end;
+  begin
+    update public.chat_messages set attachments = '[{"kind":"image","name":"x","path":"other/chat/x.jpg"}]'::jsonb;
+    raise exception 'chat attachments update should be denied';
+  exception when insufficient_privilege then null;
+  end;
+end $$;
+-- 학생이 직접 넣는 문제(AI 채팅에서 푼 문제)의 그림 풀이: 보통 크기는 들어가고, 칸 한도보다 크면 거절된다
+do $$
+declare
+  nid uuid := current_setting('kok.v_note')::uuid;
+  sub uuid := (select subject_id from public.notes where id = current_setting('kok.v_note')::uuid);
+begin
+  insert into public.questions (note_id, subject_id, type, prompt, answer, explanation, created_by, locked, figure, steps)
+    values (nid, sub, 'short', '학생 그림 문제', '"5"'::jsonb, '', 'ai', true,
+      '{"v":1,"items":[{"id":"A","type":"point"}]}'::jsonb, '[{"text":"1단계","add":[],"focus":[]}]'::jsonb);
+  if (select count(*) from public.questions where note_id = nid and prompt = '학생 그림 문제' and figure is not null and steps is not null) <> 1 then
+    raise exception 'student figure question should be saved';
+  end if;
+  begin
+    insert into public.questions (note_id, subject_id, type, prompt, answer, explanation, figure)
+      values (nid, sub, 'short', '큰 학생 그림', '"5"'::jsonb, '', jsonb_build_object('v', 1, 'big', repeat('가', 20000)));
+    raise exception 'oversize figure from a student should be refused';
+  exception when check_violation then null;
+  end;
+  begin
+    insert into public.questions (note_id, subject_id, type, prompt, answer, explanation, steps)
+      values (nid, sub, 'short', '긴 학생 풀이', '"5"'::jsonb, '', jsonb_build_array(jsonb_build_object('text', repeat('가', 12000))));
+    raise exception 'oversize steps from a student should be refused';
+  exception when check_violation then null;
+  end;
+  delete from public.questions where note_id = nid and prompt = '학생 그림 문제';
 end $$;
 select set_config('request.jwt.claim.sub', '22222222-2222-2222-2222-222222222222', false);
 do $$ begin

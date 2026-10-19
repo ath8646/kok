@@ -79,6 +79,29 @@ async def main():
         await apage.get_by_role("button", name="AI 다시 켜기").click()
         await expect(apage.get_by_role("button", name="AI 전체 끄기")).to_be_visible()
 
+        print("· figure solutions failing never stops the note (Pro)")
+        fake("/__fail?task=solve")
+        await apage.goto(BASE + "/library")
+        await apage.get_by_role("button", name="자료 넣기", exact=True).click()
+        acomp = apage.get_by_role("dialog", name="자료 넣기")
+        await acomp.get_by_label("공부한 내용").fill("그림 풀이가 실패해도 노트는 끝나요. 광합성은 엽록체에서 빛 에너지로 포도당과 산소를 만드는 과정이다.")
+        await acomp.get_by_label("공부한 내용").press("Enter")
+        st, t0 = "", time.time()
+        while time.time() - t0 < 90:
+            st = sql("select status from public.sources where text_content like '그림 풀이가 실패해도%'")
+            if st in ("ready", "failed"):
+                break
+            await asyncio.sleep(0.7)
+        fake("/__fail?task=")
+        assert st == "ready", st
+        fsid = sql("select id from public.sources where text_content like '그림 풀이가 실패해도%'")
+        counts = sql(f"select count(*)::text || ',' || count(q.steps)::text from public.questions q join public.notes n on n.id = q.note_id where n.source_id = '{fsid}'")
+        print("   questions, with steps:", counts)
+        assert int(counts.split(",")[0]) > 0 and counts.split(",")[1] == "0", counts
+        tasks = sql(f"select string_agg(task, ',' order by id) from public.energy_ledger where source_id = '{fsid}'")
+        print("   ledger tasks:", tasks)
+        assert "solve" not in tasks and "refund" not in tasks, tasks
+
         print("· cross-site POST is refused")
         r = await page.request.post(BASE + "/api/coupon", data={"code": "KOK-AAAA-BBBB"}, headers={"origin": "https://evil.example"})
         assert r.status == 403, r.status

@@ -19,6 +19,7 @@ export type PlanRow = {
   /** schema.sql 을 다시 실행하기 전에는 없다 */
   can_append?: boolean;
   can_theme?: boolean;
+  can_figures?: boolean;
   note: string | null;
   created_at: string;
   active_users: number;
@@ -51,6 +52,7 @@ type PlanForm = {
   careful: boolean;
   canAppend: boolean;
   canTheme: boolean;
+  canFigures: boolean;
   note: string;
 };
 
@@ -85,6 +87,7 @@ function blankForm(L: Limits): PlanForm {
     careful: true,
     canAppend: true,
     canTheme: true,
+    canFigures: true,
     note: '',
   };
 }
@@ -103,6 +106,7 @@ function formFrom(p: PlanRow): PlanForm {
     careful: p.careful,
     canAppend: p.can_append === true,
     canTheme: p.can_theme === true,
+    canFigures: p.can_figures === true,
     note: p.note ?? '',
   };
 }
@@ -110,7 +114,14 @@ function formFrom(p: PlanRow): PlanForm {
 /** 폼 → 서버로 보낼 값. 빈칸이면 무엇이 빠졌는지 알려 준다 */
 function toBody(f: PlanForm): { body: Record<string, unknown> } | { error: string } {
   if (!f.name.trim()) return { error: '플랜 이름을 적어 주세요.' };
-  const out: Record<string, unknown> = { name: f.name.trim(), careful: f.careful, canAppend: f.canAppend, canTheme: f.canTheme, note: f.note.trim() };
+  const out: Record<string, unknown> = {
+    name: f.name.trim(),
+    careful: f.careful,
+    canAppend: f.canAppend,
+    canTheme: f.canTheme,
+    canFigures: f.canFigures,
+    note: f.note.trim(),
+  };
   for (const field of NUM_FIELDS) {
     const raw = f[field.key].trim();
     if (!raw) {
@@ -130,17 +141,20 @@ function toBody(f: PlanForm): { body: Record<string, unknown> } | { error: strin
 /**
  * refreshKey: 바뀌면 플랜 목록(쓰는 사람 수)을 다시 읽는다 (사용자 목록에서 테스트 플랜을 끝냈을 때)
  * planFlags: DB 에 자료 더하기·테마 칸이 있는지 (없으면 그 두 스위치를 끈다)
+ * figuresOn: DB 에 그림 풀이 칸이 있는지 (없으면 그 스위치를 끈다)
  */
 export function AdminPlans({
   limits,
   onChanged,
   refreshKey = 0,
   planFlags = true,
+  figuresOn = true,
 }: {
   limits: Limits;
   onChanged?: () => void;
   refreshKey?: number;
   planFlags?: boolean;
+  figuresOn?: boolean;
 }) {
   const toast = useToast();
   const [plans, setPlans] = useState<PlanRow[] | null>(null);
@@ -309,6 +323,7 @@ export function AdminPlans({
                     {p.careful ? <Chip tone="accent">꼼꼼 모델</Chip> : null}
                     {p.can_append ? <Chip tone="accent">자료 더하기</Chip> : null}
                     {p.can_theme ? <Chip tone="accent">테마</Chip> : null}
+                    {p.can_figures ? <Chip tone="accent">그림 풀이</Chip> : null}
                     <Chip tone={p.active_users ? 'ok' : 'plain'}>쓰는 사람 {p.active_users}명</Chip>
                   </div>
                   <p className="text-xs text-muted">
@@ -503,7 +518,18 @@ export function AdminPlans({
               disabled={!planFlags}
               onChange={(v) => setForm({ ...form, canTheme: v })}
             />
-            {!planFlags ? <p className="text-xs text-muted">자료 더하기·테마는 Supabase 에서 schema.sql 을 다시 실행하면 켤 수 있어요.</p> : null}
+            <Toggle
+              id="plan-figures"
+              label="그림 풀이 (문제 그림·단계 풀이)"
+              checked={figuresOn && form.canFigures}
+              disabled={!figuresOn}
+              onChange={(v) => setForm({ ...form, canFigures: v })}
+            />
+            {!planFlags || !figuresOn ? (
+              <p className="text-xs text-muted">
+                {!planFlags ? '자료 더하기·테마·그림 풀이' : '그림 풀이'}는 Supabase 에서 schema.sql 을 다시 실행하면 켤 수 있어요.
+              </p>
+            ) : null}
             <input
               aria-label="메모"
               className={inputClass}

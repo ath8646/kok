@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation';
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import type { MeResponse, SubjectRow } from '@/lib/types';
 import { fetchSources, fetchSubjects, sb } from '@/lib/data';
-import { estimateEnergy, estimateSmallTask } from '@/lib/ai/models';
+import { estimateEnergy, estimateFigures, estimateSmallTask, figuresWanted } from '@/lib/ai/models';
 import { clientModel } from '@/lib/client-model';
 import { energyWindow, refillText } from '@/lib/plans';
 import { shrinkImage } from '@/lib/image';
@@ -13,6 +13,7 @@ import { MIN_TEXT_CHARS, checkText, fileKind, groupFiles, isSubmitKey, splitComp
 import { SUBJECT_COLORS } from '@/lib/settings';
 import { subjectVar } from '@/lib/colors';
 import { SOURCES_CHANGED, SUBJECTS_CHANGED } from '@/lib/events';
+import { topFileSink } from '@/lib/file-sink';
 import { ApiError, Button, ICONS, Icon, Sheet, Spinner, api, cx, inputClass, useToast } from './ui';
 
 /** 동시에 정리할 수 있는 자료 수 (서버와 같다) */
@@ -401,10 +402,12 @@ export function QuickAddProvider({
         if (!files) {
           // 에너지가 모자라면 올리기 전에 멈춘다 (마지막 검사는 서버가 한다)
           const model = clientModel(m, m.settings.models.organize);
-          // 노트에 더하는 자료는 지금 노트와 합치는 값도 든다 (서버 계산과 같게)
+          // 노트에 더하는 자료는 지금 노트와 합치는 값도, Pro 그림 풀이를 만들면 그 값도 든다 (서버 계산과 같게)
+          const figures = figuresWanted({ canFigures: m.canFigures, figuresSetting: m.settings.quiz.figures, featureOn: m.features.figures });
           const est =
             estimateEnergy({ kind: prep.kind, pages: prep.pages, images: prep.blobs.length, chars: prep.text.length }, model, m.usdPerEnergy) +
-            (it.parentId ? Math.ceil(estimateSmallTask(model, m.usdPerEnergy, 9000, 3000)) : 0);
+            (it.parentId ? Math.ceil(estimateSmallTask(model, m.usdPerEnergy, 9000, 3000)) : 0) +
+            (figures ? estimateFigures(clientModel(m, m.settings.models.quiz), m.usdPerEnergy) : 0);
           const left = m.energy.unlimited ? Infinity : (m.energy.remaining ?? 0);
           if (est > left) {
             throw new Error(`에너지가 부족해요. 필요: 약 ${est}, 남음: ${Math.floor(left)}. ${refillText(m.planInfo, energyWindow(m.energy))}`);
@@ -685,6 +688,8 @@ export function QuickAddProvider({
     const onEnter = (e: DragEvent) => {
       if (!hasFiles(e)) return;
       e.preventDefault();
+      // 채팅 창처럼 파일을 받는 창이 열려 있으면 그 창이 받는다 (자료 넣기 안내를 띄우지 않는다)
+      if (topFileSink()) return;
       dragDepth.current += 1;
       if (dragDepth.current === 1) {
         const id = openRef.current ? '' : resolveSubject();
@@ -709,6 +714,11 @@ export function QuickAddProvider({
       setDragging(false);
       const files = Array.from(e.dataTransfer?.files ?? []);
       if (!files.length) return;
+      const sink = topFileSink();
+      if (sink) {
+        sink(files);
+        return;
+      }
       // 입력창이 열려 있으면 그 안에 붙이고, 노트 화면이면 이 노트에 더하고, 아니면 바로 정리
       if (openRef.current) setAttachments((a) => [...a, ...toAttachments(files)]);
       else if (noteTargetRef.current?.versions) setPendingAppend({ files, text: '' });
@@ -721,6 +731,15 @@ export function QuickAddProvider({
       // 엑셀·PPT·원노트는 글을 복사하면 그 글의 그림도 같이 넣는다: 글이 있으면 글을 붙여 넣는 것으로 본다
       const textWithPicture = !!pasted.trim() && Array.from(cd?.types ?? []).includes('text/html') && files.every((f) => f.type.startsWith('image/'));
       if (textWithPicture) files = [];
+      const sink = topFileSink();
+      if (sink) {
+        // 채팅 창이 열려 있으면 붙여 넣은 파일은 채팅에 붙이고, 글은 그 창의 입력칸이 받는다
+        if (files.length) {
+          e.preventDefault();
+          sink(files);
+        }
+        return;
+      }
       if (files.length && openRef.current) {
         e.preventDefault();
         setAttachments((a) => [...a, ...toAttachments(files)]);

@@ -1,8 +1,9 @@
 'use client';
-// 홈 (오늘): 오늘 복습, 5분 콕, 이번 주 공부한 날, 남은 에너지, 시험 D-day, 정리 중인 자료, 최근 노트
+// 홈 (오늘): AI에게 물어보기, 오늘 복습, 5분 콕, 이번 주 공부한 날, 남은 에너지, 시험 D-day, 정리 중인 자료, 최근 노트
 import Link from 'next/link';
 import { useEffect, useState } from 'react';
 import { EnergyPill, useMe } from '@/components/AppShell';
+import { HomeAsk } from '@/components/chat/HomeChat';
 import { ProcessingList, useActiveSources } from '@/components/ProcessingList';
 import { SOURCES_CHANGED, useQuickAdd } from '@/components/QuickAdd';
 import { ICONS, Icon, LargeHeader, LinkButton, ProgressRing, SectionTitle, cx } from '@/components/ui';
@@ -158,6 +159,9 @@ export default function HomePage() {
           </span>
         }
       />
+
+      {/* AI에게 물어보기: 누르면 채팅 창 (대화는 홈을 떠나면 사라진다) */}
+      <HomeAsk />
 
       {/* 5분 콕 */}
       {!plan && !err ? (

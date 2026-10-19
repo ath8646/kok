@@ -2,6 +2,7 @@
 // 복습 문제 한 개: 풀기 → 채점 → 해설 → 평가 고르기
 import { useEffect, useRef, useState } from 'react';
 import type { Rating } from '@/lib/grading';
+import { QuestionFigure, StepsDisclosure, useSolution } from './figure/SolutionView';
 import { RichText } from './RichText';
 import { Button, Chip, cx, inputClass, Spinner } from './ui';
 import { pageLabel } from './NoteView';
@@ -19,6 +20,9 @@ export type ReviewQuestion = {
   note_id: string | null;
   subject_id: string;
   created_by: 'ai' | 'user';
+  /** 그림 풀이 (Pro): 문제 그림과 단계 풀이 (없으면 undefined·null) */
+  figure?: unknown;
+  steps?: unknown;
 };
 
 export type GradeOutcome = {
@@ -91,6 +95,7 @@ export function QuestionCard({
   const [rating, setRating] = useState<Rating>(3);
   const [appealed, setAppealed] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
+  const solution = useSolution(q);
 
   useEffect(() => {
     started.current = Date.now();
@@ -121,8 +126,11 @@ export function QuestionCard({
   // 키보드: 객관식 1~4, OX 는 O/X, 채점 뒤 Enter 는 다음
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      const tag = (e.target as HTMLElement | null)?.tagName;
+      const target = e.target as HTMLElement | null;
+      const tag = target?.tagName;
       if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
+      // 단계별 풀이 안의 버튼·화살표 키는 풀이가 쓴다 (Enter 로 다음 단계를 누르다가 다음 문제로 넘어가지 않게)
+      if (target?.closest?.('[data-own-keys]')) return;
       if (outcome) {
         if (e.key === 'Enter') {
           e.preventDefault();
@@ -161,6 +169,7 @@ export function QuestionCard({
         <p className="text-[19px] font-semibold leading-relaxed">
           <Prompt q={q} />
         </p>
+        <QuestionFigure solution={solution} className="mt-4" />
 
         {/* 풀기 */}
         {q.type === 'mcq' && q.choices ? (
@@ -277,6 +286,12 @@ export function QuestionCard({
             <p className="text-[15px] leading-relaxed">
               <RichText text={q.explanation} />
             </p>
+          ) : null}
+          {/* 그림으로 보는 단계별 풀이 (Pro): 틀렸으면 펼쳐 둔다 */}
+          {solution?.steps.length ? (
+            <div data-own-keys>
+              <StepsDisclosure solution={solution} defaultOpen={!outcome.correct} />
+            </div>
           ) : null}
           <div className="flex flex-wrap items-center gap-2">
             {q.pages.length && sourceKind && sourceKind !== 'text' ? (

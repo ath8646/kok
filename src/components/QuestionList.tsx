@@ -2,7 +2,11 @@
 // 문제 관리: 보기, 고치기, 잠그기, 쉬게 하기, 지우기, 이상해요 신고
 import { useState } from 'react';
 import type { QuestionRow } from '@/lib/types';
+import { THINK_OUT, estimateSmallTask } from '@/lib/ai/models';
+import { clientModel } from '@/lib/client-model';
 import { sb } from '@/lib/data';
+import { useMe } from './AppShell';
+import { QuestionFigure, StepsDisclosure, useSolution } from './figure/SolutionView';
 import { QuestionEditor, type QuestionDraft } from './QuestionEditor';
 import { answerText, type ReviewQuestion } from './QuestionCard';
 import { RichText } from './RichText';
@@ -14,14 +18,16 @@ export function QuestionPreview({
   q,
   showAnswer = true,
 }: {
-  q: Pick<QuestionRow, 'type' | 'prompt' | 'choices' | 'answer' | 'explanation'>;
+  q: Pick<QuestionRow, 'type' | 'prompt' | 'choices' | 'answer' | 'explanation'> & { figure?: unknown; steps?: unknown };
   showAnswer?: boolean;
 }) {
+  const solution = useSolution(q);
   return (
     <div className="grid gap-1.5">
       <p className="font-semibold leading-relaxed">
         <RichText text={q.prompt} />
       </p>
+      <QuestionFigure solution={solution} className="my-1" />
       {q.type === 'mcq' && q.choices ? (
         <ol className="grid gap-0.5 pl-1 text-sm">
           {q.choices.map((c, i) => (
@@ -41,7 +47,17 @@ export function QuestionPreview({
           <RichText text={q.explanation} />
         </p>
       ) : null}
+      {showAnswer ? <StepsDisclosure solution={solution} className="mt-1" /> : null}
     </div>
+  );
+}
+
+/** 문제가 바뀌면(유형·보기·정답) 예전 그림 풀이는 맞지 않을 수 있어 지운다 (그림 풀이 칸이 있는 DB 만) */
+export function clearsSolution(before: Pick<QuestionRow, 'type' | 'choices' | 'answer'>, after: Pick<QuestionRow, 'type' | 'choices' | 'answer'>): boolean {
+  return (
+    before.type !== after.type ||
+    JSON.stringify(before.choices ?? null) !== JSON.stringify(after.choices ?? null) ||
+    JSON.stringify(before.answer) !== JSON.stringify(after.answer)
   );
 }
 
@@ -66,10 +82,29 @@ export function QuestionList({
   emptyText?: string;
 }) {
   const toast = useToast();
+  const { me } = useMe();
   const [editing, setEditing] = useState<QuestionRow | null>(null);
   const [reporting, setReporting] = useState<QuestionRow | null>(null);
   const [saving, setSaving] = useState(false);
   const [open, setOpen] = useState<string | null>(null);
+  const [solving, setSolving] = useState<string | null>(null);
+  const figuresOn = !!me?.features.figures;
+  // 그림 풀이 만들기 (Pro): 문제 하나 (먼저 생각하고 답해서 답이 조금 길다)
+  const solveEst = me ? Math.round(estimateSmallTask(clientModel(me, me.settings.models.quiz), me.usdPerEnergy, 4500, THINK_OUT.solveOne) * 10) / 10 : 0;
+
+  const solve = async (q: QuestionRow) => {
+    if (solving) return;
+    setSolving(q.id);
+    try {
+      await api(`/api/questions/${q.id}/solve`, { method: 'POST', body: '{}' });
+      toast('그림 풀이를 만들었어요.', 'ok');
+      onChanged();
+    } catch (e) {
+      toast((e as Error).message, 'bad');
+    } finally {
+      setSolving(null);
+    }
+  };
 
   const update = async (id: string, patch: Record<string, unknown>, msg?: string) => {
     const { error } = await sb().from('questions').update(patch).eq('id', id);
@@ -98,6 +133,7 @@ export function QuestionList({
                   {q.edited ? <Chip tone="accent">고침</Chip> : null}
                   {q.status === 'suspended' || (q.status === 'hidden' && q.rested_hidden) ? <Chip tone="warn">쉬는 중</Chip> : null}
                   {q.status === 'hidden' ? <Chip>지금 버전엔 없음</Chip> : null}
+                  {q.steps ? <Chip tone="accent">{q.figure ? '그림 풀이' : '단계 풀이'}</Chip> : null}
                   {c && c.wrong_count > 0 ? <Chip tone="bad">틀림 {c.wrong_count}</Chip> : null}
                 </span>
                 {!isOpen ? (
@@ -138,6 +174,11 @@ export function QuestionList({
                       {q.status === 'active' ? '잠깐 쉬기' : '다시 내기'}
                     </Button>
                   ) : null}
+                  {figuresOn && me?.canFigures && !q.steps ? (
+                    <Button size="sm" variant="secondary" busy={solving === q.id} disabled={!!solving && solving !== q.id} onClick={() => solve(q)}>
+                      그림 풀이 만들기 ⚡{solveEst}
+                    </Button>
+                  ) : null}
                   <Button size="sm" variant="ghost" onClick={() => setReporting(q)}>
                     이상해요
                   </Button>
@@ -171,7 +212,9 @@ export function QuestionList({
             onCancel={() => setEditing(null)}
             onSave={async (d: QuestionDraft) => {
               setSaving(true);
-              await update(editing.id, { ...d, edited: true }, '고쳤어요. AI가 다시 만들어도 그대로 남아요.');
+              // 정답·보기가 바뀌면 예전 그림 풀이는 지운다 (Pro 는 다시 만들 수 있다)
+              const reset = figuresOn && !!(editing.steps || editing.figure) && clearsSolution(editing, d);
+              await update(editing.id, { ...d, edited: true, ...(reset ? { figure: null, steps: null } : {}) }, '고쳤어요. AI가 다시 만들어도 그대로 남아요.');
               setSaving(false);
               setEditing(null);
             }}
@@ -179,7 +222,7 @@ export function QuestionList({
         ) : null}
       </Sheet>
 
-      <ReportSheet q={reporting} onClose={() => setReporting(null)} onChanged={onChanged} />
+      <ReportSheet q={reporting} onClose={() => setReporting(null)} onChanged={onChanged} figuresOn={figuresOn} />
     </div>
   );
 }
@@ -190,10 +233,13 @@ export function ReportSheet({
   q,
   onClose,
   onChanged,
+  figuresOn = false,
 }: {
-  q: Pick<QuestionRow, 'id' | 'type' | 'prompt' | 'choices' | 'answer' | 'explanation'> | null;
+  q: (Pick<QuestionRow, 'id' | 'type' | 'prompt' | 'choices' | 'answer' | 'explanation'> & { figure?: unknown; steps?: unknown }) | null;
   onClose: () => void;
   onChanged: () => void;
+  /** 그림 풀이 칸이 있는 DB 인지 (고친 문제로 바꾸면 예전 그림 풀이를 지운다) */
+  figuresOn?: boolean;
 }) {
   const toast = useToast();
   const [reason, setReason] = useState('');
@@ -278,6 +324,7 @@ export function ReportSheet({
                         explanation: p.explanation,
                         difficulty: p.difficulty,
                         edited: true,
+                        ...(figuresOn && (q.steps || q.figure) && clearsSolution(q, p) ? { figure: null, steps: null } : {}),
                       })
                       .eq('id', q.id);
                     if (error) toast('바꾸지 못했어요.', 'bad');

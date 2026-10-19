@@ -93,7 +93,8 @@ export function remergeState(draft: Record<string, unknown>): RemergeState | nul
   const times = Number(draft.remerged ?? 0) + 1;
   if (times > MAX_REMERGES) return null;
   const keep: Record<string, unknown> = { ...draft };
-  for (const k of ['note', 'visual', 'questions', 'base', 'baseVersion']) delete keep[k];
+  // 검사·그림 풀이 표시도 지운다 (다시 합친 노트로 만든 문제를 다시 검사한다)
+  for (const k of ['note', 'visual', 'questions', 'base', 'baseVersion', 'checked', 'solveRound']) delete keep[k];
   const parts = Array.isArray(draft.newParts) ? draft.newParts : [];
   // 새 자료의 정리가 남아 있지 않으면 처음부터 다시 정리한다
   if (!parts.length) return { step: 'organize', chunk_index: 0, partials: [], progress: 3, draft: { ...keep, newParts: [], attempts: 0, remerged: times } };

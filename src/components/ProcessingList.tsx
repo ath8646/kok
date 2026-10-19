@@ -8,7 +8,7 @@ import { SOURCES_CHANGED } from '@/lib/events';
 import { dropView } from '@/lib/view-cache';
 import { Button, ICONS, Icon, ProgressRing, api, cx, useToast } from './ui';
 
-export function stepLabel(s: Pick<SourceRowWithUnit, 'status' | 'step' | 'chunk_index' | 'chunk_total'>): string {
+export function stepLabel(s: Pick<SourceRowWithUnit, 'status' | 'step' | 'chunk_index' | 'chunk_total' | 'progress'>): string {
   if (s.status === 'error') return '멈췄어요';
   if (s.status === 'ready') return '완료';
   if (s.status === 'queued') return '준비 중';
@@ -19,8 +19,10 @@ export function stepLabel(s: Pick<SourceRowWithUnit, 'status' | 'step' | 'chunk_
       return '정리 합치는 중';
     case 'visual':
     case 'quiz':
-    case 'check':
       return '마인드맵·문제 만드는 중';
+    case 'check':
+      // 검사가 끝나면(91%~) Pro 는 문제 그림·단계 풀이를 만든다
+      return s.progress >= 91 && s.progress < 100 ? '문제 그림·풀이 만드는 중' : '마인드맵·문제 만드는 중';
     default:
       return '처리 중';
   }

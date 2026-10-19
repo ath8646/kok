@@ -21,6 +21,8 @@ export type CustomPlan = {
   canAppend: boolean;
   /** 테마를 쓸 수 있는지 */
   canTheme: boolean;
+  /** 그림 풀이(문제 그림·그림으로 보는 단계 풀이)를 쓸 수 있는지 */
+  canFigures: boolean;
   note: string | null;
 };
 
@@ -49,6 +51,7 @@ export function toCustomPlan(row: Record<string, unknown>): CustomPlan {
     careful: row.careful !== false,
     canAppend: row.can_append === true,
     canTheme: row.can_theme === true,
+    canFigures: row.can_figures === true,
     note: typeof row.note === 'string' ? row.note : null,
   };
 }
@@ -119,13 +122,17 @@ export type PlanFlags = {
   canAppend: boolean;
   /** 테마 */
   canTheme: boolean;
+  /** 그림 풀이: 노트를 만들 때 문제 그림과 그림으로 보는 단계 풀이, 채팅의 그림 풀이 */
+  canFigures: boolean;
 };
 
-/** 꼼꼼 모델·원본 보관·자료 더하기·테마처럼 숫자가 아닌 혜택 */
+/** 꼼꼼 모델·원본 보관·자료 더하기·테마·그림 풀이처럼 숫자가 아닌 혜택 */
 export function planFlags(plan: PlanKind, custom: CustomPlan | null): PlanFlags {
-  if (plan === 'admin' || plan === 'pro') return { canCareful: true, keepFiles: true, canAppend: true, canTheme: true };
-  if (plan === 'custom' && custom) return { canCareful: custom.careful, keepFiles: false, canAppend: custom.canAppend, canTheme: custom.canTheme };
-  return { canCareful: false, keepFiles: false, canAppend: false, canTheme: false };
+  if (plan === 'admin' || plan === 'pro') return { canCareful: true, keepFiles: true, canAppend: true, canTheme: true, canFigures: true };
+  if (plan === 'custom' && custom) {
+    return { canCareful: custom.careful, keepFiles: false, canAppend: custom.canAppend, canTheme: custom.canTheme, canFigures: custom.canFigures };
+  }
+  return { canCareful: false, keepFiles: false, canAppend: false, canTheme: false, canFigures: false };
 }
 
 /** 플랜별 한도 */

@@ -10,13 +10,14 @@ import {
   buildTree,
   deleteNode,
   descendants,
-  edgePath,
   layoutMindmap,
   moveNode,
   renameNode,
   reorderNode,
+  ribbonPath,
   type PlacedNode,
 } from '@/lib/mindmap-layout';
+import { MEMORY_LABEL, type MemoryInfo } from '@/lib/memory';
 import { Select } from './Select';
 import { Button, cx, inputClass } from './ui';
 import { SUBJECT_COLOR_INDEX } from '@/lib/colors';
@@ -34,6 +35,9 @@ type Palette = {
   surface2: string;
   hl: string;
   accent: string;
+  ok: string;
+  warn: string;
+  bad: string;
   branches: string[];
 };
 
@@ -48,6 +52,9 @@ function readPalette(): Palette {
     surface2: v('--surface-2', '#f6f8fc'),
     hl: v('--hl', '#ffd93d'),
     accent: v('--accent', '#2456e8'),
+    ok: v('--ok', '#1a7f4b'),
+    warn: v('--warn', '#b25e09'),
+    bad: v('--bad', '#c92a2a'),
     branches: [1, 2, 3, 4, 5, 6, 7, 8].map((i) => v(`--b${i}`, '#2456e8')),
   };
 }
@@ -71,6 +78,8 @@ export function MindMap({
   onRecallDone,
   compact = false,
   onOpen,
+  onPick,
+  memory,
 }: {
   spec: Mindmap;
   settings: VisualSettings;
@@ -83,11 +92,22 @@ export function MindMap({
   /** 노트 맨 위 '한눈에 보기': 작게, 도구 없이, 누르면 onOpen */
   compact?: boolean;
   onOpen?: () => void;
+  /** 고치기·가리기가 아닐 때 가지를 누르면 (가지 자세히 열기) */
+  onPick?: (nodeId: string) => void;
+  /** 개념 번호 → 기억 상태 (1단계 가지 모서리에 점으로) */
+  memory?: Map<string, MemoryInfo>;
 }) {
   const palette = usePalette();
   const svgRef = useRef<SVGSVGElement>(null);
   const boxRef = useRef<HTMLDivElement>(null);
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
+  const toggleCollapsed = (id: string) =>
+    setCollapsed((s) => {
+      const next = new Set(s);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
   const [selected, setSelected] = useState<string | null>(null);
   const [editText, setEditText] = useState('');
   const [moveTarget, setMoveTarget] = useState('');
@@ -119,13 +139,14 @@ export function MindMap({
     h: placed.maxY - placed.minY + pad * 2,
   };
 
-  // 처음 크기: 한눈에 보기는 폭에 맞추고, 크게 볼 때는 글자가 읽히는 크기(75% 이상)로
+  // 처음 크기: 한눈에 보기는 폭에 맞추고, 크게 볼 때는 글자가 읽히는 크기로
   useEffect(() => {
     const el = boxRef.current;
     if (!el) return;
     const fit = Math.min(1, (el.clientWidth - 8) / vb.w);
     const safe = Number.isFinite(fit) ? fit : 1;
-    setScale(compact ? Math.max(0.3, safe) : Math.max(0.75, safe));
+    // 조금만 넘치면 다 보이게 줄이고, 많이 넘치면(폰) 읽히는 크기로 두고 옆으로 민다
+    setScale(compact ? Math.max(0.3, safe) : safe >= 0.62 ? safe : 0.75);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [settings.layout, fontSize, compact]);
 
@@ -183,6 +204,10 @@ export function MindMap({
     if (hideable(n) && !revealed.has(n.id)) {
       setRevealed((s) => new Set(s).add(n.id));
       setSelected(n.id);
+      return;
+    }
+    if (!editable && !hideMode && onPick) {
+      onPick(n.id);
       return;
     }
     setSelected((cur) => (cur === n.id ? null : n.id));
@@ -305,46 +330,13 @@ export function MindMap({
       ) : null}
 
       <div className="relative">
-        {!compact ? (
-          <div className="absolute right-2 top-2 z-10 inline-flex overflow-hidden rounded-xl border border-line bg-surface/95 shadow-sm backdrop-blur">
-            <button
-              type="button"
-              className="px-2.5 py-1 text-sm font-bold hover:bg-surface-2"
-              onClick={() => setScale((x) => Math.max(0.3, Math.round((x - 0.15) * 100) / 100))}
-              aria-label="작게"
-            >
-              −
-            </button>
-            <button
-              type="button"
-              className="min-w-12 border-x border-line px-2 py-1 text-xs font-semibold hover:bg-surface-2"
-              onClick={() => setScale(1)}
-              aria-label="원래 크기"
-            >
-              {Math.round(scale * 100)}%
-            </button>
-            <button
-              type="button"
-              className="px-2.5 py-1 text-sm font-bold hover:bg-surface-2"
-              onClick={() => setScale((x) => Math.min(2.5, Math.round((x + 0.15) * 100) / 100))}
-              aria-label="크게"
-            >
-              +
-            </button>
-            <button
-              type="button"
-              className="border-l border-line px-2.5 py-1 text-sm hover:bg-surface-2"
-              onClick={() => exportPng().catch(() => {})}
-              aria-label="이미지로 저장"
-              title="이미지로 저장"
-            >
-              ⤓
-            </button>
-          </div>
-        ) : null}
         <div
           ref={boxRef}
-          className={cx('relative overflow-auto kok-card', compact && onOpen ? 'cursor-pointer' : '')}
+          className={cx(
+            'kok-canvas relative flex overflow-auto kok-card',
+            compact && onOpen ? 'cursor-pointer' : '',
+            !compact && 'min-h-[300px] md:min-h-[420px]',
+          )}
           style={{ maxHeight: compact ? '240px' : '70dvh', touchAction: drag ? 'none' : 'pan-x pan-y pinch-zoom' }}
           onClick={compact && onOpen ? onOpen : undefined}
         >
@@ -362,22 +354,31 @@ export function MindMap({
             onPointerLeave={() => {
               if (!dragStart.current?.moved) dragStart.current = null;
             }}
-            style={{ display: 'block', fontFamily: 'Pretendard, "Apple SD Gothic Neo", "Malgun Gothic", "Noto Sans KR", sans-serif' }}
+            // 작으면 가운데에, 크면 스크롤 (margin:auto 는 넘칠 때 0 이 되어 왼쪽·위가 잘리지 않는다)
+            style={{
+              display: 'block',
+              margin: 'auto',
+              flexShrink: 0,
+              fontFamily: 'Pretendard, "Apple SD Gothic Neo", "Malgun Gothic", "Noto Sans KR", sans-serif',
+            }}
           >
+            {/* 가지: 뿌리에서 굵게 나와 끝으로 갈수록 가늘어진다 */}
             <g>
-              {placed.edges.map((e) => (
-                <path
-                  key={`e-${e.to.id}`}
-                  d={edgePath(e, settings.layout)}
-                  fill="none"
-                  stroke={colorOf(e.to)}
-                  strokeOpacity={settings.color === 'mono' ? 0.55 : 0.75}
-                  strokeWidth={e.to.depth === 1 ? 3 : 2}
-                  strokeLinecap="round"
-                  className={settings.reveal === 'step' ? 'mm-step' : undefined}
-                  style={settings.reveal === 'step' ? { animationDelay: `${e.to.order * 90}ms` } : undefined}
-                />
-              ))}
+              {placed.edges.map((e) => {
+                const d = e.to.depth;
+                const w1 = d === 1 ? 10 : d === 2 ? 4.4 : 2.6;
+                const w2 = d === 1 ? 3.6 : d === 2 ? 2 : 1.3;
+                return (
+                  <path
+                    key={`e-${e.to.id}`}
+                    d={ribbonPath(e, settings.layout, w1, w2)}
+                    fill={colorOf(e.to)}
+                    fillOpacity={settings.color === 'mono' ? 0.5 : d === 1 ? 0.9 : 0.72}
+                    className={settings.reveal === 'step' ? 'mm-step' : undefined}
+                    style={settings.reveal === 'step' ? { animationDelay: `${e.to.order * 90}ms` } : undefined}
+                  />
+                );
+              })}
             </g>
             {placed.nodes.map((n) => {
               const color = colorOf(n);
@@ -385,80 +386,127 @@ export function MindMap({
               const isSel = n.id === selected;
               const isHl = !!highlightKeyPoint && n.keyPointId === highlightKeyPoint;
               const isOver = drag?.over === n.id;
-              const fill = n.depth === 0 ? palette.surface2 : n.depth === 1 && settings.color !== 'mono' ? `${color}24` : palette.surface;
               const label = (settings.icons && n.icon ? `${n.icon} ` : '') + n.label;
               const fs = n.depth === 0 ? Math.round(fontSize * 1.25) : fontSize;
               const kids = childCount.get(n.id) ?? 0;
               const isCollapsed = collapsed.has(n.id);
               const mark = recall.get(n.id);
+              const mem = n.depth === 1 && n.keyPointId ? memory?.get(n.keyPointId) : undefined;
+              const memColor = mem
+                ? mem.status === 'weak'
+                  ? palette.bad
+                  : mem.status === 'due'
+                    ? palette.warn
+                    : mem.status === 'good'
+                      ? palette.ok
+                      : null
+                : null;
+              // 1단계: 가지 색으로 물든 알약, 2단계: 흰 바탕에 가지 색 테두리, 3단계부터: 글 아래 가지 색 밑줄만
+              const leafy = n.depth >= 3 && !hidden;
+              const fill = hidden
+                ? palette.surface2
+                : n.depth === 0
+                  ? palette.surface
+                  : n.depth === 1
+                    ? `color-mix(in srgb, ${color} ${settings.color === 'mono' ? 8 : 16}%, ${palette.surface})`
+                    : palette.surface;
+              const rx = n.depth <= 1 ? n.h / 2 : 10;
               return (
                 <g
                   key={n.id}
                   transform={`translate(${n.x},${n.y})`}
                   className={settings.reveal === 'step' ? 'mm-step' : undefined}
                   style={{
-                    cursor: 'pointer',
                     ...(settings.reveal === 'step' ? { animationDelay: `${n.order * 90}ms` } : {}),
                     opacity: drag?.id === n.id ? 0.35 : 1,
                   }}
-                  onPointerDown={(e) => onPointerDown(e, n)}
-                  onPointerUp={(e) => {
-                    e.stopPropagation();
-                    onPointerUp(n);
-                  }}
-                  role="button"
-                  tabIndex={0}
-                  aria-label={hidden ? '가려진 가지, 눌러서 확인' : n.label}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter' || e.key === ' ') {
-                      e.preventDefault();
-                      onNodeTap(n);
-                    }
-                  }}
                 >
-                  {isHl || isSel || isOver ? (
+                  {/* 가지 (누르기·끌기·키보드). 접기 단추는 이 단추 밖에 둔다 (단추 안의 단추는 화면 읽기 프로그램이 읽지 못한다) */}
+                  <g
+                    style={{ cursor: 'pointer' }}
+                    onPointerDown={(e) => onPointerDown(e, n)}
+                    onPointerUp={(e) => {
+                      e.stopPropagation();
+                      onPointerUp(n);
+                    }}
+                    role="button"
+                    tabIndex={0}
+                    aria-label={hidden ? '가려진 가지, 눌러서 확인' : `${n.label}${mem ? `, ${MEMORY_LABEL[mem.status]}` : ''}`}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' || e.key === ' ') {
+                        e.preventDefault();
+                        onNodeTap(n);
+                      }
+                    }}
+                  >
+                    {isHl || isSel || isOver ? (
+                      <rect
+                        x={-n.w / 2 - 5}
+                        y={-n.h / 2 - 5}
+                        width={n.w + 10}
+                        height={n.h + 10}
+                        rx={rx + 5}
+                        fill="none"
+                        stroke={isOver ? palette.accent : palette.hl}
+                        strokeWidth={4}
+                      />
+                    ) : null}
+                    {n.depth === 0 ? (
+                      <rect x={-n.w / 2 - 6} y={-n.h / 2 - 6} width={n.w + 12} height={n.h + 12} rx={(n.h + 12) / 2} fill={palette.surface2} />
+                    ) : null}
                     <rect
-                      x={-n.w / 2 - 5}
-                      y={-n.h / 2 - 5}
-                      width={n.w + 10}
-                      height={n.h + 10}
-                      rx={n.depth === 0 ? (n.h + 10) / 2 : 14}
-                      fill="none"
-                      stroke={isOver ? palette.accent : palette.hl}
-                      strokeWidth={4}
+                      x={-n.w / 2}
+                      y={-n.h / 2}
+                      width={n.w}
+                      height={n.h}
+                      rx={rx}
+                      style={{ fill: leafy ? 'transparent' : fill }}
+                      stroke={leafy ? 'none' : n.depth === 0 ? palette.ink : color}
+                      strokeOpacity={n.depth === 2 ? 0.75 : 1}
+                      strokeWidth={n.depth === 0 ? 2.5 : n.depth === 1 ? 2 : 1.5}
+                      strokeDasharray={hidden ? '5 4' : undefined}
                     />
-                  ) : null}
-                  <rect
-                    x={-n.w / 2}
-                    y={-n.h / 2}
-                    width={n.w}
-                    height={n.h}
-                    rx={n.depth === 0 ? n.h / 2 : 10}
-                    fill={hidden ? palette.surface2 : fill}
-                    stroke={n.depth === 0 ? palette.ink : color}
-                    strokeWidth={n.depth <= 1 ? 2 : 1.25}
-                    strokeDasharray={hidden ? '5 4' : undefined}
-                  />
-                  <text x={0} y={fs * 0.36} textAnchor="middle" fontSize={fs} fontWeight={n.depth <= 1 ? 700 : 500} fill={hidden ? palette.muted : palette.ink}>
-                    {hidden ? '눌러서 확인' : label}
-                  </text>
-                  {mark !== undefined ? <circle cx={n.w / 2 - 2} cy={-n.h / 2 + 2} r={7} fill={mark ? 'var(--ok)' : 'var(--bad)'} /> : null}
+                    {leafy ? (
+                      <rect x={-n.w / 2 + 10} y={n.h / 2 - 5} width={Math.max(8, n.w - 20)} height={2.5} rx={1.25} fill={color} fillOpacity={0.7} />
+                    ) : null}
+                    <text
+                      x={0}
+                      y={fs * 0.36}
+                      textAnchor="middle"
+                      fontSize={fs}
+                      fontWeight={n.depth === 0 ? 800 : n.depth === 1 ? 700 : n.depth === 2 ? 600 : 500}
+                      fill={hidden ? palette.muted : palette.ink}
+                    >
+                      {hidden ? '눌러서 확인' : label}
+                    </text>
+                    {memColor ? (
+                      <circle cx={n.w / 2 - 7} cy={-n.h / 2 + 3} r={5.5} style={{ fill: memColor, stroke: palette.surface, strokeWidth: 2 }} />
+                    ) : null}
+                    {mark !== undefined ? <circle cx={n.w / 2 - 2} cy={-n.h / 2 + 2} r={7} fill={mark ? palette.ok : palette.bad} /> : null}
+                  </g>
                   {kids > 0 && n.depth > 0 ? (
                     <g
-                      transform={`translate(${settings.layout === 'down' ? 0 : n.side * (n.w / 2 + 10)},${settings.layout === 'down' ? n.h / 2 + 10 : 0})`}
+                      transform={`translate(${settings.layout === 'down' ? 0 : n.side * (n.w / 2 + 11)},${settings.layout === 'down' ? n.h / 2 + 11 : 0})`}
+                      style={{ cursor: 'pointer' }}
                       onPointerDown={(e) => e.stopPropagation()}
                       onPointerUp={(e) => {
                         e.stopPropagation();
                         dragStart.current = null;
-                        setCollapsed((s) => {
-                          const next = new Set(s);
-                          if (next.has(n.id)) next.delete(n.id);
-                          else next.add(n.id);
-                          return next;
-                        });
+                        toggleCollapsed(n.id);
                       }}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' || e.key === ' ') {
+                          e.preventDefault();
+                          e.stopPropagation();
+                          toggleCollapsed(n.id);
+                        }
+                      }}
+                      role="button"
+                      tabIndex={0}
+                      aria-expanded={!isCollapsed}
+                      aria-label={isCollapsed ? `${n.label} 아래 ${kids}개 펼치기` : `${n.label} 접기`}
                     >
-                      <circle r={9} fill={palette.surface} stroke={color} strokeWidth={1.5} />
+                      <circle r={9.5} fill={palette.surface} stroke={color} strokeWidth={1.5} />
                       <text y={4} textAnchor="middle" fontSize={11} fontWeight={700} fill={color}>
                         {isCollapsed ? kids : '−'}
                       </text>
@@ -477,6 +525,82 @@ export function MindMap({
             ) : null}
           </svg>
         </div>
+        {!compact ? (
+          <div className="absolute bottom-3 right-3 z-10 inline-flex items-center gap-0.5 rounded-full bg-surface/90 p-1 shadow-[0_6px_18px_var(--shadow-strong)] ring-1 ring-line backdrop-blur">
+            <button
+              type="button"
+              className="press grid h-8 w-8 place-items-center rounded-full text-[17px] font-bold text-ink hover:bg-surface-2"
+              onClick={() => setScale((x) => Math.max(0.3, Math.round((x - 0.15) * 100) / 100))}
+              aria-label="작게"
+            >
+              −
+            </button>
+            <button
+              type="button"
+              className="press h-8 min-w-12 rounded-full px-1.5 text-xs font-bold tabular-nums text-muted hover:bg-surface-2"
+              onClick={() => setScale(1)}
+              aria-label="원래 크기"
+            >
+              {Math.round(scale * 100)}%
+            </button>
+            <button
+              type="button"
+              className="press grid h-8 w-8 place-items-center rounded-full text-[17px] font-bold text-ink hover:bg-surface-2"
+              onClick={() => setScale((x) => Math.min(2.5, Math.round((x + 0.15) * 100) / 100))}
+              aria-label="크게"
+            >
+              +
+            </button>
+            <span className="mx-0.5 h-5 w-px bg-line" aria-hidden="true" />
+            <button
+              type="button"
+              className="press grid h-8 w-8 place-items-center rounded-full text-ink hover:bg-surface-2"
+              onClick={() => {
+                const el = boxRef.current;
+                if (!el) return;
+                const fit = Math.min((el.clientWidth - 8) / vb.w, (el.clientHeight - 8) / vb.h);
+                setScale(Math.max(0.3, Math.min(1.5, Math.round(fit * 100) / 100)));
+              }}
+              aria-label="화면에 맞추기"
+              title="화면에 맞추기"
+            >
+              <svg
+                width="17"
+                height="17"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                aria-hidden="true"
+              >
+                <path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5" />
+              </svg>
+            </button>
+            <button
+              type="button"
+              className="press grid h-8 w-8 place-items-center rounded-full text-ink hover:bg-surface-2"
+              onClick={() => exportPng().catch(() => {})}
+              aria-label="이미지로 저장"
+              title="이미지로 저장"
+            >
+              <svg
+                width="17"
+                height="17"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                aria-hidden="true"
+              >
+                <path d="M12 4v11M7 10l5 5 5-5M5 20h14" />
+              </svg>
+            </button>
+          </div>
+        ) : null}
       </div>
 
       {hideMode && sel && revealed.has(sel.id) && sel.depth > 0 ? (

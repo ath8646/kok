@@ -27,6 +27,8 @@ export async function runTask(
     maxTokens: number;
     /** 예상 출력 토큰 (에너지 검사용). 입력은 보낼 내용의 길이로 계산한다 */
     outTokens: number;
+    /** 글로 세지 못하는 입력 (사진·PDF)의 예상 토큰 */
+    extraInputTokens?: number;
     /** 이 값보다 적게는 검사하지 않는다 (0 이면 에너지 검사를 건너뛴다: 이미 검사한 작업의 뒷단계) */
     minEstimate?: number;
     /** 한 번 기다리는 최대 시간. 라우트 제한 시간보다 짧아야 한다 */
@@ -34,6 +36,8 @@ export async function runTask(
     sourceId?: string | null;
     /** 공통 지시 대신 쓸 지시 (노트 채팅) */
     system?: string;
+    /** 문제 풀기: 먼저 생각하고 답한다 (callJson think) */
+    think?: boolean;
   },
 ): Promise<unknown> {
   return (await runTaskFull(admin, acc, app, t)).json;
@@ -48,7 +52,9 @@ export async function runTaskFull(
 ): Promise<{ json: unknown; energy: number; model: string }> {
   const model = modelForTier(app.models, t.tier, acc.canCareful, acc.isAdmin);
   const estimate =
-    t.minEstimate === 0 ? 0 : Math.max(t.minEstimate ?? 0, estimateSmallTask(model, app.limits.usdPerEnergy, contentTokens(t.content), t.outTokens));
+    t.minEstimate === 0
+      ? 0
+      : Math.max(t.minEstimate ?? 0, estimateSmallTask(model, app.limits.usdPerEnergy, contentTokens(t.content) + (t.extraInputTokens ?? 0), t.outTokens));
   await assertAiAllowed(admin, acc, app, { estimate, rateLimit: true });
   try {
     const res = await callJson({
@@ -60,6 +66,7 @@ export async function runTaskFull(
       timeoutMs: t.timeoutMs,
       maxRetries: 0,
       system: t.system,
+      think: t.think,
     });
     const cost = await charge(admin, { acc, task: t.task, model: res.model, usage: res.usage, usdPerEnergy: app.limits.usdPerEnergy, sourceId: t.sourceId });
     return { json: res.json, energy: cost.energy, model: res.model };

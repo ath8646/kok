@@ -8,22 +8,25 @@ import {
   noteJsonSchema,
   zMindmap,
   quizJsonSchema,
+  solveJsonSchema,
   toQuestionRow,
   visualJsonSchema,
   zCheck,
   zNote,
   zQuiz,
   zQuizItem,
+  zSolve,
   zVisualResult,
   type Mindmap,
   type Note,
   type VisualResult,
 } from '@/lib/ai/schemas';
-import { appendMergePrompt, checkPrompt, mergePrompt, organizePrompt, quizPrompt, visualPrompt, wrap, type MaterialMeta } from '@/lib/ai/prompts';
+import { appendMergePrompt, checkPrompt, mergePrompt, organizePrompt, quizPrompt, solvePrompt, visualPrompt, wrap, type MaterialMeta } from '@/lib/ai/prompts';
 import { growthOfParts, keepFromCurrent, mergeFits, noteForMerge, remergeState, MERGE_OUT_TOKENS, NOTE_TOO_LONG } from '@/lib/append-merge';
 import { modelForTier, type AiTask, type UserSettings } from '@/lib/settings';
 import { planChunks, slicePdf, splitPdfBySize, splitText, PdfError } from '@/lib/pdf';
-import { getAccount, getAppSettings, charge, refundSource, type Account, type AppSettings } from './account';
+import { questionsForSolve, readSolution } from '@/lib/figure/solution';
+import { getAccount, getAppSettings, getFeatures, charge, refundSource, type Account, type AppSettings } from './account';
 import { AiCallError, callJson, imageBlock, pdfBlock, textBlock, usageOf, type ContentPart } from './claude';
 import { UserFacingError } from './errors';
 import { removePaths } from './files';
@@ -33,6 +36,12 @@ export const IMAGES_PER_CHUNK = 6;
 export const TEXT_CHARS_PER_CHUNK = 40000;
 const LOCK_SECONDS = 240;
 const MAX_ATTEMPTS = 3;
+/**
+ * 그림 풀이(Pro): 한 번에 풀이를 만드는 문제 수와 최대 횟수.
+ * 그림·단계가 든 답은 길어서, 한 번의 답이 너무 길어지지 않게(시간 제한 안에) 나눠 만든다
+ */
+export const SOLVE_PER_ROUND = 3;
+export const SOLVE_ROUNDS = 2;
 
 export type SourceRow = {
   id: string;
@@ -103,14 +112,19 @@ type Ctx = {
 };
 
 function modelFor(ctx: Ctx, task: AiTask): string {
-  const tier = task === 'visual' ? ctx.settings.models.visual : task === 'quiz' || task === 'check' ? ctx.settings.models.quiz : ctx.settings.models.organize;
+  const tier =
+    task === 'visual'
+      ? ctx.settings.models.visual
+      : task === 'quiz' || task === 'check' || task === 'solve'
+        ? ctx.settings.models.quiz
+        : ctx.settings.models.organize;
   return modelForTier(ctx.app.models, tier, ctx.acc.canCareful, ctx.acc.isAdmin);
 }
 
-async function ai(ctx: Ctx, task: AiTask, content: ContentPart[], schema: Record<string, unknown>, maxTokens: number) {
+async function ai(ctx: Ctx, task: AiTask, content: ContentPart[], schema: Record<string, unknown>, maxTokens: number, think = false) {
   const model = modelFor(ctx, task);
   try {
-    const res = await callJson({ model, effort: ctx.app.models.effort[task], content, schema, maxTokens, maxRetries: 0, timeoutMs: 150_000 });
+    const res = await callJson({ model, effort: ctx.app.models.effort[task], content, schema, maxTokens, maxRetries: 0, timeoutMs: 150_000, think });
     await charge(ctx.admin, {
       acc: ctx.acc,
       task,
@@ -168,7 +182,8 @@ export function cleanMindmap(raw: Mindmap, maxNodes: number, locked: Mindmap['no
     if (!id || seen.has(id) || id === '__root__') continue;
     if (nodes.length >= maxNodes + locked.length) break;
     seen.add(id);
-    nodes.push({ ...n, id, label: (n.label || '').trim().slice(0, 60) || '…', edited: false });
+    const hint = (n.hint ?? '').trim().slice(0, 80);
+    nodes.push({ ...n, id, label: (n.label || '').trim().slice(0, 60) || '…', ...(hint ? { hint } : { hint: undefined }), edited: false });
   }
   return { root_label: (raw.root_label || '주제').trim().slice(0, 30), nodes };
 }
@@ -417,7 +432,44 @@ async function stepQuiz(ctx: Ctx): Promise<Partial<SourceRow>> {
     .filter((r): r is NonNullable<typeof r> => !!r)
     .filter((r) => q.types.includes(r.type))
     .slice(0, 40);
-  return { step: 'check', progress: 88, draft: { ...ctx.src.draft, questions: rows, attempts: 0 } };
+  // 새로 만든 문제는 다시 검사하고 그림 풀이도 처음부터
+  const draft: Record<string, unknown> = { ...ctx.src.draft, questions: rows, attempts: 0 };
+  delete draft.checked;
+  delete draft.solveRound;
+  return { step: 'check', progress: 88, draft };
+}
+
+type QuestionDraftRow = NonNullable<ReturnType<typeof toQuestionRow>> & { figure?: unknown; steps?: unknown };
+
+/** 그림 풀이를 만드는지: Pro 혜택이 있고 설정에서 켜 두었고 DB 에 칸이 있을 때 (schema.sql 을 다시 실행하기 전에는 예전처럼) */
+async function figuresOn(ctx: Ctx): Promise<boolean> {
+  if (!ctx.acc.canFigures || !ctx.settings.quiz.figures) return false;
+  return (await getFeatures(ctx.admin)).figures;
+}
+
+/**
+ * 그림 풀이 한 번: 아직 풀이가 없는 문제 중 그림·단계가 도움이 되는 문제를 AI 가 골라(최대 SOLVE_PER_ROUND 개) 풀이를 붙인다.
+ * more: 다음 번에 더 만들 만한지 (이번에 꽉 채워 골랐을 때만)
+ */
+async function solveRound(ctx: Ctx, note: Note, questions: QuestionDraftRow[]): Promise<{ questions: QuestionDraftRow[]; more: boolean }> {
+  const open = questions.map((q, i) => (q.steps ? -1 : i)).filter((i) => i >= 0);
+  if (!open.length) return { questions, more: false };
+  const content = [
+    textBlock(wrap('note', noteForPrompt(note))),
+    textBlock(wrap('questions', JSON.stringify(questionsForSolve(questions, open)))),
+    textBlock(solvePrompt({ max: SOLVE_PER_ROUND })),
+  ];
+  const json = await ai(ctx, 'solve', content, solveJsonSchema, 16_000, true);
+  const out = [...questions];
+  let added = 0;
+  for (const sol of zSolve.parse(json).solutions.slice(0, SOLVE_PER_ROUND)) {
+    if (!open.includes(sol.index) || out[sol.index].steps) continue;
+    const solution = readSolution(sol);
+    if (!solution) continue;
+    out[sol.index] = { ...out[sol.index], figure: solution.figure, steps: solution.steps };
+    added++;
+  }
+  return { questions: out, more: added >= SOLVE_PER_ROUND && open.length > added };
 }
 
 /** 더한 자료 마무리. 합칠 때 쓴 노트가 지금 노트가 아니면 'stale' (저장하지 않는다) */
@@ -432,25 +484,52 @@ async function finalizeAppend(ctx: Ctx, args: { p_note: unknown; p_visuals: unkn
   return 'ok';
 }
 
+/**
+ * 검사 → (Pro: 그림 풀이 몇 번) → 저장. 한 번 부를 때 AI 는 한 번만 부른다:
+ * 검사가 끝나면 draft.checked, 그림 풀이는 draft.solveRound 로 어디까지 했는지 남기고, 마지막 저장은 AI 없이 한다
+ */
 async function stepCheckAndFinish(ctx: Ctx): Promise<'done' | Partial<SourceRow>> {
   if (await baseIsStale(ctx)) return remergePatch(ctx.src);
   const note = zNote.parse(ctx.src.draft.note);
   const visual = zVisualResult.parse(ctx.src.draft.visual) as VisualResult;
-  const questions = (ctx.src.draft.questions as ReturnType<typeof toQuestionRow>[] | undefined)?.filter(Boolean) ?? [];
+  const questions = (ctx.src.draft.questions as QuestionDraftRow[] | undefined)?.filter(Boolean) ?? [];
 
   let kept = questions;
-  if (questions.length) {
-    const listed = questions.map((x, index) => ({ index, ...x }));
-    const content = [textBlock(wrap('note', noteForPrompt(note))), textBlock(wrap('questions', JSON.stringify(listed))), textBlock(checkPrompt())];
-    try {
-      const json = await ai(ctx, 'check', content, checkJsonSchema, 2500);
-      const verdicts = zCheck.parse(json).verdicts;
-      const drop = new Set(verdicts.filter((v) => !v.keep).map((v) => v.index));
-      kept = questions.filter((_, i) => !drop.has(i));
-    } catch (e) {
-      // 검사가 실패해도 문제는 살린다 (검사는 품질을 높이는 단계일 뿐)
-      if (e instanceof UserFacingError) throw e;
-      console.warn('[kok] check step failed, keeping questions', e);
+  if (ctx.src.draft.checked !== true) {
+    if (questions.length) {
+      const listed = questions.map((x, index) => ({ index, ...x }));
+      const content = [textBlock(wrap('note', noteForPrompt(note))), textBlock(wrap('questions', JSON.stringify(listed))), textBlock(checkPrompt())];
+      try {
+        const json = await ai(ctx, 'check', content, checkJsonSchema, 2500);
+        const verdicts = zCheck.parse(json).verdicts;
+        const drop = new Set(verdicts.filter((v) => !v.keep).map((v) => v.index));
+        kept = questions.filter((_, i) => !drop.has(i));
+      } catch (e) {
+        // 검사가 실패해도 문제는 살린다 (검사는 품질을 높이는 단계일 뿐)
+        if (e instanceof UserFacingError) throw e;
+        console.warn('[kok] check step failed, keeping questions', e);
+      }
+    }
+    // 그림 풀이를 만들면 검사 결과를 남기고 다음 번에 (한 번에 AI 한 번)
+    if (kept.length && (await figuresOn(ctx))) {
+      return { progress: 91, draft: { ...ctx.src.draft, questions: kept, checked: true, solveRound: 0, attempts: 0 } };
+    }
+  } else {
+    const round = Number(ctx.src.draft.solveRound ?? SOLVE_ROUNDS);
+    if (round < SOLVE_ROUNDS && kept.length && (await figuresOn(ctx))) {
+      let next = { questions: kept, more: false };
+      try {
+        next = await solveRound(ctx, note, kept);
+      } catch (e) {
+        // 그림 풀이가 안 돼도 노트와 문제는 그대로 만든다 (그림은 더해 주는 것일 뿐)
+        if (e instanceof UserFacingError) throw e;
+        console.warn('[kok] solve step failed, keeping questions without figures', e);
+      }
+      const done = !next.more || round + 1 >= SOLVE_ROUNDS;
+      return {
+        progress: done ? 97 : 94,
+        draft: { ...ctx.src.draft, questions: next.questions, solveRound: done ? SOLVE_ROUNDS : round + 1, attempts: 0 },
+      };
     }
   }
 

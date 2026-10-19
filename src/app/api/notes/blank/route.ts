@@ -8,6 +8,8 @@ import { UserFacingError, errorResponse } from '@/lib/server/errors';
 const Body = z.object({
   subjectId: z.string().uuid(),
   title: z.string().max(200).catch(''),
+  /** 단원 (AI 채팅에서 푼 문제를 새 노트에 넣을 때 고른 단원) */
+  unit: z.string().max(80).catch(''),
 });
 
 /** 한 시간에 만들 수 있는 빈 노트 수 (실수로 여러 번 눌러도 자료함이 넘치지 않게) */
@@ -20,6 +22,7 @@ export async function POST(req: NextRequest) {
     const parsed = Body.safeParse(await readJson(req, 4_000));
     if (!parsed.success) throw new UserFacingError('bad_body', '보낸 내용이 올바르지 않아요.', 400);
     const title = parsed.data.title.replace(/\s+/g, ' ').trim().slice(0, 120) || '새 노트';
+    const unit = parsed.data.unit.replace(/\s+/g, ' ').trim().slice(0, 40);
 
     const { data: subject } = await admin.from('subjects').select('id').eq('id', parsed.data.subjectId).eq('user_id', acc.userId).maybeSingle();
     if (!subject) throw new UserFacingError('no_subject', '과목을 찾을 수 없어요.', 404);
@@ -40,6 +43,7 @@ export async function POST(req: NextRequest) {
       subject_id: subject.id,
       kind: 'text',
       title,
+      unit,
       text_content: null,
       status: 'ready',
       step: 'done',
@@ -48,7 +52,7 @@ export async function POST(req: NextRequest) {
     if (sErr) throw sErr;
     const body = {
       title,
-      unit: '',
+      unit,
       summary: '',
       key_points: [],
       terms: [],
@@ -59,13 +63,17 @@ export async function POST(req: NextRequest) {
       changes: [],
       manual: true,
     };
-    const { error: nErr } = await admin.from('notes').insert({ user_id: acc.userId, source_id: id, subject_id: subject.id, title, body });
-    if (nErr) {
+    const { data: made, error: nErr } = await admin
+      .from('notes')
+      .insert({ user_id: acc.userId, source_id: id, subject_id: subject.id, title, body })
+      .select('id')
+      .single();
+    if (nErr || !made) {
       // 노트를 못 만들었으면 빈 자료도 남기지 않는다
       await admin.from('sources').delete().eq('id', id);
-      throw nErr;
+      throw nErr ?? new Error('note insert failed');
     }
-    return Response.json({ ok: true, id });
+    return Response.json({ ok: true, id, noteId: made.id });
   } catch (e) {
     return errorResponse(e);
   }

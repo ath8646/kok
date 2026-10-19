@@ -33,7 +33,8 @@ import {
   inputClass,
   useToast,
 } from '@/components/ui';
-import { SOURCE_COLS, sb, type SourceRowWithUnit } from '@/lib/data';
+import { SOURCE_COLS, questionCols, sb, type SourceRowWithUnit } from '@/lib/data';
+import { keyPointMemory } from '@/lib/memory';
 import { zMindmap, zNote, zTable, zTimeline, type Mindmap, type TableSpec, type TimelineSpec } from '@/lib/ai/schemas';
 import type { QuestionRow, SubjectRow } from '@/lib/types';
 import { subjectVar } from '@/lib/colors';
@@ -41,6 +42,7 @@ import { VERSION_LIST_COLS, removalPlan, toVersionRow, type ChildSource, type Ve
 import { previewText } from '@/lib/richtext';
 import { starredFirst } from '@/lib/note-order';
 import { practiceHref, rememberPracticeFrom } from '@/lib/review-mode';
+import { prefersReducedMotion } from '@/components/useReducedMotion';
 
 type Tab = 'note' | 'visual' | 'questions' | 'original';
 type SourceFull = SourceRowWithUnit & { text_content: string | null; parent_id?: string | null };
@@ -57,8 +59,6 @@ const TABS: Array<{ id: Tab; label: string }> = [
   { id: 'original', label: '원본' },
 ];
 
-const Q_COLS =
-  'id, note_id, subject_id, key_point_id, type, prompt, choices, answer, accepted, explanation, difficulty, pages, created_by, locked, edited, status, created_at';
 const CHILD_COLS = `${SOURCE_COLS}, text_content, parent_id`;
 const VISUAL_TYPES: VisualType[] = ['mindmap', 'table', 'timeline'];
 const STALE_LIVE = '그사이 다른 곳에서 노트가 바뀌어서 방금 고친 것은 저장하지 못했어요. 새로 불러왔어요.';
@@ -92,7 +92,7 @@ function toVisuals(rows: Array<{ type: string; spec: unknown }>): Visuals {
   return visuals;
 }
 
-async function fetchBundle(sourceId: string, versionsOn: boolean, restedOn: boolean): Promise<Bundle> {
+async function fetchBundle(sourceId: string, versionsOn: boolean, restedOn: boolean, figuresOn: boolean): Promise<Bundle> {
   const empty: Bundle = { source: null, note: null, visuals: {}, visualRows: {}, questions: [], cards: new Map(), subject: null, versions: [] };
   const { data: s } = await sb()
     .from('sources')
@@ -112,7 +112,7 @@ async function fetchBundle(sourceId: string, versionsOn: boolean, restedOn: bool
     sb().from('visuals').select('id, type, spec, updated_at').eq('note_id', note.id),
     sb()
       .from('questions')
-      .select(restedOn ? `${Q_COLS}, rested_hidden` : Q_COLS)
+      .select(questionCols({ rested: restedOn, figures: figuresOn }))
       .eq('note_id', note.id)
       .order('created_at')
       .order('id'),
@@ -196,6 +196,7 @@ export default function NotePage() {
   const [opened] = useState(() => ({ tab: params.get('tab'), kp: params.get('kp'), v: params.get('v') }));
   const versionsOn = !!me?.features.versions;
   const restedOn = !!me?.features.restedHidden;
+  const figuresOn = !!me?.features.figures;
   const chatOn = !!me?.features.chat;
   const canAppend = !!me?.canAppend;
   const [bundle, setBundle] = useState<Bundle | null | undefined>(undefined);
@@ -255,7 +256,7 @@ export default function NotePage() {
   useEffect(() => {
     let alive = true;
     const gen = saveGen.current;
-    fetchBundle(sourceId, versionsOn, restedOn)
+    fetchBundle(sourceId, versionsOn, restedOn, figuresOn)
       .then((b) => {
         if (!alive || !freshSince(gen)) return;
         noteToken.current = b.note?.updated_at ?? null;
@@ -268,13 +269,13 @@ export default function NotePage() {
     return () => {
       alive = false;
     };
-  }, [sourceId, tick, versionsOn, restedOn, freshSince]);
+  }, [sourceId, tick, versionsOn, restedOn, figuresOn, freshSince]);
 
   const source = bundle === undefined ? undefined : (bundle?.source ?? null);
   const note = bundle?.note ?? null;
   const visuals = bundle?.visuals;
   const questions = bundle?.questions;
-  const cards = bundle?.cards ?? new Map<string, CardInfo>();
+  const cards = useMemo(() => bundle?.cards ?? new Map<string, CardInfo>(), [bundle]);
   const subject = bundle?.subject ?? null;
   const versions = useMemo(() => bundle?.versions ?? [], [bundle]);
   const noteId = note?.id;
@@ -390,6 +391,14 @@ export default function NotePage() {
   // 풀 수 있는 문제 (쉬는 문제 빼고)가 있을 때만 '이 노트 문제 풀기'
   const canPractice = useMemo(() => liveQuestions.some((q) => q.status === 'active'), [liveQuestions]);
   const docQuestions = useMemo(() => (old ? (questions ?? []).filter((q) => old.questionIds.includes(q.id)) : liveQuestions), [old, questions, liveQuestions]);
+  // 개념마다 기억 상태 (마인드맵 가지 색 점, 가지 자세히): 지금 복습에 나오는 문제의 카드로
+  const memory = useMemo(() => keyPointMemory(liveQuestions, cards), [liveQuestions, cards]);
+  /** 마인드맵 가지 자세히의 '정리에서 보기': 정리 탭으로 가서 그 개념을 칠해 보여 준다 */
+  const showInNote = useCallback((kpId: string) => {
+    setTab('note');
+    setKp(kpId);
+    setTimeout(() => document.getElementById(`kp-${kpId}`)?.scrollIntoView({ behavior: prefersReducedMotion() ? 'auto' : 'smooth', block: 'center' }), 250);
+  }, []);
   const existing = useMemo(() => new Set((questions ?? []).map((q) => q.id)), [questions]);
   const view = (raw?.view ?? {}) as NoteViewPrefs;
   // 문제 만들기·채팅에서 쓰는 개념: 노트에 보이는 순서(별표 먼저), 이름은 꾸미기 기호 없이 글로
@@ -838,6 +847,8 @@ export default function NotePage() {
                         recommended={body.recommended}
                         view={view}
                         highlightKeyPoint={kp}
+                        note={body}
+                        memory={memory}
                         onSaved={reload}
                         onOpen={() => setTab('visual')}
                         saveSpec={old ? saveOldVisual : saveLiveVisual}
@@ -893,6 +904,9 @@ export default function NotePage() {
               recommended={body.recommended}
               view={view}
               highlightKeyPoint={kp}
+              note={body}
+              memory={memory}
+              onShowInNote={showInNote}
               onSaved={reload}
               onViewChange={(v) => saveBody({ ...raw, view: v })}
               onReport={() => setReporting(true)}

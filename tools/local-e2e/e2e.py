@@ -419,12 +419,63 @@ async def main():
         await term_sec.get_by_role("button", name="완료").click()
         await page.evaluate("window.scrollTo(0, 0)")
 
-        step("visual tab")
+        step("visual tab: overview + branch cards, branch details, big map")
         await page.get_by_role("tab", name="그림").click()
-        await page.wait_for_timeout(500)
+        mm_view = page.get_by_role("radiogroup", name="마인드맵 보기")
+        # 폰은 카드 보기로 시작한다: 한눈 지도 + 가지 카드 (외우기 한 줄, 기억 상태)
+        await expect(mm_view.get_by_role("radio", name="카드")).to_have_attribute("aria-checked", "true")
+        atlas = page.get_by_role("group", name="한눈 지도: 광합성, 가지 4개")
+        await expect(atlas).to_be_visible()
+        branch_cards = page.get_by_role("list", name="가지 카드").get_by_role("button")
+        await expect(branch_cards).to_have_count(4)
+        await expect(branch_cards.first).to_contain_text("물은 뿌리로, 이산화탄소는 기공으로")
+        await expect(branch_cards.first).to_contain_text("아직 안 풀었어요")
+        await page.wait_for_timeout(400)
         await shot(page, "09-mindmap")
         await no_hscroll(page, "mindmap")
-        await page.get_by_role("button", name="가리기 모드").click()
+        # 한눈 지도의 가지를 누르면 그 카드로 내려가 테두리가 잠깐 빛난다
+        await atlas.get_by_role("button", name=re.compile("^빛의 세기")).click()
+        await expect(page.locator("#branch-n4 > button")).to_have_class(re.compile("kok-branch-flash"))
+        await expect(page.locator("#branch-n4")).to_be_in_viewport()
+        await expect(page.locator("#branch-n4 > button")).not_to_have_class(re.compile("kok-branch-flash"), timeout=3000)
+        # 가지 자세히: 외우기 한 줄·노트 설명·이 개념 문제 풀기, 아래에서 다음 가지로
+        await branch_cards.first.click()
+        sheet = page.get_by_role("dialog", name=re.compile("재료$"))
+        await expect(sheet.get_by_text("노트 설명")).to_be_visible()
+        await expect(sheet.get_by_text("물은 뿌리로, 이산화탄소는 기공으로")).to_be_visible()
+        await expect(sheet.get_by_role("link", name="이 개념 문제 풀기")).to_have_attribute("href", re.compile(r"^/review\?kp="))
+        await expect(sheet.get_by_text("1 / 4")).to_be_visible()
+        await shot(page, "09-branch-sheet", full=False)
+        await sheet.get_by_role("button", name="장소", exact=True).click()
+        sheet = page.get_by_role("dialog", name=re.compile("장소$"))
+        await expect(sheet.get_by_text("2 / 4")).to_be_visible()
+        await expect(sheet.get_by_label("아래 가지").get_by_text("엽록소", exact=True)).to_be_visible()  # 가지 아래의 아래도 보인다
+        await expect(sheet.get_by_label("예").locator(".kok-red", has_text="엽록소")).to_be_visible()  # 노트에서 고친 예시도 (꾸미기 그대로)
+        # 정리에서 보기 → 정리 탭의 그 개념, 그림 탭으로 돌아오면 그 가지 카드가 표시돼 있다
+        await sheet.get_by_role("button", name="정리에서 보기").click()
+        await expect(page.get_by_role("tab", name="정리")).to_have_attribute("aria-selected", "true")
+        await expect(page.locator("#kp-k2")).to_have_class(re.compile(r"shadow-\[0_0_0_3px_var\(--hl\)\]"))
+        await expect(page.locator("#kp-k2")).to_be_in_viewport()
+        await page.locator("#kp-k2").click(position={"x": 8, "y": 8})  # 한 번 더 누르면 표시를 끈다
+        await expect(page.locator("#kp-k2")).not_to_have_class(re.compile(r"shadow-\[0_0_0_3px"))
+        await page.locator("#kp-k2").click(position={"x": 8, "y": 8})
+        await page.get_by_role("tab", name="그림").click()
+        await expect(page.locator("#branch-n2 > button")).to_have_class(re.compile(r"shadow-\[0_0_0_3px_var\(--hl\)\]"))
+        # 큰 지도: 고른 보기는 이 기기에 기억한다
+        await mm_view.get_by_role("radio", name="지도").click()
+        big = page.get_by_role("img", name="마인드맵: 광합성")
+        await expect(big).to_be_visible()
+        assert await page.evaluate("localStorage.getItem('kok.mindmap.mode')") == "map"
+        await expect(big.get_by_role("button", name="재료, 아직 안 풀었어요")).to_be_visible()
+        await page.wait_for_timeout(300)
+        await shot(page, "09-mindmap-map", full=False)
+        # 지도에서 가지를 눌러도 가지 자세히
+        await big.get_by_role("button", name=re.compile("^결과물")).first.click()
+        await expect(page.get_by_role("dialog", name=re.compile("결과물$")).get_by_text("노트 설명")).to_be_visible()
+        await page.keyboard.press("Escape")
+        await expect(page.get_by_role("dialog", name=re.compile("결과물$"))).to_be_hidden()
+        await page.get_by_role("button", name="가리기", exact=True).click()
+        await expect(mm_view).to_be_hidden()  # 가리기·고치기는 큰 지도에서만
         hidden = page.get_by_role("button", name="가려진 가지, 눌러서 확인")
         n_hidden = await hidden.count()
         assert n_hidden > 3, n_hidden
@@ -435,37 +486,48 @@ async def main():
         await shot(page, "10-hide-mode", full=False)
         await page.get_by_role("button", name="결과 저장").click()
         await expect(page.get_by_text(re.compile("오늘 복습에 넣었어요|모두 기억났어요"))).to_be_visible()
-        await page.get_by_role("button", name="가리기 끄기").click()
+        await page.get_by_role("button", name="가리기 끝", exact=True).click()
         # 고치기
         await page.get_by_role("button", name="고치기", exact=True).click()
-        await page.get_by_role("button", name="재료").click()
+        await page.get_by_role("button", name=re.compile("^재료")).first.click()
         await page.get_by_label("가지 글자").fill("재료(원료)")
         await page.get_by_role("button", name="저장", exact=True).click()
-        await expect(page.get_by_role("button", name="재료(원료)")).to_be_visible()
+        await expect(page.get_by_role("button", name=re.compile(r"^재료\(원료\)")).first).to_be_visible()
         await page.get_by_role("button", name="가지 추가").click()
         await expect(page.get_by_text("저장됨")).to_be_visible()
         await shot(page, "11-mindmap-edit", full=False)
-        await page.get_by_role("button", name="고치기 끝").click()
+        await page.get_by_role("button", name="고치기 끝", exact=True).click()
+        await expect(mm_view.get_by_role("radio", name="지도")).to_have_attribute("aria-checked", "true")
         # 다시 그리기
-        await page.get_by_role("button", name="더보기").click()
+        await page.get_by_role("button", name="그림 더보기").click()
         await page.get_by_role("button", name=re.compile("AI로 다시 그리기")).click()
         await expect(page.get_by_role("heading", name="새 그림 미리보기")).to_be_visible()
         await page.get_by_role("button", name="적용").click()
         await expect(page.get_by_text("새 그림으로 바꿨어요.")).to_be_visible()
         await page.wait_for_timeout(600)
-        assert await page.get_by_role("button", name="재료(원료)").count() >= 1, "edited node should survive regenerate"
+        assert await page.get_by_role("button", name=re.compile(r"^재료\(원료\)")).count() >= 1, "edited node should survive regenerate"
         # 표로 만들기
-        await page.get_by_role("button", name="더보기").click()
+        await page.get_by_role("button", name="그림 더보기").click()
         await page.get_by_role("button", name=re.compile("^표로 만들기")).click()
         await page.get_by_role("button", name="적용").click()
         await expect(page.get_by_role("radio", name="표")).to_be_visible()
         await page.get_by_role("radio", name="표").click()
+        await expect(page.get_by_role("heading", name="광합성 정리표")).to_be_visible()
         await shot(page, "12-table", full=False)
-        for layout in ["오른쪽", "아래로", "퍼지기"]:
-            await page.get_by_role("radio", name="마인드맵").click() if await page.get_by_role("radio", name="마인드맵").count() else None
-            await page.get_by_role("radio", name=layout).click()
+        await no_hscroll(page, "table")
+        # 지도 모양 (더보기 안)
+        await page.get_by_role("radio", name="마인드맵").click()
+        for layout in ["오른쪽으로", "아래로", "가운데서 퍼지기"]:
+            await page.get_by_role("button", name="그림 더보기").click()
+            more = page.get_by_role("dialog", name="그림 더보기")
+            await more.get_by_role("radio", name=layout).click()
+            await expect(more.get_by_role("radio", name=layout)).to_have_attribute("aria-checked", "true")
+            await page.keyboard.press("Escape")
+            await expect(more).to_be_hidden()
             await page.wait_for_timeout(250)
             await shot(page, f"13-layout-{layout}", full=False)
+        # 다음 시험들을 위해 카드 보기로 되돌린다
+        await mm_view.get_by_role("radio", name="카드").click()
 
         step("questions tab")
         await page.get_by_role("tab", name=re.compile("문제")).click()
@@ -1464,6 +1526,215 @@ async def main():
         assert r.status == 403, (r.status, await r.text())
         await octx.close()
 
+        # ---------------- 그림 풀이·AI 채팅
+        step("Pro: a new note's questions come with figures and step-by-step solutions")
+        psql(f"delete from public.energy_ledger where user_id = '{student_id}'; delete from public.rate_hits where user_id = '{student_id}'")
+        ctx, page = await new_ctx(browser, "student")
+        await page.goto(BASE + "/library")
+        await page.get_by_role("button", name="자료 넣기", exact=True).click()
+        composer = page.get_by_role("dialog", name="자료 넣기")
+        await composer.get_by_label("공부한 내용").fill("그림 풀이 시험 자료. 광합성은 빛 에너지로 물과 이산화탄소에서 포도당과 산소를 만든다. 빛이 셀수록 광합성량이 늘다가 일정해진다.")
+        await composer.get_by_label("공부한 내용").press("Enter")
+        assert await wait_db(page, "select count(*) from public.sources where text_content like '그림 풀이 시험 자료%'", "1", timeout=30)
+        fig_sid = psql("select id from public.sources where text_content like '그림 풀이 시험 자료%'")
+        await page.goto(BASE + f"/notes/{fig_sid}")
+        assert await wait_ready(page, 120), "figure note not ready"
+        fig_q = lambda cond: int(psql(f"select count(*) from public.questions q join public.notes n on n.id = q.note_id where n.source_id = '{fig_sid}' and {cond}"))
+        n_fig, n_steps, n_all = fig_q("q.figure is not null"), fig_q("q.steps is not null"), fig_q("true")
+        print("   questions:", n_all, "with figure:", n_fig, "with steps:", n_steps)
+        assert n_fig >= 2 and n_steps >= 4, (n_fig, n_steps)
+        # 그림 풀이는 단계(solve)로 따로 받고, 단계마다 문제 몇 개씩
+        assert int(psql(f"select count(*) from public.energy_ledger where source_id = '{fig_sid}' and task = 'solve'")) == 2
+        # 문제 탭: 그림 풀이 표시, 펼치면 문제 그림과 단계별 풀이
+        await page.get_by_role("tab", name=re.compile("문제")).click()
+        await expect(page.get_by_text("그림 풀이", exact=True).first).to_be_visible()
+        first_fig = page.locator(".kok-card", has=page.get_by_text("그림 풀이", exact=True)).first
+        await first_fig.get_by_role("button", name=re.compile("보기$")).click()
+        await expect(first_fig.get_by_role("img", name="문제 그림")).to_be_visible()
+        await first_fig.get_by_role("button", name=re.compile("그림으로 보는 단계별 풀이")).click()
+        player = first_fig.get_by_role("region", name="단계별 풀이")
+        await expect(player.get_by_role("button", name="1단계")).to_have_attribute("aria-current", "step")
+        await player.get_by_role("button", name="3단계").click()
+        await expect(player.get_by_text("3단계")).to_be_visible()
+        await shot(page, "55-question-figure", full=False)
+        await no_hscroll(page, "question figure")
+        # 문제 풀기: 그림이 있는 문제는 문제 아래에 그림이 보이고, 틀리면 단계별 풀이가 처음부터 펼쳐져 있다
+        await page.goto(BASE + f"/notes/{fig_sid}/practice")
+        seen_fig = False
+        for _ in range(8):
+            await expect(page.get_by_role("button", name="그만하기")).to_be_visible()
+            card_text = await page.locator("main").inner_text()
+            has_fig = await page.get_by_role("img", name="문제 그림").count() > 0
+            if await page.get_by_role("button", name="O 맞다").count():
+                await page.get_by_role("button", name="O 맞다" if has_fig else "X 틀리다").click()  # (가짜 OX 답은 모두 X)
+            elif await page.get_by_label("답").count():
+                await page.get_by_label("답").fill("녹말" if "포도당은" in card_text else "기공")
+                await page.get_by_role("button", name="확인").click()
+            else:
+                await page.locator("main button:has-text('1')").first.click()  # 가짜 객관식 답은 2번
+            await expect(page.get_by_role("button", name="다음", exact=True)).to_be_visible(timeout=15000)
+            if has_fig:
+                steps_btn = page.get_by_role("button", name=re.compile("그림으로 보는 단계별 풀이"))
+                await expect(steps_btn).to_have_attribute("aria-expanded", "true")
+                await expect(page.get_by_role("region", name="단계별 풀이")).to_be_visible()
+                await page.get_by_role("region", name="단계별 풀이").focus()
+                await page.keyboard.press("ArrowRight")  # 풀이 안의 화살표 키는 풀이 단계를 넘긴다 (다음 문제로 가지 않는다)
+                await expect(page.get_by_role("button", name="2단계")).to_have_attribute("aria-current", "step")
+                await expect(page.get_by_role("button", name="다음", exact=True)).to_be_visible()
+                await shot(page, "56-practice-figure-wrong", full=False)
+                await no_hscroll(page, "practice figure")
+                seen_fig = True
+                break
+            await page.get_by_role("button", name="다음", exact=True).click()
+        assert seen_fig, "no question with a figure in practice"
+        await page.get_by_role("button", name="다음", exact=True).click()
+        await page.get_by_role("button", name="그만하기").click()
+
+        step("Pro: '그림 풀이 만들기' adds a step-by-step solution to one question")
+        own_q = psql("select q.id || '|' || s.id from public.questions q join public.notes n on n.id = q.note_id join public.sources s on s.id = n.source_id where q.prompt = '엽록소는 초록색 색소이다.'")
+        own_qid, own_sid = own_q.split("|")
+        assert psql(f"select steps is null from public.questions where id = '{own_qid}'") == "t"
+        await page.goto(BASE + f"/notes/{own_sid}?tab=questions")
+        own_card = page.locator(".kok-card", has_text="엽록소는 초록색 색소이다.").first
+        await own_card.get_by_role("button", name=re.compile("보기$")).click()
+        await own_card.get_by_role("button", name=re.compile("^그림 풀이 만들기 ⚡")).click()
+        await expect(page.get_by_text("그림 풀이를 만들었어요.")).to_be_visible(timeout=30000)
+        assert psql(f"select (steps is not null)::text || (figure is not null)::text from public.questions where id = '{own_qid}'") == "truetrue"
+        await expect(own_card.get_by_text("그림 풀이", exact=True)).to_be_visible()
+        assert int(psql(f"select count(*) from public.energy_ledger where user_id = '{student_id}' and task = 'solve' and source_id is null")) >= 1
+        # 이미 풀이가 있으면 다시 만들지 않는다 (에너지를 쓰기 전에 거절)
+        r = await page.request.post(BASE + f"/api/questions/{own_qid}/solve", headers={"origin": BASE}, data={})
+        assert r.status in (400, 409), (r.status, await r.text())
+        # 정답을 바꾸면 예전 풀이는 지운다
+        was_o = psql(f"select answer::text from public.questions where id = '{own_qid}'") == "true"
+        await own_card.get_by_role("button", name="고치기", exact=True).click()
+        dlg = page.get_by_role("dialog")
+        await dlg.get_by_role("radiogroup", name="OX 정답").get_by_role("radio", name="X (틀리다)" if was_o else "O (맞다)").click()
+        await dlg.get_by_role("button", name="저장", exact=True).click()
+        await poll_db(f"select (steps is null)::text || (figure is null)::text from public.questions where id = '{own_qid}'", "truetrue")
+
+        step("note chat (Pro): a photo of a problem → steps with a figure → this note's question")
+        psql(f"delete from public.rate_hits where user_id = '{student_id}'")
+        await page.goto(BASE + f"/notes/{fig_sid}")
+        assert await wait_ready(page)
+        await page.get_by_role("button", name="노트에게 물어보기").click()
+        chat = page.get_by_role("dialog", name="노트에게 물어보기")
+        await expect(chat.get_by_role("button", name="사진 찍기")).to_be_visible()
+        await chat.locator("input[type=file]").first.set_input_files(str(tmp / "p1.jpg"))
+        await expect(chat.get_by_role("list", name="붙인 파일").get_by_role("listitem")).to_have_count(1)
+        await chat.get_by_label("물어볼 내용").fill("이 문제 풀어 줘")
+        await chat.get_by_label("물어볼 내용").press("Enter")
+        await expect(chat.get_by_text("읽은 문제")).to_be_visible(timeout=20000)
+        await expect(chat.get_by_role("region", name="단계별 풀이").get_by_role("img")).to_be_visible()
+        await shot(page, "57-note-chat-solution", full=False)
+        n_before = fig_q("true")
+        await chat.get_by_role("button", name="이 노트 문제로 넣기").click()
+        await expect(chat.get_by_text("이 노트 문제로 넣었어요")).to_be_visible()
+        assert fig_q("true") == n_before + 1
+        assert fig_q("q.locked and q.created_by = 'ai' and q.figure is not null and q.steps is not null and q.prompt like '∠A = 90°%'") == 1
+        # 두 번 눌러도 한 번만 들어간다
+        msg_id = psql(f"select m.id from public.chat_messages m join public.notes n on n.id = m.note_id where n.source_id = '{fig_sid}' and m.solution is not null")
+        fig_note = psql(f"select id from public.notes where source_id = '{fig_sid}'")
+        r = await page.request.post(BASE + f"/api/notes/{fig_note}/chat/apply", headers={"origin": BASE}, data={"messageId": msg_id, "action": "save_problem"})
+        assert r.status == 409, r.status
+        assert fig_q("true") == n_before + 1
+        # Pro 는 보낸 사진을 보관한다: 다시 열어도 사진이 보인다
+        path = psql(f"select m.attachments->0->>'path' from public.chat_messages m join public.notes n on n.id = m.note_id where n.source_id = '{fig_sid}' and m.role = 'user' and m.attachments is not null")
+        assert path.startswith(f"{student_id}/chat/{fig_sid}/"), path
+        await page.keyboard.press("Escape")
+        await page.reload()
+        assert await wait_ready(page)
+        await page.get_by_role("button", name="노트에게 물어보기").click()
+        thumb = chat.get_by_role("button", name="p1.jpg 크게 보기").locator("img")
+        await expect(thumb).to_be_visible()
+        await wait_js(page, "() => [...document.querySelectorAll('[aria-label=\"p1.jpg 크게 보기\"] img')].some((i) => i.complete && i.naturalWidth > 0)")
+        # 대화를 지우면 보관한 사진도 지운다
+        assert psql(f"select count(*) from storage.objects where name like '{student_id}/chat/{fig_sid}/%'") == "1"
+        page.once("dialog", lambda d: asyncio.ensure_future(d.accept()))
+        await chat.get_by_role("button", name="채팅 메뉴").click()
+        await page.get_by_role("menuitem", name="대화 모두 지우기").click()
+        await poll_db(f"select count(*) from public.chat_messages m join public.notes n on n.id = m.note_id where n.source_id = '{fig_sid}'", "0")
+        await poll_db(f"select count(*) from storage.objects where name like '{student_id}/chat/{fig_sid}/%'", "0")
+        await page.keyboard.press("Escape")
+
+        step("home: AI에게 물어보기 → photo problem → steps with a figure → a new subject, unit and note")
+        await page.goto(BASE + "/home")
+        await page.get_by_role("button", name="AI에게 물어보기").click()
+        ask = page.get_by_role("dialog", name="AI에게 물어보기")
+        await expect(ask.get_by_role("radiogroup", name="AI 모델")).to_be_visible()
+        await expect(ask.get_by_text("무엇이든 물어보세요")).to_be_visible()
+        await shot(page, "60-home-ask", full=False)
+        await no_hscroll(page, "home ask")
+        await ask.locator("input[type=file]").first.set_input_files(str(tmp / "p2.jpg"))
+        await ask.get_by_label("물어볼 내용").press("Enter")  # 사진만 보내도 된다
+        await expect(ask.get_by_role("button", name="노트에 넣기")).to_be_visible(timeout=20000)
+        await expect(ask.get_by_role("region", name="단계별 풀이").get_by_role("img")).to_be_visible()
+        await expect(ask.get_by_text("수학 · 피타고라스 정리")).to_be_visible()
+        await shot(page, "61-home-ask-solution", full=False)
+        await ask.get_by_role("button", name="노트에 넣기").click()
+        save = page.get_by_role("dialog", name="노트에 넣기")
+        # 없는 과목(수학)이면 그 이름으로 새 과목, 단원·노트 이름도 AI 가 짐작한 것으로
+        await expect(save.get_by_role("radio", name="새 과목")).to_have_attribute("aria-checked", "true")
+        await expect(save.get_by_label("새 과목 이름")).to_have_value("수학")
+        await expect(save.get_by_label("새 단원 이름")).to_have_value("피타고라스 정리")
+        await expect(save.get_by_label("새 노트 이름")).to_have_value("피타고라스 정리 문제")
+        await shot(page, "62-save-problem", full=False)
+        await save.get_by_role("button", name="새 노트를 만들어 넣기").click()
+        await expect(ask.get_by_text(re.compile("피타고라스 정리 문제.에 넣었어요"))).to_be_visible()
+        math_sid = psql(f"select s.id from public.sources s join public.subjects j on j.id = s.subject_id where j.name = '수학' and j.user_id = '{student_id}' and s.unit = '피타고라스 정리' and s.title = '피타고라스 정리 문제'")
+        assert math_sid, "new note in the new subject and unit"
+        math_q = lambda: psql(f"select count(*) from public.questions q join public.notes n on n.id = q.note_id where n.source_id = '{math_sid}' and q.locked and q.figure is not null")
+        assert math_q() == "1", math_q()
+        # 두 번째 문제는 그 노트로: 이번에는 과목·단원·노트가 이미 있어서 그것을 고른다
+        await ask.get_by_label("물어볼 내용").fill("이것도 풀어 줘")
+        await ask.get_by_label("물어볼 내용").press("Enter")
+        await expect(ask.get_by_role("button", name="노트에 넣기")).to_be_visible(timeout=20000)
+        await ask.get_by_role("button", name="노트에 넣기").click()
+        await expect(save.get_by_role("radio", name="수학")).to_have_attribute("aria-checked", "true")
+        await expect(save.get_by_role("radiogroup", name="단원").get_by_role("radio", name="피타고라스 정리")).to_have_attribute("aria-checked", "true")
+        await expect(save.get_by_role("radiogroup", name="노트").get_by_role("radio", name=re.compile("^피타고라스 정리 문제"))).to_have_attribute("aria-checked", "true")
+        await save.get_by_role("button", name="이 노트에 넣기").click()
+        await expect(save).to_be_hidden()
+        await poll_db(f"select count(*) from public.questions q join public.notes n on n.id = q.note_id where n.source_id = '{math_sid}'", "2")
+        # 홈을 떠나면 대화가 사라진다
+        await page.keyboard.press("Escape")
+        await expect(ask).to_be_hidden()
+        await expect(page.get_by_role("button", name="AI에게 물어보기")).to_contain_text("이어서 물어보기")
+        nav = page.get_by_role("navigation", name="주 메뉴")
+        await nav.get_by_role("link", name="자료함").first.click()
+        await page.wait_for_url(re.compile(r"/library"))
+        await nav.get_by_role("link", name="홈").first.click()
+        await page.wait_for_url(re.compile(r"/home$"))
+        await expect(page.get_by_role("button", name="AI에게 물어보기")).to_contain_text("모든 과목 · 사진으로 문제 풀이")
+        # 넣은 문제는 노트에서 바로 풀 수 있다
+        await page.goto(BASE + f"/notes/{math_sid}/practice")
+        await expect(page.get_by_role("img", name="문제 그림")).to_be_visible()
+        await page.get_by_label("답").fill("5")
+        await page.get_by_role("button", name="확인").click()
+        await expect(page.get_by_role("button", name=re.compile("그림으로 보는 단계별 풀이"))).to_have_attribute("aria-expanded", "false")
+        await ctx.close()
+
+        step("free: AI에게 물어보기 gives text steps (no figure), careful model is Pro")
+        psql(f"delete from public.energy_ledger where user_id = '{other_id}'; delete from public.rate_hits where user_id = '{other_id}'")
+        octx, opage = await new_ctx(browser, "other")
+        await opage.goto(BASE + "/home")
+        await opage.get_by_role("button", name="AI에게 물어보기").click()
+        ask = opage.get_by_role("dialog", name="AI에게 물어보기")
+        await ask.get_by_role("radio", name=re.compile("^꼼꼼")).click()
+        await expect(opage.get_by_text("꼼꼼 모델은 Pro에서 쓸 수 있어요.")).to_be_visible()
+        await expect(ask.get_by_role("radio", name=re.compile("^빠름"))).to_have_attribute("aria-checked", "true")
+        await ask.get_by_role("button", name="이차방정식 풀어 줘").click()
+        await expect(ask.get_by_role("region", name="단계별 풀이")).to_be_visible(timeout=20000)
+        await expect(ask.get_by_role("region", name="단계별 풀이").get_by_role("img")).to_have_count(0)
+        await expect(ask.get_by_role("region", name="단계별 풀이").get_by_text("직각을 낀 두 변이")).to_be_visible()
+        await shot(opage, "63-home-ask-free", full=False)
+        await ask.get_by_role("button", name="노트에 넣기").click()
+        save = opage.get_by_role("dialog", name="노트에 넣기")
+        await save.get_by_role("button", name="새 노트를 만들어 넣기").click()
+        await expect(ask.get_by_text("에 넣었어요")).to_be_visible()
+        assert psql(f"select (q.figure is null)::text || (jsonb_array_length(q.steps) = 3)::text from public.questions q where q.user_id = '{other_id}' and q.prompt like '∠A = 90°%'") == "truetrue"
+        await octx.close()
+
         # 다크 모드 폰 한 장
         step("dark phone note")
         ctx, page = await new_ctx(browser, "student", scheme="dark")
@@ -1472,7 +1743,7 @@ async def main():
         await shot(page, "32-library-dark")
         await page.get_by_role("tab", name=re.compile("^과학")).click()
         await page.wait_for_url(LIBRARY_SUBJECT)
-        await page.get_by_role("link", name=re.compile("광합성")).first.click()
+        await page.locator(f"main a[href='/notes/{note_sid}']").first.click()
         await wait_ready(page)
         await shot(page, "32-note-dark")
         await page.locator("article[data-flip]").first.get_by_role("button", name=re.compile("고치기$")).click()
@@ -1487,6 +1758,13 @@ async def main():
         await page.get_by_role("tab", name="그림").click()
         await page.wait_for_timeout(500)
         await shot(page, "33-mindmap-dark", full=False)
+        await page.get_by_role("list", name="가지 카드").get_by_role("button").nth(2).click()
+        await page.wait_for_timeout(350)
+        await shot(page, "33-branch-sheet-dark", full=False)
+        await page.keyboard.press("Escape")
+        await page.get_by_role("radiogroup", name="마인드맵 보기").get_by_role("radio", name="지도").click()
+        await page.wait_for_timeout(400)
+        await shot(page, "33-mindmap-map-dark", full=False)
 
         step("mind map step reveal keeps every branch in its place")
         subprocess.run(
@@ -1499,9 +1777,11 @@ async def main():
         )
         await page.reload()
         await page.get_by_role("tab", name="그림").click()
+        # 큰 지도 (앞에서 고른 '지도' 보기를 기억한다)
+        await expect(page.get_by_role("radiogroup", name="마인드맵 보기").get_by_role("radio", name="지도")).to_have_attribute("aria-checked", "true")
         await page.wait_for_timeout(2500)
         centers = await page.evaluate(
-            "() => [...document.querySelectorAll('svg g.mm-step')].map((g) => { const r = g.getBoundingClientRect(); return [r.x + r.width / 2, r.y + r.height / 2]; })"
+            "() => [...document.querySelectorAll('svg[aria-label^=\"마인드맵:\"] g.mm-step')].map((g) => { const r = g.getBoundingClientRect(); return [r.x + r.width / 2, r.y + r.height / 2]; })"
         )
         xs = [c[0] for c in centers]
         ys = [c[1] for c in centers]

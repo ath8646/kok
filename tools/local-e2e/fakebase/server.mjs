@@ -677,11 +677,11 @@ function fakeVisual(prompt) {
     mindmap: {
       root_label: '광합성',
       nodes: [
-        { id: 'n1', parent_id: '', label: '재료', icon: '💧', key_point_id: 'k1', pages: [1] },
-        { id: 'n2', parent_id: '', label: '장소', icon: '🌿', key_point_id: 'k2', pages: [2] },
-        { id: 'n3', parent_id: '', label: '결과물', icon: '🍬', key_point_id: 'k3', pages: [2] },
-        { id: 'n4', parent_id: '', label: '빛의 세기', icon: '☀️', key_point_id: 'k4', pages: [4] },
-        { id: 'n5', parent_id: 'n1', label: '물', icon: '', key_point_id: 'k1', pages: [1] },
+        { id: 'n1', parent_id: '', label: '재료', icon: '💧', key_point_id: 'k1', pages: [1], hint: '물은 뿌리로, 이산화탄소는 기공으로' },
+        { id: 'n2', parent_id: '', label: '장소', icon: '🌿', key_point_id: 'k2', pages: [2], hint: '초록색 엽록소가 있는 엽록체' },
+        { id: 'n3', parent_id: '', label: '결과물', icon: '🍬', key_point_id: 'k3', pages: [2], hint: '산소는 재료가 아니라 결과물!' },
+        { id: 'n4', parent_id: '', label: '빛의 세기', icon: '☀️', key_point_id: 'k4', pages: [4], hint: '세질수록 늘다가 어느 순간 일정' },
+        { id: 'n5', parent_id: 'n1', label: '물', icon: '', key_point_id: 'k1', pages: [1], hint: '' },
         { id: 'n6', parent_id: 'n1', label: '이산화탄소', icon: '', key_point_id: 'k1', pages: [1] },
         { id: 'n7', parent_id: 'n2', label: '엽록체', icon: '', key_point_id: 'k2', pages: [2] },
         { id: 'n8', parent_id: 'n7', label: '엽록소', icon: '', key_point_id: 'k2', pages: [2] },
@@ -740,16 +740,71 @@ function fakeNewQuiz() {
 }
 
 /** 노트 채팅: '문제' 를 말하면 문제를, '노트에' 를 말하면 노트에 넣자고 한다 */
-function fakeChat(textOf) {
+const emptyQuestion = { type: 'short', prompt: '', choices: [], answer_index: -1, answer_bool: false, answer_text: '', accepted: [], explanation: '', key_point_id: '', difficulty: 'medium', pages: [] };
+const it = (p) => ({ refs: [], x: 0, y: 0, w: 0, h: 0, r: 0, expr: '', from: 0, to: 0, label: '', style: 'given', marks: 0, ...p });
+const noFigure = { include: false, view: { x_min: 0, x_max: 0, y_min: 0, y_max: 0 }, axes: false, grid: false, items: [] };
+
+/** 채팅에서 푼 문제 (사진·'풀어' 가 있으면): 직각삼각형 빗변. Pro 스키마(그림 칸이 있음)면 그림도 */
+function fakeChatSolution(solveProps, wantSolve) {
+  const figures = !!solveProps?.properties?.figure;
+  if (!wantSolve) return { include: false, problem: '', steps: [], ...(figures ? { figure: noFigure } : {}), question: emptyQuestion, subject: '', unit: '' };
+  const steps = [
+    { text: '직각을 낀 두 변이 $3$ cm, $4$ cm 이에요. 빗변은 직각의 맞은편 $\\overline{BC}$ 예요.', add: [], focus: ['AB', 'AC', 'right'] },
+    { text: '피타고라스 정리: $\\overline{BC}^2 = 3^2 + 4^2 = 25$', add: [], focus: ['BC'] },
+    { text: '그래서 $\\overline{BC} = 5$ cm 예요.', add: ['ans'], focus: ['BC', 'ans'] },
+  ];
+  return {
+    include: true,
+    problem: '직각삼각형 ABC 에서 ∠A = 90°, AB = 4 cm, AC = 3 cm 일 때 빗변 BC 의 길이를 구하시오.',
+    steps: figures ? steps : steps.map(({ text }) => ({ text })),
+    ...(figures
+      ? {
+          figure: {
+            include: true,
+            view: { x_min: -1, x_max: 5, y_min: -1, y_max: 4 },
+            axes: false,
+            grid: false,
+            items: [
+              it({ id: 'A', type: 'point', x: 0, y: 0, label: 'A' }),
+              it({ id: 'B', type: 'point', x: 4, y: 0, label: 'B' }),
+              it({ id: 'C', type: 'point', x: 0, y: 3, label: 'C' }),
+              it({ id: 'AB', type: 'segment', refs: ['A', 'B'], label: '4 cm' }),
+              it({ id: 'AC', type: 'segment', refs: ['A', 'C'], label: '3 cm' }),
+              it({ id: 'right', type: 'angle', refs: ['B', 'A', 'C'], label: '90°' }),
+              it({ id: 'BC', type: 'segment', refs: ['B', 'C'], label: '?', style: 'answer' }),
+              it({ id: 'ans', type: 'text', x: 2.9, y: 2.2, label: '5 cm', style: 'answer' }),
+            ],
+          },
+        }
+      : {}),
+    question: { ...emptyQuestion, type: 'short', prompt: '∠A = 90° 인 직각삼각형 ABC 에서 AB = 4 cm, AC = 3 cm 일 때 BC 의 길이는? (cm)', answer_text: '5', accepted: ['5cm', '5 cm'], explanation: '피타고라스 정리로 $3^2+4^2=25$ 이니 빗변은 5 cm 예요.', difficulty: 'easy' },
+    subject: '수학',
+    unit: '피타고라스 정리',
+  };
+}
+
+function fakeChat(textOf, props = {}, images = 0) {
   const q = (textOf.match(/<question>\n([\s\S]*?)\n<\/question>/) || [])[1] || '';
   const allowQuestions = !/adding questions from chat is turned off/.test(textOf);
   const allowNote = !/adding to the note from chat is turned off/.test(textOf);
   const none = { kind: 'none', questions: [], note_addition: { key_point_id: '', title: '', text: '' } };
+  const wantSolve = images > 0 || /풀어/.test(q);
+  const solution = props.solution ? { solution: fakeChatSolution(props.solution, wantSolve) } : {};
+  // 홈 AI 채팅 (노트 없음)
+  if (!props.outside_note) {
+    return wantSolve
+      ? { reply: '빗변 BC 는 **5 cm** 예요. 아래 단계별 풀이를 보세요.', ...solution }
+      : { reply: '광합성은 식물이 빛 에너지로 물과 이산화탄소에서 포도당과 산소를 만드는 과정이에요.', ...solution };
+  }
+  if (wantSolve) {
+    return { reply: '빗변 BC 는 5 cm 예요. 단계별 풀이를 보세요.', outside_note: true, proposal: none, ...solution };
+  }
   if (/문제/.test(q) && allowQuestions) {
     return {
       reply: '노트로 문제 2개를 만들었어요. 넣을지 골라 주세요.',
       outside_note: false,
       proposal: { ...none, kind: 'questions', questions: fakeQuiz().questions.slice(0, 2) },
+      ...solution,
     };
   }
   if (/노트에/.test(q) && allowNote) {
@@ -757,13 +812,73 @@ function fakeChat(textOf) {
       reply: '엽록체 설명에 이 내용을 더하면 좋겠어요.',
       outside_note: true,
       proposal: { ...none, kind: 'note', note_addition: { key_point_id: 'k2', title: '', text: '엽록체는 두 겹의 막으로 싸여 있어요.' } },
+      ...solution,
     };
   }
   return {
     reply: `노트에 따르면 광합성은 **엽록체**에서 일어나요. ${/자세히|더/.test(q) ? '노트 밖 설명을 보태면, 엽록체 안의 틸라코이드에서 빛을 받아요.' : ''}`.trim(),
     outside_note: /자세히|더/.test(q),
     proposal: none,
+    ...solution,
   };
+}
+
+/** 노트 문제 그림 풀이: 받은 문제 앞에서부터 max 개 (객관식은 과정 상자 그림, OX 는 그래프, 나머지는 글 단계) */
+function fakeSolve(textOf) {
+  const listed = JSON.parse((textOf.match(/<questions>\n([\s\S]*?)\n<\/questions>/) || [])[1] || '[]');
+  const max = Number((textOf.match(/Pick at most (\d+) questions/) || [])[1] || 1);
+  const solutions = listed.slice(0, max).map((q) => {
+    if (q.type === 'mcq') {
+      return {
+        index: q.index,
+        steps: [
+          { text: '광합성의 재료는 물과 이산화탄소예요.', add: [], focus: ['in', 'a2'] },
+          { text: '엽록체가 빛 에너지를 써서', add: [], focus: ['light', 'a1', 'chl'] },
+          { text: '포도당과 산소를 만들어요. 그래서 답은 2번이에요.', add: ['out', 'a3'], focus: ['out'] },
+        ],
+        figure: {
+          include: true,
+          view: { x_min: -5, x_max: 5, y_min: -2, y_max: 4 },
+          axes: false,
+          grid: false,
+          items: [
+            it({ id: 'light', type: 'box', x: 0, y: 3, label: '빛 에너지' }),
+            it({ id: 'in', type: 'box', x: -3.4, y: 0, label: '물 + 이산화탄소' }),
+            it({ id: 'chl', type: 'box', x: 0, y: 0, label: '엽록체' }),
+            it({ id: 'out', type: 'box', x: 3.4, y: 0, label: '포도당 + 산소', style: 'answer' }),
+            it({ id: 'a1', type: 'arrow', refs: ['light', 'chl'] }),
+            it({ id: 'a2', type: 'arrow', refs: ['in', 'chl'], label: '재료' }),
+            it({ id: 'a3', type: 'arrow', refs: ['chl', 'out'], label: '결과물' }),
+          ],
+        },
+      };
+    }
+    if (q.type === 'ox') {
+      return {
+        index: q.index,
+        steps: [
+          { text: '빛이 약할 때는 빛이 셀수록 광합성량이 늘어요.', add: [], focus: ['g'] },
+          { text: '어느 세기를 넘으면 더 늘지 않고 일정해져요 (광포화점).', add: ['sat', 'P'], focus: ['sat', 'P'] },
+          { text: '그래서 "끝없이 늘어난다"는 틀렸어요 (X).', add: [], focus: ['sat'] },
+        ],
+        figure: {
+          include: true,
+          view: { x_min: -0.5, x_max: 10, y_min: -0.5, y_max: 5 },
+          axes: true,
+          grid: false,
+          items: [
+            it({ id: 'g', type: 'function', expr: '4(1 - e^(-x/2))', from: 0, to: 10, label: '광합성량' }),
+            it({ id: 'P', type: 'point', x: 6, y: 3.8, label: '광포화점', style: 'answer' }),
+            it({ id: 'S1', type: 'point', x: 0, y: 4, style: 'muted' }),
+            it({ id: 'S2', type: 'point', x: 10, y: 4, style: 'muted' }),
+            it({ id: 'sat', type: 'line', refs: ['S1', 'S2'], style: 'aux' }),
+          ],
+        },
+      };
+    }
+    return { index: q.index, steps: [{ text: '노트의 정의를 떠올려요.', add: [], focus: [] }, { text: `답은 ${q.answer} 예요.`, add: [], focus: [] }], figure: noFigure };
+  });
+  return { solutions };
 }
 
 function fakeQuiz() {
@@ -836,9 +951,14 @@ async function handleClaude(req, res) {
   }
   let out;
   let task;
+  const images = Array.isArray(content) ? content.filter((c) => c?.type === 'image').length : 0;
+  if (Array.isArray(content)) stats.images = (stats.images || 0) + images;
   if (props.reply) {
-    task = 'chat';
-    out = fakeChat(textOf);
+    task = props.outside_note ? 'chat' : 'ask';
+    out = fakeChat(textOf, props, images);
+  } else if (props.solutions) {
+    task = 'solve';
+    out = fakeSolve(textOf);
   } else if (props.key_points && /Merge the new material into the current note/.test(textOf)) {
     task = 'merge';
     out = fakeMerged(textOf);

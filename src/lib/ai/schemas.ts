@@ -3,6 +3,7 @@
 //    규칙: 모든 객체 additionalProperties:false, 재귀 금지, min/max 길이 금지.
 // 2) zod 스키마: 받은 JSON 을 한 번 더 검사하고 빈 값을 채운다.
 import { z } from 'zod';
+import { figureJsonSchema, stepsJsonSchema, textStepsJsonSchema } from '@/lib/figure/spec';
 
 type JsonSchema = Record<string, unknown>;
 
@@ -84,7 +85,7 @@ export const visualJsonSchema: JsonSchema = obj({
     root_label: str,
     nodes: {
       type: 'array',
-      items: obj({ id: str, parent_id: str, label: str, icon: str, key_point_id: str, pages: intArr }),
+      items: obj({ id: str, parent_id: str, label: str, icon: str, key_point_id: str, pages: intArr, hint: str }),
     },
   }),
   table: obj({
@@ -107,6 +108,8 @@ export const zMindNode = z.object({
   icon: z.string().catch(''),
   key_point_id: z.string().catch(''),
   pages: zPages,
+  /** 1단계 가지의 외우기 한 줄 (예전 그림에는 없다) */
+  hint: z.string().optional().catch(undefined),
   edited: z.boolean().optional(),
 });
 export type MindNode = z.infer<typeof zMindNode>;
@@ -187,17 +190,65 @@ export type QuizItem = z.infer<typeof zQuizItem>;
 
 export const zQuiz = z.object({ questions: z.array(z.unknown()).catch([]) });
 
-// ---------------------------------------------------------------- 노트 채팅
-export const chatJsonSchema: JsonSchema = obj({
-  reply: str,
-  // 노트 밖 일반 지식을 보탰는지 (화면에 표시)
-  outside_note: { type: 'boolean' },
-  proposal: obj({
-    kind: { type: 'string', enum: ['none', 'questions', 'note'] },
-    questions: (quizJsonSchema.properties as Record<string, unknown>).questions,
-    note_addition: obj({ key_point_id: str, title: str, text: str }),
-  }),
+// ---------------------------------------------------------------- 그림 풀이 (Pro): 문제 그림과 단계 풀이
+export const solveJsonSchema: JsonSchema = obj({
+  solutions: { type: 'array', items: obj({ index: int, steps: stepsJsonSchema, figure: figureJsonSchema }) },
 });
+export const zSolve = z.object({
+  // 빈 칸이 있어도 받는다 (zod 4 는 z.unknown() 칸도 빠지면 오류라 optional)
+  solutions: z.array(z.object({ index: z.number().int(), steps: z.unknown().optional(), figure: z.unknown().optional() })).catch([]),
+});
+
+// ---------------------------------------------------------------- 채팅 (노트 채팅·홈 AI 채팅)
+const quizItemSchema = (quizJsonSchema.properties as Record<string, { items: JsonSchema }>).questions.items;
+
+/** 채팅에서 푼 문제: 읽은 문제, 단계 풀이 (figures: Pro 는 그림도), 노트에 넣을 문제 모양, 과목·단원 짐작 */
+export function chatSolutionSchema(figures: boolean): JsonSchema {
+  return obj({
+    include: { type: 'boolean' },
+    problem: str,
+    steps: figures ? stepsJsonSchema : textStepsJsonSchema,
+    ...(figures ? { figure: figureJsonSchema } : {}),
+    question: quizItemSchema,
+    subject: str,
+    unit: str,
+  });
+}
+
+const proposalSchema = obj({
+  kind: { type: 'string', enum: ['none', 'questions', 'note'] },
+  questions: (quizJsonSchema.properties as Record<string, unknown>).questions,
+  note_addition: obj({ key_point_id: str, title: str, text: str }),
+});
+
+/** 노트 채팅. solve: 문제 풀이 칸까지 (schema.sql 을 다시 실행하기 전에는 빼고 예전처럼) */
+export function noteChatJsonSchema(o: { solve: boolean; figures: boolean }): JsonSchema {
+  return obj({
+    reply: str,
+    // 노트 밖 일반 지식을 보탰는지 (화면에 표시)
+    outside_note: { type: 'boolean' },
+    proposal: proposalSchema,
+    ...(o.solve ? { solution: chatSolutionSchema(o.figures) } : {}),
+  });
+}
+
+/** 홈 AI 채팅 (노트 없이 아무 과목이나) */
+export function homeChatJsonSchema(figures: boolean): JsonSchema {
+  return obj({ reply: str, solution: chatSolutionSchema(figures) });
+}
+
+/** 받은 풀이 (검사는 readChatSolution 이 한다) */
+export const zChatSolutionRaw = z.object({
+  include: z.boolean().catch(false),
+  problem: z.string().catch(''),
+  // 무료는 그림 칸이 없다 (zod 4 는 z.unknown() 칸도 빠지면 오류라 optional)
+  steps: z.unknown().optional(),
+  figure: z.unknown().optional(),
+  question: z.unknown().optional(),
+  subject: z.string().catch(''),
+  unit: z.string().catch(''),
+});
+export type ChatSolutionRaw = z.infer<typeof zChatSolutionRaw>;
 
 export const zNoteAddition = z.object({
   key_point_id: z.string().catch(''),
@@ -209,6 +260,7 @@ export type NoteAddition = z.infer<typeof zNoteAddition>;
 export const zChat = z.object({
   reply: z.string().catch(''),
   outside_note: z.boolean().catch(false),
+  solution: zChatSolutionRaw.optional().catch(undefined),
   proposal: z
     .object({
       kind: z.enum(['none', 'questions', 'note']).catch('none'),
@@ -218,6 +270,11 @@ export const zChat = z.object({
     .catch({ kind: 'none', questions: [], note_addition: { key_point_id: '', title: '', text: '' } }),
 });
 export type ChatResult = z.infer<typeof zChat>;
+
+export const zHomeChat = z.object({
+  reply: z.string().catch(''),
+  solution: zChatSolutionRaw.optional().catch(undefined),
+});
 
 // ---------------------------------------------------------------- 테마 (Pro)
 const palette = obj({ bg: str, surface: str, accent: str });

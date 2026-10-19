@@ -32,6 +32,8 @@ const TASK_NAME: Record<string, string> = {
   grade: '채점',
   fix: '문제 고치기',
   chat: '노트 채팅',
+  ask: 'AI에게 물어보기',
+  solve: '그림 풀이',
   theme: '테마 만들기',
   refund: '돌려받음',
 };
@@ -535,6 +537,21 @@ export default function SettingsPage() {
             ]}
           />
         </Field>
+        {me.features.figures ? (
+          <div className="grid gap-1.5">
+            <Toggle
+              id="set-figures"
+              label={`필요한 문제에 그림과 단계 풀이 붙이기${me.canFigures ? '' : ' (Pro)'}`}
+              checked={me.canFigures && draft.quiz.figures}
+              disabled={!me.canFigures}
+              onChange={(v) => set('quiz', { figures: v })}
+            />
+            <p className="text-xs text-muted">
+              노트를 만들 때 수학·과학처럼 그림이나 단계가 도움이 되는 문제에만 붙여요. 에너지가 조금 더 들어요. 예전 문제는 문제 목록에서 하나씩 만들 수
+              있어요.
+            </p>
+          </div>
+        ) : null}
       </Card>
 
       <SectionTitle>내 데이터</SectionTitle>

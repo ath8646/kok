@@ -79,7 +79,16 @@ function withLatest(p: PlanData, latest: Map<string, CardRow>): PlanData {
   const cards = p.cards.map((c) => {
     const l = latest.get(c.question_id);
     return l
-      ? { ...c, due: l.due, state: l.state, reps: l.reps, lapses: l.lapses, wrong_count: l.wrong_count ?? 0, last_review: l.last_review, in_wrong_note: l.in_wrong_note }
+      ? {
+          ...c,
+          due: l.due,
+          state: l.state,
+          reps: l.reps,
+          lapses: l.lapses,
+          wrong_count: l.wrong_count ?? 0,
+          last_review: l.last_review,
+          in_wrong_note: l.in_wrong_note,
+        }
       : c;
   });
   const rawCards = new Map(p.rawCards);
@@ -99,7 +108,13 @@ async function fetchPracticeNote(m: Extract<ReviewMode, { kind: 'practice' }>): 
   return data ? { id: String(data.id), title: String(data.title ?? ''), sourceId: String(data.source_id) } : null;
 }
 
-async function fetchQueue(m: ReviewMode, practiceAhead: boolean, r: MeResponse['settings']['review'], latest: Map<string, CardRow>): Promise<Queue> {
+async function fetchQueue(
+  m: ReviewMode,
+  practiceAhead: boolean,
+  r: MeResponse['settings']['review'],
+  latest: Map<string, CardRow>,
+  figures: boolean,
+): Promise<Queue> {
   const [read, note] = await Promise.all([fetchPlanData(), m.kind === 'practice' ? fetchPracticeNote(m) : Promise.resolve(null)]);
   const p = withLatest(read, latest);
   let cards = p.cards;
@@ -119,7 +134,7 @@ async function fetchQueue(m: ReviewMode, practiceAhead: boolean, r: MeResponse['
     chosen = [...chosen, ...rest].slice(0, m.kind === 'practice' ? 200 : 60);
   }
   const ids = chosen.map((c) => c.question_id);
-  const qs = await fetchQuestionsByIds(ids);
+  const qs = await fetchQuestionsByIds(ids, { figures });
   const qmap = new Map(qs.map((q) => [q.id, q]));
   const items: Item[] = [];
   for (const id of ids) {
@@ -130,7 +145,13 @@ async function fetchQueue(m: ReviewMode, practiceAhead: boolean, r: MeResponse['
   return { plan: p, items, note };
 }
 
-export function ReviewSession({ mode, fromNote = false }: { mode: ReviewMode; /** 노트 화면에서 왔는지 (노트 문제 풀기 주소의 ?from=note): 돌아갈 때 뒤로 가기 */ fromNote?: boolean }) {
+export function ReviewSession({
+  mode,
+  fromNote = false,
+}: {
+  mode: ReviewMode;
+  /** 노트 화면에서 왔는지 (노트 문제 풀기 주소의 ?from=note): 돌아갈 때 뒤로 가기 */ fromNote?: boolean;
+}) {
   const { me, setFocus, refresh } = useMe();
   const router = useRouter();
   const toast = useToast();
@@ -165,6 +186,7 @@ export function ReviewSession({ mode, fromNote = false }: { mode: ReviewMode; /*
   const leaving = useRef(false);
   const subjectNames = useMemo(() => new Map((plan?.subjects ?? []).map((s) => [s.id, s.name])), [plan]);
   const reviewSettings = me?.settings.review;
+  const figuresOn = !!me?.features.figures;
 
   // 못 읽었을 때는 '오늘 할 일 끝' 대신 다시 불러오기를 보여 준다
   const [failed, setFailed] = useState(false);
@@ -213,13 +235,13 @@ export function ReviewSession({ mode, fromNote = false }: { mode: ReviewMode; /*
     if (!reviewSettings) return;
     if (phase === 'end') setRound((r) => r + 1);
     setPhase('loading');
-    fetchQueue(mode, practiceAhead, reviewSettings, latest.current).then(applyQueue).catch(loadFailed);
+    fetchQueue(mode, practiceAhead, reviewSettings, latest.current, figuresOn).then(applyQueue).catch(loadFailed);
   };
 
   useEffect(() => {
     if (!reviewSettings) return;
     let alive = true;
-    fetchQueue(mode, false, reviewSettings, latest.current)
+    fetchQueue(mode, false, reviewSettings, latest.current, figuresOn)
       .then((r) => {
         if (alive) applyQueue(r);
       })
@@ -389,7 +411,7 @@ export function ReviewSession({ mode, fromNote = false }: { mode: ReviewMode; /*
         <Sheet open={!!visual} onClose={() => setVisual(null)} title="그림으로 보기">
           {visual ? <MindMap spec={visual.spec} settings={me.settings.visual} highlightKeyPoint={visual.kp} /> : null}
         </Sheet>
-        <ReportSheet q={reportQ} onClose={() => setReportQ(null)} onChanged={() => {}} />
+        <ReportSheet q={reportQ} onClose={() => setReportQ(null)} onChanged={() => {}} figuresOn={figuresOn} />
       </>
     ) : null;
 
@@ -626,7 +648,11 @@ export function ReviewSession({ mode, fromNote = false }: { mode: ReviewMode; /*
 /** 위 띠의 글자 버튼 (그만하기·닫기) */
 function BarButton({ onClick, children }: { onClick: () => void; children: ReactNode }) {
   return (
-    <button type="button" className="press shrink-0 whitespace-nowrap rounded-lg px-3 py-1.5 text-sm font-semibold text-muted hover:bg-surface-2" onClick={onClick}>
+    <button
+      type="button"
+      className="press shrink-0 whitespace-nowrap rounded-lg px-3 py-1.5 text-sm font-semibold text-muted hover:bg-surface-2"
+      onClick={onClick}
+    >
       {children}
     </button>
   );

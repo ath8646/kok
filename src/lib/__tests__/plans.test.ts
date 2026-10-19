@@ -13,7 +13,7 @@ import {
   type CustomPlan,
 } from '@/lib/plans';
 import { DEFAULT_LIMITS, MAX_FILE_MB } from '@/lib/settings';
-import { FLAGS_WARNING, PlanBody, planRow, savePlan, schemaMissing } from '@/app/api/admin/plans/shared';
+import { FIGURES_WARNING, FLAGS_WARNING, PlanBody, planRow, savePlan, schemaMissing } from '@/app/api/admin/plans/shared';
 
 const NOW = Date.parse('2026-10-18T03:00:00Z');
 const later = new Date(NOW + 7 * 86_400_000).toISOString();
@@ -91,6 +91,12 @@ describe('테스트 플랜 판단', () => {
     const on = toCustomPlan({ id: 'x', name: 'a', energy_total: 10, can_append: true, can_theme: true });
     expect(planFlags('custom', on)).toMatchObject({ canAppend: true, canTheme: true });
     expect(planFlags('custom', { ...on, canTheme: false })).toMatchObject({ canAppend: true, canTheme: false });
+    // 그림 풀이: Pro·관리자는 늘, 테스트 플랜은 켠 것만, 무료는 없음
+    expect(planFlags('pro', null).canFigures).toBe(true);
+    expect(planFlags('admin', null).canFigures).toBe(true);
+    expect(planFlags('free', null).canFigures).toBe(false);
+    expect(planFlags('custom', on).canFigures).toBe(false);
+    expect(planFlags('custom', toCustomPlan({ id: 'x', name: 'a', energy_total: 10, can_figures: true })).canFigures).toBe(true);
   });
 
   it('끝난 테스트 플랜 뒤부터 무료·Pro 에너지를 센다', () => {
@@ -170,10 +176,26 @@ describe('테스트 플랜 저장 값', () => {
     // 다른 오류는 그대로 낸다
     await expect(savePlan(body, async () => ({ data: null, error: { code: '23514', message: 'check violation' } }))).rejects.toMatchObject({ code: '23514' });
   });
+  it('그림 풀이 칸만 없으면 그 칸만 빼고 다시 저장한다', async () => {
+    const withFig = PlanBody.parse({ ...body, canFigures: true });
+    expect(planRow(withFig, true)).toMatchObject({ can_figures: true, can_append: true });
+    const rows: Array<Record<string, unknown>> = [];
+    const r = await savePlan(withFig, async (row) => {
+      rows.push(row);
+      return 'can_figures' in row
+        ? { data: null, error: { code: 'PGRST204', message: "Could not find the 'can_figures' column of 'custom_plans' in the schema cache" } }
+        : { data: { id: 'p3', ...row }, error: null };
+    });
+    expect(rows).toHaveLength(2);
+    expect(rows[1]).toMatchObject({ can_append: true });
+    expect(rows[1]).not.toHaveProperty('can_figures');
+    expect(r.warning).toBe(FIGURES_WARNING);
+  });
   it('schema.sql 을 다시 실행하기 전(칸이 없음)에는 그 칸을 빼고 저장한다', () => {
     const row = planRow(body, false);
     expect(row).not.toHaveProperty('can_append');
     expect(row).not.toHaveProperty('can_theme');
+    expect(row).not.toHaveProperty('can_figures');
     expect(row).toMatchObject({ name: '베타', careful: true });
   });
 });

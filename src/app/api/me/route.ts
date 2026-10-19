@@ -24,6 +24,8 @@ export async function GET() {
       canCareful: acc.canCareful,
       canAppend: acc.canAppend,
       canTheme: acc.canTheme,
+      canFigures: acc.canFigures,
+      keepChatFiles: acc.keepFiles,
       features,
       consented: acc.consented,
       settings: acc.settings,

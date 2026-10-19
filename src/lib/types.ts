@@ -21,8 +21,12 @@ export type MeResponse = {
   canAppend: boolean;
   /** 테마를 쓸 수 있는지 (Pro 기능) */
   canTheme: boolean;
+  /** 그림 풀이: 노트를 만들 때 문제 그림·단계 풀이, 채팅의 그림 풀이 (Pro 기능) */
+  canFigures: boolean;
+  /** 채팅에 붙인 사진·파일을 노트 채팅 기록에 보관하는지 (Pro 기능, 아니면 이름만 남는다) */
+  keepChatFiles: boolean;
   /** DB 에 새 표가 있는지 (schema.sql 을 다시 실행하기 전에는 false) */
-  features: { versions: boolean; restedHidden: boolean; chat: boolean; planFlags: boolean; themes: boolean };
+  features: { versions: boolean; restedHidden: boolean; chat: boolean; planFlags: boolean; themes: boolean; figures: boolean; chatFiles: boolean };
   consented: boolean;
   settings: UserSettings;
   energy: {
@@ -99,6 +103,10 @@ export type QuestionRow = {
   status: 'active' | 'suspended' | 'hidden';
   /** 숨긴 문제가 숨기 전에 쉬는 중이었는지 (그 버전으로 돌아오면 다시 쉬는 중) */
   rested_hidden?: boolean;
+  /** 문제 그림 설계도 (Pro 그림 풀이, 예전 문제·schema.sql 전에는 없다). readFigure 로 읽는다 */
+  figure?: unknown;
+  /** 단계 풀이 [{ text, add, focus }]. readSteps 로 읽는다 */
+  steps?: unknown;
   created_at: string;
 };
 

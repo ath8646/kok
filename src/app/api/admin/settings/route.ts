@@ -36,7 +36,17 @@ const Models = z.object({
   fast: modelId,
   careful: modelId,
   adminTest: modelId,
-  effort: z.object({ organize: effort, merge: effort, visual: effort, quiz: effort, check: effort, grade: effort, chat: effort.catch('low') }),
+  effort: z.object({
+    organize: effort,
+    merge: effort,
+    visual: effort,
+    quiz: effort,
+    check: effort,
+    grade: effort,
+    chat: effort.catch('low'),
+    theme: effort.catch('low'),
+    solve: effort.catch('medium'),
+  }),
 });
 const Notice = z.object({ active: z.boolean(), text: z.string().max(300) });
 const Site = z.object({ contactEmail: z.string().max(120), operatorName: z.string().max(60) });

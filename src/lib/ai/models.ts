@@ -116,3 +116,23 @@ export function estimateSmallTask(model: ModelId, usdPerEnergy: number, inputTok
   const usd = costUsd(model, { input_tokens: inputTokens, output_tokens: outputTokens });
   return Math.max(0.1, Math.round(usdToEnergy(usd, usdPerEnergy) * 10) / 10);
 }
+
+/**
+ * 먼저 생각하고 답하는 작은 작업의 예상 답 길이 (생각한 토큰도 답으로 센다). 서버의 에너지 확인과 화면의 예상이 같은 값을 쓴다
+ * chat: 노트 채팅 (파일 없음), chatSolve: 사진·파일을 붙인 채팅과 AI에게 물어보기, solveOne: 문제 하나 그림 풀이 만들기
+ */
+export const THINK_OUT = { chat: 1200, chatSolve: 3500, solveOne: 6000 } as const;
+
+/**
+ * Pro 그림 풀이(문제 그림·단계 풀이)의 예상 에너지: 문제 몇 개씩 한두 번 (먼저 생각하고 답해서 답이 길다).
+ * 노트 만들기 예상에 더한다 (model: 문제 모델)
+ */
+export function estimateFigures(model: ModelId, usdPerEnergy: number): number {
+  const usd = costUsd(model, { input_tokens: 8000, output_tokens: 7000 }) * 1.5;
+  return Math.max(1, Math.ceil(usdToEnergy(usd, usdPerEnergy)));
+}
+
+/** 노트를 만들 때 그림 풀이를 만드는지 (Pro 혜택, 설정에서 켜 둠, DB 칸이 있음) */
+export function figuresWanted(o: { canFigures: boolean; figuresSetting: boolean; featureOn: boolean }): boolean {
+  return o.canFigures && o.figuresSetting && o.featureOn;
+}

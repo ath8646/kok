@@ -72,6 +72,7 @@ const EFFORT_TASKS: Array<[keyof ModelsConfig['effort'], string]> = [
   ['grade', '채점'],
   ['chat', '채팅'],
   ['theme', '테마 만들기'],
+  ['solve', '풀이 (그림·단계)'],
 ];
 
 export default function AdminPage() {
@@ -409,7 +410,13 @@ export default function AdminPage() {
         </ul>
       </Card>
 
-      <AdminPlans limits={ov.settings.limits} refreshKey={plansKey} planFlags={me.features.planFlags} onChanged={() => loadUsers(q).catch(() => {})} />
+      <AdminPlans
+        limits={ov.settings.limits}
+        refreshKey={plansKey}
+        planFlags={me.features.planFlags}
+        figuresOn={me.features.figures}
+        onChanged={() => loadUsers(q).catch(() => {})}
+      />
 
       <SectionTitle>신고함</SectionTitle>
       <Card className="grid gap-3">

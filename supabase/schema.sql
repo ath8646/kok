@@ -477,10 +477,18 @@ create table if not exists public.chat_messages (
 );
 create index if not exists chat_note_idx on public.chat_messages (note_id, created_at);
 create index if not exists chat_user_idx on public.chat_messages (user_id, created_at desc);
+-- 채팅에 붙인 사진·파일 [{ kind, name, path? }] (path 는 Pro 만 보관: 내id/chat/자료id/…), AI 가 풀어 준 문제 { problem, steps, figure, question, subject, unit, saved? }
+alter table public.chat_messages add column if not exists attachments jsonb check (attachments is null or pg_column_size(attachments) <= 8192);
+alter table public.chat_messages add column if not exists solution jsonb check (solution is null or pg_column_size(solution) <= 65536);
 
--- 테스트 플랜: 자료 더하기·테마를 쓸 수 있는지
+-- 문제 그림(설계도: 좌표와 도형 목록, 그림은 앱이 그린다)과 단계 풀이 [{ text, add, focus }]. 예전 문제는 null
+alter table public.questions add column if not exists figure jsonb check (figure is null or pg_column_size(figure) <= 32768);
+alter table public.questions add column if not exists steps jsonb check (steps is null or pg_column_size(steps) <= 16384);
+
+-- 테스트 플랜: 자료 더하기·테마·그림 풀이(문제 그림·단계 풀이)를 쓸 수 있는지
 alter table public.custom_plans add column if not exists can_append boolean not null default false;
 alter table public.custom_plans add column if not exists can_theme boolean not null default false;
+alter table public.custom_plans add column if not exists can_figures boolean not null default false;
 
 -- ---------------------------------------------------------------------
 -- 한 사람이 표를 끝없이 채우지 못하게 막는다 (학생이 직접 넣는 표만).
@@ -1233,7 +1241,7 @@ begin
   for q in select * from jsonb_array_elements(coalesce(p_questions, '[]'::jsonb)) loop
     insert into public.questions (
       user_id, note_id, subject_id, key_point_id, type, prompt, choices, answer, accepted,
-      explanation, difficulty, pages, created_by
+      explanation, difficulty, pages, created_by, figure, steps
     ) values (
       n.user_id, n.id, n.subject_id,
       nullif(q->>'key_point_id', ''),
@@ -1249,7 +1257,11 @@ begin
            case when jsonb_typeof(q->'pages') = 'array' then q->'pages' else '[]'::jsonb end) x),
         '{}'
       ),
-      'ai'
+      'ai',
+      -- 그림·단계 풀이 (Pro 가 노트를 만들 때). 없거나 칸 한도보다 크면 null (풀이 때문에 노트 저장이 멈추지 않게)
+      case when jsonb_typeof(q->'figure') = 'object' and pg_column_size(q->'figure') <= 32768 then q->'figure' else null end,
+      case when jsonb_typeof(q->'steps') = 'array' and jsonb_array_length(q->'steps') > 0 and pg_column_size(q->'steps') <= 16384
+           then q->'steps' else null end
     )
     returning id into qid;
     insert into public.cards (question_id, user_id, subject_id, due)

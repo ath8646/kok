@@ -5,11 +5,9 @@ import { Suspense, useCallback, useEffect, useMemo, useState } from 'react';
 import { QuestionList, type CardInfo } from '@/components/QuestionList';
 import { Select } from '@/components/Select';
 import { LargeHeader, Segmented, inputClass } from '@/components/ui';
-import { fetchAll, fetchSubjects, sb } from '@/lib/data';
+import { fetchAll, fetchSubjects, questionCols, sb } from '@/lib/data';
+import { useMe } from '@/components/AppShell';
 import type { QuestionRow, SubjectRow } from '@/lib/types';
-
-const QCOLS =
-  'id, note_id, subject_id, key_point_id, type, prompt, choices, answer, accepted, explanation, difficulty, pages, created_by, locked, edited, status, created_at';
 
 export default function QuestionsPage() {
   return (
@@ -34,13 +32,25 @@ function QuestionsView() {
 
   const [version, setVersion] = useState(0);
   const load = useCallback(() => setVersion((v) => v + 1), []);
+  // 문제 그림 칸은 DB 에 있을 때만 읽는다 (내 정보를 받은 뒤에 읽기 시작)
+  const { me } = useMe();
+  const ready = !!me;
+  const figuresOn = !!me?.features.figures;
 
   useEffect(() => {
+    if (!ready) return;
     let alive = true;
     Promise.all([
       fetchSubjects(),
-      fetchAll<QuestionRow>((a, b) =>
-        sb().from('questions').select(QCOLS).neq('status', 'hidden').order('created_at', { ascending: false }).order('id').range(a, b),
+      fetchAll<QuestionRow>(
+        (a, b) =>
+          sb()
+            .from('questions')
+            .select(questionCols({ figures: figuresOn }))
+            .neq('status', 'hidden')
+            .order('created_at', { ascending: false })
+            .order('id')
+            .range(a, b) as unknown as PromiseLike<{ data: QuestionRow[] | null; error: unknown }>,
       ),
       fetchAll<{ question_id: string } & CardInfo>((a, b) =>
         sb().from('cards').select('question_id, lapses, wrong_count, in_wrong_note, due, reps').order('question_id').range(a, b),
@@ -62,7 +72,7 @@ function QuestionsView() {
     return () => {
       alive = false;
     };
-  }, [version]);
+  }, [version, ready, figuresOn]);
 
   const units = useMemo(() => {
     const set = new Set<string>();

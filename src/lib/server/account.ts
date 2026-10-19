@@ -52,6 +52,8 @@ export type Account = {
   canAppend: boolean;
   /** 테마를 쓸 수 있는지 (Pro·관리자, 켠 테스트 플랜) */
   canTheme: boolean;
+  /** 그림 풀이를 쓸 수 있는지: 노트를 만들 때 문제 그림·단계 풀이, 채팅의 그림 풀이 (Pro·관리자, 켠 테스트 플랜) */
+  canFigures: boolean;
   /** 마지막 테스트 플랜이 끝난 시각 (무료·Pro 에너지는 이 뒤부터 센다, 켜져 있으면 null) */
   planEndedAt: string | null;
   banned: boolean;
@@ -111,6 +113,7 @@ export async function getAccount(admin: SupabaseClient, userId: string, email?: 
     keepFiles: caps.keepFiles,
     canAppend: caps.canAppend,
     canTheme: caps.canTheme,
+    canFigures: caps.canFigures,
     planEndedAt: plan.kind === 'custom' ? null : planEndedAt(row),
     banned: !!row.banned,
     consented: !!row.consented_at,
@@ -131,6 +134,10 @@ export type Features = {
   planFlags: boolean;
   /** 내가 만든 테마·배경 그림 (user_themes, theme_images, app_counters) */
   themes: boolean;
+  /** 문제 그림·단계 풀이 (questions.figure·steps, custom_plans.can_figures) */
+  figures: boolean;
+  /** 채팅에 붙인 사진·파일과 단계 풀이 (chat_messages.attachments·solution). 없어도 채팅은 예전처럼 된다 */
+  chatFiles: boolean;
 };
 
 let featuresCache: { at: number; value: Features } | null = null;
@@ -141,7 +148,7 @@ let featuresCache: { at: number; value: Features } | null = null;
  */
 export async function getFeatures(admin: SupabaseClient): Promise<Features> {
   if (featuresCache && Date.now() - featuresCache.at < 60_000) return featuresCache.value;
-  const [v, p, r, c, f, t, ti, ac] = await Promise.all([
+  const [v, p, r, c, f, t, ti, ac, qf, pf, cf] = await Promise.all([
     admin.from('note_versions').select('id').limit(1),
     admin.from('sources').select('parent_id').limit(1),
     admin.from('questions').select('rested_hidden').limit(1),
@@ -150,6 +157,9 @@ export async function getFeatures(admin: SupabaseClient): Promise<Features> {
     admin.from('user_themes').select('id').limit(1),
     admin.from('theme_images').select('id').limit(1),
     admin.from('app_counters').select('day').limit(1),
+    admin.from('questions').select('figure, steps').limit(1),
+    admin.from('custom_plans').select('can_figures').limit(1),
+    admin.from('chat_messages').select('attachments, solution').limit(1),
   ]);
   const value: Features = {
     versions: !v.error && !p.error,
@@ -157,6 +167,8 @@ export async function getFeatures(admin: SupabaseClient): Promise<Features> {
     chat: !c.error,
     planFlags: !f.error,
     themes: !t.error && !ti.error && !ac.error,
+    figures: !qf.error && !pf.error,
+    chatFiles: !c.error && !cf.error,
   };
   featuresCache = { at: Date.now(), value };
   return value;

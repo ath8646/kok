@@ -126,6 +126,23 @@ export function TableView({
     );
   }
 
+  /** 가린 칸 (가리기 모드): 누르면 보인다 */
+  const cell = (r: number, c: number, text: string) => {
+    const key = `${r}:${c}`;
+    const hidden = hideMode && c > 0 && !shown.has(key);
+    return hidden ? (
+      <button
+        type="button"
+        className="press w-full rounded-lg border border-dashed border-line bg-surface-2 px-2 py-1 text-sm text-muted"
+        onClick={() => setShown((s) => new Set(s).add(key))}
+      >
+        눌러서 확인
+      </button>
+    ) : (
+      <RichText text={text} />
+    );
+  };
+
   return (
     <div className="grid gap-3">
       <div className="flex items-center justify-between gap-2">
@@ -136,12 +153,39 @@ export function TableView({
           </Button>
         ) : null}
       </div>
-      <div className="overflow-x-auto kok-card">
-        <table className="w-full min-w-[480px] border-collapse text-[15px]">
-          <thead className="bg-surface-2">
+
+      {/* 폰: 줄마다 카드 (첫 칸이 제목, 나머지는 '열 이름: 값') */}
+      <ol className="grid gap-2.5 sm:hidden" aria-label={spec.title || '표'}>
+        {spec.rows.map((row, r) => (
+          <li key={r} className="kok-card kok-rise relative overflow-hidden p-4 pl-5" style={{ ['--i' as string]: r }}>
+            <span className="absolute inset-y-0 left-0 w-1.5" style={{ background: `var(--b${(r % 8) + 1})` }} aria-hidden="true" />
+            <p className="font-display text-[17px] leading-snug">{cell(r, 0, row[0] ?? '')}</p>
+            <dl className="mt-2 grid gap-2">
+              {Array.from({ length: cols - 1 }, (_, k) => k + 1).map((c) => (
+                <div key={c} className="grid gap-0.5">
+                  <dt className="text-xs font-bold tracking-wide text-muted">{spec.columns[c] ?? ''}</dt>
+                  <dd className="text-[15px] leading-relaxed">{cell(r, c, row[c] ?? '')}</dd>
+                </div>
+              ))}
+            </dl>
+          </li>
+        ))}
+      </ol>
+
+      {/* 넓은 화면: 표 (첫 열은 옆으로 밀어도 남는다) */}
+      <div className="kok-card hidden overflow-x-auto sm:block">
+        <table className="w-full border-collapse text-[15px]">
+          <thead>
             <tr>
               {Array.from({ length: cols }, (_, c) => (
-                <th key={c} scope="col" className="border-b border-line px-3 py-2.5 text-left font-bold">
+                <th
+                  key={c}
+                  scope="col"
+                  className={cx(
+                    'border-b border-line bg-surface-2 px-4 py-3 text-left text-[13px] font-bold tracking-wide text-muted',
+                    c === 0 && 'sticky left-0 z-[1]',
+                  )}
+                >
                   {spec.columns[c] ?? ''}
                 </th>
               ))}
@@ -149,27 +193,26 @@ export function TableView({
           </thead>
           <tbody>
             {spec.rows.map((row, r) => (
-              <tr key={r} className="align-top">
+              <tr key={r} className="align-top transition-colors hover:bg-surface-2/50">
                 {Array.from({ length: cols }, (_, c) => {
-                  const key = `${r}:${c}`;
-                  const hidden = hideMode && c > 0 && !shown.has(key);
                   const Cell = c === 0 ? 'th' : 'td';
                   return (
                     <Cell
                       key={c}
                       scope={c === 0 ? 'row' : undefined}
-                      className={cx('border-b border-line px-3 py-2.5 text-left', c === 0 ? 'font-bold' : 'font-normal')}
+                      className={cx(
+                        'border-b border-line px-4 py-3 text-left',
+                        r === spec.rows.length - 1 && 'border-b-0',
+                        c === 0 ? 'sticky left-0 bg-surface font-bold' : 'font-normal',
+                      )}
                     >
-                      {hidden ? (
-                        <button
-                          type="button"
-                          className="w-full rounded-lg border border-dashed border-line bg-surface-2 px-2 py-1 text-sm text-muted"
-                          onClick={() => setShown((s) => new Set(s).add(key))}
-                        >
-                          눌러서 확인
-                        </button>
+                      {c === 0 ? (
+                        <span className="inline-flex items-start gap-2">
+                          <span className="mt-[7px] h-2 w-2 shrink-0 rounded-full" style={{ background: `var(--b${(r % 8) + 1})` }} aria-hidden="true" />
+                          <span>{cell(r, c, row[c] ?? '')}</span>
+                        </span>
                       ) : (
-                        <RichText text={row[c] ?? ''} />
+                        cell(r, c, row[c] ?? '')
                       )}
                     </Cell>
                   );
@@ -286,33 +329,46 @@ export function TimelineView({
           </Button>
         ) : null}
       </div>
-      <ol className="relative grid gap-4 border-l-2 border-accent/40 pl-6">
+      <ol className="relative grid gap-3 pl-11" aria-label={spec.title || '연표'}>
+        {/* 세로 줄: 위에서 아래로 옅어진다 */}
+        <span
+          className="absolute bottom-3 left-[17px] top-3 w-[3px] rounded-full"
+          style={{ background: 'linear-gradient(var(--accent), color-mix(in srgb, var(--accent) 18%, transparent))' }}
+          aria-hidden="true"
+        />
         {spec.events.map((ev, i) => {
           const hidden = hideMode && !shown.has(i);
           return (
-            <li key={i} className="relative">
-              <span className="absolute -left-[33px] top-1 h-4 w-4 rounded-full border-2 border-accent bg-surface" aria-hidden="true" />
-              <p className="text-sm font-bold text-accent">{ev.date}</p>
-              {hidden ? (
-                <button
-                  type="button"
-                  className="mt-1 rounded-lg border border-dashed border-line bg-surface-2 px-3 py-1.5 text-sm text-muted"
-                  onClick={() => setShown((s) => new Set(s).add(i))}
-                >
-                  무슨 일이었을까요? 눌러서 확인
-                </button>
-              ) : (
-                <>
-                  <p className="text-[16px] font-bold">
-                    <RichText text={ev.label} />
-                  </p>
-                  {ev.detail ? (
-                    <p className="text-sm text-muted">
-                      <RichText text={ev.detail} />
+            <li key={i} className="kok-rise relative" style={{ ['--i' as string]: i }}>
+              <span
+                className="absolute -left-11 top-3 grid h-9 w-9 place-items-center rounded-full bg-accent text-[13px] font-bold text-accent-ink shadow-[0_0_0_4px_var(--bg)]"
+                aria-hidden="true"
+              >
+                {i + 1}
+              </span>
+              <div className="kok-card p-4">
+                {ev.date ? <span className="mb-1.5 inline-flex rounded-full bg-accent-soft px-2.5 py-0.5 text-xs font-bold text-accent">{ev.date}</span> : null}
+                {hidden ? (
+                  <button
+                    type="button"
+                    className="press mt-0.5 block w-full rounded-xl border border-dashed border-line bg-surface-2 px-3 py-2 text-left text-sm text-muted"
+                    onClick={() => setShown((s) => new Set(s).add(i))}
+                  >
+                    무슨 일이었을까요? 눌러서 확인
+                  </button>
+                ) : (
+                  <>
+                    <p className="text-[16px] font-bold leading-snug">
+                      <RichText text={ev.label} />
                     </p>
-                  ) : null}
-                </>
-              )}
+                    {ev.detail ? (
+                      <p className="mt-1 text-sm leading-relaxed text-muted">
+                        <RichText text={ev.detail} />
+                      </p>
+                    ) : null}
+                  </>
+                )}
+              </div>
             </li>
           );
         })}

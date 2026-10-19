@@ -3,7 +3,7 @@
 // 보고 있는 버전에 들어간 자료들의 원본
 import { useRef, useState } from 'react';
 import type { MeResponse } from '@/lib/types';
-import { estimateEnergy, estimateSmallTask } from '@/lib/ai/models';
+import { estimateEnergy, estimateFigures, estimateSmallTask, figuresWanted } from '@/lib/ai/models';
 import { clientModel } from '@/lib/client-model';
 import { MIN_TEXT_CHARS } from '@/lib/quick-add';
 import { materialLabel, versionItems, type ChildSource, type Material, type VersionRow } from '@/lib/versions';
@@ -230,9 +230,12 @@ function AddMaterial({ me, busyHint, onAdd }: { me: MeResponse; busyHint: boolea
   const can = me.canAppend;
   const trimmed = text.trim();
   const model = clientModel(me, me.settings.models.organize);
+  const figures = figuresWanted({ canFigures: me.canFigures, figuresSetting: me.settings.quiz.figures, featureOn: me.features.figures });
   const est =
     trimmed.length >= MIN_TEXT_CHARS
-      ? estimateEnergy({ kind: 'text', chars: trimmed.length }, model, me.usdPerEnergy) + Math.ceil(estimateSmallTask(model, me.usdPerEnergy, 9000, 3000))
+      ? estimateEnergy({ kind: 'text', chars: trimmed.length }, model, me.usdPerEnergy) +
+        Math.ceil(estimateSmallTask(model, me.usdPerEnergy, 9000, 3000)) +
+        (figures ? estimateFigures(clientModel(me, me.settings.models.quiz), me.usdPerEnergy) : 0)
       : null;
 
   return (

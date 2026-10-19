@@ -163,17 +163,26 @@ export async function fetchPlanData(): Promise<PlanData> {
   };
 }
 
-export async function fetchQuestionsByIds(ids: string[]): Promise<QuestionRow[]> {
+/** 화면에서 읽는 문제 칸. 새 칸은 DB 에 있을 때만 (features: schema.sql 을 다시 실행하기 전에는 없다) */
+export function questionCols(o: { figures?: boolean; rested?: boolean } = {}): string {
+  return [
+    'id, note_id, subject_id, key_point_id, type, prompt, choices, answer, accepted, explanation, difficulty, pages, created_by, locked, edited, status, created_at',
+    o.rested ? 'rested_hidden' : '',
+    o.figures ? 'figure, steps' : '',
+  ]
+    .filter(Boolean)
+    .join(', ');
+}
+
+export async function fetchQuestionsByIds(ids: string[], opts: { figures?: boolean } = {}): Promise<QuestionRow[]> {
   const out: QuestionRow[] = [];
   for (let i = 0; i < ids.length; i += 100) {
     const { data, error } = await sb()
       .from('questions')
-      .select(
-        'id, note_id, subject_id, key_point_id, type, prompt, choices, answer, accepted, explanation, difficulty, pages, created_by, locked, edited, status, created_at',
-      )
+      .select(questionCols({ figures: opts.figures }))
       .in('id', ids.slice(i, i + 100));
     if (error) throw error;
-    out.push(...((data ?? []) as QuestionRow[]));
+    out.push(...((data ?? []) as unknown as QuestionRow[]));
   }
   return out;
 }

@@ -299,21 +299,76 @@ export function findNode(root: TreeNode, id: string): TreeNode | null {
   return null;
 }
 
-/** 연결선 경로 (부드러운 곡선) */
-export function edgePath(e: Edge, layout: Layout): string {
+type P = { x: number; y: number };
+
+/** 연결선의 곡선 (시작·조절점 둘·끝) */
+export function edgeCurve(e: Edge, layout: Layout): [P, P, P, P] {
   const a = e.from;
   const b = e.to;
   if (layout === 'down') {
     const y1 = a.y + a.h / 2;
     const y2 = b.y - b.h / 2;
     const my = (y1 + y2) / 2;
-    return `M${a.x} ${y1}C${a.x} ${my},${b.x} ${my},${b.x} ${y2}`;
+    return [
+      { x: a.x, y: y1 },
+      { x: a.x, y: my },
+      { x: b.x, y: my },
+      { x: b.x, y: y2 },
+    ];
   }
   const side = b.side;
-  const x1 = a.x + (side * a.w) / 2;
+  // 가운데 주제에서 나가는 선은 주제 상자 안쪽에서 시작해 굵은 뿌리가 상자에 묻히게
+  const x1 = a.x + (side * a.w) / 2 - (a.depth === 0 ? side * 10 : 0);
   const x2 = b.x - (side * b.w) / 2;
   const mx = (x1 + x2) / 2;
-  return `M${x1} ${a.y}C${mx} ${a.y},${mx} ${b.y},${x2} ${b.y}`;
+  return [
+    { x: x1, y: a.y },
+    { x: mx, y: a.y },
+    { x: mx, y: b.y },
+    { x: x2, y: b.y },
+  ];
+}
+
+/** 연결선 경로 (부드러운 곡선) */
+export function edgePath(e: Edge, layout: Layout): string {
+  const [p0, p1, p2, p3] = edgeCurve(e, layout);
+  return `M${p0.x} ${p0.y}C${p1.x} ${p1.y},${p2.x} ${p2.y},${p3.x} ${p3.y}`;
+}
+
+const r2 = (n: number) => Math.round(n * 10) / 10;
+
+/**
+ * 끝으로 갈수록 가늘어지는 리본 모양 연결선 (채워서 그린다): 곡선을 따라 굵기를 w1 → w2 로 줄인다.
+ * 손으로 그린 마인드맵처럼 가지가 굵게 뻗어 나와 끝에서 가늘어진다
+ */
+export function ribbonPath(e: Edge, layout: Layout, w1: number, w2: number, n = 20): string {
+  const [p0, p1, p2, p3] = edgeCurve(e, layout);
+  const at = (t: number): P => {
+    const u = 1 - t;
+    return {
+      x: u * u * u * p0.x + 3 * u * u * t * p1.x + 3 * u * t * t * p2.x + t * t * t * p3.x,
+      y: u * u * u * p0.y + 3 * u * u * t * p1.y + 3 * u * t * t * p2.y + t * t * t * p3.y,
+    };
+  };
+  const left: P[] = [];
+  const right: P[] = [];
+  for (let k = 0; k <= n; k++) {
+    const t = k / n;
+    const p = at(t);
+    const q = at(Math.min(1, t + 0.01));
+    const o = at(Math.max(0, t - 0.01));
+    let dx = q.x - o.x;
+    let dy = q.y - o.y;
+    const len = Math.hypot(dx, dy) || 1;
+    dx /= len;
+    dy /= len;
+    // 처음에 빨리 가늘어지다 천천히 (부드러운 붓 느낌)
+    const w = (w2 + (w1 - w2) * (1 - t) * (1 - t * 0.35)) / 2;
+    left.push({ x: p.x - dy * w, y: p.y + dx * w });
+    right.push({ x: p.x + dy * w, y: p.y - dx * w });
+  }
+  const pts = [...left, ...right.reverse()];
+  return `M${pts.map((p) => `${r2(p.x)} ${r2(p.y)}`).join('L')}Z`;
 }
 
 // ------------------------------------------------------------- 편집 도우미 (불변 업데이트)

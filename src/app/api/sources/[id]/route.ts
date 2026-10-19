@@ -3,6 +3,7 @@ import type { NextRequest } from 'next/server';
 import { assertSameOrigin, assertUuid, requireAccount } from '@/lib/server/auth';
 import { UserFacingError, errorResponse } from '@/lib/server/errors';
 import { removeFolder } from '@/lib/server/files';
+import { removeChatFolders } from '@/lib/server/chat-input';
 
 export async function DELETE(req: NextRequest, ctx: RouteContext<'/api/sources/[id]'>) {
   try {
@@ -18,6 +19,8 @@ export async function DELETE(req: NextRequest, ctx: RouteContext<'/api/sources/[
     if (kidsErr && !/parent_id/.test(kidsErr.message ?? '')) throw kidsErr;
     for (const k of kids ?? []) await removeFolder(admin, `${acc.userId}/${k.id}`);
     await removeFolder(admin, `${acc.userId}/${id}`);
+    // 노트 채팅에 보관한 사진·파일 (Pro)
+    await removeChatFolders(admin, acc.userId, [id]);
     const { error } = await admin.from('sources').delete().eq('id', id).eq('user_id', acc.userId);
     if (error) throw error;
     return Response.json({ ok: true });

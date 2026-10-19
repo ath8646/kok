@@ -2,7 +2,7 @@
 // 문제 직접 만들기·고치기
 import { useState } from 'react';
 import { Select } from './Select';
-import { Button, Field, Segmented, cx, inputClass } from './ui';
+import { Button, Field, ICONS, Icon, Segmented, cx, inputClass } from './ui';
 
 export type QuestionDraft = {
   type: 'mcq' | 'ox' | 'cloze' | 'short';
@@ -129,14 +129,14 @@ export function QuestionEditor({
                 <button
                   type="button"
                   aria-label={`보기 ${i + 1} 지우기`}
-                  className="rounded-lg px-2 py-1 text-bad hover:bg-bad-soft"
+                  className="grid place-items-center rounded-lg px-2 py-1.5 text-bad hover:bg-bad-soft"
                   onClick={() => {
                     const cs = (d.choices ?? []).filter((_, j) => j !== i);
                     const a = typeof d.answer === 'number' ? (d.answer === i ? 0 : d.answer > i ? d.answer - 1 : d.answer) : 0;
                     setD({ ...d, choices: cs, answer: a });
                   }}
                 >
-                  ✕
+                  <Icon d={ICONS.close} size={16} strokeWidth={2.4} />
                 </button>
               ) : null}
             </div>

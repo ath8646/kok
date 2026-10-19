@@ -6,7 +6,7 @@ import { EnergyPill, useMe } from '@/components/AppShell';
 import { HomeAsk } from '@/components/chat/HomeChat';
 import { ProcessingList, useActiveSources } from '@/components/ProcessingList';
 import { SOURCES_CHANGED, useQuickAdd } from '@/components/QuickAdd';
-import { ICONS, Icon, LargeHeader, LinkButton, ProgressRing, SectionTitle, cx } from '@/components/ui';
+import { Energy, ICONS, Icon, LargeHeader, LinkButton, ProgressRing, SectionTitle, cx } from '@/components/ui';
 import { NOTE_PEEK, fetchPlanData, fetchSources, fetchStudyDays, peekText, sb, type NotePeek, type PlanData, type SourceRowWithUnit } from '@/lib/data';
 import { pickToday, streakInfo } from '@/lib/review-plan';
 import { daysUntil, kstDateString } from '@/lib/time';
@@ -182,17 +182,18 @@ export default function HomePage() {
             </ProgressRing>
             <div className="min-w-0">
               <p className="text-sm font-semibold text-muted">오늘의 콕</p>
-              <p className="font-display text-xl leading-snug">{today.length ? `${today.length}문제 남았어요` : '복습 완료 🎉'}</p>
+              <p className="font-display text-xl leading-snug">{today.length ? `${today.length}문제 남았어요` : '복습 완료'}</p>
               <p className="text-sm text-muted">{doneToday ? `오늘 ${doneToday}문제 풀었어요` : '하루 5분이면 충분해요'}</p>
             </div>
           </div>
           {today.length ? (
             <LinkButton href="/review" size="lg" className="kok-fill w-full">
-              {settings.session}분 콕 시작
+              {settings.minutes}분 콕 시작
             </LinkButton>
           ) : (
-            <LinkButton href="/review?mode=wrong" variant="secondary" className="kok-fill w-full">
-              {wrongCount ? `오답 ${wrongCount}문제 다시 보기` : '더 풀고 싶으면 오답노트로'}
+            // 오늘 복습을 다 했으면: 오답 다시 보기, 오답이 없으면 지난 공부를 기간으로 골라 다시 풀기
+            <LinkButton href={wrongCount ? '/review?mode=wrong' : '/review'} variant="secondary" className="kok-fill w-full">
+              {wrongCount ? `오답 ${wrongCount}문제 다시 보기` : '지난 공부 다시 풀기'}
             </LinkButton>
           )}
         </section>
@@ -250,7 +251,7 @@ export default function HomePage() {
         <Link href="/settings#energy" className="kok-card kok-card-hover press kok-rise grid content-between gap-1 p-4" style={{ ['--i' as string]: 2 }}>
           <span className="text-sm font-semibold text-muted">{energyPeriodLabel(me.energy.period)} AI 에너지</span>
           <span className="font-display text-[28px] leading-tight tabular-nums">
-            {me.energy.unlimited ? '∞' : `⚡ ${Math.floor(me.energy.remaining ?? 0)}`}
+            {me.energy.unlimited ? '∞' : <Energy n={Math.floor(me.energy.remaining ?? 0)} />}
           </span>
           {!me.energy.unlimited && me.energy.limit ? (
             <span className="h-1.5 overflow-hidden rounded-full bg-surface-2" aria-hidden="true">

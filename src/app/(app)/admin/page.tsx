@@ -192,7 +192,7 @@ export default function AdminPage() {
                   method: 'POST',
                   body: JSON.stringify({ model: models[testModel] }),
                 });
-                setTestResult(r.ok ? `작동해요 ✓ ${r.model} (${r.ms}ms)` : `안 돼요: ${r.message}`);
+                setTestResult(r.ok ? `작동해요 · ${r.model} (${r.ms}ms)` : `안 돼요: ${r.message}`);
               } catch (e) {
                 setTestResult((e as Error).message);
               } finally {

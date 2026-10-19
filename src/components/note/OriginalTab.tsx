@@ -8,7 +8,7 @@ import { clientModel } from '@/lib/client-model';
 import { MIN_TEXT_CHARS } from '@/lib/quick-add';
 import { materialLabel, versionItems, type ChildSource, type Material, type VersionRow } from '@/lib/versions';
 import { OriginalPanel } from './OriginalPanel';
-import { Button, Chip, ICONS, Icon, LinkButton, cx } from '../ui';
+import { Button, Chip, EnergyEstimate, ICONS, Icon, LinkButton, cx } from '../ui';
 
 const KIND_ICON = { text: ICONS.pen, pdf: ICONS.file, image: ICONS.image } as const;
 const KIND_LABEL = { text: '글', pdf: 'PDF', image: '사진' } as const;
@@ -279,7 +279,11 @@ function AddMaterial({ me, busyHint, onAdd }: { me: MeResponse; busyHint: boolea
               파일 더하기
             </Button>
             <span className="flex-1" />
-            {est !== null ? <span className="text-xs font-semibold text-muted">⚡ 약 {est}</span> : null}
+            {est !== null ? (
+              <span className="text-xs font-semibold text-muted">
+                <EnergyEstimate est={est} />
+              </span>
+            ) : null}
             <Button
               size="sm"
               disabled={!me.aiEnabled || trimmed.length < MIN_TEXT_CHARS}

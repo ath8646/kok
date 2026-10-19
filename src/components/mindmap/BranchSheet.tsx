@@ -108,10 +108,12 @@ export function BranchSheet({
 
           {branch.hint ? (
             <p
-              className="rounded-2xl px-4 py-3 text-[15px] font-semibold leading-relaxed"
+              className="flex gap-2 rounded-2xl px-4 py-3 text-[15px] font-semibold leading-relaxed"
               style={{ background: `color-mix(in srgb, ${color} 12%, var(--surface))` }}
             >
-              💡 {branch.hint}
+              <Icon d={ICONS.bulb} size={18} className="mt-[3px] shrink-0" />
+              <span className="sr-only">외우기 한 줄: </span>
+              <span className="min-w-0">{branch.hint}</span>
             </p>
           ) : null}
 

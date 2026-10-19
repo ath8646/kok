@@ -8,7 +8,7 @@ import { useRouter } from 'next/navigation';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { RichText } from '@/components/RichText';
 import { useMe } from '@/components/AppShell';
-import { ApiError, Button, ICONS, Icon, Menu, api, cx, useToast } from '@/components/ui';
+import { ApiError, Button, Energy, EnergyEstimate, ICONS, Icon, Menu, api, cx, useToast } from '@/components/ui';
 import {
   ChatDropHint,
   ChatInput,
@@ -459,7 +459,7 @@ export function NoteChat({
                             {m.proposal?.outside ? (
                               <span className="rounded-full bg-warn-soft px-2 py-0.5 font-semibold text-warn">노트 밖 설명 포함</span>
                             ) : null}
-                            {m.energy ? <span>⚡ {Math.round(Number(m.energy) * 10) / 10}</span> : null}
+                            {m.energy ? <Energy n={Math.round(Number(m.energy) * 10) / 10} /> : null}
                           </div>
                         ) : null}
                         {m.proposal && m.proposal.kind !== 'none' ? (
@@ -496,7 +496,9 @@ export function NoteChat({
             >
               <div className="flex items-center justify-between gap-2 px-1">
                 <TierPicker tiers={tiers} tier={tier} locked={locked} onPick={pickTier} />
-                <span className="text-xs font-semibold text-muted">{[`⚡ 약 ${est}`, left !== null ? `남음 ${left}` : ''].filter(Boolean).join(' · ')}</span>
+                <span className="inline-flex items-center gap-1 text-xs font-semibold text-muted">
+                  <EnergyEstimate est={est} left={left} />
+                </span>
               </div>
               <PickStrip picks={attach.picks} onRemove={attach.remove} />
               <ChatInput
@@ -585,8 +587,15 @@ function ProposalCard({
             </Button>
           </>
         ) : (
-          <span className={cx('text-sm font-semibold', proposal.status === 'applied' ? 'text-ok' : 'text-muted')}>
-            {proposal.status === 'applied' ? '넣었어요 ✓' : '넣지 않았어요'}
+          <span className={cx('inline-flex items-center gap-1 text-sm font-semibold', proposal.status === 'applied' ? 'text-ok' : 'text-muted')}>
+            {proposal.status === 'applied' ? (
+              <>
+                <Icon d={ICONS.check} size={16} strokeWidth={2.6} />
+                넣었어요
+              </>
+            ) : (
+              '넣지 않았어요'
+            )}
           </span>
         )}
       </div>

@@ -1,5 +1,6 @@
 // 학생 설정과 운영 설정의 모양, 기본값
 import { z } from 'zod';
+import { REVIEW_PERIODS } from './review-plan';
 
 export type Effort = 'low' | 'medium' | 'high';
 /** solve: 문제 그림·단계 풀이, 사진·파일로 보낸 문제 풀기 (홈 채팅) */
@@ -140,19 +141,30 @@ export const zUserSettings = z.object({
       fontSize: 'md',
     }),
   review: z
-    .object({
-      retention: z.number().min(0.8).max(0.95).catch(0.9),
-      dailyMax: z.number().int().min(10).max(500).catch(50),
-      session: z.union([z.literal(5), z.literal(10), z.literal(25)]).catch(5),
-      interleave: z.boolean().catch(true),
-      aiShortGrade: z.boolean().catch(true),
-      reminder: z
-        .string()
-        .regex(/^\d{2}:\d{2}$/)
-        .nullable()
-        .catch(null),
-    })
-    .catch({ retention: 0.9, dailyMax: 50, session: 5, interleave: true, aiShortGrade: true, reminder: null }),
+    .preprocess(
+      // 예전 '세션 길이'(5·10·25분)를 고른 사람은 가까운 복습 시간(5·15·30분)으로
+      (v) => {
+        if (!v || typeof v !== 'object' || 'minutes' in v) return v;
+        const old = (v as { session?: unknown }).session;
+        return typeof old === 'number' ? { ...v, minutes: old >= 25 ? 30 : old >= 10 ? 15 : 5 } : v;
+      },
+      z.object({
+        retention: z.number().min(0.8).max(0.95).catch(0.9),
+        dailyMax: z.number().int().min(10).max(500).catch(50),
+        /** 마지막으로 고른 복습 시간(분): 시간은 문제 수만 정한다 */
+        minutes: z.union([z.literal(5), z.literal(15), z.literal(30)]).catch(5),
+        /** 마지막으로 고른 복습 기간 (복습할 차례가 없을 때 먼저 고른다) */
+        period: z.enum(REVIEW_PERIODS).catch('due'),
+        interleave: z.boolean().catch(true),
+        aiShortGrade: z.boolean().catch(true),
+        reminder: z
+          .string()
+          .regex(/^\d{2}:\d{2}$/)
+          .nullable()
+          .catch(null),
+      }),
+    )
+    .catch({ retention: 0.9, dailyMax: 50, minutes: 5, period: 'due', interleave: true, aiShortGrade: true, reminder: null }),
   quiz: z
     .object({
       types: z

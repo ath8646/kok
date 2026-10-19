@@ -1,5 +1,6 @@
 'use client';
-// 복습 세션: 5분 콕(집중 모드, 한 화면에 한 문제), 자동 채점·평가, FSRS 일정, 오답노트, 끝 화면.
+// 복습 세션: 언제 공부한 문제(기간)·과목·시간(5·15·30분)을 고르면 핵심 문제부터 골라 집중 모드(한 화면에 한 문제)로 푼다.
+// 시간은 문제 수만 정한다: 시간이 지나도 고른 문제는 끝까지 푼다. 자동 채점·평가, FSRS 일정, 오답노트, 끝 화면.
 // 노트 문제 풀기는 고르는 화면 없이 그 노트의 문제로 바로 시작한다. 시간 제한 없이 다 풀면 끝나고, 끝나면 노트로 돌아간다.
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
@@ -8,10 +9,11 @@ import { useMe } from '@/components/AppShell';
 import { MindMap } from '@/components/MindMap';
 import { QuestionCard, type GradeOutcome, type ReviewQuestion } from '@/components/QuestionCard';
 import { ReportSheet } from '@/components/QuestionList';
-import { Button, Card, EmptyState, ICONS, Icon, LargeHeader, LinkButton, Segmented, Sheet, api, cx, useToast } from '@/components/ui';
-import { fetchPlanData, fetchQuestionsByIds, fetchStudyDays, sb, type PlanData } from '@/lib/data';
+import { ReviewStart, StartSkeleton, type StartChoice, type StartPick } from '@/components/review/ReviewStart';
+import { Button, Card, EmptyState, ICONS, Icon, LargeHeader, LinkButton, Sheet, api, cx, useToast } from '@/components/ui';
+import { fetchPlanData, fetchQuestionsByIds, fetchRecentPace, fetchStudyDays, sb, type PlanData } from '@/lib/data';
 import { autoGrade, autoRating, type Rating } from '@/lib/grading';
-import { pickToday, streakInfo } from '@/lib/review-plan';
+import { paceFrom, periodCounts, periodPool, pickToday, streakInfo, type ReviewPeriod } from '@/lib/review-plan';
 import { practiceFrom, type ReviewMode } from '@/lib/review-mode';
 import { reviewCard, type StoredCard } from '@/lib/srs';
 import { ACCEPTED_MAX_CHARS, zMindmap, type Mindmap } from '@/lib/ai/schemas';
@@ -21,7 +23,10 @@ type Phase = 'loading' | 'start' | 'run' | 'end';
 type Item = { q: QuestionRow; card: CardRow; requeued: number };
 type Result = { correct: boolean; graduated: boolean; enteredWrong: boolean };
 type PracticeNote = { id: string; title: string; sourceId: string };
-type Queue = { plan: PlanData; items: Item[]; note: PracticeNote | null };
+type ReviewSettings = MeResponse['settings']['review'];
+type PlanCardRow = PlanData['cards'][number];
+/** 읽은 것: 복습 계획, 노트 문제 풀기의 노트, 내 빠르기, 노트 문제 풀기면 바로 풀 문제 */
+type Loaded = { plan: PlanData; note: PracticeNote | null; pace: number; items: Item[] };
 
 // ------------------------------------------------------------ 저장 (인터넷이 끊겨도 기록을 잃지 않게)
 type SaveState = {
@@ -59,13 +64,41 @@ async function saveLog(st: SaveState, log: Record<string, unknown>): Promise<voi
   }
 }
 
+// 오늘·과목 복습은 같은 화면 (과목은 시작 화면의 칩으로 고른다)
 const MODE_TITLE: Record<ReviewMode['kind'], string> = {
-  today: '오늘 복습',
-  subject: '과목 복습',
+  today: '복습',
+  subject: '복습',
   practice: '노트 문제 풀기',
   wrong: '오답 다시 풀기',
   kp: '약점 개념 풀기',
 };
+
+/** 기간·과목을 고르는 복습 (오답·약점 개념은 그 문제만 푼다) */
+const choosesPeriod = (m: ReviewMode) => m.kind === 'today' || m.kind === 'subject';
+
+/** 이 복습 방법의 문제 */
+function modeCards(m: ReviewMode, p: PlanData): PlanCardRow[] {
+  if (m.kind === 'wrong') return p.cards.filter((c) => c.in_wrong_note);
+  if (m.kind === 'kp') return p.cards.filter((c) => c.note_id === m.note && c.key_point_id === m.kp);
+  return p.cards;
+}
+
+/**
+ * 처음 고를 것: 복습할 차례인 문제가 있으면 그것, 없으면 지난번에 고른 기간(문제가 있을 때),
+ * 과목 복습(?subject=)이면 그 과목 전체. 시간은 지난번에 고른 시간.
+ */
+function firstChoice(m: ReviewMode, p: PlanData, r: ReviewSettings): StartChoice {
+  const subjectId = m.kind === 'subject' && p.cards.some((c) => c.subject_id === m.id) ? m.id : null;
+  if (!choosesPeriod(m)) return { period: 'all', subjectId: null, minutes: r.minutes };
+  const cards = subjectId ? p.cards.filter((c) => c.subject_id === subjectId) : p.cards;
+  const counts = periodCounts(cards, p.planSubjects, { dailyMax: r.dailyMax, doneToday: p.doneToday, interleave: r.interleave });
+  let period: ReviewPeriod = 'due';
+  if (!counts.due) {
+    if (r.period !== 'due' && counts[r.period]) period = r.period;
+    else if (subjectId && counts.all) period = 'all';
+  }
+  return { period, subjectId, minutes: r.minutes };
+}
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -108,32 +141,17 @@ async function fetchPracticeNote(m: Extract<ReviewMode, { kind: 'practice' }>): 
   return data ? { id: String(data.id), title: String(data.title ?? ''), sourceId: String(data.source_id) } : null;
 }
 
-async function fetchQueue(
-  m: ReviewMode,
-  practiceAhead: boolean,
-  r: MeResponse['settings']['review'],
-  latest: Map<string, CardRow>,
-  figures: boolean,
-): Promise<Queue> {
-  const [read, note] = await Promise.all([fetchPlanData(), m.kind === 'practice' ? fetchPracticeNote(m) : Promise.resolve(null)]);
-  const p = withLatest(read, latest);
-  let cards = p.cards;
-  if (m.kind === 'subject') cards = cards.filter((c) => c.subject_id === m.id);
-  if (m.kind === 'practice') cards = note ? cards.filter((c) => c.note_id === note.id) : [];
-  if (m.kind === 'wrong') cards = cards.filter((c) => c.in_wrong_note);
-  if (m.kind === 'kp') cards = cards.filter((c) => c.note_id === m.note && c.key_point_id === m.kp);
-  let chosen =
-    m.kind === 'today'
-      ? pickToday(cards, p.planSubjects, { dailyMax: r.dailyMax, doneToday: p.doneToday, interleave: r.interleave })
-      : pickToday(cards, p.planSubjects, { dailyMax: 10_000, doneToday: 0, interleave: r.interleave });
-  // 노트·오답·약점 연습(과목은 '미리 풀어 보기'를 눌렀을 때)은 날짜가 안 된 문제도 푼다
-  const includeAhead = m.kind === 'practice' || m.kind === 'wrong' || m.kind === 'kp' || (m.kind === 'subject' && practiceAhead);
-  if (includeAhead) {
-    const picked = new Set(chosen.map((c) => c.question_id));
-    const rest = cards.filter((c) => !picked.has(c.question_id)).sort((a, b) => Date.parse(a.due) - Date.parse(b.due));
-    chosen = [...chosen, ...rest].slice(0, m.kind === 'practice' ? 200 : 60);
-  }
-  const ids = chosen.map((c) => c.question_id);
+/** 노트 문제 풀기: 복습할 차례인 문제 먼저, 그다음 날짜가 가까운 문제 (200개까지) */
+function practiceIds(p: PlanData, note: PracticeNote | null, interleave: boolean): string[] {
+  const cards = note ? p.cards.filter((c) => c.note_id === note.id) : [];
+  const due = pickToday(cards, p.planSubjects, { dailyMax: 10_000, doneToday: 0, interleave });
+  const picked = new Set(due.map((c) => c.question_id));
+  const rest = cards.filter((c) => !picked.has(c.question_id)).sort((a, b) => Date.parse(a.due) - Date.parse(b.due));
+  return [...due, ...rest].slice(0, 200).map((c) => c.question_id);
+}
+
+/** 고른 문제를 순서대로 읽는다 (그사이 쉬게 했거나 지운 문제는 뺀다) */
+async function buildItems(ids: string[], p: PlanData, figures: boolean): Promise<Item[]> {
   const qs = await fetchQuestionsByIds(ids, { figures });
   const qmap = new Map(qs.map((q) => [q.id, q]));
   const items: Item[] = [];
@@ -142,7 +160,22 @@ async function fetchQueue(
     const c = p.rawCards.get(id);
     if (q && c && q.status === 'active') items.push({ q, card: c, requeued: 0 });
   }
-  return { plan: p, items, note };
+  return items;
+}
+
+async function load(m: ReviewMode, r: ReviewSettings, latest: Map<string, CardRow>, figures: boolean): Promise<Loaded> {
+  const practice = m.kind === 'practice';
+  const [read, note, logs] = await Promise.all([
+    fetchPlanData(),
+    practice ? fetchPracticeNote(m) : Promise.resolve(null),
+    // 내 빠르기는 못 읽어도 보통 빠르기로
+    practice ? Promise.resolve([]) : fetchRecentPace().catch(() => []),
+  ]);
+  const plan = withLatest(read, latest);
+  const types = new Map(read.cards.map((c) => [c.question_id, c.type]));
+  const pace = paceFrom(logs.map((l) => ({ ms: l.ms, type: l.question_id ? types.get(l.question_id) : null })));
+  const items = practice ? await buildItems(practiceIds(plan, note, r.interleave), plan, figures) : [];
+  return { plan, note, pace, items };
 }
 
 export function ReviewSession({
@@ -164,16 +197,21 @@ export function ReviewSession({
   );
   const [phase, setPhase] = useState<Phase>('loading');
   const [plan, setPlan] = useState<PlanData | null>(null);
+  /** 내 빠르기 (복습 시간마다 문제 수) */
+  const [pace, setPace] = useState(1);
+  /** 시작 화면에서 고른 기간·과목·시간 ('조금 더 하기'로 돌아와도 그대로) */
+  const [choice, setChoice] = useState<StartChoice | null>(null);
+  const [starting, setStarting] = useState(false);
   const [queue, setQueue] = useState<Item[]>([]);
   const [idx, setIdx] = useState(0);
-  const [minutes, setMinutes] = useState<5 | 10 | 25>(() => me?.settings.review.session ?? 5);
+  /** 목표 시간(ms): 지나도 멈추지 않고, 남은 시간을 안내만 한다 */
+  const [target, setTarget] = useState(0);
   const [startedAt, setStartedAt] = useState(0);
   const [endedAt, setEndedAt] = useState(0);
   const [results, setResults] = useState<Result[]>([]);
-  /** 노트 문제 풀기를 다 풀기 전에 그만뒀는지 (끝 화면 제목) */
+  /** 다 풀기 전에 그만뒀는지 (끝 화면 제목) */
   const [stopped, setStopped] = useState(false);
   const [now, setNow] = useState(0);
-  const [ahead, setAhead] = useState(false);
   const [visual, setVisual] = useState<{ spec: Mindmap; kp: string | null } | null>(null);
   const [reportQ, setReportQ] = useState<QuestionRow | null>(null);
   const [streak, setStreak] = useState(0);
@@ -184,6 +222,10 @@ export function ReviewSession({
   const latest = useRef<Map<string, CardRow>>(new Map());
   /** 노트로 돌아가는 중 (두 번 눌러 두 번 뒤로 가지 않게) */
   const leaving = useRef(false);
+  /** 이번 세션에서 답한 수 (다시 나온 문제도 센다: 오늘 푼 수) */
+  const answered = useRef(0);
+  /** 끝 화면: 고른 기간에 아직 안 푼 문제 수 ('조금 더 하기') */
+  const [remaining, setRemaining] = useState(0);
   const subjectNames = useMemo(() => new Map((plan?.subjects ?? []).map((s) => [s.id, s.name])), [plan]);
   const reviewSettings = me?.settings.review;
   const figuresOn = !!me?.features.figures;
@@ -198,9 +240,10 @@ export function ReviewSession({
     return () => setFocus(false);
   }, [practice, setFocus]);
 
-  const applyQueue = useCallback(
-    (r: Queue) => {
+  const applyLoaded = useCallback(
+    (r: Loaded) => {
       setPlan(r.plan);
+      setPace(r.pace);
       setQueue(r.items);
       setIdx(0);
       setResults([]);
@@ -216,10 +259,13 @@ export function ReviewSession({
           setPhase('run');
           return;
         }
+      } else if (reviewSettings) {
+        // 처음 읽을 때만 정한다 ('조금 더 하기'로 다시 읽어도 고른 것은 그대로)
+        setChoice((c) => c ?? firstChoice(mode, r.plan, reviewSettings));
       }
       setPhase('start');
     },
-    [practice],
+    [practice, mode, reviewSettings],
   );
 
   const loadFailed = useCallback(() => {
@@ -230,20 +276,20 @@ export function ReviewSession({
     setPhase('start');
   }, [practice]);
 
-  /** 버튼에서 다시 고를 때 (미리 풀기, 조금 더 하기, 한 번 더 풀기, 다시 불러오기) */
-  const rebuild = (practiceAhead: boolean) => {
+  /** 다시 읽을 때 (조금 더 하기, 한 번 더 풀기, 다시 불러오기) */
+  const rebuild = () => {
     if (!reviewSettings) return;
     if (phase === 'end') setRound((r) => r + 1);
     setPhase('loading');
-    fetchQueue(mode, practiceAhead, reviewSettings, latest.current, figuresOn).then(applyQueue).catch(loadFailed);
+    load(mode, reviewSettings, latest.current, figuresOn).then(applyLoaded).catch(loadFailed);
   };
 
   useEffect(() => {
     if (!reviewSettings) return;
     let alive = true;
-    fetchQueue(mode, false, reviewSettings, latest.current, figuresOn)
+    load(mode, reviewSettings, latest.current, figuresOn)
       .then((r) => {
-        if (alive) applyQueue(r);
+        if (alive) applyLoaded(r);
       })
       .catch(() => {
         if (alive) loadFailed();
@@ -255,7 +301,7 @@ export function ReviewSession({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // 남은 시간 표시 (노트 문제 풀기는 시간 제한이 없다)
+  // 남은 시간 안내 (노트 문제 풀기는 시간이 없다)
   useEffect(() => {
     if (phase !== 'run' || practice) return;
     const t = setInterval(() => setNow(Date.now()), 1000);
@@ -267,6 +313,22 @@ export function ReviewSession({
       if (!practice) setFocus(false);
       setStopped(early);
       setEndedAt(Date.now());
+      // 고른 기간에 아직 안 푼 문제 (이번 화면에서 푼 문제는 빼고)
+      let more = 0;
+      if (!practice && plan && choice && reviewSettings) {
+        const after = withLatest(plan, latest.current);
+        let pool = modeCards(mode, after);
+        if (choosesPeriod(mode)) {
+          if (choice.subjectId) pool = pool.filter((c) => c.subject_id === choice.subjectId);
+          pool = periodPool(pool, after.planSubjects, choice.period, {
+            dailyMax: reviewSettings.dailyMax,
+            doneToday: after.doneToday + answered.current,
+            interleave: false,
+          });
+        }
+        more = pool.filter((c) => !latest.current.has(c.question_id)).length;
+      }
+      setRemaining(more);
       setPhase('end');
       // 진행 중인 저장을 기다리고, 저장 못 한 것을 한 번 더 저장해 본다
       const st = saves.current;
@@ -280,7 +342,7 @@ export function ReviewSession({
         .catch(() => {});
       refresh();
     },
-    [practice, setFocus, toast, refresh],
+    [practice, setFocus, toast, refresh, plan, choice, reviewSettings, mode],
   );
 
   if (!me) return <div className="h-48 animate-pulse rounded-2xl bg-surface-2" />;
@@ -288,7 +350,7 @@ export function ReviewSession({
   const settings = me.settings.review;
   const item = queue[idx];
   const elapsed = startedAt ? now - startedAt : 0;
-  const left = Math.max(0, minutes * 60_000 - elapsed);
+  const left = Math.max(0, target - elapsed);
   const noteSource = mode.kind === 'practice' && mode.by === 'source' ? mode.id : note?.sourceId;
 
   /** 노트로 돌아가기: 노트에서 왔으면 뒤로 가기 (노트가 보던 탭 그대로 열리고 방문 기록에 노트가 두 번 쌓이지 않는다) */
@@ -334,6 +396,7 @@ export function ReviewSession({
     };
     const updated: CardRow = { ...card, ...patch };
     latest.current.set(q.id, updated);
+    answered.current += 1;
 
     // 카드는 같은 문제끼리 순서대로 저장한다 (늦게 끝난 옛 저장이 새 상태를 덮지 않게)
     const st = saves.current;
@@ -352,21 +415,71 @@ export function ReviewSession({
       ms: Math.min(r.ms, 3_600_000),
       reviewed_at: at.toISOString(),
     });
-    if (graduated) toast('오답노트 졸업! 3번 연속 맞혔어요 🎓', 'ok');
+    if (graduated) toast('오답노트 졸업! 3번 연속 맞혔어요', 'ok');
 
     setResults((rs) => [...rs, { correct: r.correct, graduated, enteredWrong }]);
-    // 곧 다시 볼 문제(틀린 문제)는 이번 세션 끝에 한 번 더
+    // 곧 다시 볼 문제(틀린 문제)는 이번 세션 끝에 한 번 더. 목표 시간이 지났으면 더 늘리지 않는다 (다음 복습에 나온다)
     let nextQueue = queue.map((it, i) => (i === idx ? { ...it, card: updated } : it));
     const soon = Date.parse(next.due) - at.getTime() <= 10 * 60_000;
-    if (soon && item.requeued < 2) nextQueue = [...nextQueue, { q, card: updated, requeued: item.requeued + 1 }];
+    const overTime = !practice && Date.now() - startedAt >= target;
+    if (soon && item.requeued < 2 && !overTime) nextQueue = [...nextQueue, { q, card: updated, requeued: item.requeued + 1 }];
     setQueue(nextQueue);
 
-    const timeUp = !practice && Date.now() - startedAt >= minutes * 60_000;
-    if (timeUp || idx + 1 >= nextQueue.length) {
+    // 시간이 지나도 고른 문제는 끝까지 푼다
+    if (idx + 1 >= nextQueue.length) {
       finish(false);
       return;
     }
     setIdx(idx + 1);
+  };
+
+  /** 지난번에 고른 시간·기간을 기억한다 (다음에 그대로 고른 채 연다) */
+  const remember = (c: StartChoice, timed: boolean) => {
+    const r = me.settings.review;
+    const next = { ...r, ...(timed ? { minutes: c.minutes } : {}), ...(choosesPeriod(mode) ? { period: c.period } : {}) };
+    if (next.minutes === r.minutes && next.period === r.period) return;
+    void sb()
+      .from('profiles')
+      .update({ settings: { ...me.settings, review: next } })
+      .eq('id', me.userId)
+      .then(
+        () => {},
+        () => {},
+      );
+  };
+
+  /** 시작: 고른 문제를 읽고 집중 모드로 */
+  const start = async (pick: StartPick) => {
+    if (!plan || !choice || starting) return;
+    setStarting(true);
+    try {
+      const items = await buildItems(
+        pick.cards.map((c) => c.question_id),
+        plan,
+        figuresOn,
+      );
+      if (!items.length) {
+        toast('문제를 불러오지 못했어요. 다시 해 주세요.', 'bad');
+        return;
+      }
+      setQueue(items);
+      setIdx(0);
+      setResults([]);
+      setStopped(false);
+      answered.current = 0;
+      // 목표 시간: 고른 시간 (기간의 문제가 다 들어가면 예상 시간)
+      setTarget(pick.all ? Math.max(1, Math.ceil(pick.seconds / 60)) * 60_000 : choice.minutes * 60_000);
+      const t = Date.now();
+      setStartedAt(t);
+      setNow(t);
+      setFocus(true);
+      setPhase('run');
+      remember(choice, pick.timed);
+    } catch {
+      toast('문제를 불러오지 못했어요. 인터넷 연결을 확인해 주세요.', 'bad');
+    } finally {
+      setStarting(false);
+    }
   };
 
   const showVisual = async () => {
@@ -436,7 +549,7 @@ export function ReviewSession({
               <EmptyState
                 title="문제를 불러오지 못했어요"
                 body="인터넷 연결을 확인하고 다시 불러와 주세요."
-                action={<Button onClick={() => rebuild(false)}>다시 불러오기</Button>}
+                action={<Button onClick={rebuild}>다시 불러오기</Button>}
               />
             ) : note === null ? (
               <EmptyState title="노트를 찾지 못했어요" body="지워진 노트일 수 있어요." action={<LinkButton href="/library">자료함으로</LinkButton>} />
@@ -449,125 +562,114 @@ export function ReviewSession({
     );
   }
 
-  // ------------------------------------------------------------ 화면
+  // ------------------------------------------------------------ 시작 화면
   if (phase === 'loading' || phase === 'start') {
     // 불러오는 동안과 다 불러온 뒤가 같은 틀이라 제목은 그대로 있고, 부제와 카드 안의 글만 바뀐다
-    const ready = phase === 'start';
-    const n = queue.length;
-    const subtitleText = failed ? '불러오지 못했어요' : n ? `${n}문제가 준비됐어요` : '지금은 풀 문제가 없어요';
-    const subtitle = ready ? (
-      <span key={subtitleText} className="kok-swap">
-        {subtitleText}
-      </span>
-    ) : (
-      // 읽는 동안에도 부제 줄 높이를 지켜서, 다 읽었을 때 제목이 위로 튀지 않게 한다
-      <span className="kok-skel inline-block h-6 align-top" aria-hidden="true">
-        <span className="kok-bone mt-[7px] h-2.5 w-32 max-w-full" />
-      </span>
-    );
+    const ready = phase === 'start' && !!plan && !!choice;
+    const cards = plan ? modeCards(mode, plan) : [];
+    const periods = choosesPeriod(mode);
+    const dueCount =
+      plan && periods
+        ? periodPool(plan.cards, plan.planSubjects, 'due', { dailyMax: settings.dailyMax, doneToday: plan.doneToday, interleave: false }).length
+        : 0;
+    const kpTitle = mode.kind === 'kp' ? plan?.concepts.get(mode.note)?.get(mode.kp)?.title : undefined;
+    const subtitleText = failed
+      ? '불러오지 못했어요'
+      : !cards.length
+        ? '지금은 풀 문제가 없어요'
+        : mode.kind === 'wrong'
+          ? `오답노트에 ${cards.length}문제가 있어요`
+          : mode.kind === 'kp'
+            ? kpTitle
+              ? `${kpTitle} · ${cards.length}문제`
+              : `${cards.length}문제`
+            : dueCount
+              ? `복습할 차례인 문제가 ${dueCount}개 있어요`
+              : '오늘 복습은 다 했어요';
+    const subtitle =
+      ready || failed ? (
+        <span key={subtitleText} className="kok-swap">
+          {subtitleText}
+        </span>
+      ) : (
+        // 읽는 동안에도 부제 줄 높이를 지켜서, 다 읽었을 때 제목이 위로 튀지 않게 한다
+        <span className="kok-skel inline-block h-6 align-top" aria-hidden="true">
+          <span className="kok-bone mt-[7px] h-2.5 w-44 max-w-full" />
+        </span>
+      );
     return (
       <div key={round} className={cx('grid gap-3', round > 0 && 'kok-page')}>
         <LargeHeader title={MODE_TITLE[mode.kind]} subtitle={subtitle} />
-        {!ready ? (
-          <StartSkeleton />
-        ) : failed ? (
+        {phase === 'start' && failed ? (
           <div className="kok-fill">
             <EmptyState
               title="복습을 불러오지 못했어요"
               body="인터넷 연결을 확인하고 다시 불러와 주세요."
-              action={<Button onClick={() => rebuild(ahead)}>다시 불러오기</Button>}
+              action={<Button onClick={rebuild}>다시 불러오기</Button>}
             />
           </div>
-        ) : n === 0 ? (
+        ) : !ready ? (
+          <StartSkeleton periods={periods} />
+        ) : !cards.length ? (
           // 자리 표시와 모양이 달라서 카드째 살짝 번지며 나타난다
           <div className="kok-fill">
-            <EmptyState
-              title={mode.kind === 'today' ? '오늘 할 일 끝! 🎉' : '풀 문제가 없어요'}
-              body={
-                mode.kind === 'today'
-                  ? '잊어버리기 직전이 되면 다시 나와요. 오늘은 푹 쉬어요.'
-                  : mode.kind === 'subject'
-                    ? '이 과목은 오늘 복습할 문제가 없어요.'
-                    : '조건에 맞는 문제가 없어요.'
-              }
-              action={
-                mode.kind === 'subject' && !ahead ? (
-                  <Button
-                    variant="secondary"
-                    onClick={() => {
-                      setAhead(true);
-                      rebuild(true);
-                    }}
-                  >
-                    미리 풀어 보기
-                  </Button>
-                ) : (
-                  <LinkButton href="/home">홈으로</LinkButton>
-                )
-              }
-            />
+            {periods ? (
+              <EmptyState
+                title="아직 풀 문제가 없어요"
+                body="자료를 넣으면 AI가 정리하고 문제를 만들어요."
+                action={<LinkButton href="/library?compose=1">자료 넣기</LinkButton>}
+              />
+            ) : (
+              <EmptyState
+                title="풀 문제가 없어요"
+                body={mode.kind === 'wrong' ? '오답노트가 비어 있어요.' : '이 개념에는 지금 풀 문제가 없어요.'}
+                action={<LinkButton href="/home">홈으로</LinkButton>}
+              />
+            )}
           </div>
         ) : (
-          // 자리 표시와 같은 크기의 카드는 그 자리에 두고, 안의 글만 번지며 나타난다
-          <Card className="grid gap-4 p-5">
-            <div className="kok-fill grid gap-2">
-              <span className="text-sm font-semibold">세션 길이</span>
-              <Segmented
-                label="세션 길이"
-                value={minutes}
-                onChange={(v) => setMinutes(v)}
-                options={[
-                  { value: 5, label: '5분' },
-                  { value: 10, label: '10분' },
-                  { value: 25, label: '25분' },
-                ]}
-              />
-            </div>
-            <p className="kok-fill text-sm text-muted" style={{ ['--i' as string]: 1 }}>
-              집중 모드: 한 화면에 한 문제만 보이고, 메뉴와 알림은 숨겨요. 시간이 끝나면 멈춰요.
-            </p>
-            <Button
-              size="lg"
-              className="kok-fill"
-              style={{ ['--i' as string]: 2 }}
-              onClick={() => {
-                setStartedAt(Date.now());
-                setNow(Date.now());
-                setFocus(true);
-                setPhase('run');
-              }}
-            >
-              시작
-            </Button>
-          </Card>
+          <ReviewStart
+            plan={plan}
+            cards={cards}
+            periods={periods}
+            choice={choice}
+            onChoice={setChoice}
+            pace={pace}
+            review={settings}
+            starting={starting}
+            onStart={start}
+          />
         )}
       </div>
     );
   }
 
+  // ------------------------------------------------------------ 끝 화면
   if (phase === 'end') {
     const total = results.length;
     const right = results.filter((r) => r.correct).length;
     const enteredWrong = results.filter((r) => r.enteredWrong).length;
     const graduated = results.filter((r) => r.graduated).length;
-    const remaining =
-      mode.kind === 'today' && plan
-        ? Math.max(
-            0,
-            pickToday(plan.cards, plan.planSubjects, { dailyMax: settings.dailyMax, doneToday: plan.doneToday + total, interleave: false }).length - total,
-          )
-        : 0;
-    const heading = practice ? (!total ? '다음에 또 만나요' : stopped ? '여기까지 풀었어요' : '다 풀었어요!') : total ? '오늘 할 일 끝!' : '다음에 또 만나요';
+    const dueDone = choosesPeriod(mode) && choice?.period === 'due' && !remaining;
+    const heading = !total ? '다음에 또 만나요' : stopped ? '여기까지 풀었어요' : dueDone ? '오늘 할 일 끝!' : '다 풀었어요!';
+    const great = total > 0 && right / total >= 0.8;
     const noteTitle = practice ? note?.title || '노트' : null;
     // 끝 화면은 위에서부터 차례로 살짝 번지며 나타난다. 노트 문제 풀기는 집중 모드 그대로라 화면 위 여백(상태 표시줄 칸 포함)이 이미 있다
     return (
       <div className={cx('grid gap-4 pb-4', practice ? 'pt-3 md:pt-6' : 'pt-[calc(28px+env(safe-area-inset-top))] md:pt-10')}>
-        <div className="kok-fill text-center">
-          <p className="text-5xl" aria-hidden="true">
-            {total && right / total >= 0.8 ? '🎉' : '👏'}
-          </p>
-          {noteTitle ? <p className="mt-3 truncate px-6 text-sm font-semibold text-muted">{noteTitle}</p> : null}
-          <h1 className={cx('font-display text-3xl', noteTitle ? 'mt-1' : 'mt-2')}>{heading}</h1>
+        <div className="kok-fill grid justify-items-center text-center">
+          {/* 잘 풀었으면 트로피, 아니면 체크 (이모지 대신 앱 아이콘) */}
+          <span
+            className={cx(
+              'kok-badge grid h-[72px] w-[72px] place-items-center rounded-full',
+              !total ? 'bg-surface-2 text-muted' : great ? 'bg-ok-soft text-ok' : 'bg-accent-soft text-accent',
+            )}
+            aria-hidden="true"
+          >
+            <Icon d={great ? ICONS.trophy : ICONS.check} size={34} strokeWidth={great ? 1.9 : 2.4} />
+          </span>
+          {noteTitle ? <p className="mt-3 w-full truncate px-6 text-sm font-semibold text-muted">{noteTitle}</p> : null}
+          <h1 className={cx('font-display text-3xl', noteTitle ? 'mt-1' : 'mt-3')}>{heading}</h1>
           {/* 연속 기록은 저장이 끝난 뒤에 읽어서 조금 늦게 온다: 줄을 미리 잡아 두어 아래가 밀리지 않게 하고, 그 자리에서 번진다 */}
           <p className="mt-1 text-muted">
             {streak ? (
@@ -575,7 +677,7 @@ export function ReviewSession({
                 연속 {streak}일째 공부했어요.
               </span>
             ) : (
-              ' '
+              ' '
             )}
           </p>
         </div>
@@ -606,7 +708,7 @@ export function ReviewSession({
             <Button size="lg" variant="ink" onClick={backToNote}>
               노트로 돌아가기
             </Button>
-            <Button size="lg" variant="secondary" onClick={() => rebuild(false)}>
+            <Button size="lg" variant="secondary" onClick={rebuild}>
               한 번 더 풀기
             </Button>
           </div>
@@ -619,8 +721,8 @@ export function ReviewSession({
         )}
         {remaining > 0 ? (
           <p className="kok-fill text-center text-sm text-muted" style={{ ['--i' as string]: 4 }}>
-            오늘 남은 복습 {remaining}문제는 나중에 해도 괜찮아요.{' '}
-            <button type="button" className="font-semibold underline" onClick={() => rebuild(false)}>
+            남은 {remaining}문제는 나중에 해도 괜찮아요.{' '}
+            <button type="button" className="font-semibold underline" onClick={rebuild}>
               조금 더 하기
             </button>
           </p>
@@ -629,14 +731,25 @@ export function ReviewSession({
     );
   }
 
-  // run
+  // ------------------------------------------------------------ 푸는 중: 남은 시간은 안내만 (지나도 멈추지 않는다)
   const mm = Math.floor(left / 60_000);
   const ss = Math.floor((left % 60_000) / 1000);
+  const leftQs = Math.max(1, queue.length - idx);
   return (
     <div className="grid gap-4">
-      <div className="flex items-center justify-between gap-3">
-        <span className="font-mono text-sm text-muted" aria-label="남은 시간">
-          ⏱ {mm}:{String(ss).padStart(2, '0')}
+      <div className="flex min-h-9 items-center justify-between gap-3">
+        <span className="flex min-w-0 items-center gap-1.5 text-sm text-muted">
+          <Icon d={ICONS.clock} size={16} className="shrink-0" />
+          {left > 0 ? (
+            <span className="font-mono tabular-nums">
+              <span className="sr-only">남은 시간 </span>
+              {mm}:{String(ss).padStart(2, '0')}
+            </span>
+          ) : (
+            <span key="over" className="kok-swap truncate">
+              {leftQs === 1 ? '마지막 문제예요' : `남은 ${leftQs}문제만 풀면 끝나요`}
+            </span>
+          )}
         </span>
         <BarButton onClick={() => finish(true)}>그만하기</BarButton>
       </div>
@@ -695,31 +808,6 @@ function QuestionSkeleton() {
           ))}
         </div>
       </div>
-    </div>
-  );
-}
-
-/** 시작 카드를 읽는 동안: 실제 카드와 같은 모양·크기 (세션 길이, 안내 글, 시작 버튼) */
-function StartSkeleton() {
-  return (
-    <div className="kok-card kok-skel kok-shimmer grid gap-4 p-5" aria-busy="true">
-      <span className="sr-only">복습을 불러오는 중이에요</span>
-      <div className="grid gap-2" aria-hidden="true">
-        <span className="flex h-5 items-center">
-          <span className="kok-bone h-3 w-16" />
-        </span>
-        <span className="kok-bone h-10 w-full" />
-      </div>
-      {/* 안내 글: 폰에서는 두 줄, 넓은 화면에서는 한 줄. 두 줄의 너비 합(+사이)이 실제 글 한 줄 너비(약 456px)와 같아서 같은 화면 너비에서 줄이 바뀐다 */}
-      <div className="flex flex-wrap gap-x-2" aria-hidden="true">
-        <span className="flex h-5 w-[290px] max-w-full items-center">
-          <span className="kok-bone h-2.5 w-full" />
-        </span>
-        <span className="flex h-5 w-[158px] max-w-full items-center">
-          <span className="kok-bone h-2.5 w-full" />
-        </span>
-      </div>
-      <span className="kok-bone h-[52px] w-full" aria-hidden="true" />
     </div>
   );
 }

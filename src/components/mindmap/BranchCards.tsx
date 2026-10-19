@@ -4,7 +4,7 @@
 import type { CSSProperties } from 'react';
 import type { Branch } from '@/lib/mindmap-branches';
 import { MEMORY_LABEL, MEMORY_TONE, type MemoryInfo } from '@/lib/memory';
-import { Chip, cx } from '@/components/ui';
+import { Chip, ICONS, Icon, cx } from '@/components/ui';
 
 /** 기억 상태 칩 */
 export function MemoryChip({ info, className }: { info: MemoryInfo; className?: string }) {
@@ -62,7 +62,12 @@ export function BranchCards({
                 </span>
                 <span className="min-w-0 flex-1">
                   <span className="block font-display text-[17px] leading-snug text-ink">{b.label}</span>
-                  {b.hint ? <span className="mt-0.5 block text-sm leading-snug text-muted">💡 {b.hint}</span> : null}
+                  {b.hint ? (
+                    <span className="mt-0.5 flex gap-1 text-sm leading-snug text-muted">
+                      <Icon d={ICONS.bulb} size={15} className="mt-px shrink-0" />
+                      <span className="min-w-0">{b.hint}</span>
+                    </span>
+                  ) : null}
                 </span>
                 {mem ? <MemoryChip info={mem} /> : null}
               </span>

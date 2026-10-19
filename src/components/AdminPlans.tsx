@@ -3,7 +3,7 @@
 // 테스트 플랜: 번개(에너지) 총량과 한도를 정해 만든다. 코드를 쓴 사람은 코드에 정한 날수 동안 이 플랜을 쓰고, 끝나면 원래 요금제로 돌아간다.
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Select } from '@/components/Select';
-import { ApiError, Button, Card, Chip, Field, SectionTitle, Sheet, Toggle, api, cx, inputClass, useToast } from '@/components/ui';
+import { ApiError, Button, Card, Chip, Energy, Field, SectionTitle, Sheet, Toggle, api, cx, inputClass, useToast } from '@/components/ui';
 import { MAX_FILE_MB, type Limits } from '@/lib/settings';
 
 export type PlanRow = {
@@ -62,8 +62,8 @@ const NUM_FIELDS: Array<{
   hint?: string;
   optional?: boolean;
 }> = [
-  { key: 'energyTotal', label: '번개(⚡) 총량', hint: '플랜 기간 전체에 쓸 수 있어요' },
-  { key: 'energyDaily', label: '하루 최대 ⚡', hint: '비우면 하루 제한 없음', optional: true },
+  { key: 'energyTotal', label: '에너지 총량', hint: '플랜 기간 전체에 쓸 수 있어요' },
+  { key: 'energyDaily', label: '하루 최대 에너지', hint: '비우면 하루 제한 없음', optional: true },
   { key: 'pdfPages', label: 'PDF 쪽수 (한 번에)' },
   { key: 'images', label: '사진 장수 (한 번에)' },
   { key: 'textChars', label: '글자 수 (한 번에)' },
@@ -301,7 +301,7 @@ export function AdminPlans({
       </SectionTitle>
       <Card className="grid gap-3">
         <p className="text-sm text-muted">
-          번개(⚡) 총량과 한도를 정해 플랜을 만들고, 아래에서 그 플랜의 코드를 만들어 나눠 주세요. 코드를 쓴 사람은 정한 날수 동안 이 플랜을 쓰고, 끝나면 원래
+          에너지 총량과 한도를 정해 플랜을 만들고, 아래에서 그 플랜의 코드를 만들어 나눠 주세요. 코드를 쓴 사람은 정한 날수 동안 이 플랜을 쓰고, 끝나면 원래
           요금제(무료·Pro)로 돌아가요.
         </p>
         {schemaHint ? (
@@ -318,8 +318,14 @@ export function AdminPlans({
                 <li key={p.id} className="grid gap-2 rounded-xl border border-line p-3">
                   <div className="flex flex-wrap items-center gap-2">
                     <span className="font-semibold">{p.name}</span>
-                    <Chip tone="hl">⚡ {fmt(num(p.energy_total) ?? 0)}</Chip>
-                    {daily !== null ? <Chip>하루 ⚡ {fmt(daily)}</Chip> : null}
+                    <Chip tone="hl">
+                      <Energy n={fmt(num(p.energy_total) ?? 0)} />
+                    </Chip>
+                    {daily !== null ? (
+                      <Chip>
+                        하루 <Energy n={fmt(daily)} />
+                      </Chip>
+                    ) : null}
                     {p.careful ? <Chip tone="accent">꼼꼼 모델</Chip> : null}
                     {p.can_append ? <Chip tone="accent">자료 더하기</Chip> : null}
                     {p.can_theme ? <Chip tone="accent">테마</Chip> : null}
@@ -358,7 +364,7 @@ export function AdminPlans({
               onChange={(v) => setNewCoupon({ ...newCoupon, planId: v || null })}
               options={[
                 { value: '', label: 'Pro' },
-                ...(plans ?? []).map((p) => ({ value: p.id, label: `테스트 플랜 · ${p.name} (⚡ ${fmt(num(p.energy_total) ?? 0)})` })),
+                ...(plans ?? []).map((p) => ({ value: p.id, label: `테스트 플랜 · ${p.name} (에너지 ${fmt(num(p.energy_total) ?? 0)})` })),
               ]}
             />
           </label>
@@ -501,7 +507,9 @@ export function AdminPlans({
               ))}
             </div>
             <p className="text-xs text-muted">
-              참고: 무료는 하루 ⚡ {fmt(limits.freeDaily)}, Pro는 한 달 ⚡ {fmt(limits.proMonthly)} (하루 최대 ⚡ {fmt(limits.proDaily)})예요.
+              참고: 무료는 하루 <Energy n={fmt(limits.freeDaily)} />, Pro는 한 달 <Energy n={fmt(limits.proMonthly)} /> (하루 최대{' '}
+              <Energy n={fmt(limits.proDaily)} />
+              )예요.
             </p>
             <Toggle id="plan-careful" label="꼼꼼 모델 쓰기" checked={form.careful} onChange={(v) => setForm({ ...form, careful: v })} />
             <Toggle

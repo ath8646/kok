@@ -4,14 +4,15 @@ import Link from 'next/link';
 import { useEffect, useState } from 'react';
 import { QuestionPreview } from '@/components/QuestionList';
 import { Button, Card, Chip, EmptyState, ICONS, Icon, LargeHeader, LinkButton, SectionTitle, buttonClass, cx, useToast } from '@/components/ui';
-import { fetchImportance, fetchPlanData, fetchQuestionsByIds, sb } from '@/lib/data';
+import { fetchPlanData, fetchQuestionsByIds, sb } from '@/lib/data';
 import { weakConcepts, type WeakConcept } from '@/lib/review-plan';
 import type { QuestionRow } from '@/lib/types';
 
 type NoteInfo = { id: string; source_id: string; title: string };
 
 async function fetchWrong() {
-  const [plan, titles] = await Promise.all([fetchPlanData(), fetchImportance()]);
+  const plan = await fetchPlanData();
+  const titles = plan.concepts;
   const wrong = plan.cards.filter((c) => c.in_wrong_note);
   const weak = weakConcepts(
     wrong.map((c) => ({ question_id: c.question_id, note_id: c.note_id, key_point_id: c.key_point_id, lapses: c.wrong_count ?? 0 })),

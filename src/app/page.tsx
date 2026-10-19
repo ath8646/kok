@@ -1,11 +1,12 @@
 import Link from 'next/link';
 import { LoginButton } from '@/components/LoginButton';
+import { ICONS } from '@/lib/icons';
 
 const FEATURES = [
-  { emoji: '📄', title: '넣기만 하세요', body: '교과서 사진, 학습지 PDF, 내가 쓴 필기. AI가 핵심만 골라 정리 노트로 바꿔요.' },
-  { emoji: '🧠', title: '한눈에 보는 마인드맵', body: '개념끼리의 연결을 그림으로. 가지를 가리고 떠올려 보는 가리기 모드도 있어요.' },
-  { emoji: '🎯', title: '핵심만 콕 찌르는 문제', body: '시험에 나올 개념만 묻는 문제를 AI가 만들고 스스로 한 번 더 검사해요.' },
-  { emoji: '⏱️', title: '하루 5분 복습', body: '잊어버리기 직전에 다시 나와요. 오늘 할 만큼만 풀고 끝내요.' },
+  { icon: ICONS.file, title: '넣기만 하세요', body: '교과서 사진, 학습지 PDF, 내가 쓴 필기. AI가 핵심만 골라 정리 노트로 바꿔요.' },
+  { icon: ICONS.mindmap, title: '한눈에 보는 마인드맵', body: '개념끼리의 연결을 그림으로. 가지를 가리고 떠올려 보는 가리기 모드도 있어요.' },
+  { icon: ICONS.target, title: '핵심만 콕 찌르는 문제', body: '시험에 나올 개념만 묻는 문제를 AI가 만들고 스스로 한 번 더 검사해요.' },
+  { icon: ICONS.clock, title: '하루 5분 복습', body: '잊어버리기 직전에 다시 나와요. 오늘 할 만큼만 풀고 끝내요.' },
 ];
 
 function safeNext(v: string | string[] | undefined): string {
@@ -52,8 +53,10 @@ export default async function Landing({ searchParams }: PageProps<'/'>) {
       <section className="grid grid-cols-2 gap-3">
         {FEATURES.map((f, i) => (
           <div key={f.title} className="kok-card kok-rise grid content-start gap-2 p-4 sm:p-5" style={{ ['--i' as string]: i + 1 }}>
-            <span className="grid h-11 w-11 place-items-center rounded-2xl bg-accent-soft text-2xl" aria-hidden="true">
-              {f.emoji}
+            <span className="grid h-11 w-11 place-items-center rounded-2xl bg-accent-soft text-accent" aria-hidden="true">
+              <svg width={24} height={24} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.9} strokeLinecap="round" strokeLinejoin="round">
+                <path d={f.icon} />
+              </svg>
             </span>
             <h2 className="font-display text-lg leading-snug sm:text-xl">{f.title}</h2>
             <p className="text-sm text-muted sm:text-[15px]">{f.body}</p>

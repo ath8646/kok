@@ -302,7 +302,7 @@ export function NoteView({
     return out;
   }, [note.key_points, hold]);
   const listRef = useRef<HTMLDivElement>(null);
-  const onLeadAway = useCallback((up: boolean) => toast(up ? '★ 별표한 개념은 맨 위에 모여요.' : '별표를 빼서 원래 자리로 옮겼어요.'), [toast]);
+  const onLeadAway = useCallback((up: boolean) => toast(up ? '별표한 개념은 맨 위에 모여요.' : '별표를 빼서 원래 자리로 옮겼어요.'), [toast]);
   const flip = useFlip(listRef, ordered.map((k) => k.id).join('|'), onLeadAway);
   const toggleStar = (kp: KeyPoint) => {
     const on = !kp.starred;

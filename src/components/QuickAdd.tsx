@@ -14,7 +14,7 @@ import { SUBJECT_COLORS } from '@/lib/settings';
 import { subjectVar } from '@/lib/colors';
 import { SOURCES_CHANGED, SUBJECTS_CHANGED } from '@/lib/events';
 import { topFileSink } from '@/lib/file-sink';
-import { ApiError, Button, ICONS, Icon, Sheet, Spinner, api, cx, inputClass, useToast } from './ui';
+import { ApiError, Button, EnergyEstimate, ICONS, Icon, Sheet, Spinner, api, cx, inputClass, useToast } from './ui';
 
 /** 동시에 정리할 수 있는 자료 수 (서버와 같다) */
 const MAX_PARALLEL = 3;
@@ -1119,9 +1119,7 @@ function Composer({
               </div>
             ) : null}
           </div>
-          <span className="text-xs font-semibold text-muted">
-            {blank ? 'AI 없이 · 에너지 0' : [est ? `⚡ 약 ${est}` : '', left !== null ? `남음 ${left}` : ''].filter(Boolean).join(' · ')}
-          </span>
+          <span className="text-xs font-semibold text-muted">{blank ? 'AI 없이 · 에너지 0' : <EnergyEstimate est={est || null} left={left} />}</span>
         </div>
 
         {blank ? (

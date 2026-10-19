@@ -84,19 +84,23 @@ export function peekText(n: NotePeek): string | null {
   return [n.kp, n.kpx].filter((x) => x?.trim()).join(' · ') || null;
 }
 
-type NoteKps = { id: string; kps: Array<{ id: string; importance?: string; title?: string }> | null };
+type NoteKps = { id: string; kps: Array<{ id: string; importance?: string; title?: string; starred?: boolean }> | null };
 
-/** 노트마다 개념 중요도 */
-export async function fetchImportance(): Promise<Map<string, Map<string, { importance: string; title: string }>>> {
+/** 개념 하나: 중요도, 이름(꾸미기 기호 없이), 별표 */
+export type ConceptInfo = { importance: string; title: string; starred: boolean };
+
+/** 노트마다 개념 (노트 id → 개념 id → 중요도·이름·별표) */
+export async function fetchImportance(): Promise<Map<string, Map<string, ConceptInfo>>> {
   const rows = await fetchAll<NoteKps>(
     (a, b) =>
       sb().from('notes').select('id, kps:body->key_points').order('id').range(a, b) as unknown as PromiseLike<{ data: NoteKps[] | null; error: unknown }>,
   );
-  const m = new Map<string, Map<string, { importance: string; title: string }>>();
+  const m = new Map<string, Map<string, ConceptInfo>>();
   for (const r of rows) {
-    const inner = new Map<string, { importance: string; title: string }>();
+    const inner = new Map<string, ConceptInfo>();
     // 이름은 꾸미기 기호(**굵게** 등) 없이 글로
-    for (const k of r.kps ?? []) if (k?.id) inner.set(k.id, { importance: k.importance ?? 'medium', title: k.title ? previewText(k.title) || k.title : '' });
+    for (const k of r.kps ?? [])
+      if (k?.id) inner.set(k.id, { importance: k.importance ?? 'medium', title: k.title ? previewText(k.title) || k.title : '', starred: k.starred === true });
     m.set(r.id, inner);
   }
   return m;
@@ -109,11 +113,15 @@ export type PlanData = {
   subjects: SubjectRow[];
   planSubjects: PlanSubject[];
   doneToday: number;
+  /** 노트마다 개념 (중요도·이름·별표) */
+  concepts: Map<string, Map<string, ConceptInfo>>;
 };
 
-/** 복습 계획에 필요한 것 한 번에: 카드(쉬는 문제 빼고), 과목, 오늘 푼 수 */
+type PlanQuestion = { id: string; note_id: string | null; key_point_id: string | null; status: string; type: string; created_at: string };
+
+/** 복습 계획에 필요한 것 한 번에: 카드(쉬는 문제 빼고), 과목, 오늘 푼 수, 개념 */
 export async function fetchPlanData(): Promise<PlanData> {
-  const [subjects, cards, questions, importance, done] = await Promise.all([
+  const [subjects, cards, questions, concepts, done] = await Promise.all([
     fetchSubjects(),
     fetchAll<CardRow>(
       (a, b) =>
@@ -123,10 +131,10 @@ export async function fetchPlanData(): Promise<PlanData> {
           .order('question_id')
           .range(a, b) as unknown as PromiseLike<{ data: CardRow[] | null; error: unknown }>,
     ),
-    fetchAll<{ id: string; note_id: string | null; key_point_id: string | null; status: string }>(
+    fetchAll<PlanQuestion>(
       (a, b) =>
-        sb().from('questions').select('id, note_id, key_point_id, status').order('id').range(a, b) as unknown as PromiseLike<{
-          data: Array<{ id: string; note_id: string | null; key_point_id: string | null; status: string }> | null;
+        sb().from('questions').select('id, note_id, key_point_id, status, type, created_at').order('id').range(a, b) as unknown as PromiseLike<{
+          data: PlanQuestion[] | null;
           error: unknown;
         }>,
     ),
@@ -138,7 +146,8 @@ export async function fetchPlanData(): Promise<PlanData> {
   for (const c of cards) {
     const q = qmap.get(c.question_id);
     if (!q || q.status !== 'active') continue;
-    const imp = q.note_id && q.key_point_id ? importance.get(q.note_id)?.get(q.key_point_id)?.importance : undefined;
+    const kp = q.note_id && q.key_point_id ? concepts.get(q.note_id)?.get(q.key_point_id) : undefined;
+    const imp = kp?.importance;
     planCards.push({
       question_id: c.question_id,
       subject_id: c.subject_id,
@@ -150,6 +159,9 @@ export async function fetchPlanData(): Promise<PlanData> {
       last_review: c.last_review,
       in_wrong_note: c.in_wrong_note,
       importance: imp === 'high' || imp === 'low' ? imp : 'medium',
+      starred: kp?.starred ?? false,
+      type: q.type,
+      created_at: q.created_at,
       note_id: q.note_id,
       key_point_id: q.key_point_id,
     });
@@ -160,7 +172,15 @@ export async function fetchPlanData(): Promise<PlanData> {
     subjects,
     planSubjects: subjects.map((s) => ({ id: s.id, exam_date: s.exam_date })),
     doneToday: done.count ?? 0,
+    concepts,
   };
+}
+
+/** 최근 푼 기록 (답하는 데 걸린 시간): 내 빠르기로 복습 시간마다 문제 수를 맞춘다 */
+export async function fetchRecentPace(limit = 120): Promise<Array<{ question_id: string | null; ms: number | null }>> {
+  const { data, error } = await sb().from('review_logs').select('question_id, ms').order('reviewed_at', { ascending: false }).limit(limit);
+  if (error) throw error;
+  return (data ?? []) as Array<{ question_id: string | null; ms: number | null }>;
 }
 
 /** 화면에서 읽는 문제 칸. 새 칸은 DB 에 있을 때만 (features: schema.sql 을 다시 실행하기 전에는 없다) */

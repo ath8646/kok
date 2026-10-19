@@ -250,7 +250,7 @@ export function ImageViewer({ src, alt, onClose }: { src: string; alt: string; o
 }
 
 /**
- * 입력 줄: 파일 붙이기(📎), 사진 찍기(📷), 글, 보내기. 엔터로 보내고 Shift+엔터·한글 조합 중 엔터는 줄바꿈.
+ * 입력 줄: 파일 붙이기(클립 아이콘), 사진 찍기(카메라 아이콘), 글, 보내기. 엔터로 보내고 Shift+엔터·한글 조합 중 엔터는 줄바꿈.
  * cameraRef: 밖에서 사진 찍기를 바로 열 때 (홈의 카메라 버튼)
  */
 export function ChatInput({

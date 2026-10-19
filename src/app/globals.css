@@ -454,6 +454,11 @@ body {
     kok-ring 900ms var(--ease-out) 200ms 1;
 }
 
+/* 끝 화면의 큰 아이콘: 살짝 커지며 나타난다 (가끔 보는 화면이라 조금 눈에 띄게) */
+.kok-badge {
+  animation: kok-pop-in 280ms var(--ease-out) 60ms backwards;
+}
+
 /* 정리 중인 카드의 반짝이는 미리보기 */
 @keyframes kok-shimmer {
   from {

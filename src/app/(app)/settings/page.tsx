@@ -5,7 +5,24 @@ import { useRouter } from 'next/navigation';
 import { useEffect, useRef, useState } from 'react';
 import { useMe } from '@/components/AppShell';
 import { Select } from '@/components/Select';
-import { Button, Card, Chip, Field, LargeHeader, LinkButton, Segmented, SectionTitle, Toggle, api, cx, inputClass, useToast } from '@/components/ui';
+import {
+  Button,
+  Card,
+  Chip,
+  Energy,
+  Field,
+  ICONS,
+  Icon,
+  LargeHeader,
+  LinkButton,
+  Segmented,
+  SectionTitle,
+  Toggle,
+  api,
+  cx,
+  inputClass,
+  useToast,
+} from '@/components/ui';
 import { fetchSubjects, sb } from '@/lib/data';
 import { supabaseBrowser } from '@/lib/supabase/client';
 import type { SubjectRow } from '@/lib/types';
@@ -110,8 +127,17 @@ export default function SettingsPage() {
         title="설정"
         subtitle={`${me.nickname ?? '나'} · ${planLabel(me.planInfo, false)}`}
         actions={
-          <span className="mr-2 text-xs font-semibold text-muted" aria-live="polite">
-            {saved === 'saving' ? '저장 중…' : saved === 'saved' ? '저장됨 ✓' : ''}
+          <span className="mr-2 inline-flex items-center gap-1 text-xs font-semibold text-muted" aria-live="polite">
+            {saved === 'saving' ? (
+              '저장 중…'
+            ) : saved === 'saved' ? (
+              <>
+                <Icon d={ICONS.check} size={14} strokeWidth={2.6} />
+                저장됨
+              </>
+            ) : (
+              ''
+            )}
           </span>
         }
       />
@@ -166,7 +192,13 @@ export default function SettingsPage() {
       </SectionTitle>
       <Card className="grid gap-3">
         <p className="text-lg font-bold">
-          {e.unlimited ? '무제한 (관리자)' : `${energyPeriodLabel(e.period)} 남은 에너지 ⚡ ${Math.floor(e.remaining ?? 0)} / ${e.limit}`}
+          {e.unlimited ? (
+            '무제한 (관리자)'
+          ) : (
+            <>
+              {energyPeriodLabel(e.period)} 남은 에너지 <Energy sr={false} n={`${Math.floor(e.remaining ?? 0)} / ${e.limit}`} />
+            </>
+          )}
         </p>
         <p className="text-sm text-muted">
           {e.period === 'plan' ? (
@@ -433,18 +465,6 @@ export default function SettingsPage() {
             }}
           />
         </Field>
-        <Field label="세션 길이">
-          <Segmented
-            label="세션 길이"
-            value={draft.review.session}
-            onChange={(v) => set('review', { session: v })}
-            options={[
-              { value: 5 as const, label: '5분' },
-              { value: 10 as const, label: '10분' },
-              { value: 25 as const, label: '25분' },
-            ]}
-          />
-        </Field>
         <Toggle id="set-mix" label="여러 과목 섞어 풀기" checked={draft.review.interleave} onChange={(v) => set('review', { interleave: v })} />
         <Toggle
           id="set-aigrade"
@@ -479,11 +499,11 @@ export default function SettingsPage() {
                     set('quiz', { types });
                   }}
                   className={cx(
-                    'rounded-full border px-3 py-1.5 text-sm font-semibold',
+                    'inline-flex items-center gap-1 rounded-full border px-3 py-1.5 text-sm font-semibold',
                     on ? 'border-accent bg-accent-soft text-accent' : 'border-line bg-surface text-muted',
                   )}
                 >
-                  {on ? '✓ ' : ''}
+                  {on ? <Icon d={ICONS.check} size={14} strokeWidth={2.6} /> : null}
                   {label}
                 </button>
               );

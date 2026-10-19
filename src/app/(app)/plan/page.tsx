@@ -1,8 +1,8 @@
 'use client';
 // 요금제: 무료와 Pro 비교, 지금 쓰는 테스트 플랜, 쿠폰 입력 (결제는 v0.4)
-import { useState } from 'react';
+import { useState, type ReactNode } from 'react';
 import { useMe } from '@/components/AppShell';
-import { ApiError, Button, Card, Chip, Field, LargeHeader, api, inputClass, useToast } from '@/components/ui';
+import { ApiError, Button, Card, Chip, Energy, Field, LargeHeader, api, inputClass, useToast } from '@/components/ui';
 import { planLabel } from '@/lib/plans';
 
 const day = (iso: string) => new Date(iso).toLocaleDateString('ko-KR', { timeZone: 'Asia/Seoul' });
@@ -142,9 +142,9 @@ function CustomPlanCard() {
   const { me } = useMe();
   if (!me || me.planInfo.kind !== 'custom') return null;
   const e = me.energy;
-  const items: Array<[string, string]> = [
-    ['남은 에너지', `⚡ ${Math.floor(e.remaining ?? 0)} / ${e.limit ?? 0}`],
-    ['하루 최대', e.planDaily === null ? '없음' : `⚡ ${e.planDaily}`],
+  const items: Array<[string, ReactNode]> = [
+    ['남은 에너지', <Energy key="e" n={`${Math.floor(e.remaining ?? 0)} / ${e.limit ?? 0}`} />],
+    ['하루 최대', e.planDaily === null ? '없음' : <Energy key="d" n={e.planDaily} />],
     ['PDF 한 번에', `${me.plan.pdfPages}쪽`],
     ['사진 한 번에', `${me.plan.images}장`],
     ['글 한 번에', `${me.plan.textChars.toLocaleString('ko-KR')}자`],

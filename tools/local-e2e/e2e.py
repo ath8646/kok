@@ -584,15 +584,41 @@ async def main():
         await page.get_by_role("tab", name="원본").click()
         await expect(page.get_by_text("내가 쓴 원문")).to_be_visible()
 
-        step("review session")
+        step("review session: pick a period and a time, core questions first, no hard stop")
         await page.goto(BASE + "/review")
-        await expect(page.get_by_role("button", name="시작")).to_be_visible()
+        await expect(page.get_by_role("heading", name="복습", exact=True)).to_be_visible()
+        periods = page.get_by_role("radiogroup", name="언제 공부한 문제를 풀까요?")
+        await expect(periods).to_be_visible()
+        # 방금 만든 문제는 모두 복습할 차례 (처음 보는 문제는 바로 나온다)
+        await expect(periods.get_by_role("radio", name=re.compile("^복습할 차례"))).to_have_attribute("aria-checked", "true")
+        start_btn = page.get_by_role("button", name=re.compile(r"^\d+문제 시작$"))
+        await expect(start_btn).to_be_visible()
+        await expect(page.get_by_role("list", name="고른 문제")).to_be_visible()
+        assert await page.get_by_text("세션 길이").count() == 0
         await shot(page, "16-review-start", full=False)
-        await page.get_by_role("button", name="시작").click()
+        await no_hscroll(page, "review start")
+        # 오늘 넣은 문제로 바꾸고, 시간을 고를 수 있으면 30분 (5분은 핵심 문제만)
+        today_chip = periods.get_by_role("radio", name=re.compile("^오늘"))
+        await today_chip.click()
+        await expect(today_chip).to_have_attribute("aria-checked", "true")
+        times = page.get_by_role("radiogroup", name="얼마나 풀까요?")
+        if await times.count():
+            await expect(times.get_by_role("radio", name=re.compile("^5분"))).to_contain_text(re.compile("핵심|전부"))
+            await times.get_by_role("radio", name=re.compile("^30분")).click()
+            print("   time cards:", await times.inner_text())
+        else:
+            await expect(page.get_by_text(re.compile(r"전부 \d+문제 · 약 \d+분이면 다 풀어요"))).to_be_visible()
+            print("   all questions fit in 5 minutes")
+        await shot(page, "16a-review-today", full=False)
+        await start_btn.click()
+        # 남은 시간은 안내만 (시계 아이콘 + 분:초)
+        await expect(page.get_by_text(re.compile(r"남은 시간 \d+:\d{2}"))).to_be_visible()
+        # 고른 기간은 다음에 그대로 (설정에 저장)
+        await poll_db(f"select settings->'review'->>'period' from public.profiles where id = '{USERS['student'][0]}'", "today")
         seen = 0
         answered_types = set()
         for i in range(30):
-            if await page.get_by_role("heading", name=re.compile("오늘 할 일 끝|다음에 또")).count():
+            if await page.get_by_role("heading", name=re.compile("오늘 할 일 끝|다 풀었어요|다음에 또")).count():
                 break
             card_text = await page.locator("main").inner_text()
             if "그만하기" not in card_text:
@@ -622,11 +648,17 @@ async def main():
             seen += 1
             await page.get_by_role("button", name="다음").click()
             await page.wait_for_timeout(200)
-        if not await page.get_by_role("heading", name=re.compile("오늘 할 일 끝|다음에 또")).count():
+        if not await page.get_by_role("heading", name=re.compile("오늘 할 일 끝|다 풀었어요|다음에 또")).count():
             await shot(page, "debug-review")
-        await expect(page.get_by_role("heading", name=re.compile("오늘 할 일 끝|다음에 또"))).to_be_visible(timeout=10000)
+        await expect(page.get_by_role("heading", name=re.compile("오늘 할 일 끝|다 풀었어요|다음에 또"))).to_be_visible(timeout=10000)
+        end_text = await page.locator("main").inner_text()
+        assert not re.search("[\U0001F300-\U0001FAFF\u2600-\u27BF]", end_text), end_text
         await shot(page, "19-review-end", full=False)
         print("   answered:", seen, sorted(answered_types))
+        # 다시 열면 고른 기간(오늘)이 그대로 (복습할 차례가 남아 있으면 그것이 먼저)
+        await page.goto(BASE + "/review")
+        await expect(page.get_by_role("radiogroup", name="언제 공부한 문제를 풀까요?")).to_be_visible()
+        print("   reopened with:", await page.get_by_role("radio", checked=True).first.inner_text())
 
         step("wrong note")
         await page.goto(BASE + "/wrong")
@@ -759,7 +791,11 @@ async def main():
         await page.get_by_role("button", name="과목 메뉴").click()
         await page.get_by_role("menuitem", name="이 과목만 복습").click()
         await page.wait_for_url(re.compile(r"/review\?subject="))
-        await expect(page.get_by_role("heading", name="과목 복습")).to_be_visible()
+        await expect(page.get_by_role("heading", name="복습", exact=True)).to_be_visible()
+        await expect(page.get_by_role("radiogroup", name="언제 공부한 문제를 풀까요?")).to_be_visible()
+        subject_radio = page.get_by_role("radiogroup", name="과목").get_by_role("radio", name=re.compile("^과학"))
+        if await subject_radio.count():
+            await expect(subject_radio).to_have_attribute("aria-checked", "true")
         await page.go_back()
         await page.wait_for_url(LIBRARY_SUBJECT)
         await page.get_by_role("button", name="과목 메뉴").click()
@@ -1023,7 +1059,7 @@ async def main():
         await sheet.get_by_label("플랜 이름").click()
         await apage.keyboard.type("베타 테스터")
         await expect(sheet.get_by_label("플랜 이름")).to_have_value("베타 테스터")
-        await sheet.get_by_label("번개(⚡) 총량").fill("100")
+        await sheet.get_by_label("에너지 총량").fill("100")
         await sheet.get_by_label("PDF 쪽수 (한 번에)").fill("33")
         await sheet.get_by_text("꼼꼼 모델 쓰기").click()  # 끈다
         await shot(apage, "35-admin-plan-form", full=False)
@@ -1031,7 +1067,7 @@ async def main():
         await expect(apage.get_by_text(re.compile("'베타 테스터' 플랜을 만들었어요"))).to_be_visible()
         plan_item = apage.locator("li").filter(has=apage.get_by_role("button", name="고치기"))
         await expect(plan_item).to_have_count(1)
-        await expect(plan_item.get_by_text("⚡ 100")).to_be_visible()
+        await expect(plan_item.get_by_text("에너지 100", exact=True)).to_be_visible()
         await plan_item.get_by_role("button", name="코드 만들기", exact=True).click()
         await apage.get_by_label("기간(일)").fill("7")
         await apage.get_by_role("button", name="'베타 테스터' 코드 만들기").click()
@@ -1049,7 +1085,7 @@ async def main():
         await opage.get_by_role("button", name="쿠폰 쓰기").click()
         await expect(opage.get_by_text(re.compile("'베타 테스터' 플랜이 켜졌어요!"))).to_be_visible()
         await expect(opage.get_by_text("테스트 플랜", exact=True)).to_be_visible()
-        await expect(opage.get_by_text("⚡ 100 / 100")).to_be_visible()
+        await expect(opage.get_by_text("에너지 100 / 100", exact=True)).to_be_visible()
         await expect(opage.get_by_text("33쪽")).to_be_visible()
         await expect(opage.get_by_text("플랜이 끝나고 7일")).to_be_visible()
         await shot(opage, "37-plan-custom")
@@ -1067,7 +1103,7 @@ async def main():
         await expect(opage.get_by_text(re.compile("^베타 테스터 · .+까지$"))).to_be_visible()
         await shot(opage, "38-home-test-plan", full=False)
         await opage.goto(BASE + "/settings")
-        await expect(opage.get_by_text("플랜 남은 에너지 ⚡ 100 / 100")).to_be_visible()
+        await expect(opage.get_by_text("플랜 남은 에너지 100 / 100")).to_be_visible()
 
         step("test plan: energy is counted from the plan total")
         psql = lambda sql: subprocess.run(["psql", "-d", "kokapp", "-tAc", sql], capture_output=True, text=True, check=True).stdout.strip()
@@ -1096,7 +1132,7 @@ async def main():
         await apage.reload()
         await plan_item.get_by_role("button", name="고치기").click()
         sheet = apage.get_by_role("dialog", name="테스트 플랜 고치기")
-        await sheet.get_by_label("번개(⚡) 총량").fill("1")
+        await sheet.get_by_label("에너지 총량").fill("1")
         await sheet.get_by_role("button", name="고친 내용 저장").click()
         await expect(apage.get_by_text("플랜을 고쳤어요.")).to_be_visible()
         r = await opage.request.post(BASE + "/api/sources", data={"id": str(uuid.uuid4()), "subjectId": subject_id, "kind": "text", "title": "", "text": words})
@@ -1190,7 +1226,7 @@ async def main():
         await box.press("Enter")
         await expect(chat.get_by_text(re.compile("노트에 따르면 광합성은")).first).to_be_visible(timeout=15000)
         assert "**" not in await chat.inner_text(), "markdown marks are removed from replies"
-        await expect(chat.get_by_text(re.compile(r"^⚡ [\d.]+$")).first).to_be_visible()
+        await expect(chat.get_by_text(re.compile(r"^에너지 [\d.]+$")).first).to_be_visible()
         n_before = live_q()
         await box.fill("이 노트로 문제 만들어 줘")
         await box.press("Enter")
@@ -1199,7 +1235,7 @@ async def main():
         await shot(page, "41-chat-proposal", full=False)
         await chat.get_by_role("button", name="넣기", exact=True).click()
         await expect(page.get_by_text("문제 2개를 넣었어요.")).to_be_visible()
-        await expect(chat.get_by_text("넣었어요 ✓")).to_be_visible()
+        await expect(chat.get_by_text("넣었어요", exact=True)).to_be_visible()
         assert live_q() == n_before + 2, (n_before, live_q())
         # 두 번 눌러도 한 번만 들어간다 (서버가 먼저 상태를 바꾼다)
         msg_id = psql(f"select m.id from public.chat_messages m join public.notes n on n.id = m.note_id where n.source_id = '{note_sid}' and m.proposal->>'kind' = 'questions'")
@@ -1259,7 +1295,7 @@ async def main():
         await page.get_by_role("tab", name="원본").click()
         add = page.get_by_role("region", name="이 노트에 자료 더하기")
         await add.get_by_label("더할 내용").fill("광합성과 호흡을 비교해 보자. 호흡은 포도당을 분해해서 에너지를 얻는 과정이고 밤낮없이 일어난다.")
-        await expect(add.get_by_text(re.compile(r"⚡ 약 [\d.]+"))).to_be_visible()
+        await expect(add.get_by_text(re.compile(r"에너지 약 [\d.]+"))).to_be_visible()
         await shot(page, "43-append-form", full=False)
         n_live = live_q()
         await add.get_by_role("button", name="글 더하기").click()
@@ -1597,7 +1633,7 @@ async def main():
         await page.goto(BASE + f"/notes/{own_sid}?tab=questions")
         own_card = page.locator(".kok-card", has_text="엽록소는 초록색 색소이다.").first
         await own_card.get_by_role("button", name=re.compile("보기$")).click()
-        await own_card.get_by_role("button", name=re.compile("^그림 풀이 만들기 ⚡")).click()
+        await own_card.get_by_role("button", name=re.compile("^그림 풀이 만들기 에너지")).click()
         await expect(page.get_by_text("그림 풀이를 만들었어요.")).to_be_visible(timeout=30000)
         assert psql(f"select (steps is not null)::text || (figure is not null)::text from public.questions where id = '{own_qid}'") == "truetrue"
         await expect(own_card.get_by_text("그림 풀이", exact=True)).to_be_visible()

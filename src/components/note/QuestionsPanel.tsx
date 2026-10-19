@@ -7,7 +7,7 @@ import { clientModel } from '@/lib/client-model';
 import { sb } from '@/lib/data';
 import { QuestionEditor } from '../QuestionEditor';
 import { QuestionList, QuestionPreview, createOwnQuestion, type CardInfo, type QuestionRemoval } from '../QuestionList';
-import { ApiError, Button, LinkButton, Sheet, api, useToast } from '../ui';
+import { ApiError, Button, Energy, LinkButton, Sheet, api, useToast } from '../ui';
 
 type PreviewRow = Pick<QuestionRow, 'type' | 'prompt' | 'choices' | 'answer' | 'accepted' | 'explanation' | 'difficulty' | 'pages'> & { key_point_id: string };
 
@@ -77,7 +77,7 @@ export function QuestionsPanel({
               }
             }}
           >
-            다시 만들기 ⚡{est}
+            다시 만들기 <Energy n={est} />
           </Button>
         ) : null}
       </div>

@@ -94,7 +94,7 @@ export function ProcessingList({ items, justDone, reload }: Pick<ReturnType<type
             <Icon d={ICONS.check} size={22} strokeWidth={2.6} />
           </span>
           <span className="min-w-0 flex-1">
-            <span className="block text-xs font-bold text-ok">정리 끝! 🎉</span>
+            <span className="block text-xs font-bold text-ok">정리 끝!</span>
             <span className="block truncate font-semibold">{s.title || '새 자료'}</span>
           </span>
           <span className="shrink-0 text-sm font-bold text-accent">보러 가기</span>

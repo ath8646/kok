@@ -7,7 +7,7 @@ import { useRouter } from 'next/navigation';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useMe } from '@/components/AppShell';
 import { RichText } from '@/components/RichText';
-import { ICONS, Icon, Menu, api, cx, useToast } from '@/components/ui';
+import { Energy, EnergyEstimate, ICONS, Icon, Menu, api, cx, useToast } from '@/components/ui';
 import { THINK_OUT, estimateSmallTask } from '@/lib/ai/models';
 import { clientModel } from '@/lib/client-model';
 import { sb } from '@/lib/data';
@@ -45,7 +45,7 @@ type Msg = {
 };
 
 const SUGGESTIONS: Array<{ label: string; text?: string; camera?: boolean }> = [
-  { label: '📷 사진으로 문제 풀기', camera: true },
+  { label: '사진으로 문제 풀기', camera: true },
   { label: '이차방정식 풀어 줘', text: '$x^2-5x+6=0$ 을 풀어 줘' },
   { label: '광합성 쉽게 설명해 줘', text: '광합성을 쉽게 설명해 줘' },
   { label: '영어 문장 해석해 줘', text: '"I wish I had studied harder." 해석하고 문법도 알려 줘' },
@@ -303,10 +303,11 @@ export function HomeAsk() {
                       <button
                         key={s.label}
                         type="button"
-                        className="press rounded-full bg-surface-2 px-3 py-1.5 text-left text-sm font-semibold hover:bg-surface-3"
+                        className="press inline-flex items-center gap-1.5 rounded-full bg-surface-2 px-3 py-1.5 text-left text-sm font-semibold hover:bg-surface-3"
                         onClick={() => (s.camera ? openCamera('panel') : send(s.text))}
                         disabled={sending}
                       >
+                        {s.camera ? <Icon d={ICONS.camera} size={16} className="shrink-0" /> : null}
                         {s.label}
                       </button>
                     ))}
@@ -354,7 +355,7 @@ export function HomeAsk() {
                           }
                         />
                       ) : null}
-                      {m.role === 'assistant' && m.energy ? <span className="px-1 text-[11px] text-muted">⚡ {Math.round(m.energy * 10) / 10}</span> : null}
+                      {m.role === 'assistant' && m.energy ? <Energy n={Math.round(m.energy * 10) / 10} className="px-1 text-[11px] text-muted" /> : null}
                     </li>
                   ))}
                   {sending ? <ThinkingRow label={busyLabel} /> : null}
@@ -371,7 +372,9 @@ export function HomeAsk() {
             >
               <div className="flex items-center justify-between gap-2 px-1">
                 <TierPicker tiers={tiers} tier={tier} locked={locked} onPick={pickTier} />
-                <span className="text-xs font-semibold text-muted">{[`⚡ 약 ${est}`, left !== null ? `남음 ${left}` : ''].filter(Boolean).join(' · ')}</span>
+                <span className="inline-flex items-center gap-1 text-xs font-semibold text-muted">
+                  <EnergyEstimate est={est} left={left} />
+                </span>
               </div>
               <PickStrip picks={attach.picks} onRemove={attach.remove} />
               <ChatInput

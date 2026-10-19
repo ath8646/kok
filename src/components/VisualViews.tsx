@@ -3,7 +3,7 @@
 import { useState } from 'react';
 import type { TableSpec, TimelineSpec } from '@/lib/ai/schemas';
 import { RichText } from './RichText';
-import { Button, cx, inputClass } from './ui';
+import { Button, ICONS, Icon, cx, inputClass } from './ui';
 
 export function TableView({
   spec,
@@ -72,10 +72,10 @@ export function TableView({
                     <button
                       type="button"
                       aria-label={`${r + 1}행 지우기`}
-                      className="rounded-lg px-2 py-1 text-bad hover:bg-bad-soft"
+                      className="grid place-items-center rounded-lg px-2 py-1.5 text-bad hover:bg-bad-soft"
                       onClick={() => setDraft({ ...draft, rows: draft.rows.filter((_, i) => i !== r) })}
                     >
-                      ✕
+                      <Icon d={ICONS.close} size={16} strokeWidth={2.4} />
                     </button>
                   </td>
                 </tr>
@@ -283,10 +283,10 @@ export function TimelineView({
             <button
               type="button"
               aria-label="지우기"
-              className="self-start rounded-lg px-2 py-2 text-bad hover:bg-bad-soft"
+              className="grid place-items-center self-start rounded-lg px-2 py-2.5 text-bad hover:bg-bad-soft"
               onClick={() => setDraft({ ...draft, events: draft.events.filter((_, j) => j !== i) })}
             >
-              ✕
+              <Icon d={ICONS.close} size={16} strokeWidth={2.4} />
             </button>
           </div>
         ))}

@@ -29,7 +29,7 @@ import { estimateSmallTask } from '@/lib/ai/models';
 import { clientModel } from '@/lib/client-model';
 import { shrinkImage } from '@/lib/image';
 import { sb } from '@/lib/data';
-import { ApiError, Button, Chip, Field, ICONS, Icon, LinkButton, Segmented, Sheet, Toggle, api, cx, inputClass, radioKeys, useToast } from './ui';
+import { ApiError, Button, Chip, Energy, Field, ICONS, Icon, LinkButton, Segmented, Sheet, Toggle, api, cx, inputClass, radioKeys, useToast } from './ui';
 
 /** user_themes 행 (updated_at: 고칠 때 '읽은 그대로인지' 확인한다) */
 type ThemeRow = CustomTheme & { updated_at?: string | null };
@@ -305,7 +305,7 @@ export function ThemeSettings({ me, theme, onChange }: { me: MeResponse; theme: 
               <div className="flex flex-wrap gap-2">
                 <Button size="sm" disabled={!me.aiEnabled || (customs?.length ?? 0) >= MAX_THEMES} onClick={() => setMaking(true)}>
                   <Icon d={ICONS.sparkle} size={16} />
-                  AI로 만들기 ⚡{est}
+                  AI로 만들기 <Energy n={est} />
                 </Button>
                 <Button size="sm" variant="secondary" disabled={(customs?.length ?? 0) >= MAX_THEMES} onClick={() => setEditing('new')}>
                   <Icon d={ICONS.plus} size={16} strokeWidth={2.4} />
@@ -822,7 +822,13 @@ function ThemeEditor({
                     disabled={!!busy || !me.aiEnabled || (!aiText.trim() && !canRedraw)}
                     onClick={drawAi}
                   >
-                    {aiText.trim() || !canRedraw ? `그리기 ⚡${aiEst}` : '다시 그리기'}
+                    {aiText.trim() || !canRedraw ? (
+                      <>
+                        그리기 <Energy n={aiEst} />
+                      </>
+                    ) : (
+                      '다시 그리기'
+                    )}
                   </Button>
                   <p className="text-xs text-muted">사람·글자·캐릭터 없이 풍경·무늬로 그려요. 하루에 몇 번까지만 그릴 수 있어요.</p>
                 </div>
@@ -938,7 +944,7 @@ function ThemeMaker({
       footer={
         <div className="flex gap-2">
           <Button busy={busy} onClick={make}>
-            만들기 ⚡{est}
+            만들기 <Energy n={est} />
           </Button>
           <Button variant="ghost" disabled={busy} onClick={onClose}>
             닫기

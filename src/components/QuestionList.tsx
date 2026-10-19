@@ -10,7 +10,7 @@ import { QuestionFigure, StepsDisclosure, useSolution } from './figure/SolutionV
 import { QuestionEditor, type QuestionDraft } from './QuestionEditor';
 import { answerText, type ReviewQuestion } from './QuestionCard';
 import { RichText } from './RichText';
-import { Button, Chip, Sheet, cx, inputClass, api, useToast } from './ui';
+import { Button, Chip, Energy, ICONS, Icon, Sheet, cx, inputClass, api, useToast } from './ui';
 
 const TYPE_LABEL = { mcq: '객관식', ox: 'OX', cloze: '빈칸', short: '단답' } as const;
 
@@ -129,7 +129,12 @@ export function QuestionList({
                 <span className="mb-1 flex flex-wrap items-center gap-1.5">
                   <Chip>{TYPE_LABEL[q.type]}</Chip>
                   {q.created_by === 'ai' ? <Chip>AI</Chip> : <Chip tone="ok">내가 만듦</Chip>}
-                  {q.locked ? <Chip tone="hl">🔒 잠금</Chip> : null}
+                  {q.locked ? (
+                    <Chip tone="hl">
+                      <Icon d={ICONS.lock} size={12} strokeWidth={2.4} />
+                      잠금
+                    </Chip>
+                  ) : null}
                   {q.edited ? <Chip tone="accent">고침</Chip> : null}
                   {q.status === 'suspended' || (q.status === 'hidden' && q.rested_hidden) ? <Chip tone="warn">쉬는 중</Chip> : null}
                   {q.status === 'hidden' ? <Chip>지금 버전엔 없음</Chip> : null}
@@ -176,7 +181,7 @@ export function QuestionList({
                   ) : null}
                   {figuresOn && me?.canFigures && !q.steps ? (
                     <Button size="sm" variant="secondary" busy={solving === q.id} disabled={!!solving && solving !== q.id} onClick={() => solve(q)}>
-                      그림 풀이 만들기 ⚡{solveEst}
+                      그림 풀이 만들기 <Energy n={solveEst} />
                     </Button>
                   ) : null}
                   <Button size="sm" variant="ghost" onClick={() => setReporting(q)}>

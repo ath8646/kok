@@ -11,7 +11,7 @@ import { sb } from '@/lib/data';
 import { MindMap, type RecallResult } from '../MindMap';
 import { MindMapView, initialMindMapMode, rememberMindMapMode, type MindMapMode } from '../mindmap/MindMapView';
 import { TableView, TimelineView } from '../VisualViews';
-import { ApiError, Button, Chip, ICONS, Icon, Segmented, Sheet, api, cx, useToast } from '../ui';
+import { ApiError, Button, Chip, Energy, ICONS, Icon, Segmented, Sheet, api, cx, useToast } from '../ui';
 
 export type Visuals = { mindmap?: Mindmap; table?: TableSpec; timeline?: TimelineSpec };
 export type VisualType = 'mindmap' | 'table' | 'timeline';
@@ -175,7 +175,7 @@ export function VisualPanel({
   const onRecall = async (results: RecallResult[]) => {
     const confused = [...new Set(results.filter((r) => !r.ok && r.keyPointId).map((r) => r.keyPointId))];
     if (!confused.length) {
-      toast(`${results.length}개 모두 기억났어요! 👏`, 'ok');
+      toast(`${results.length}개 모두 기억났어요!`, 'ok');
       return;
     }
     const { data: qs } = await sb().from('questions').select('id').eq('note_id', noteId).in('key_point_id', confused).eq('status', 'active');
@@ -315,7 +315,7 @@ export function VisualPanel({
             }}
           >
             <span>AI로 다시 그리기</span>
-            <span className="text-sm text-muted">⚡{est}</span>
+            <Energy n={est} className="text-sm text-muted" />
           </Button>
           {!local.table ? (
             <Button
@@ -328,7 +328,7 @@ export function VisualPanel({
               }}
             >
               <span>표로 만들기</span>
-              <span className="text-sm text-muted">⚡{est}</span>
+              <Energy n={est} className="text-sm text-muted" />
             </Button>
           ) : null}
           {!local.timeline ? (
@@ -342,7 +342,7 @@ export function VisualPanel({
               }}
             >
               <span>연표로 만들기</span>
-              <span className="text-sm text-muted">⚡{est}</span>
+              <Energy n={est} className="text-sm text-muted" />
             </Button>
           ) : null}
           <p className="text-xs text-muted">새로 만들면 미리보기를 먼저 보여 줘요. 내가 고친 가지는 그대로 남아요.</p>

@@ -2,6 +2,7 @@
 // 콕 공통 화면 조각 (버튼, 카드, 시트, 큰 제목, 메뉴, 알림 등)
 import Link from 'next/link';
 import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from 'react';
+import { ICONS } from '@/lib/icons';
 
 export function cx(...parts: Array<string | false | null | undefined>): string {
   return parts.filter(Boolean).join(' ');
@@ -98,27 +99,50 @@ export function Icon({ d, size = 22, className, strokeWidth = 1.9 }: { d: string
   );
 }
 
-export const ICONS = {
-  plus: 'M12 5v14M5 12h14',
-  search: 'M11 4a7 7 0 1 0 0 14 7 7 0 0 0 0-14zM20 20l-3.5-3.5',
-  more: 'M12 5.5h.01M12 12h.01M12 18.5h.01',
-  back: 'M15 5l-7 7 7 7',
-  close: 'M6 6l12 12M18 6L6 18',
-  clip: 'M20 11.5l-7.6 7.6a5 5 0 0 1-7.1-7.1l8.1-8.1a3.3 3.3 0 0 1 4.7 4.7l-8.1 8.1a1.7 1.7 0 0 1-2.4-2.4L15 6.9',
-  camera: 'M4 8h3l2-3h6l2 3h3v11H4zM12 17a4 4 0 1 0 0-8 4 4 0 0 0 0 8z',
-  send: 'M5 12h13M12 5l7 7-7 7',
-  file: 'M7 3h7l5 5v13H7zM14 3v5h5',
-  image: 'M4 5h16v14H4zM4 16l5-5 4 4 3-3 4 4M15.5 9.5h.01',
-  pen: 'M4 20h4L19 9l-4-4L4 16zM14 6l4 4',
-  folder: 'M3 6h6l2 2h10v11H3z',
-  check: 'M5 12.5l4.5 4.5L19 7',
-  retry: 'M4 12a8 8 0 1 0 2.4-5.7M4 4v4h4',
-  trash: 'M5 7h14M10 7V4h4v3M7 7l1 13h8l1-13',
-  edit: 'M4 20h4L19 9l-4-4L4 16z',
-  grid: 'M4 4h7v7H4zM13 4h7v7h-7zM4 13h7v7H4zM13 13h7v7h-7z',
-  upload: 'M12 16V4M7 9l5-5 5 5M5 20h14',
-  sparkle: 'M12 3.5l1.9 5.1 5.1 1.9-5.1 1.9L12 17.5l-1.9-5.1L5 10.5l5.1-1.9zM18.5 15.5l.8 2.2 2.2.8-2.2.8-.8 2.2-.8-2.2-2.2-.8 2.2-.8z',
-};
+// 선 아이콘 모양은 src/lib/icons.ts (서버 화면에서도 쓰게 'use client' 밖에 둔다)
+export { ICONS };
+
+/** 에너지 수: 번개 아이콘 + 숫자 (⚡ 이모지 대신. 글자 크기를 따른다) */
+export function Energy({
+  n,
+  className,
+  sr = true,
+}: {
+  n: ReactNode;
+  className?: string;
+  /** 화면 읽기 프로그램에 '에너지'라고 읽어 줄지 (옆 글에 이미 '에너지'가 있으면 false) */ sr?: boolean;
+}) {
+  return (
+    <span className={cx('inline-flex items-center gap-0.5 tabular-nums', className)}>
+      <svg
+        aria-hidden="true"
+        viewBox="0 0 24 24"
+        className="h-[0.95em] w-[0.95em] shrink-0"
+        fill="currentColor"
+        stroke="currentColor"
+        strokeWidth={1.4}
+        strokeLinejoin="round"
+      >
+        <path d={ICONS.bolt} />
+      </svg>
+      {sr ? <span className="sr-only">에너지 </span> : null}
+      {n}
+    </span>
+  );
+}
+
+/** AI 를 부르기 전 한 줄: 예상 에너지(약 N)와 남은 에너지. est 가 없으면 남은 에너지만 */
+export function EnergyEstimate({ est, left }: { est?: number | string | null; left?: number | null }) {
+  const hasEst = est !== null && est !== undefined && est !== '';
+  const hasLeft = left !== null && left !== undefined;
+  return (
+    <>
+      {hasEst ? <Energy n={`약 ${est}`} /> : null}
+      {hasEst && hasLeft ? ' · ' : null}
+      {hasLeft ? `남음 ${left}` : null}
+    </>
+  );
+}
 
 export function Spinner({ className }: { className?: string }) {
   return <span aria-hidden="true" className={cx('inline-block h-4 w-4 animate-spin rounded-full border-2 border-current border-t-transparent', className)} />;

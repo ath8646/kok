@@ -8,7 +8,7 @@ import type { MeResponse } from '@/lib/types';
 import { QuickAddProvider } from './QuickAdd';
 import { applyTheme, clearTheme, missingCustomIds, rememberCustomThemes, type CustomTheme, type Theme } from '@/lib/theme';
 import { sb } from '@/lib/data';
-import { Button, Icon, Spinner, cx } from './ui';
+import { Button, ICONS, Icon, Spinner, cx } from './ui';
 
 type MeCtx = {
   me: MeResponse | null;
@@ -55,7 +55,17 @@ export function EnergyPill({ me }: { me: MeResponse }) {
       )}
       aria-label={`남은 AI 에너지 ${label}`}
     >
-      <span aria-hidden="true">⚡</span>
+      <svg
+        aria-hidden="true"
+        viewBox="0 0 24 24"
+        className="h-[15px] w-[15px]"
+        fill="currentColor"
+        stroke="currentColor"
+        strokeWidth={1.4}
+        strokeLinejoin="round"
+      >
+        <path d={ICONS.bolt} />
+      </svg>
       {label}
     </Link>
   );

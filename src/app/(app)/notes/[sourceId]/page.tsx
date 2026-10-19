@@ -22,6 +22,7 @@ import {
   Chip,
   EmptyState,
   ICONS,
+  Icon,
   LargeHeader,
   LinkButton,
   Menu,
@@ -33,7 +34,7 @@ import {
   inputClass,
   useToast,
 } from '@/components/ui';
-import { SOURCE_COLS, questionCols, sb, type SourceRowWithUnit } from '@/lib/data';
+import { ORGANIZE_COLS, SOURCE_COLS, questionCols, sb, type SourceRowWithUnit } from '@/lib/data';
 import { keyPointMemory } from '@/lib/memory';
 import { zMindmap, zNote, zTable, zTimeline, type Mindmap, type TableSpec, type TimelineSpec } from '@/lib/ai/schemas';
 import type { QuestionRow, SubjectRow } from '@/lib/types';
@@ -92,11 +93,11 @@ function toVisuals(rows: Array<{ type: string; spec: unknown }>): Visuals {
   return visuals;
 }
 
-async function fetchBundle(sourceId: string, versionsOn: boolean, restedOn: boolean, figuresOn: boolean): Promise<Bundle> {
+async function fetchBundle(sourceId: string, versionsOn: boolean, restedOn: boolean, figuresOn: boolean, organizeOn: boolean): Promise<Bundle> {
   const empty: Bundle = { source: null, note: null, visuals: {}, visualRows: {}, questions: [], cards: new Map(), subject: null, versions: [] };
   const { data: s } = await sb()
     .from('sources')
-    .select(`${SOURCE_COLS}, text_content${versionsOn ? ', parent_id' : ''}`)
+    .select(`${SOURCE_COLS}, text_content${versionsOn ? ', parent_id' : ''}${organizeOn ? `, ${ORGANIZE_COLS}` : ''}`)
     .eq('id', sourceId)
     .maybeSingle();
   const source = (s as SourceFull | null) ?? null;
@@ -197,6 +198,7 @@ export default function NotePage() {
   const versionsOn = !!me?.features.versions;
   const restedOn = !!me?.features.restedHidden;
   const figuresOn = !!me?.features.figures;
+  const organizeOn = !!me?.features.organize;
   const chatOn = !!me?.features.chat;
   const canAppend = !!me?.canAppend;
   const [bundle, setBundle] = useState<Bundle | null | undefined>(undefined);
@@ -256,7 +258,7 @@ export default function NotePage() {
   useEffect(() => {
     let alive = true;
     const gen = saveGen.current;
-    fetchBundle(sourceId, versionsOn, restedOn, figuresOn)
+    fetchBundle(sourceId, versionsOn, restedOn, figuresOn, organizeOn)
       .then((b) => {
         if (!alive || !freshSince(gen)) return;
         noteToken.current = b.note?.updated_at ?? null;
@@ -269,7 +271,7 @@ export default function NotePage() {
     return () => {
       alive = false;
     };
-  }, [sourceId, tick, versionsOn, restedOn, figuresOn, freshSince]);
+  }, [sourceId, tick, versionsOn, restedOn, figuresOn, organizeOn, freshSince]);
 
   const source = bundle === undefined ? undefined : (bundle?.source ?? null);
   const note = bundle?.note ?? null;
@@ -281,6 +283,21 @@ export default function NotePage() {
   const noteId = note?.id;
   const cur = note?.current_version ?? 1;
   const parentId = source?.parent_id ?? null;
+  // 이 노트를 복습에 넣는지 (자료함 정리 칸이 있을 때만. 바꾸면 바로 보여 주고, 저장하지 못하면 되돌린다)
+  const [reviewOverride, setReviewOverride] = useState<{ id: string; on: boolean } | null>(null);
+  const inReview = (reviewOverride?.id === sourceId ? reviewOverride.on : null) ?? source?.in_review ?? true;
+  const setInReview = async (on: boolean) => {
+    setReviewOverride({ id: sourceId, on });
+    const { error } = await sb().from('sources').update({ in_review: on }).eq('id', sourceId);
+    if (error) {
+      setReviewOverride(null);
+      toast('저장하지 못했어요.', 'bad');
+      return;
+    }
+    // 자료함·홈이 새로 읽게 (기억해 둔 목록도 버린다)
+    window.dispatchEvent(new CustomEvent(SOURCES_CHANGED));
+    toast(on ? '다시 복습에 넣었어요.' : '복습에서 뺐어요.');
+  };
 
   // 노트에 더한 자료의 주소로 들어오면 그 노트로 보낸다
   useEffect(() => {
@@ -765,6 +782,13 @@ export default function NotePage() {
                       },
                     },
                   ]),
+              ...(organizeOn && !old
+                ? [
+                    inReview
+                      ? { label: '복습에서 빼기', icon: ICONS.reviewOff, onSelect: () => setInReview(false) }
+                      : { label: '복습에 다시 넣기', icon: ICONS.review, onSelect: () => setInReview(true) },
+                  ]
+                : []),
               ...(versionsOn ? [{ label: versions.length ? '버전 기록' : '자료 더하기', icon: ICONS.file, onSelect: () => setTab('original') }] : []),
               ...(reportable ? [{ label: '이상해요 (신고)', icon: ICONS.edit, onSelect: () => setReporting(true) }] : []),
             ]}
@@ -793,6 +817,21 @@ export default function NotePage() {
       </div>
 
       {versionsOn ? <AppendStatus kids={kids} onChanged={() => setKidsTick((x) => x + 1)} /> : null}
+
+      {/* 복습에서 뺀 노트: 문제는 여기서 직접 풀 수 있고, 바로 다시 넣을 수 있다 */}
+      {organizeOn && !inReview && !old ? (
+        <section className="kok-card kok-rise flex items-center gap-3 p-3 pl-3.5" role="status" aria-label="복습에서 뺀 노트">
+          <span className="grid h-9 w-9 shrink-0 place-items-center rounded-full bg-warn-soft text-warn" aria-hidden="true">
+            <Icon d={ICONS.reviewOff} size={19} />
+          </span>
+          <p className="min-w-0 flex-1 text-sm leading-snug">
+            <b>복습에서 뺀 노트예요.</b> <span className="text-muted">문제는 여기서 직접 풀 수 있어요.</span>
+          </p>
+          <Button size="sm" variant="secondary" onClick={() => setInReview(true)}>
+            다시 넣기
+          </Button>
+        </section>
+      ) : null}
 
       {showOld ? (
         <section className="kok-card kok-rise grid gap-2.5 p-4 ring-2 ring-[color-mix(in_srgb,var(--accent)_35%,transparent)]" aria-live="polite">

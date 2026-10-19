@@ -13,7 +13,9 @@ type NoteInfo = { id: string; source_id: string; title: string };
 async function fetchWrong() {
   const plan = await fetchPlanData();
   const titles = plan.concepts;
-  const wrong = plan.cards.filter((c) => c.in_wrong_note);
+  // 자료함에서 복습을 끈 노트의 문제는 빼고 (몇 개 뺐는지는 알려 준다)
+  const wrong = plan.cards.filter((c) => c.in_wrong_note && c.in_review);
+  const hidden = plan.cards.filter((c) => c.in_wrong_note && !c.in_review).length;
   const weak = weakConcepts(
     wrong.map((c) => ({ question_id: c.question_id, note_id: c.note_id, key_point_id: c.key_point_id, lapses: c.wrong_count ?? 0 })),
     5,
@@ -30,7 +32,7 @@ async function fetchWrong() {
     for (const n of data ?? []) notes.set(n.id, n as NoteInfo);
   }
   const items = qs.map((q) => ({ q, lapses: lapses.get(q.id) ?? 0 })).sort((a, b) => b.lapses - a.lapses);
-  return { weak, titles, notes, items };
+  return { weak, titles, notes, items, hidden };
 }
 
 export default function WrongPage() {
@@ -40,6 +42,8 @@ export default function WrongPage() {
   const [titles, setTitles] = useState<Map<string, Map<string, { title: string }>>>(new Map());
   const [notes, setNotes] = useState<Map<string, NoteInfo>>(new Map());
   const [items, setItems] = useState<Array<{ q: QuestionRow; lapses: number }>>([]);
+  /** 복습을 끈 노트라서 뺀 틀린 문제 수 */
+  const [hidden, setHidden] = useState(0);
   const [open, setOpen] = useState<string | null>(null);
   // 못 읽었을 때는 '비어 있어요' 대신 다시 불러오기를 보여 준다
   const [failed, setFailed] = useState(false);
@@ -54,6 +58,7 @@ export default function WrongPage() {
         setTitles(r.titles);
         setNotes(r.notes);
         setItems(r.items);
+        setHidden(r.hidden);
         setFailed(false);
         setLoading(false);
       })
@@ -101,6 +106,7 @@ export default function WrongPage() {
         }
       />
 
+      {!loading && !failed && hidden ? <p className="kok-fill -mt-1 px-1 text-sm text-muted">복습을 끈 노트의 틀린 문제 {hidden}개는 빼고 보여 줘요.</p> : null}
       {loading ? (
         <WrongSkeleton />
       ) : failed ? (

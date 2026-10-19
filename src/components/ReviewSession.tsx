@@ -76,11 +76,12 @@ const MODE_TITLE: Record<ReviewMode['kind'], string> = {
 /** 기간·과목을 고르는 복습 (오답·약점 개념은 그 문제만 푼다) */
 const choosesPeriod = (m: ReviewMode) => m.kind === 'today' || m.kind === 'subject';
 
-/** 이 복습 방법의 문제 */
+/** 이 복습 방법의 문제. 자료함에서 복습을 끈 노트의 문제는 빼고 (약점 개념 풀기·노트 문제 풀기처럼 그 노트를 골라 푸는 것은 된다) */
 function modeCards(m: ReviewMode, p: PlanData): PlanCardRow[] {
-  if (m.kind === 'wrong') return p.cards.filter((c) => c.in_wrong_note);
   if (m.kind === 'kp') return p.cards.filter((c) => c.note_id === m.note && c.key_point_id === m.kp);
-  return p.cards;
+  const live = p.cards.filter((c) => c.in_review);
+  if (m.kind === 'wrong') return live.filter((c) => c.in_wrong_note);
+  return live;
 }
 
 /**
@@ -88,9 +89,10 @@ function modeCards(m: ReviewMode, p: PlanData): PlanCardRow[] {
  * 과목 복습(?subject=)이면 그 과목 전체. 시간은 지난번에 고른 시간.
  */
 function firstChoice(m: ReviewMode, p: PlanData, r: ReviewSettings): StartChoice {
-  const subjectId = m.kind === 'subject' && p.cards.some((c) => c.subject_id === m.id) ? m.id : null;
+  const live = modeCards(m, p);
+  const subjectId = m.kind === 'subject' && live.some((c) => c.subject_id === m.id) ? m.id : null;
   if (!choosesPeriod(m)) return { period: 'all', subjectId: null, minutes: r.minutes };
-  const cards = subjectId ? p.cards.filter((c) => c.subject_id === subjectId) : p.cards;
+  const cards = subjectId ? live.filter((c) => c.subject_id === subjectId) : live;
   const counts = periodCounts(cards, p.planSubjects, { dailyMax: r.dailyMax, doneToday: p.doneToday, interleave: r.interleave });
   let period: ReviewPeriod = 'due';
   if (!counts.due) {
@@ -574,9 +576,7 @@ export function ReviewSession({
     const cards = plan ? modeCards(mode, plan) : [];
     const periods = choosesPeriod(mode);
     const dueCount =
-      plan && periods
-        ? periodPool(plan.cards, plan.planSubjects, 'due', { dailyMax: settings.dailyMax, doneToday: plan.doneToday, interleave: false }).length
-        : 0;
+      plan && periods ? periodPool(cards, plan.planSubjects, 'due', { dailyMax: settings.dailyMax, doneToday: plan.doneToday, interleave: false }).length : 0;
     const kpTitle = mode.kind === 'kp' ? plan?.concepts.get(mode.note)?.get(mode.kp)?.title : undefined;
     const subtitleText = failed
       ? '불러오지 못했어요'

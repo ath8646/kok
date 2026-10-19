@@ -3,6 +3,7 @@
 import type { NextRequest } from 'next/server';
 import { z } from 'zod';
 import { assertSameOrigin, readJson, requireAccount } from '@/lib/server/auth';
+import { getFeatures } from '@/lib/server/account';
 import { UserFacingError, errorResponse } from '@/lib/server/errors';
 
 const Body = z.object({
@@ -10,6 +11,8 @@ const Body = z.object({
   title: z.string().max(200).catch(''),
   /** 단원 (AI 채팅에서 푼 문제를 새 노트에 넣을 때 고른 단원) */
   unit: z.string().max(80).catch(''),
+  /** 이 노트의 문제를 복습에 넣을지 (없으면 넣는다) */
+  review: z.boolean().optional(),
 });
 
 /** 한 시간에 만들 수 있는 빈 노트 수 (실수로 여러 번 눌러도 자료함이 넘치지 않게) */
@@ -37,7 +40,10 @@ export async function POST(req: NextRequest) {
     if (!allowed) throw new UserFacingError('rate_limited', '빈 노트를 너무 많이 만들었어요. 조금 뒤에 다시 해 주세요.', 429);
 
     const id = crypto.randomUUID();
+    // 복습에 넣지 않을 노트 (칸이 없는 예전 DB 면 넣지 않고 지금처럼 만든다)
+    const keepOut = parsed.data.review === false && (await getFeatures(admin)).organize;
     const { error: sErr } = await admin.from('sources').insert({
+      ...(keepOut ? { in_review: false } : {}),
       id,
       user_id: acc.userId,
       subject_id: subject.id,

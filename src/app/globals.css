@@ -1028,6 +1028,34 @@ body {
   animation-delay: calc(min(var(--i, 0), 5) * 16ms);
 }
 
+/* ------------------------------------------------------------ 자료함 여러 개 고르기
+   카드를 꾹 누르면 고르기가 시작된다: 폰이 링크 메뉴(미리보기·복사)나 글자 고르기를 띄우지 않게 하고,
+   아래 띠는 아래 메뉴 자리로 올라온다 (넓은 화면은 가운데 떠 있는 띠가 살짝 떠오른다) */
+.kok-no-callout {
+  -webkit-touch-callout: none;
+  -webkit-user-select: none;
+  user-select: none;
+}
+@keyframes kok-selbar {
+  from {
+    transform: translateY(100%);
+  }
+}
+@keyframes kok-selbar-float {
+  from {
+    opacity: 0;
+    transform: translateY(12px) scale(0.98);
+  }
+}
+.kok-selbar {
+  animation: kok-selbar 240ms var(--ease-out) backwards;
+}
+@media (min-width: 768px) {
+  .kok-selbar {
+    animation-name: kok-selbar-float;
+  }
+}
+
 /* ------------------------------------------------------------ 그림·단계별 풀이 */
 /* 단계에서 새로 나타난 선·점·글: 살짝 나타난다 */
 @keyframes kok-fig-in {

@@ -34,6 +34,8 @@ const Body = z.object({
   files: z.array(z.string().max(200)).max(60).catch([]),
   /** 이 자료를 더할 노트의 자료 (Pro). 정리가 끝나면 그 노트의 새 버전이 된다 */
   parentId: z.string().uuid().nullable().optional(),
+  /** 이 노트의 문제를 복습에 넣을지 (자료 넣기 창에서 끌 수 있다. 없으면 넣는다) */
+  review: z.boolean().optional(),
 });
 
 export async function POST(req: NextRequest) {
@@ -159,6 +161,11 @@ export async function POST(req: NextRequest) {
     const refusal = reserveError(v, acc.plan);
     if (refusal) throw refusal;
     cleanup = false;
+    // 복습에 넣지 않을 노트 (칸이 없는 예전 DB 면 넘어간다: 복습에 들어간다)
+    if (b.review === false && !parentId && (await getFeatures(admin)).organize) {
+      const { error: rErr } = await admin.from('sources').update({ in_review: false }).eq('id', b.id).eq('user_id', acc.userId);
+      if (rErr) console.warn('[kok] could not keep the new note out of review', rErr.message);
+    }
 
     const origin = req.nextUrl.origin;
     after(() => driveSource(b.id, origin));

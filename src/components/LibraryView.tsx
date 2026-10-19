@@ -1,14 +1,48 @@
 'use client';
 // 자료함: 과목(폴더) 칩 + 노트 카드 격자. 파일은 화면에 끌어다 놓고, 글은 + 버튼에서 엔터로 넣는다.
+// 카드를 꾹 누르면(또는 메뉴의 '여러 개 고르기') 여러 개를 골라 한꺼번에 별표·복습 켜고 끄기·지우기 (삼성 노트처럼).
+// 별표한 자료가 맨 위, 과목 안에서는 '순서 바꾸기'로 정한 순서 (src/lib/library-order.ts)
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent, type RefObject } from 'react';
 import { useMe, EnergyPill } from './AppShell';
 import { SOURCES_CHANGED, SUBJECTS_CHANGED, useQuickAdd } from './QuickAdd';
 import { stepLabel, useActiveSources } from './ProcessingList';
 import { SubjectForm } from './SubjectForm';
-import { Button, EmptyState, ICONS, Icon, IconButton, LargeHeader, Menu, ProgressRing, Sheet, api, cx, inputClass, useToast, type MenuItem } from './ui';
-import { NOTE_PEEK, SOURCE_COLS, fetchAll, fetchSubjects, peekText, sb, topLevelSources, type NotePeek, type SourceRowWithUnit } from '@/lib/data';
+import { StarGlyph } from './note/StarButton';
+import { SortList } from './note/SortList';
+import { useLongPress } from './useLongPress';
+import { prefersReducedMotion } from './useReducedMotion';
+import {
+  Button,
+  EmptyState,
+  ICONS,
+  Icon,
+  IconButton,
+  LargeHeader,
+  Menu,
+  ProgressRing,
+  Sheet,
+  Spinner,
+  api,
+  cx,
+  inputClass,
+  useToast,
+  type MenuItem,
+} from './ui';
+import {
+  NOTE_PEEK,
+  ORGANIZE_COLS,
+  SOURCE_COLS,
+  fetchAll,
+  fetchSubjects,
+  peekText,
+  sb,
+  topLevelSources,
+  type NotePeek,
+  type SourceRowWithUnit,
+} from '@/lib/data';
+import { BULK_MAX, bulkLabels, flattenOrder, libraryOrder, withPositions } from '@/lib/library-order';
 import type { SubjectRow } from '@/lib/types';
 import { subjectVar } from '@/lib/colors';
 import { previewText } from '@/lib/richtext';
@@ -25,12 +59,15 @@ export const LIBRARY_VIEW = 'library';
 /** 카드가 나타나는 방법: 기억해 둔 목록이면 그대로(none), 그 밖에는 카드 자리에서 글만 번진다(fill) */
 type Enter = 'none' | 'fill';
 
-async function fetchLibrary(): Promise<LibData> {
+/** organize: 자료함 정리 칸(복습에 넣기·별표·순서)이 DB 에 있을 때만 읽는다 */
+async function fetchLibrary(organize: boolean): Promise<LibData> {
   const [subjects, sources, notes] = await Promise.all([
     fetchSubjects(),
     fetchAll<SourceRowWithUnit>((a, b) =>
       topLevelSources<SourceRowWithUnit[]>((onlyTop) => {
-        let q = sb().from('sources').select(SOURCE_COLS);
+        let q = sb()
+          .from('sources')
+          .select(organize ? `${SOURCE_COLS}, ${ORGANIZE_COLS}` : SOURCE_COLS);
         if (onlyTop) q = q.is('parent_id', null);
         return q.order('created_at', { ascending: false }).order('id').range(a, b) as unknown as PromiseLike<{
           data: SourceRowWithUnit[] | null;
@@ -108,12 +145,61 @@ export function LibraryView() {
   const reload = useCallback(() => setVersion((v) => v + 1), []);
   const searchRef = useRef<HTMLInputElement>(null);
 
+  // ---------------------------------------------------------- 여러 개 고르기 (카드를 꾹 누르거나 메뉴에서)
+  const [selecting, setSelecting] = useState(false);
+  const [picked, setPicked] = useState<Set<string>>(() => new Set());
+  const [bulkBusy, setBulkBusy] = useState<'star' | 'review' | 'delete' | null>(null);
+  const [ordering, setOrdering] = useState(false);
+  const startSelect = useCallback((id?: string) => {
+    setSelecting(true);
+    setPicked(new Set(id ? [id] : []));
+  }, []);
+  const endSelect = useCallback(() => {
+    setSelecting(false);
+    setPicked(new Set());
+  }, []);
+  const togglePick = useCallback(
+    (id: string) =>
+      setPicked((cur) => {
+        const next = new Set(cur);
+        if (next.has(id)) next.delete(id);
+        else next.add(id);
+        return next;
+      }),
+    [],
+  );
+  // 고르는 동안 + 버튼은 숨기고(아래 띠가 그 자리를 쓴다), Esc 로 끝낸다
+  const setFabHidden = quick.setFabHidden;
+  useEffect(() => {
+    if (!selecting) return;
+    setFabHidden(true);
+    const onKey = (e: globalThis.KeyboardEvent) => {
+      if (e.key === 'Escape') endSelect();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => {
+      window.removeEventListener('keydown', onKey);
+      setFabHidden(false);
+    };
+  }, [selecting, setFabHidden, endSelect]);
+
+  // 화면에서 바로 고친 것(별표·복습·순서)이 읽는 사이에 생겼으면, 읽은 목록은 옛것이라 버리고 저장이 끝난 뒤 다시 읽는다
+  const edits = useRef({ seq: 0, saving: 0, stale: false });
+
   // 불러오기 (처음, 새 자료가 들어왔을 때, 정리가 끝났을 때)
+  const organize = !!me?.features.organize;
   useEffect(() => {
     let alive = true;
-    fetchLibrary()
+    const seq = edits.current.seq;
+    fetchLibrary(organize)
       .then((r) => {
         if (!alive) return;
+        const e = edits.current;
+        if (e.seq !== seq || e.saving) {
+          e.stale = true;
+          if (!e.saving) reload();
+          return;
+        }
         writeView(LIBRARY_VIEW, owner, r);
         setData(r);
         setPainted(true);
@@ -127,7 +213,7 @@ export function LibraryView() {
     return () => {
       alive = false;
     };
-  }, [version, active.doneCount, toast, owner]);
+  }, [version, active.doneCount, toast, owner, organize, reload]);
 
   // 새로 넣은 자료는 카드가 반짝이며 나타난다
   useEffect(() => {
@@ -202,14 +288,19 @@ export function LibraryView() {
 
   const shown = useMemo(() => {
     const q = query.trim().toLowerCase();
-    return (data?.sources ?? [])
+    const list = (data?.sources ?? [])
       .filter((s) => !selected || s.subject_id === selected)
       .filter((s) => !q || [s.title, s.unit, s.summary ? previewText(s.summary) : ''].some((x) => (x ?? '').toLowerCase().includes(q)))
       .map((s) => {
         const l = live.get(s.id);
-        return l ? { ...s, ...l, summary: s.summary } : s;
+        // 진행률만 새 값으로 (별표·순서·복습 칸은 자료함이 고친 값 그대로)
+        return l ? { ...s, ...l, summary: s.summary, starred: s.starred, position: s.position, in_review: s.in_review } : s;
       });
-  }, [data, selected, query, live]);
+    // 별표한 자료가 맨 위, 과목 안에서는 내가 정한 순서
+    return libraryOrder(list, !!selected && organize);
+  }, [data, selected, query, live, organize]);
+  const gridRef = useRef<HTMLDivElement>(null);
+  const flip = useGridFlip(gridRef, shown.map((s) => s.id).join('|'));
 
   // 과목을 고르고 단원이 있으면 단원별로 묶는다
   const groups = useMemo(() => {
@@ -227,6 +318,130 @@ export function LibraryView() {
   const select = (id: string | null) => {
     setSelected(id);
     setUrl(id);
+    // 다른 과목으로 가면 고르기는 끝낸다 (보이지 않는 자료를 바꾸지 않게)
+    if (id !== selected) endSelect();
+  };
+
+  // 고른 자료: 지금 보이는 것만 (지워졌거나, 검색으로 가려진 것은 바꾸지 않는다)
+  const pickedRows = shown.filter((s) => picked.has(s.id));
+  const labels = bulkLabels(pickedRows);
+
+  /** 화면에서 바로 고친 것을 저장하는 동안 (그사이에 읽은 목록은 버리고, 다 저장한 뒤 다시 읽는다) */
+  const keepWhileSaving = async (work: () => Promise<void>) => {
+    const e = edits.current;
+    e.seq += 1;
+    e.saving += 1;
+    try {
+      await work();
+    } finally {
+      e.saving -= 1;
+      if (!e.saving && e.stale) {
+        e.stale = false;
+        reload();
+      }
+    }
+  };
+
+  /** 자료 칸을 한꺼번에 바꾼다: 화면은 바로 바꾸고(카드가 새 자리로 미끄러진다), 저장하지 못하면 다시 읽는다 */
+  const patchSources = async (ids: string[], patch: { starred?: boolean; in_review?: boolean }, done: string): Promise<boolean> => {
+    if (!ids.length || !data) return false;
+    flip();
+    const next = { ...data, sources: data.sources.map((s) => (ids.includes(s.id) ? { ...s, ...patch } : s)) };
+    setData(next);
+    writeView(LIBRARY_VIEW, owner, next);
+    let failed = false;
+    await keepWhileSaving(async () => {
+      for (let i = 0; i < ids.length; i += BULK_MAX) {
+        const { error } = await sb()
+          .from('sources')
+          .update(patch)
+          .in('id', ids.slice(i, i + BULK_MAX));
+        if (error) failed = true;
+      }
+    });
+    if (failed) {
+      toast('저장하지 못했어요. 다시 해 주세요.', 'bad');
+      reload();
+      return false;
+    }
+    toast(done);
+    return true;
+  };
+  const starOne = (s: LibSource) => patchSources([s.id], { starred: !s.starred }, s.starred ? '별표를 뺐어요.' : '별표했어요. 맨 위에 보여요.');
+  const reviewOne = (s: LibSource) =>
+    patchSources([s.id], { in_review: s.in_review === false }, s.in_review === false ? '다시 복습에 넣었어요.' : '복습에서 뺐어요.');
+
+  const bulkStar = async () => {
+    const ids = pickedRows.map((s) => s.id);
+    setBulkBusy('star');
+    const ok = await patchSources(ids, { starred: labels.star }, labels.star ? `${ids.length}개에 별표했어요.` : `${ids.length}개의 별표를 뺐어요.`);
+    setBulkBusy(null);
+    if (ok) endSelect();
+  };
+  const bulkReview = async () => {
+    const ids = pickedRows.map((s) => s.id);
+    setBulkBusy('review');
+    const ok = await patchSources(
+      ids,
+      { in_review: labels.review },
+      labels.review ? `${ids.length}개 노트를 복습에 넣었어요.` : `${ids.length}개 노트를 복습에서 뺐어요.`,
+    );
+    setBulkBusy(null);
+    if (ok) endSelect();
+  };
+  const bulkDelete = async () => {
+    const ids = pickedRows.map((s) => s.id);
+    if (!ids.length) return;
+    if (!confirm(`고른 자료 ${ids.length}개와 그 노트·문제·복습 기록을 모두 지울까요? 되돌릴 수 없어요.`)) return;
+    setBulkBusy('delete');
+    try {
+      let deleted = 0;
+      for (let i = 0; i < ids.length; i += BULK_MAX) {
+        const r = await api<{ deleted: number }>('/api/sources/delete', { method: 'POST', body: JSON.stringify({ ids: ids.slice(i, i + BULK_MAX) }) });
+        deleted += r.deleted;
+      }
+      dropView(LIBRARY_VIEW);
+      setData((cur) => (cur ? { ...cur, sources: cur.sources.filter((s) => !ids.includes(s.id)) } : cur));
+      toast(`${deleted}개를 지웠어요.`);
+      endSelect();
+      reload();
+      active.reload();
+    } catch (e) {
+      toast((e as Error).message, 'bad');
+      reload();
+    } finally {
+      setBulkBusy(null);
+    }
+  };
+
+  /** 순서 바꾸기: 화면은 바로, 저장은 서버 함수가 한 번에 (내 자료만). 빨리 여러 번 옮기면 한 줄로 세워 마지막 순서만 저장한다 */
+  const orderQueue = useRef<{ running: boolean; next: string[] | null }>({ running: false, next: null });
+  const saveOrder = (order: string[]) => {
+    setData((cur) => {
+      if (!cur) return cur;
+      const next = { ...cur, sources: withPositions(cur.sources, order) };
+      writeView(LIBRARY_VIEW, owner, next);
+      return next;
+    });
+    const q = orderQueue.current;
+    q.next = order;
+    if (q.running) return;
+    q.running = true;
+    void keepWhileSaving(async () => {
+      while (q.next) {
+        const o = q.next;
+        q.next = null;
+        const { error } = await sb().rpc('kok_reorder_sources', { p_ids: o });
+        if (error) {
+          q.next = null;
+          toast('순서를 저장하지 못했어요. 다시 해 주세요.', 'bad');
+          edits.current.stale = true;
+          break;
+        }
+      }
+    }).finally(() => {
+      q.running = false;
+    });
   };
 
   if (!me) return null;
@@ -258,48 +473,92 @@ export function LibraryView() {
   // 기억해 둔 목록으로 처음 그린 카드는 그대로, 새로 읽은 뒤에 생기는 카드는 자리에서 글이 번진다
   const enter: Enter = painted ? 'fill' : 'none';
 
+  // 여러 개 고르기·순서 바꾸기 (자료가 있을 때만. 순서는 과목 안에서만 정한다)
+  // 순서는 과목 안에서 정한다: 자료가 둘 이상인 과목. 전체 보기에서 고르면 그 과목으로 가서 연다
+  const orderable = subjects.filter((x) => (counts.get(x.id) ?? 0) > 1);
+  const canOrder = organize && !query && (subject ? shown.length > 1 : orderable.length > 0);
+  const organizeMenu: MenuItem[] = [
+    ...(total ? [{ label: '여러 개 고르기', icon: ICONS.select, onSelect: () => startSelect() }] : []),
+    ...(canOrder
+      ? [
+          {
+            label: '순서 바꾸기',
+            icon: ICONS.reorder,
+            onSelect: () => {
+              if (!subject) select(orderable[0].id);
+              setOrdering(true);
+            },
+          },
+        ]
+      : []),
+  ];
   const headerMenu: MenuItem[] = subject
     ? [
+        ...organizeMenu,
         { label: '이 과목만 복습', icon: ICONS.retry, onSelect: () => router.push(`/review?subject=${subject.id}`) },
         { label: '문제 모아 보기', icon: ICONS.grid, onSelect: () => router.push(`/questions?subject=${subject.id}`) },
         { label: '과목 고치기', icon: ICONS.edit, onSelect: () => setEditingSubject(subject) },
       ]
     : [
+        ...organizeMenu,
         { label: '새 과목', icon: ICONS.folder, onSelect: () => setEditingSubject('new') },
         { label: '문제 모아 보기', icon: ICONS.grid, onSelect: () => router.push('/questions') },
       ];
+  const allPicked = shown.length > 0 && shown.every((s) => picked.has(s.id));
 
   return (
     <div className="grid gap-1">
       <LargeHeader
         title={
-          subject?.name ??
-          (selected && !data ? (
-            <span className="kok-skel inline-block h-[1.25em] align-top" aria-hidden="true">
-              <span className="kok-bone mt-[0.3em] h-[0.65em] w-32" />
+          selecting ? (
+            <span key={pickedRows.length ? 'n' : 'none'} className="kok-swap">
+              {pickedRows.length ? `${pickedRows.length}개 선택` : '자료 고르기'}
             </span>
           ) : (
-            '자료함'
-          ))
+            (subject?.name ??
+            (selected && !data ? (
+              <span className="kok-skel inline-block h-[1.25em] align-top" aria-hidden="true">
+                <span className="kok-bone mt-[0.3em] h-[0.65em] w-32" />
+              </span>
+            ) : (
+              '자료함'
+            )))
+          )
         }
-        subtitle={subtitle}
+        compactTitle={selecting ? (pickedRows.length ? `${pickedRows.length}개 선택` : '자료 고르기') : undefined}
+        subtitle={selecting ? <span className="kok-swap">카드를 눌러 고르고, 아래에서 한꺼번에 바꿔요</span> : subtitle}
         actions={
-          <>
-            <IconButton
-              label="검색"
-              aria-pressed={searching}
-              onClick={() => {
-                if (searching) setQuery('');
-                setSearching(!searching);
-              }}
-            >
-              <Icon d={ICONS.search} />
-            </IconButton>
-            <Menu label={subject ? '과목 메뉴' : '자료함 메뉴'} items={headerMenu} />
-            <span className="ml-1 md:hidden">
-              <EnergyPill me={me} />
-            </span>
-          </>
+          selecting ? (
+            <>
+              <button
+                type="button"
+                className="press rounded-full px-3 py-2 text-sm font-semibold text-accent hover:bg-accent-soft"
+                onClick={() => setPicked(allPicked ? new Set() : new Set(shown.map((s) => s.id)))}
+              >
+                {allPicked ? '모두 풀기' : '모두 고르기'}
+              </button>
+              <IconButton label="고르기 끝내기" onClick={endSelect}>
+                <Icon d={ICONS.close} />
+              </IconButton>
+            </>
+          ) : (
+            <>
+              <IconButton
+                label="검색"
+                aria-pressed={searching}
+                onClick={() => {
+                  if (searching) setQuery('');
+                  setSearching(!searching);
+                }}
+              >
+                <Icon d={ICONS.search} />
+              </IconButton>
+              <Menu label={subject ? '과목 메뉴' : '자료함 메뉴'} items={headerMenu} />
+              <span className="ml-1 md:hidden">
+                <EnergyPill me={me} />
+              </span>
+            </>
+          )
         }
       />
 
@@ -367,48 +626,100 @@ export function LibraryView() {
           <DropHint onAdd={() => quick.openComposer(selected ?? undefined)} subjectName={subject?.name} />
         )
       ) : (
-        groups.map((g) => (
-          <section key={g.unit || 'all'} className="grid gap-2">
-            {g.unit ? <h2 className="mt-3 px-1 text-sm font-bold text-muted">{g.unit}</h2> : null}
-            <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
-              {g.list.map((s, i) => (
-                <NoteCard
-                  key={s.id}
-                  s={s}
-                  index={i}
-                  isNew={fresh.has(s.id)}
-                  enter={enter}
-                  subject={selected ? null : (subjects.find((x) => x.id === s.subject_id) ?? null)}
-                  onRename={() => setRenaming(s)}
-                  onDelete={async () => {
-                    if (!confirm(`'${s.title || '이 자료'}'와 노트·문제를 지울까요? 되돌릴 수 없어요.`)) return;
-                    try {
-                      await api(`/api/sources/${s.id}`, { method: 'DELETE' });
-                      dropView(LIBRARY_VIEW);
-                      setData((cur) => (cur ? { ...cur, sources: cur.sources.filter((x) => x.id !== s.id) } : cur));
-                      toast('지웠어요.');
-                      reload();
-                    } catch (e) {
-                      toast((e as Error).message, 'bad');
-                    }
-                  }}
-                  onRetry={async () => {
-                    try {
-                      await api(`/api/sources/${s.id}/retry`, { method: 'POST', body: '{}' });
-                      dropView(LIBRARY_VIEW);
-                      toast('다시 시작했어요.');
-                      active.reload();
-                      reload();
-                    } catch (e) {
-                      toast((e as Error).message, 'bad');
-                    }
-                  }}
-                />
-              ))}
-            </div>
-          </section>
-        ))
+        // 카드 순서가 바뀌면(별표) 원래 자리에서 새 자리로 미끄러진다 (data-flip)
+        <div ref={gridRef} className="grid gap-1">
+          {groups.map((g) => (
+            <section key={g.unit || 'all'} className="grid gap-2">
+              {g.unit ? <h2 className="mt-3 px-1 text-sm font-bold text-muted">{g.unit}</h2> : null}
+              <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
+                {g.list.map((s, i) => (
+                  <NoteCard
+                    key={s.id}
+                    s={s}
+                    index={i}
+                    isNew={fresh.has(s.id)}
+                    enter={enter}
+                    subject={selected ? null : (subjects.find((x) => x.id === s.subject_id) ?? null)}
+                    organize={organize}
+                    selecting={selecting}
+                    picked={picked.has(s.id)}
+                    onPick={() => togglePick(s.id)}
+                    onLongPress={() => (selecting ? togglePick(s.id) : startSelect(s.id))}
+                    onStar={() => starOne(s)}
+                    onReview={() => reviewOne(s)}
+                    onSelectMode={() => startSelect(s.id)}
+                    onRename={() => setRenaming(s)}
+                    onDelete={async () => {
+                      if (!confirm(`'${s.title || '이 자료'}'와 노트·문제를 지울까요? 되돌릴 수 없어요.`)) return;
+                      try {
+                        await api(`/api/sources/${s.id}`, { method: 'DELETE' });
+                        dropView(LIBRARY_VIEW);
+                        setData((cur) => (cur ? { ...cur, sources: cur.sources.filter((x) => x.id !== s.id) } : cur));
+                        toast('지웠어요.');
+                        reload();
+                      } catch (e) {
+                        toast((e as Error).message, 'bad');
+                      }
+                    }}
+                    onRetry={async () => {
+                      try {
+                        await api(`/api/sources/${s.id}/retry`, { method: 'POST', body: '{}' });
+                        dropView(LIBRARY_VIEW);
+                        toast('다시 시작했어요.');
+                        active.reload();
+                        reload();
+                      } catch (e) {
+                        toast((e as Error).message, 'bad');
+                      }
+                    }}
+                  />
+                ))}
+              </div>
+            </section>
+          ))}
+        </div>
       )}
+
+      {/* 여러 개 고르기: 아래 띠 (폰은 아래 메뉴 자리, 넓은 화면은 가운데 떠 있는 띠) */}
+      {selecting ? (
+        <SelectionBar
+          count={pickedRows.length}
+          organize={organize}
+          labels={labels}
+          busy={bulkBusy}
+          onStar={bulkStar}
+          onReview={bulkReview}
+          onDelete={bulkDelete}
+        />
+      ) : null}
+
+      {/* 순서 바꾸기 (과목 안에서). 과목이 여럿이면 위의 칩으로 과목을 바꾼다 (뒤의 자료함도 그 과목으로) */}
+      <Sheet open={ordering && !!subject} onClose={() => setOrdering(false)} title={subject ? `${subject.name} 순서 바꾸기` : '순서 바꾸기'}>
+        {ordering && subject ? (
+          <div className="grid gap-4">
+            {orderable.length > 1 ? (
+              <div role="group" aria-label="과목" className="no-scrollbar -mx-1 flex gap-2 overflow-x-auto px-1 pb-0.5">
+                {orderable.map((x) => (
+                  <button
+                    key={x.id}
+                    type="button"
+                    aria-pressed={x.id === subject.id}
+                    onClick={() => select(x.id)}
+                    className={cx(
+                      'press inline-flex h-9 shrink-0 items-center gap-1.5 rounded-full px-3.5 text-sm font-semibold transition-colors duration-200',
+                      x.id === subject.id ? 'bg-ink text-surface' : 'bg-surface-2 text-ink hover:bg-surface-3',
+                    )}
+                  >
+                    <span className="h-2.5 w-2.5 shrink-0 rounded-full" style={{ background: subjectVar(x.color) }} aria-hidden="true" />
+                    <span className="max-w-[8rem] truncate">{x.name}</span>
+                  </button>
+                ))}
+              </div>
+            ) : null}
+            <ReorderList key={subject.id} groups={groups} onOrder={saveOrder} />
+          </div>
+        ) : null}
+      </Sheet>
 
       {/* 과목 만들기·고치기 */}
       <Sheet open={!!editingSubject} onClose={() => setEditingSubject(null)} title={editingSubject === 'new' ? '새 과목' : '과목 고치기'}>
@@ -550,6 +861,14 @@ function NoteCard({
   isNew,
   enter,
   subject,
+  organize,
+  selecting,
+  picked,
+  onPick,
+  onLongPress,
+  onStar,
+  onReview,
+  onSelectMode,
   onRename,
   onDelete,
   onRetry,
@@ -559,29 +878,70 @@ function NoteCard({
   isNew: boolean;
   enter: Enter;
   subject: SubjectRow | null;
+  /** 자료함 정리 칸(별표·복습)이 있는지 */
+  organize: boolean;
+  /** 여러 개 고르는 중 (카드를 누르면 고르기) */
+  selecting: boolean;
+  picked: boolean;
+  onPick: () => void;
+  /** 카드를 꾹 눌렀다 (고르기 시작, 고르는 중이면 고르기) */
+  onLongPress: () => void;
+  onStar: () => void;
+  onReview: () => void;
+  onSelectMode: () => void;
   onRename: () => void;
   onDelete: () => void;
   onRetry: () => void;
 }) {
   const processing = s.status === 'queued' || s.status === 'processing';
   const failed = s.status === 'error';
+  const reviewOff = organize && s.in_review === false;
   // 나타나는 방법과 '정리 중이던 카드인지'는 처음 그릴 때 정한 그대로 (다시 그려도 움직임이 다시 돌지 않게)
   const [mode] = useState(enter);
   const [startedBusy] = useState(processing);
   const fill = !isNew && mode === 'fill' ? 'kok-fill' : undefined;
+  const press = useLongPress(onLongPress, true);
   const items: MenuItem[] = [
     ...(failed ? [{ label: '다시 하기', icon: ICONS.retry, onSelect: onRetry }] : []),
+    ...(organize
+      ? [
+          { label: s.starred ? '별표 빼기' : '별표', icon: ICONS.star, onSelect: onStar },
+          reviewOff
+            ? { label: '복습에 다시 넣기', icon: ICONS.review, onSelect: onReview }
+            : { label: '복습에서 빼기', icon: ICONS.reviewOff, onSelect: onReview },
+        ]
+      : []),
+    { label: '여러 개 고르기', icon: ICONS.select, onSelect: onSelectMode },
     { label: '이름·단원 바꾸기', icon: ICONS.edit, onSelect: onRename },
     { label: '지우기', icon: ICONS.trash, onSelect: onDelete, danger: true },
   ];
   const href = `/notes/${s.id}`;
+  const name = s.title || (processing ? '정리하는 중…' : '제목 없는 자료');
+  // 화면 읽기 이름: 제목(없으면 '제목 없는 자료') + 진행·별표·복습 끔
+  const label = s.title || '제목 없는 자료';
+  const marks = `${organize && s.starred ? ' (별표)' : ''}${reviewOff ? ' (복습 끔)' : ''}`;
   const footer = (
     <>
-      <p className="line-clamp-2 text-[15px] font-bold leading-snug">{s.title || (processing ? '정리하는 중…' : '제목 없는 자료')}</p>
+      <p className="line-clamp-2 text-[15px] font-bold leading-snug">
+        {organize && s.starred ? (
+          <span className="mr-1 inline-block align-[-2px]">
+            <StarGlyph on size={15} />
+          </span>
+        ) : null}
+        {name}
+      </p>
       <p className="mt-1 flex min-w-0 items-center gap-1.5 text-xs text-muted">
         {subject ? <span className="h-2 w-2 shrink-0 rounded-full" style={{ background: subjectVar(subject.color) }} aria-hidden="true" /> : null}
-        <Icon d={KIND_ICON[s.kind]} size={13} className="shrink-0" />
+        {reviewOff ? (
+          <span className="inline-flex shrink-0 items-center gap-1 font-semibold text-warn">
+            <Icon d={ICONS.reviewOff} size={13} className="shrink-0" />
+            복습 끔
+          </span>
+        ) : (
+          <Icon d={KIND_ICON[s.kind]} size={13} className="shrink-0" />
+        )}
         <span className="truncate">
+          {reviewOff ? '· ' : ''}
           {s.manual ? '직접 만든 노트' : KIND_LABEL[s.kind]}
           {s.page_count ? ` ${s.page_count}${s.kind === 'image' ? '장' : '쪽'}` : ''} · {shortDate(s.created_at)}
         </span>
@@ -589,16 +949,46 @@ function NoteCard({
     </>
   );
   const fade = <div className="pointer-events-none absolute inset-x-0 bottom-0 h-8 bg-gradient-to-t from-surface to-transparent" aria-hidden="true" />;
+  // 고르는 중: 카드를 누르면 고르기 (링크로 가지 않는다). 키보드는 스페이스·엔터
+  const pickKeys = (e: KeyboardEvent) => {
+    if (e.key === ' ' || e.key === 'Enter') {
+      e.preventDefault();
+      onPick();
+    }
+  };
+  // (누르기는 바깥 칸이 먼저 받아서 고르기만 한다: 아래 onClickCapture)
+  const selectProps = selecting ? { role: 'checkbox' as const, 'aria-checked': picked, onKeyDown: pickKeys } : {};
+  const ring = selecting && picked ? 'ring-2 ring-accent ring-offset-2 ring-offset-bg' : '';
   return (
-    <div className={cx('relative', isNew && 'kok-new rounded-[22px]')} style={{ ['--i' as string]: index }}>
+    <div
+      data-flip={s.id}
+      className={cx('kok-no-callout relative', isNew && 'kok-new rounded-[22px]')}
+      style={{ ['--i' as string]: index }}
+      {...press}
+      onPointerDown={(e) => {
+        if ((e.target as Element).closest('button, [role="menu"]')) return;
+        press.onPointerDown(e);
+      }}
+      onClickCapture={(e) => {
+        press.onClickCapture(e);
+        if (e.defaultPrevented) return;
+        // 고르는 중에는 카드 안 어디를 눌러도(다시 하기 단추도) 고르기만 한다
+        if (selecting) {
+          e.preventDefault();
+          e.stopPropagation();
+          onPick();
+        }
+      }}
+    >
       {failed ? (
         // 멈춘 자료: 카드 안에서 바로 다시 하기 (단추를 링크 안에 넣지 않도록 제목만 링크)
-        <div className="kok-card flex h-[196px] flex-col overflow-hidden ring-2 ring-bad/40">
+        <div className={cx('kok-card flex h-[196px] flex-col overflow-hidden', ring || 'ring-2 ring-bad/40')}>
           <div className={cx('relative grid min-h-0 flex-1 content-start gap-1.5 overflow-hidden px-4 pt-4', fill)}>
-            <span className="pr-7 text-xs font-bold text-bad">멈췄어요 · 에너지는 돌려줬어요</span>
+            <span className={cx('text-xs font-bold text-bad', selecting ? 'pl-7' : 'pr-7')}>멈췄어요 · 에너지는 돌려줬어요</span>
             <p className="line-clamp-2 text-[13px] leading-relaxed text-muted">{s.error ?? '정리하다가 문제가 생겼어요.'}</p>
             <button
               type="button"
+              tabIndex={selecting ? -1 : undefined}
               className="press mt-0.5 inline-flex items-center gap-1 justify-self-start rounded-full bg-bad px-3 py-1.5 text-xs font-bold text-white"
               onClick={onRetry}
             >
@@ -606,20 +996,23 @@ function NoteCard({
               다시 하기
             </button>
           </div>
-          <Link href={href} className={cx('press px-4 pb-3.5 pt-1.5', fill)} aria-label={`${s.title || '제목 없는 자료'} (멈췄어요)`}>
+          <Link href={href} draggable={false} className={cx('press px-4 pb-3.5 pt-1.5', fill)} aria-label={`${label} (멈췄어요)${marks}`} {...selectProps}>
             {footer}
           </Link>
         </div>
       ) : (
         <Link
           href={href}
-          className="kok-card kok-card-hover press flex h-[196px] flex-col overflow-hidden"
-          aria-label={`${s.title || '제목 없는 자료'}${processing ? ` (${stepLabel(s)})` : ''}`}
+          // 꾹 누른 채 움직여도 링크를 끌지 않는다 (꾹 누르기는 고르기)
+          draggable={false}
+          className={cx('kok-card press flex h-[196px] flex-col overflow-hidden', !selecting && 'kok-card-hover', ring)}
+          aria-label={`${label}${processing ? ` (${stepLabel(s)})` : ''}${marks}`}
+          {...selectProps}
         >
           <div className={cx('relative min-h-0 flex-1 overflow-hidden px-4 pt-4', fill)}>
             {processing ? (
               <div className="grid gap-2">
-                <div className="flex items-center gap-2.5 pr-7">
+                <div className={cx('flex items-center gap-2.5', selecting ? 'pl-7' : 'pr-7')}>
                   <ProgressRing value={s.progress} label={`${s.title || '자료'} 진행`} />
                   <span className="min-w-0 text-xs font-bold leading-snug text-accent">{stepLabel(s)}</span>
                 </div>
@@ -630,7 +1023,7 @@ function NoteCard({
             ) : (
               // 정리 중이던 카드가 끝나면 미리보기가 번지며 나타난다
               <p className={cx('line-clamp-5 text-[13px] leading-relaxed text-muted', startedBusy && 'kok-fade')}>
-                <span className="float-right h-5 w-6" aria-hidden="true" />
+                <span className={cx('h-5 w-6', selecting ? 'float-left' : 'float-right')} aria-hidden="true" />
                 {s.summary ? previewText(s.summary) : s.manual ? '직접 만든 노트예요. 눌러서 채워 보세요.' : '정리 노트가 준비됐어요.'}
               </p>
             )}
@@ -639,9 +1032,197 @@ function NoteCard({
           <div className={cx('px-4 pb-3.5 pt-1.5', fill)}>{footer}</div>
         </Link>
       )}
-      <div className="absolute right-1.5 top-1.5 z-10">
-        <Menu label={`${s.title || '자료'} 메뉴`} items={items} small />
+      {selecting ? (
+        // 고르기 동그라미 (왼쪽 위): 고르면 채워지며 체크가 톡
+        <span
+          className={cx(
+            'kok-appear pointer-events-none absolute left-2.5 top-2.5 z-10 grid h-6 w-6 place-items-center rounded-full transition-colors duration-150',
+            picked ? 'bg-accent text-accent-ink' : 'bg-surface/90 ring-2 ring-inset ring-line',
+          )}
+          aria-hidden="true"
+        >
+          {picked ? <Icon key="on" d={ICONS.check} size={14} strokeWidth={3} className="kok-check-in" /> : null}
+        </span>
+      ) : (
+        <div className="absolute right-1.5 top-1.5 z-10">
+          <Menu label={`${s.title || '자료'} 메뉴`} items={items} small />
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** 카드 순서가 바뀌면 원래 자리에서 새 자리로 미끄러진다 (FLIP: 바뀌기 전 자리를 재고, 바뀐 뒤 거꾸로 옮겼다가 풀어 준다).
+ * 바뀌기 바로 전에 돌려준 함수를 부른다. 움직임 줄이기면 바로 바뀐다 */
+function useGridFlip(root: RefObject<HTMLElement | null>, orderKey: string) {
+  const before = useRef<Map<string, DOMRect> | null>(null);
+  const lastKey = useRef(orderKey);
+  // 그릴 때마다: 잰 자리는 바로 다음 그리기에서만 쓴다 (순서가 그대로면 버린다. 나중에 스크롤한 뒤 엉뚱하게 움직이지 않게)
+  useLayoutEffect(() => {
+    const prev = before.current;
+    before.current = null;
+    const changed = lastKey.current !== orderKey;
+    lastKey.current = orderKey;
+    const el = root.current;
+    if (!prev || !changed || !el || prefersReducedMotion()) return;
+    for (const n of Array.from(el.querySelectorAll<HTMLElement>('[data-flip]'))) {
+      const r0 = prev.get(n.dataset.flip ?? '');
+      if (!r0) continue;
+      const r = n.getBoundingClientRect();
+      const dx = r0.left - r.left;
+      const dy = r0.top - r.top;
+      if (Math.abs(dx) < 1 && Math.abs(dy) < 1) continue;
+      n.animate([{ transform: `translate(${dx}px, ${dy}px)` }, { transform: 'none' }], { duration: 300, easing: 'cubic-bezier(0.65, 0, 0.35, 1)' });
+    }
+  });
+  return () => {
+    const el = root.current;
+    if (el) before.current = new Map(Array.from(el.querySelectorAll<HTMLElement>('[data-flip]'), (n) => [n.dataset.flip ?? '', n.getBoundingClientRect()]));
+  };
+}
+
+/** 여러 개 고르는 동안 아래 띠: 별표 · 복습 켜고 끄기 · 지우기 (폰은 아래 메뉴 자리를 덮고, 넓은 화면은 가운데에 뜬다) */
+function SelectionBar({
+  count,
+  organize,
+  labels,
+  busy,
+  onStar,
+  onReview,
+  onDelete,
+}: {
+  count: number;
+  organize: boolean;
+  labels: { star: boolean; review: boolean };
+  busy: 'star' | 'review' | 'delete' | null;
+  onStar: () => void;
+  onReview: () => void;
+  onDelete: () => void;
+}) {
+  const off = !count || !!busy;
+  return (
+    <div className="pointer-events-none fixed inset-x-0 bottom-0 z-50 md:bottom-6 md:left-60 md:flex md:justify-center">
+      <div
+        role="toolbar"
+        aria-label={`고른 자료 ${count}개`}
+        className={cx(
+          'kok-selbar pointer-events-auto grid border-t border-line bg-surface px-2 pb-[calc(6px+env(safe-area-inset-bottom))] pt-1.5 md:w-[440px] md:rounded-[24px] md:border md:pb-1.5 md:shadow-[0_12px_36px_var(--shadow-strong)]',
+          organize ? 'grid-cols-3' : 'grid-cols-1',
+        )}
+      >
+        {organize ? (
+          <>
+            <BarAction icon={ICONS.star} label={labels.star ? '별표' : '별표 빼기'} disabled={off} busy={busy === 'star'} onClick={onStar} />
+            <BarAction
+              icon={labels.review ? ICONS.review : ICONS.reviewOff}
+              label={labels.review ? '복습 켜기' : '복습 끄기'}
+              disabled={off}
+              busy={busy === 'review'}
+              onClick={onReview}
+            />
+          </>
+        ) : null}
+        <BarAction icon={ICONS.trash} label="지우기" danger disabled={off} busy={busy === 'delete'} onClick={onDelete} />
       </div>
+    </div>
+  );
+}
+
+function BarAction({
+  icon,
+  label,
+  onClick,
+  disabled,
+  busy,
+  danger,
+}: {
+  icon: string;
+  label: string;
+  onClick: () => void;
+  disabled: boolean;
+  busy: boolean;
+  danger?: boolean;
+}) {
+  return (
+    <button
+      type="button"
+      disabled={disabled}
+      onClick={onClick}
+      className={cx(
+        'press flex flex-col items-center gap-0.5 rounded-2xl py-1.5 text-[12px] font-semibold transition-opacity hover:bg-surface-2 disabled:opacity-40',
+        danger ? 'text-bad' : 'text-ink',
+      )}
+    >
+      <span className="grid h-6 place-items-center">{busy ? <Spinner /> : <Icon d={icon} size={22} />}</span>
+      {label}
+    </button>
+  );
+}
+
+/** 순서 바꾸기: 단원마다, 별표한 자료와 다른 자료를 따로 끌어서 옮긴다 (자료함에 보이는 차례 그대로) */
+function ReorderList({ groups, onOrder }: { groups: Array<{ unit: string; list: LibSource[] }>; onOrder: (order: string[]) => void }) {
+  // 단원 × (별표·다른 자료) 묶음. 옮기면 그 묶음만 바꾸고 전체 차례를 다시 만든다
+  const sets = groups.map((g) => ({ unit: g.unit, starred: g.list.filter((s) => s.starred), others: g.list.filter((s) => !s.starred) }));
+  const move = (gi: number, starred: boolean, next: LibSource[]) => {
+    const lists = sets.flatMap((g, i) => {
+      const st = i === gi && starred ? next : g.starred;
+      const ot = i === gi && !starred ? next : g.others;
+      return [st, ot];
+    });
+    onOrder(flattenOrder(lists));
+  };
+  const row = (s: LibSource) => (
+    <span className="min-w-0 flex-1" data-source={s.id}>
+      <span className="flex items-center gap-1.5 text-[15px] font-semibold">
+        {s.starred ? <StarGlyph on size={14} /> : null}
+        <span className="truncate">{s.title || '제목 없는 자료'}</span>
+      </span>
+      <span className="block truncate text-xs text-muted">
+        {s.manual ? '직접 만든 노트' : KIND_LABEL[s.kind]} · {shortDate(s.created_at)}
+        {s.in_review === false ? ' · 복습 끔' : ''}
+      </span>
+    </span>
+  );
+  // 단원이 여럿이면 목록 이름에 단원을 붙인다 (화면 읽기에서 어느 단원 목록인지)
+  const named = (unit: string, name: string) => (unit && groups.length > 1 ? `${unit} · ${name}` : name);
+  return (
+    <div className="grid gap-4">
+      <p className="rounded-2xl bg-surface-2 px-4 py-2.5 text-sm text-muted">줄을 꾹 누른 채로 끌면 순서가 바뀌어요. 별표한 자료는 늘 맨 위에 있어요.</p>
+      {sets.map((g, gi) => (
+        <section key={g.unit || 'all'} className="grid gap-2">
+          {g.unit && groups.length > 1 ? <h3 className="px-1 text-sm font-bold text-muted">{g.unit}</h3> : null}
+          {g.starred.length ? (
+            <div className="grid gap-2">
+              {g.others.length ? (
+                <p className="flex items-center gap-1 px-1 text-xs font-bold text-muted">
+                  <StarGlyph on size={13} /> 별표한 자료
+                </p>
+              ) : null}
+              <SortList
+                items={g.starred}
+                keyOf={(s) => s.id}
+                label={named(g.unit, '별표한 자료 순서')}
+                nameOf={(s) => s.title || '제목 없는 자료'}
+                render={row}
+                onReorder={(next) => move(gi, true, next)}
+              />
+            </div>
+          ) : null}
+          {g.others.length ? (
+            <div className="grid gap-2">
+              {g.starred.length ? <p className="px-1 text-xs font-bold text-muted">다른 자료</p> : null}
+              <SortList
+                items={g.others}
+                keyOf={(s) => s.id}
+                label={named(g.unit, '자료 순서')}
+                nameOf={(s) => s.title || '제목 없는 자료'}
+                render={row}
+                onReorder={(next) => move(gi, false, next)}
+              />
+            </div>
+          ) : null}
+        </section>
+      ))}
     </div>
   );
 }

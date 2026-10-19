@@ -97,16 +97,16 @@ export default function HomePage() {
 
   if (!me) return null;
   const settings = me.settings.review;
-  const today = plan
-    ? pickToday(plan.cards, plan.planSubjects, { dailyMax: settings.dailyMax, doneToday: plan.doneToday, interleave: settings.interleave })
-    : [];
+  // 자료함에서 복습을 끈 노트의 문제는 오늘 복습·오답 수에 넣지 않는다
+  const live = plan ? plan.cards.filter((c) => c.in_review) : [];
+  const today = plan ? pickToday(live, plan.planSubjects, { dailyMax: settings.dailyMax, doneToday: plan.doneToday, interleave: settings.interleave }) : [];
   const streak = streakInfo(days);
   // 복습 정보를 다 읽었는지 (못 읽었어도 자리 표시는 거둔다)
   const loaded = !!plan || err;
   const week = weekDots(days);
-  const nextDue = plan?.cards.length ? plan.cards.map((c) => c.due).sort()[0] : null;
+  const nextDue = live.length ? live.map((c) => c.due).sort()[0] : null;
   const exams = (plan?.subjects ?? []).filter((s) => s.exam_date && daysUntil(s.exam_date) >= 0).sort((a, b) => (a.exam_date! < b.exam_date! ? -1 : 1));
-  const wrongCount = plan?.cards.filter((c) => c.in_wrong_note).length ?? 0;
+  const wrongCount = live.filter((c) => c.in_wrong_note).length;
   const hasCards = !!plan?.cards.length;
   const doneToday = plan?.doneToday ?? 0;
   const dayTotal = doneToday + today.length;

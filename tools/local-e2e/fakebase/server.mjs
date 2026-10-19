@@ -308,7 +308,8 @@ async function handleRest(req, res, url, auth) {
       const params = [];
       const args = names.map((n, i) => {
         let v = body[n];
-        if (v !== null && typeof v === 'object') v = JSON.stringify(v);
+        // 배열 인자(uuid[] 등)는 Postgres 배열로 (PostgREST 처럼), 그 밖의 객체는 JSON 글로
+        if (v !== null && typeof v === 'object' && !(Array.isArray(v) && argtypes[i].endsWith('[]'))) v = JSON.stringify(v);
         params.push(v === undefined ? null : v);
         return `${ident(n)} => $${params.length}::${argtypes[i]}`;
       });

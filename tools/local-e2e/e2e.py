@@ -2102,6 +2102,298 @@ async def main():
         r = await opage.request.post(BASE + "/api/themes/generate", headers={"origin": BASE}, data={"prompt": "비 오는 날", "image": True})
         assert r.status == 403, r.status
         await octx.close()
+
+        step("library: star, review on/off for each note, long-press to pick several, reorder in a subject")
+        me_id = USERS["student"][0]
+        ctx, page = await new_ctx(browser, "student")
+        # 문제가 가장 많은 노트: 복습에서 빼 본다
+        qsrc = db(
+            "select n.source_id from public.cards c join public.questions q on q.id = c.question_id join public.notes n on n.id = q.note_id "
+            f"join public.sources s on s.id = n.source_id where c.user_id = '{me_id}' and q.status = 'active' and s.parent_id is null "
+            "group by n.source_id order by count(*) desc, n.source_id limit 1"
+        )
+        assert qsrc, "no note with questions"
+
+        async def review_total():
+            """복습 시작 화면의 '전체' 문제 수"""
+            await page.goto(BASE + "/review")
+            periods = page.get_by_role("radiogroup", name="언제 공부한 문제를 풀까요?")
+            await expect(periods).to_be_visible()
+            txt = await periods.get_by_role("radio", name=re.compile("^전체")).inner_text()
+            return int(re.search(r"(\d+)\s*$", txt).group(1))
+
+        def card(sid_):
+            return page.locator(f'main [data-flip="{sid_}"]')
+
+        before = await review_total()
+        # 카드 메뉴로 복습에서 빼기 → 복습 문제 수가 준다 (노트에서 직접 푸는 것은 그대로)
+        await page.goto(BASE + "/library")
+        await expect(card(qsrc)).to_be_visible()
+        await card(qsrc).get_by_role("button", name=re.compile(" 메뉴$")).click()
+        await page.get_by_role("menuitem", name="복습에서 빼기").click()
+        await expect(page.get_by_text("복습에서 뺐어요.", exact=True)).to_be_visible()
+        await expect(card(qsrc)).to_contain_text("복습 끔")
+        await poll_db(f"select in_review from public.sources where id = '{qsrc}'", "f")
+        await shot(page, "90-library-review-off", full=False)
+        off_total = await review_total()
+        assert off_total < before, (off_total, before)
+        wrong_off = int(db(
+            "select count(*) from public.cards c join public.questions q on q.id = c.question_id join public.notes n on n.id = q.note_id "
+            f"where n.source_id = '{qsrc}' and c.in_wrong_note and q.status = 'active'"
+        ))
+        if wrong_off:
+            await page.goto(BASE + "/wrong")
+            await expect(page.get_by_text(f"복습을 끈 노트의 틀린 문제 {wrong_off}개는 빼고 보여 줘요.")).to_be_visible()
+        # 노트 화면: 알림 줄의 '다시 넣기', 노트 메뉴로 끄고 켜기
+        await page.goto(BASE + f"/notes/{qsrc}")
+        assert await wait_ready(page)
+        banner = page.get_by_text("복습에서 뺀 노트예요.")
+        await expect(banner).to_be_visible()
+        await shot(page, "91-note-review-off", full=False)
+        await page.get_by_role("button", name="다시 넣기").click()
+        await expect(banner).to_have_count(0)
+        await poll_db(f"select in_review from public.sources where id = '{qsrc}'", "t")
+        await page.get_by_role("button", name="노트 메뉴").click()
+        await page.get_by_role("menuitem", name="복습에서 빼기").click()
+        await expect(banner).to_be_visible()
+        await poll_db(f"select in_review from public.sources where id = '{qsrc}'", "f")
+        await page.get_by_role("button", name="노트 메뉴").click()
+        await page.get_by_role("menuitem", name="복습에 다시 넣기").click()
+        await expect(banner).to_have_count(0)
+        await poll_db(f"select in_review from public.sources where id = '{qsrc}'", "t")
+        assert await review_total() == before
+
+        # 별표: 가장 오래된 자료가 맨 위로 미끄러진다
+        ready = db(f"select string_agg(id::text, ',' order by created_at, id) from public.sources where user_id = '{me_id}' and parent_id is null and status = 'ready'").split(",")
+        assert len(ready) >= 4, ready
+        oldest = ready[0]
+        await page.goto(BASE + "/library")
+        cards = page.locator("main [data-flip]")
+        await expect(card(oldest)).to_be_visible()
+        assert await cards.first.get_attribute("data-flip") != oldest
+        await card(oldest).get_by_role("button", name=re.compile(" 메뉴$")).click()
+        await page.get_by_role("menuitem", name="별표", exact=True).click()
+        await expect(page.get_by_text("별표했어요. 맨 위에 보여요.")).to_be_visible()
+        await expect(cards.first).to_have_attribute("data-flip", oldest)
+        await expect(card(oldest).get_by_role("link")).to_have_accessible_name(re.compile(r"\(별표\)$"))
+        await poll_db(f"select starred from public.sources where id = '{oldest}'", "t")
+        # 다시 들어와도 맨 위 (저장된 별표)
+        await page.reload()
+        await expect(cards.first).to_have_attribute("data-flip", oldest)
+
+        # 꾹 누르기(마우스 0.45초)로 고르기 시작 → 눌러서 더 고르기 → 스페이스로 고르고 풀기
+        order = [await cards.nth(i).get_attribute("data-flip") for i in range(await cards.count())]
+        a_id, b_id, c_id = order[1], order[2], order[3]
+        await card(a_id).hover()
+        await page.mouse.down()
+        await page.wait_for_timeout(650)
+        await page.mouse.up()
+        await expect(page.get_by_role("heading", name="1개 선택", exact=True)).to_be_visible()
+        assert page.url.endswith("/library"), page.url
+        bar = page.get_by_role("toolbar", name=re.compile("^고른 자료"))
+        await expect(bar).to_be_visible()
+        await expect(page.get_by_role("button", name="자료 넣기", exact=True)).to_have_count(0)
+        await expect(card(a_id).get_by_role("checkbox")).to_have_attribute("aria-checked", "true")
+        await card(b_id).click()
+        await expect(page.get_by_role("heading", name="2개 선택", exact=True)).to_be_visible()
+        await card(c_id).get_by_role("checkbox").focus()
+        await page.keyboard.press("Space")
+        await expect(page.get_by_role("heading", name="3개 선택", exact=True)).to_be_visible()
+        await page.keyboard.press("Space")
+        await expect(page.get_by_role("heading", name="2개 선택", exact=True)).to_be_visible()
+        await shot(page, "92-library-select", full=False)
+        await no_hscroll(page, "library selecting")
+        # 하나라도 별표가 없으면 '별표'
+        await bar.get_by_role("button", name="별표", exact=True).click()
+        await expect(page.get_by_text("2개에 별표했어요.")).to_be_visible()
+        await expect(bar).to_have_count(0)
+        await poll_db(f"select count(*) from public.sources where id in ('{a_id}', '{b_id}') and starred", "2")
+        await expect(page.get_by_role("button", name="자료 넣기", exact=True)).to_be_visible()
+        # 별표한 둘을 고르면 '별표 빼기'
+        await card(a_id).hover()
+        await page.mouse.down()
+        await page.wait_for_timeout(650)
+        await page.mouse.up()
+        await card(b_id).click()
+        await bar.get_by_role("button", name="별표 빼기").click()
+        await poll_db(f"select count(*) from public.sources where id in ('{a_id}', '{b_id}') and starred", "0")
+        # 복습 끄기 → 다시 고르면 '복습 켜기'
+        await card(a_id).hover()
+        await page.mouse.down()
+        await page.wait_for_timeout(650)
+        await page.mouse.up()
+        await card(b_id).click()
+        await bar.get_by_role("button", name="복습 끄기").click()
+        await expect(page.get_by_text("2개 노트를 복습에서 뺐어요.")).to_be_visible()
+        await poll_db(f"select count(*) from public.sources where id in ('{a_id}', '{b_id}') and not in_review", "2")
+        await expect(card(a_id)).to_contain_text("복습 끔")
+        await card(a_id).get_by_role("button", name=re.compile(" 메뉴$")).click()
+        await page.get_by_role("menuitem", name="여러 개 고르기").click()
+        await expect(page.get_by_role("heading", name="1개 선택", exact=True)).to_be_visible()
+        await card(b_id).click()
+        await bar.get_by_role("button", name="복습 켜기").click()
+        await poll_db(f"select count(*) from public.sources where id in ('{a_id}', '{b_id}') and in_review", "2")
+        # 모두 고르기 · 모두 풀기 · Esc
+        await page.get_by_role("button", name="자료함 메뉴").click()
+        await page.get_by_role("menuitem", name="여러 개 고르기").click()
+        await expect(page.get_by_role("heading", name="자료 고르기", exact=True)).to_be_visible()
+        await expect(bar.get_by_role("button", name="지우기")).to_be_disabled()
+        await page.get_by_role("button", name="모두 고르기").click()
+        n_all = await cards.count()
+        await expect(page.get_by_role("heading", name=f"{n_all}개 선택", exact=True)).to_be_visible()
+        await page.get_by_role("button", name="모두 풀기").click()
+        await expect(page.get_by_role("heading", name="자료 고르기", exact=True)).to_be_visible()
+        await page.keyboard.press("Escape")
+        await expect(page.get_by_role("heading", name="자료함", exact=True)).to_be_visible()
+        await expect(bar).to_have_count(0)
+
+        # 손가락으로 꾹: 폰의 링크 메뉴를 막고, 손을 뗀 뒤의 누르기로 노트가 열리지 않는다
+        got = await card(c_id).get_by_role("link").evaluate(
+            """(a) => new Promise((done) => {
+              const r = a.getBoundingClientRect();
+              const at = { bubbles: true, cancelable: true, clientX: r.left + 30, clientY: r.top + 50 };
+              const p = { ...at, pointerType: 'touch', pointerId: 7, isPrimary: true, button: 0 };
+              a.dispatchEvent(new PointerEvent('pointerdown', p));
+              setTimeout(() => {
+                const menu = new MouseEvent('contextmenu', at);
+                a.dispatchEvent(menu);
+                a.dispatchEvent(new PointerEvent('pointerup', p));
+                const click = new MouseEvent('click', at);
+                a.dispatchEvent(click);
+                done({ menu: menu.defaultPrevented, click: click.defaultPrevented });
+              }, 650);
+            })"""
+        )
+        assert got == {"menu": True, "click": True}, got
+        await expect(page.get_by_role("heading", name="1개 선택", exact=True)).to_be_visible()
+        assert page.url.endswith("/library"), page.url
+        # 손가락으로 움직이면(스크롤) 고르지 않는다
+        await page.keyboard.press("Escape")
+        moved = await card(c_id).get_by_role("link").evaluate(
+            """(a) => new Promise((done) => {
+              const r = a.getBoundingClientRect();
+              const p = { bubbles: true, cancelable: true, clientX: r.left + 30, clientY: r.top + 50, pointerType: 'touch', pointerId: 8, isPrimary: true, button: 0 };
+              a.dispatchEvent(new PointerEvent('pointerdown', p));
+              a.dispatchEvent(new PointerEvent('pointermove', { ...p, clientY: p.clientY + 30 }));
+              setTimeout(() => done(document.querySelector('main h1')?.textContent), 650);
+            })"""
+        )
+        assert moved == "자료함", moved
+
+        # 여러 개 지우기 (노트·문제도 같이)
+        r = await page.request.post(BASE + "/api/notes/blank", headers={"origin": BASE}, data={"subjectId": db(f"select subject_id from public.sources where id = '{oldest}'"), "title": "지울 노트 1"})
+        assert r.ok, (r.status, await r.text())
+        r = await page.request.post(BASE + "/api/notes/blank", headers={"origin": BASE}, data={"subjectId": db(f"select subject_id from public.sources where id = '{oldest}'"), "title": "지울 노트 2"})
+        assert r.ok, (r.status, await r.text())
+        gone = db(f"select string_agg(id::text, ',' order by title) from public.sources where user_id = '{me_id}' and title like '지울 노트 %'").split(",")
+        await page.reload()
+        await expect(card(gone[0])).to_be_visible()
+        await card(gone[0]).hover()
+        await page.mouse.down()
+        await page.wait_for_timeout(650)
+        await page.mouse.up()
+        await card(gone[1]).click()
+        await expect(page.get_by_role("heading", name="2개 선택", exact=True)).to_be_visible()
+        page.once("dialog", lambda d: asyncio.ensure_future(d.accept()))
+        await bar.get_by_role("button", name="지우기").click()
+        await expect(page.get_by_text("2개를 지웠어요.")).to_be_visible()
+        await expect(card(gone[0])).to_have_count(0)
+        await expect(card(gone[1])).to_have_count(0)
+        assert db(f"select count(*) from public.sources where id in ('{gone[0]}', '{gone[1]}')") == "0"
+        assert db(f"select count(*) from public.notes where source_id in ('{gone[0]}', '{gone[1]}')") == "0"
+        # 남의 자료는 지우지 않는다
+        r = await page.request.post(BASE + "/api/sources/delete", headers={"origin": BASE}, data={"ids": [db(f"select id from public.sources where user_id <> '{me_id}' limit 1") or "00000000-0000-4000-8000-000000000000"]})
+        assert r.status == 404, (r.status, await r.text())
+
+        # 과목 안에서 순서 바꾸기 (키보드): 별표하지 않은 자료끼리
+        sci_id = db(f"select subject_id from public.sources where id = '{oldest}'")
+        await page.goto(BASE + f"/library/{sci_id}")
+        await page.get_by_role("button", name="과목 메뉴").click()
+        await page.get_by_role("menuitem", name="순서 바꾸기").click()
+        sheet = page.get_by_role("dialog", name=re.compile("순서 바꾸기$"))
+        await expect(sheet).to_be_visible()
+        # 별표하지 않은 자료가 둘 이상인 목록 (단원마다 목록이 따로다)
+        lists = sheet.get_by_role("list", name=re.compile("(^| · )자료 순서$"))
+        rows_ = None
+        for i in range(await lists.count()):
+            if await lists.nth(i).locator("li").count() >= 2:
+                rows_ = lists.nth(i).locator("li")
+                break
+        assert rows_ is not None, "no list with two rows"
+        first_id = await rows_.nth(0).locator("[data-source]").get_attribute("data-source")
+        second_id = await rows_.nth(1).locator("[data-source]").get_attribute("data-source")
+        await shot(page, "93-library-reorder", full=False)
+        await rows_.first.get_by_role("button").focus()
+        await page.keyboard.press("Space")
+        await page.wait_for_timeout(200)
+        await page.keyboard.press("ArrowDown")
+        await page.wait_for_timeout(300)
+        await page.keyboard.press("Space")
+        await expect(rows_.nth(0).locator("[data-source]")).to_have_attribute("data-source", second_id)
+        await expect(rows_.nth(1).locator("[data-source]")).to_have_attribute("data-source", first_id)
+        await poll_db(f"select (select position from public.sources where id = '{second_id}') < (select position from public.sources where id = '{first_id}')", "t")
+        # 과목의 모든 자료에 번호가 붙는다 (보이는 차례대로 0, 1, 2 …)
+        assert db(f"select count(*) from public.sources where subject_id = '{sci_id}' and parent_id is null and position is null") == "0"
+        await page.keyboard.press("Escape")
+        await expect(sheet).to_have_count(0)
+        # 자료함 카드도 같은 순서 (다시 읽어도)
+        await page.reload()
+        await expect(card(first_id)).to_be_visible()
+        flips = [await c.get_attribute("data-flip") for c in await page.locator("main [data-flip]").all()]
+        assert flips.index(second_id) < flips.index(first_id), flips
+        # 전체 보기에서 고르면 자료가 둘 이상인 과목으로 가서 연다 (순서는 과목 안에서 정한다)
+        await page.goto(BASE + "/library")
+        await expect(page.locator("main [data-flip]").first).to_be_visible()
+        await page.get_by_role("button", name="자료함 메뉴").click()
+        await page.get_by_role("menuitem", name="순서 바꾸기").click()
+        await expect(page.get_by_role("dialog", name=re.compile("순서 바꾸기$"))).to_be_visible()
+        assert re.search(r"/library/[0-9a-f-]{36}$", page.url), page.url
+        await page.keyboard.press("Escape")
+
+        # 새 자료: 입력창에서 복습 끄기 (빈 노트·AI 정리 모두)
+        await page.goto(BASE + "/library")
+        await page.get_by_role("button", name="자료 넣기", exact=True).click()
+        composer = page.get_by_role("dialog", name="자료 넣기")
+        await composer.get_by_label("공부한 내용").fill("복습 안 할 노트")
+        await composer.get_by_role("button", name="빈 노트").click()
+        toggle = composer.get_by_role("switch", name="복습에 넣기")
+        await expect(toggle).to_have_attribute("aria-checked", "true")
+        await expect(toggle).to_have_text("복습 켬")
+        await toggle.click()
+        await expect(toggle).to_have_attribute("aria-checked", "false")
+        await expect(toggle).to_have_text("복습 끔")
+        await expect(composer.get_by_text("이 노트는 복습에 나오지 않아요.", exact=False)).to_be_visible()
+        await shot(page, "94-composer-review-off", full=False)
+        await composer.get_by_role("button", name="만들기").click()
+        await page.wait_for_url("**/notes/*")
+        assert await wait_ready(page)
+        nsid = page.url.rstrip("/").split("/")[-1].split("?")[0]
+        await expect(page.get_by_text("복습에서 뺀 노트예요.")).to_be_visible()
+        assert db(f"select in_review from public.sources where id = '{nsid}'") == "f"
+        # 입력창을 다시 열면 복습에 넣기로 돌아와 있다
+        await page.goto(BASE + "/library")
+        await page.get_by_role("button", name="자료 넣기", exact=True).click()
+        await expect(composer.get_by_role("switch", name="복습에 넣기")).to_have_attribute("aria-checked", "true")
+        await composer.get_by_label("공부한 내용").fill("이 글은 복습에 넣지 않을 자료예요. 광합성은 빛에너지를 화학 에너지로 바꾸는 과정이에요.")
+        await composer.get_by_role("switch", name="복습에 넣기").click()
+        await composer.get_by_label("공부한 내용").press("Enter")
+        await expect(composer).to_be_hidden()
+        await poll_db(f"select count(*) from public.sources where user_id = '{me_id}' and title is distinct from '복습 안 할 노트' and not in_review and created_at > now() - interval '1 minute'", "1", timeout=15)
+        await ctx.close()
+
+        # 넓은 화면·어두운 화면: 고르기 띠
+        ctx, page = await new_ctx(browser, "student", width=1280, scheme="dark")
+        await page.goto(BASE + "/library")
+        cards = page.locator("main [data-flip]")
+        await expect(cards.first).to_be_visible()
+        await cards.nth(1).hover()
+        await page.mouse.down()
+        await page.wait_for_timeout(650)
+        await page.mouse.up()
+        await cards.nth(2).click()
+        await expect(page.get_by_role("heading", name="2개 선택", exact=True)).to_be_visible()
+        await shot(page, "95-library-select-desktop", full=False)
+        await ctx.close()
         await browser.close()
 
     print("\nSTEPS OK:", len(STEPS))

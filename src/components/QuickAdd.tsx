@@ -62,6 +62,8 @@ type Item = {
   files?: string[];
   /** 올리는 파일 크기 합 (큰 파일은 띠에 MB 로 보여 준다) */
   bytes?: number;
+  /** false 면 이 노트의 문제를 복습에 넣지 않는다 (자료 넣기 창에서 끈 것) */
+  review?: boolean;
 };
 
 /** 올리기 전에 한 번 준비한 것 (다시 하기에서 사진을 또 줄이지 않게) */
@@ -82,6 +84,8 @@ type Ctx = {
   setNoteTarget: (t: NoteTarget | null) => void;
   /** 지금 노트에 파일·글을 더한다 (ask 면 먼저 한 번 묻는다) */
   addToNote: (files: File[], text?: string, ask?: boolean) => void;
+  /** + 버튼을 잠깐 숨긴다 (자료함에서 여러 개 고르는 동안: 아래 띠가 그 자리를 쓴다) */
+  setFabHidden: (hidden: boolean) => void;
   enabled: boolean;
 };
 
@@ -91,6 +95,7 @@ const QuickAddCtx = createContext<Ctx>({
   setContextSubject: () => {},
   setNoteTarget: () => {},
   addToNote: () => {},
+  setFabHidden: () => {},
   enabled: false,
 });
 
@@ -192,6 +197,7 @@ export function QuickAddProvider({
   const contextSubject = useRef<string | null>(null);
   const noteTargetRef = useRef<NoteTarget | null>(null);
   const [noteTarget, setNoteTargetState] = useState<NoteTarget | null>(null);
+  const [fabHidden, setFabHidden] = useState(false);
   const [pendingAppend, setPendingAppend] = useState<{ files: File[]; text: string } | null>(null);
   const loadSubjects = useCallback(async () => {
     try {
@@ -361,6 +367,7 @@ export function QuickAddProvider({
               text: prep.kind === 'text' ? prep.text : undefined,
               files,
               ...(it.parentId ? { parentId: it.parentId } : {}),
+              ...(it.review === false ? { review: false } : {}),
             }),
           });
           return 'ok';
@@ -481,7 +488,7 @@ export function QuickAddProvider({
   }, [runItem, runAppendChain]);
 
   const enqueue = useCallback(
-    (jobs: Job[], subjectId: string, into?: { parentId: string; noteTitle: string }) => {
+    (jobs: Job[], subjectId: string, into?: { parentId: string; noteTitle: string }, opts: { review?: boolean } = {}) => {
       if (!jobs.length) return;
       const added: Item[] = jobs.map((job) => ({
         key: newId(),
@@ -492,6 +499,7 @@ export function QuickAddProvider({
         done: 0,
         total: 0,
         ...(into ? { parentId: into.parentId, noteTitle: into.noteTitle } : {}),
+        ...(opts.review === false ? { review: false } : {}),
       }));
       commit([...itemsRef.current, ...added]);
       if (!into) writeLast(meRef.current.userId, subjectId);
@@ -550,6 +558,8 @@ export function QuickAddProvider({
   const [composerSubject, setComposerSubject] = useState('');
   const [text, setText] = useState('');
   const [attachments, setAttachments] = useState<Attachment[]>([]);
+  /** 이번에 만드는 노트를 복습에 넣을지 (창을 열 때마다 켠 채로 시작한다) */
+  const [review, setReview] = useState(true);
 
   const closeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const fabRef = useRef<HTMLButtonElement>(null);
@@ -560,6 +570,7 @@ export function QuickAddProvider({
       if (closeTimer.current) clearTimeout(closeTimer.current);
       closeTimer.current = null;
       setComposerSubject(subjectId || resolveSubject());
+      setReview(true);
       setClosing(false);
       setOpen(true);
       // 과목 목록을 아직 못 읽었을 때 열었으면, 읽은 뒤에 과목을 골라 둔다
@@ -632,11 +643,11 @@ export function QuickAddProvider({
     }
     jobs.push(...filesToJobs(attachedFiles, titleForFiles));
     if (!jobs.length) return;
-    enqueue(jobs, subjectId);
+    enqueue(jobs, subjectId, undefined, { review });
     setText('');
     setAttachments([]);
     closeComposer();
-  }, [composerSubject, text, attachments, filesToJobs, enqueue, closeComposer, toast]);
+  }, [composerSubject, text, attachments, filesToJobs, enqueue, closeComposer, toast, review]);
 
   /** 빈 노트: AI 없이 직접 채우는 노트를 만들고 그 노트로 간다 (에너지를 쓰지 않는다) */
   const createBlank = useCallback(
@@ -647,7 +658,10 @@ export function QuickAddProvider({
         return false;
       }
       try {
-        const r = await api<{ id: string }>('/api/notes/blank', { method: 'POST', body: JSON.stringify({ subjectId, title }) });
+        const r = await api<{ id: string }>('/api/notes/blank', {
+          method: 'POST',
+          body: JSON.stringify({ subjectId, title, ...(review ? {} : { review: false }) }),
+        });
         writeLast(meRef.current.userId, subjectId);
         window.dispatchEvent(new CustomEvent(SOURCES_CHANGED, { detail: { id: r.id } }));
         closeComposer();
@@ -658,7 +672,7 @@ export function QuickAddProvider({
         return false;
       }
     },
-    [composerSubject, toast, closeComposer, router],
+    [composerSubject, toast, closeComposer, router, review],
   );
 
   // ---------------------------------------------------------- 끌어다 놓기, 붙여 넣기
@@ -866,7 +880,7 @@ export function QuickAddProvider({
   }, [pendingAppend, addFiles, openComposer]);
 
   const ctx = useMemo<Ctx>(
-    () => ({ openComposer, addFiles, setContextSubject, setNoteTarget, addToNote, enabled }),
+    () => ({ openComposer, addFiles, setContextSubject, setNoteTarget, addToNote, setFabHidden, enabled }),
     [openComposer, addFiles, setContextSubject, setNoteTarget, addToNote, enabled],
   );
 
@@ -876,8 +890,8 @@ export function QuickAddProvider({
       <div inert={open}>{children}</div>
       {enabled ? (
         <>
-          {/* 노트 화면은 + 버튼 대신 노트 채팅 버튼을 쓴다 */}
-          {noteTarget?.hideFab ? null : (
+          {/* 노트 화면은 + 버튼 대신 노트 채팅 버튼을 쓴다. 자료함에서 여러 개 고르는 동안은 숨긴다 */}
+          {noteTarget?.hideFab || fabHidden ? null : (
             <button
               ref={fabRef}
               type="button"
@@ -917,6 +931,8 @@ export function QuickAddProvider({
               onSubmit={submitComposer}
               onBlank={createBlank}
               onClose={closeComposer}
+              review={review}
+              onReview={setReview}
             />
           ) : null}
           {dragging ? <DropOverlay subjectName={dropSubjectName} intoComposer={open} note={open ? null : noteTarget} /> : null}
@@ -950,6 +966,8 @@ function Composer({
   onSubmit,
   onBlank,
   onClose,
+  review,
+  onReview,
 }: {
   me: MeResponse;
   closing: boolean;
@@ -966,6 +984,9 @@ function Composer({
   /** 빈 노트 만들기 (이름) → 만들었는지 */
   onBlank: (title: string) => Promise<boolean>;
   onClose: () => void;
+  /** 이번에 만드는 노트를 복습에 넣을지 */
+  review: boolean;
+  onReview: (on: boolean) => void;
 }) {
   const toast = useToast();
   const area = useRef<HTMLTextAreaElement>(null);
@@ -1023,6 +1044,31 @@ function Composer({
     if (ok && t && t === trimmed) onText('');
   };
 
+  // 복습에 넣기 켜고 끄기 (DB 에 칸이 있을 때만): 과목 옆의 '복습 켬·끔'. 끄면 아래에 한 줄로 알려 준다
+  const reviewToggle = me.features.organize ? (
+    <button
+      type="button"
+      role="switch"
+      aria-checked={review}
+      aria-label="복습에 넣기"
+      title={review ? '이 노트 문제를 복습에 넣어요 · 누르면 빼요' : '복습에 넣지 않아요 · 누르면 다시 넣어요'}
+      className={cx(
+        'press inline-flex shrink-0 items-center gap-1 rounded-full py-1.5 pl-2.5 pr-3 text-sm font-semibold',
+        review ? 'bg-surface-2 text-muted hover:text-ink' : 'bg-warn-soft text-warn',
+      )}
+      onClick={() => onReview(!review)}
+    >
+      <Icon d={review ? ICONS.review : ICONS.reviewOff} size={16} />
+      {review ? '복습 켬' : '복습 끔'}
+    </button>
+  ) : null;
+  const reviewNote =
+    me.features.organize && !review ? (
+      <p className="kok-appear -mt-1 flex items-center gap-1.5 px-1 text-xs font-semibold text-warn" role="status">
+        <Icon d={ICONS.reviewOff} size={14} className="shrink-0" />이 노트는 복습에 나오지 않아요. 자료함·노트에서 다시 켤 수 있어요.
+      </p>
+    ) : null;
+
   const createSubject = async () => {
     const name = newName.trim();
     if (!name) return;
@@ -1053,73 +1099,76 @@ function Composer({
         }}
       >
         <div className="flex items-center justify-between gap-2">
-          <div className="relative">
-            <button
-              type="button"
-              className="press inline-flex max-w-[220px] items-center gap-2 rounded-full bg-surface-2 py-1.5 pl-3 pr-2.5 text-sm font-semibold"
-              aria-haspopup="listbox"
-              aria-expanded={picking}
-              onClick={() => setPicking((p) => !p)}
-            >
-              <span className="h-2.5 w-2.5 shrink-0 rounded-full" style={{ background: subjectVar(subject?.color) }} aria-hidden="true" />
-              <span className="truncate">{subject?.name ?? '과목 고르기'}</span>
-              <span className="text-muted" aria-hidden="true">
-                ▾
-              </span>
-            </button>
-            {picking ? (
-              <div className="kok-pop absolute left-0 top-10 z-10 grid w-60 origin-top-left rounded-2xl bg-surface p-1.5 shadow-[0_12px_32px_var(--shadow-strong)] ring-1 ring-line sm:bottom-10 sm:top-auto sm:origin-bottom-left">
-                <div className="grid max-h-60 gap-0.5 overflow-y-auto" role="listbox" aria-label="과목">
-                  {subjects.map((s) => (
-                    <button
-                      key={s.id}
-                      type="button"
-                      role="option"
-                      aria-selected={s.id === subjectId}
-                      className={cx(
-                        'flex items-center gap-2.5 rounded-xl px-3 py-2 text-left text-[15px] hover:bg-surface-2',
-                        s.id === subjectId && 'font-bold',
-                      )}
-                      onClick={() => {
-                        onSubject(s.id);
-                        setPicking(false);
-                        area.current?.focus();
+          <div className="flex min-w-0 items-center gap-1.5">
+            <div className="relative min-w-0">
+              <button
+                type="button"
+                className="press inline-flex max-w-[220px] items-center gap-2 rounded-full bg-surface-2 py-1.5 pl-3 pr-2.5 text-sm font-semibold"
+                aria-haspopup="listbox"
+                aria-expanded={picking}
+                onClick={() => setPicking((p) => !p)}
+              >
+                <span className="h-2.5 w-2.5 shrink-0 rounded-full" style={{ background: subjectVar(subject?.color) }} aria-hidden="true" />
+                <span className="truncate">{subject?.name ?? '과목 고르기'}</span>
+                <span className="text-muted" aria-hidden="true">
+                  ▾
+                </span>
+              </button>
+              {picking ? (
+                <div className="kok-pop absolute left-0 top-10 z-10 grid w-60 origin-top-left rounded-2xl bg-surface p-1.5 shadow-[0_12px_32px_var(--shadow-strong)] ring-1 ring-line sm:bottom-10 sm:top-auto sm:origin-bottom-left">
+                  <div className="grid max-h-60 gap-0.5 overflow-y-auto" role="listbox" aria-label="과목">
+                    {subjects.map((s) => (
+                      <button
+                        key={s.id}
+                        type="button"
+                        role="option"
+                        aria-selected={s.id === subjectId}
+                        className={cx(
+                          'flex items-center gap-2.5 rounded-xl px-3 py-2 text-left text-[15px] hover:bg-surface-2',
+                          s.id === subjectId && 'font-bold',
+                        )}
+                        onClick={() => {
+                          onSubject(s.id);
+                          setPicking(false);
+                          area.current?.focus();
+                        }}
+                      >
+                        <span className="h-2.5 w-2.5 shrink-0 rounded-full" style={{ background: subjectVar(s.color) }} aria-hidden="true" />
+                        <span className="min-w-0 flex-1 truncate">{s.name}</span>
+                        {s.id === subjectId ? <Icon d={ICONS.check} size={16} className="text-accent" /> : null}
+                      </button>
+                    ))}
+                  </div>
+                  <div className="mt-1 flex gap-1.5 border-t border-line px-1 pt-2">
+                    <input
+                      aria-label="새 과목 이름"
+                      className="min-w-0 flex-1 rounded-xl bg-surface-2 px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-accent"
+                      placeholder="새 과목"
+                      value={newName}
+                      maxLength={40}
+                      onChange={(e) => setNewName(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (isSubmitKey(e.nativeEvent)) {
+                          e.preventDefault();
+                          createSubject();
+                        }
                       }}
+                    />
+                    <button
+                      type="button"
+                      className="press rounded-xl bg-ink px-3 text-sm font-semibold text-surface disabled:opacity-40"
+                      disabled={!newName.trim() || creating}
+                      onClick={createSubject}
                     >
-                      <span className="h-2.5 w-2.5 shrink-0 rounded-full" style={{ background: subjectVar(s.color) }} aria-hidden="true" />
-                      <span className="min-w-0 flex-1 truncate">{s.name}</span>
-                      {s.id === subjectId ? <Icon d={ICONS.check} size={16} className="text-accent" /> : null}
+                      만들기
                     </button>
-                  ))}
+                  </div>
                 </div>
-                <div className="mt-1 flex gap-1.5 border-t border-line px-1 pt-2">
-                  <input
-                    aria-label="새 과목 이름"
-                    className="min-w-0 flex-1 rounded-xl bg-surface-2 px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-accent"
-                    placeholder="새 과목"
-                    value={newName}
-                    maxLength={40}
-                    onChange={(e) => setNewName(e.target.value)}
-                    onKeyDown={(e) => {
-                      if (isSubmitKey(e.nativeEvent)) {
-                        e.preventDefault();
-                        createSubject();
-                      }
-                    }}
-                  />
-                  <button
-                    type="button"
-                    className="press rounded-xl bg-ink px-3 text-sm font-semibold text-surface disabled:opacity-40"
-                    disabled={!newName.trim() || creating}
-                    onClick={createSubject}
-                  >
-                    만들기
-                  </button>
-                </div>
-              </div>
-            ) : null}
+              ) : null}
+            </div>
+            {reviewToggle}
           </div>
-          <span className="text-xs font-semibold text-muted">{blank ? 'AI 없이 · 에너지 0' : <EnergyEstimate est={est || null} left={left} />}</span>
+          <span className="shrink-0 text-xs font-semibold text-muted">{blank ? 'AI 없이 · 에너지 0' : <EnergyEstimate est={est || null} left={left} />}</span>
         </div>
 
         {blank ? (
@@ -1166,6 +1215,7 @@ function Composer({
                 만들기
               </button>
             </div>
+            {reviewNote}
           </div>
         ) : (
           <>
@@ -1260,6 +1310,7 @@ function Composer({
                 <Icon d={ICONS.send} size={18} strokeWidth={2.2} />
               </button>
             </div>
+            {reviewNote}
             {!me.aiEnabled ? <p className="text-xs font-semibold text-bad">지금은 AI 기능을 잠깐 쉬고 있어요.</p> : null}
             {trimmed && !attachments.length && trimmed.length < MIN_TEXT_CHARS ? (
               <p className="-mt-1 px-1 text-xs text-muted">

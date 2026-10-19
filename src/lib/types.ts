@@ -26,7 +26,17 @@ export type MeResponse = {
   /** 채팅에 붙인 사진·파일을 노트 채팅 기록에 보관하는지 (Pro 기능, 아니면 이름만 남는다) */
   keepChatFiles: boolean;
   /** DB 에 새 표가 있는지 (schema.sql 을 다시 실행하기 전에는 false) */
-  features: { versions: boolean; restedHidden: boolean; chat: boolean; planFlags: boolean; themes: boolean; figures: boolean; chatFiles: boolean };
+  features: {
+    versions: boolean;
+    restedHidden: boolean;
+    chat: boolean;
+    planFlags: boolean;
+    themes: boolean;
+    figures: boolean;
+    chatFiles: boolean;
+    /** 자료함 정리: 노트마다 복습에 넣기·별표·순서 */
+    organize: boolean;
+  };
   consented: boolean;
   settings: UserSettings;
   energy: {
@@ -79,6 +89,10 @@ export type SourceListRow = {
   files_expire_at: string | null;
   created_at: string;
   updated_at: string;
+  /** 자료함 정리 (DB 에 칸이 있을 때만 읽는다): 복습에 넣기, 별표, 과목 안의 순서 */
+  in_review?: boolean;
+  starred?: boolean;
+  position?: number | null;
 };
 
 export type QuestionType = 'mcq' | 'ox' | 'cloze' | 'short';

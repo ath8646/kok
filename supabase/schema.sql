@@ -641,6 +641,15 @@ drop trigger if exists review_logs_owner on public.review_logs;
 create trigger review_logs_owner before insert or update of user_id, question_id on public.review_logs
   for each row execute function public.kok_check_owner();
 
+-- ---------------------------------------------------------------------
+-- 자료함 정리: 노트(자료)마다 복습에 넣을지(in_review), 별표(starred), 내가 정한 순서(position)
+-- in_review 가 false 인 노트의 문제는 오늘 복습·기간 복습·오답 다시 풀기에 나오지 않는다 (노트에서 직접 푸는 것은 된다).
+-- position 은 과목 안의 순서 (작을수록 앞, 비어 있으면 새 자료처럼 맨 앞). 별표한 자료가 늘 먼저다.
+-- ---------------------------------------------------------------------
+alter table public.sources add column if not exists in_review boolean not null default true;
+alter table public.sources add column if not exists starred boolean not null default false;
+alter table public.sources add column if not exists position int;
+
 -- =====================================================================
 -- 권한(GRANT): 로그인 안 한 사람(anon)은 아무것도 못 하고,
 -- 로그인한 사람(authenticated)은 아래에 적은 것만 할 수 있다.
@@ -679,9 +688,11 @@ grant select, insert, update, delete on public.cards to authenticated;
 grant select (
   id, user_id, subject_id, kind, title, unit, text_content, file_paths, page_count,
   status, step, progress, chunk_index, chunk_total, model, plan_at_start, energy_estimate,
-  error, locked_until, files_expire_at, created_at, updated_at, parent_id
+  error, locked_until, files_expire_at, created_at, updated_at, parent_id,
+  in_review, starred, position
 ) on public.sources to authenticated;
-grant update (title, unit) on public.sources to authenticated;
+-- 자료함 정리(복습에 넣기·별표·순서)도 학생이 직접 고친다
+grant update (title, unit, in_review, starred, position) on public.sources to authenticated;
 
 -- 노트·그림: 보기, 고치기 (지우기는 자료를 지울 때 같이)
 grant select on public.notes to authenticated;
@@ -1567,6 +1578,24 @@ as $$
 $$;
 revoke execute on function public.kok_my_study_days(int) from public, anon;
 grant execute on function public.kok_my_study_days(int) to authenticated;
+
+-- 자료함 순서 바꾸기: 받은 순서대로 position 을 0, 1, 2 … 로 (내 자료만, 2000개까지).
+-- 로그인한 사람의 권한으로 돌아서 RLS 와 칸 권한(position)이 그대로 적용된다
+create or replace function public.kok_reorder_sources(p_ids uuid[])
+returns void
+language sql
+security invoker
+set search_path = public
+as $$
+  update public.sources s
+     set position = o.ord - 1
+    from unnest(p_ids) with ordinality as o(id, ord)
+   where s.id = o.id
+     and s.user_id = (select auth.uid())
+     and cardinality(p_ids) <= 2000;
+$$;
+revoke execute on function public.kok_reorder_sources(uuid[]) from public, anon;
+grant execute on function public.kok_reorder_sources(uuid[]) to authenticated;
 
 revoke execute on function public.kok_add_questions(uuid, jsonb, boolean) from public, anon, authenticated;
 revoke execute on function public.kok_finalize_source(uuid, text, jsonb, jsonb, jsonb, timestamptz) from public, anon, authenticated;

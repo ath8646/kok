@@ -138,6 +138,8 @@ export type Features = {
   figures: boolean;
   /** 채팅에 붙인 사진·파일과 단계 풀이 (chat_messages.attachments·solution). 없어도 채팅은 예전처럼 된다 */
   chatFiles: boolean;
+  /** 자료함 정리: 노트마다 복습에 넣기·별표·순서 (sources.in_review·starred·position, kok_reorder_sources) */
+  organize: boolean;
 };
 
 let featuresCache: { at: number; value: Features } | null = null;
@@ -148,7 +150,7 @@ let featuresCache: { at: number; value: Features } | null = null;
  */
 export async function getFeatures(admin: SupabaseClient): Promise<Features> {
   if (featuresCache && Date.now() - featuresCache.at < 60_000) return featuresCache.value;
-  const [v, p, r, c, f, t, ti, ac, qf, pf, cf] = await Promise.all([
+  const [v, p, r, c, f, t, ti, ac, qf, pf, cf, og] = await Promise.all([
     admin.from('note_versions').select('id').limit(1),
     admin.from('sources').select('parent_id').limit(1),
     admin.from('questions').select('rested_hidden').limit(1),
@@ -160,6 +162,7 @@ export async function getFeatures(admin: SupabaseClient): Promise<Features> {
     admin.from('questions').select('figure, steps').limit(1),
     admin.from('custom_plans').select('can_figures').limit(1),
     admin.from('chat_messages').select('attachments, solution').limit(1),
+    admin.from('sources').select('in_review, starred, position').limit(1),
   ]);
   const value: Features = {
     versions: !v.error && !p.error,
@@ -169,6 +172,7 @@ export async function getFeatures(admin: SupabaseClient): Promise<Features> {
     themes: !t.error && !ti.error && !ac.error,
     figures: !qf.error && !pf.error,
     chatFiles: !c.error && !cf.error,
+    organize: !og.error,
   };
   featuresCache = { at: Date.now(), value };
   return value;

@@ -31,6 +31,37 @@ export async function fetchSubjects(): Promise<SubjectRow[]> {
 
 export const SOURCE_COLS =
   'id, subject_id, kind, title, unit, status, step, progress, chunk_index, chunk_total, error, locked_until, page_count, file_paths, files_expire_at, created_at, updated_at';
+/** 자료함 정리 칸 (복습에 넣기·별표·순서). DB 에 있을 때만 읽는다 (features.organize: schema.sql 을 다시 실행하기 전에는 없다) */
+export const ORGANIZE_COLS = 'in_review, starred, position';
+
+/** 칸이 없거나 읽을 권한이 없다는 오류인지 (schema.sql 을 다시 실행하기 전) */
+function missingColumn(e: unknown, col: string): boolean {
+  const err = e as { code?: string; message?: string } | null;
+  return !!err && (err.code === '42703' || err.code === '42501' || new RegExp(col).test(err.message ?? ''));
+}
+
+/** 복습에 넣는 칸(in_review)이 DB 에 있는지. 처음 읽을 때 알아낸다 */
+let reviewCol: boolean | null = null;
+
+/** 복습에서 뺀 노트의 자료 번호. 칸이 없는 예전 DB 면 비어 있다 (모든 노트가 복습에 들어간다) */
+export async function fetchReviewOff(): Promise<Set<string>> {
+  if (reviewCol === false) return new Set();
+  try {
+    const rows = await fetchAll<{ id: string }>(
+      (a, b) =>
+        sb().from('sources').select('id').eq('in_review', false).order('id').range(a, b) as unknown as PromiseLike<{
+          data: Array<{ id: string }> | null;
+          error: unknown;
+        }>,
+    );
+    reviewCol = true;
+    return new Set(rows.map((r) => r.id));
+  } catch (e) {
+    if (!missingColumn(e, 'in_review')) throw e;
+    reviewCol = false;
+    return new Set();
+  }
+}
 
 export type SourceRowWithUnit = SourceListRow & { unit: string };
 
@@ -84,30 +115,41 @@ export function peekText(n: NotePeek): string | null {
   return [n.kp, n.kpx].filter((x) => x?.trim()).join(' · ') || null;
 }
 
-type NoteKps = { id: string; kps: Array<{ id: string; importance?: string; title?: string; starred?: boolean }> | null };
+type NoteKps = { id: string; source_id: string; kps: Array<{ id: string; importance?: string; title?: string; starred?: boolean }> | null };
 
 /** 개념 하나: 중요도, 이름(꾸미기 기호 없이), 별표 */
 export type ConceptInfo = { importance: string; title: string; starred: boolean };
 
-/** 노트마다 개념 (노트 id → 개념 id → 중요도·이름·별표) */
-export async function fetchImportance(): Promise<Map<string, Map<string, ConceptInfo>>> {
+/** 노트마다 개념 (노트 id → 개념 id → 중요도·이름·별표)과 노트의 자료 번호 */
+export async function fetchNoteMeta(): Promise<{ concepts: Map<string, Map<string, ConceptInfo>>; noteSource: Map<string, string> }> {
   const rows = await fetchAll<NoteKps>(
     (a, b) =>
-      sb().from('notes').select('id, kps:body->key_points').order('id').range(a, b) as unknown as PromiseLike<{ data: NoteKps[] | null; error: unknown }>,
+      sb().from('notes').select('id, source_id, kps:body->key_points').order('id').range(a, b) as unknown as PromiseLike<{
+        data: NoteKps[] | null;
+        error: unknown;
+      }>,
   );
-  const m = new Map<string, Map<string, ConceptInfo>>();
+  const concepts = new Map<string, Map<string, ConceptInfo>>();
+  const noteSource = new Map<string, string>();
   for (const r of rows) {
     const inner = new Map<string, ConceptInfo>();
     // 이름은 꾸미기 기호(**굵게** 등) 없이 글로
     for (const k of r.kps ?? [])
       if (k?.id) inner.set(k.id, { importance: k.importance ?? 'medium', title: k.title ? previewText(k.title) || k.title : '', starred: k.starred === true });
-    m.set(r.id, inner);
+    concepts.set(r.id, inner);
+    noteSource.set(r.id, r.source_id);
   }
-  return m;
+  return { concepts, noteSource };
+}
+
+/** 노트마다 개념 (노트 id → 개념 id → 중요도·이름·별표) */
+export async function fetchImportance(): Promise<Map<string, Map<string, ConceptInfo>>> {
+  return (await fetchNoteMeta()).concepts;
 }
 
 export type PlanData = {
-  cards: Array<PlanCard & { note_id: string | null; key_point_id: string | null }>;
+  /** in_review: 이 문제의 노트가 복습에 들어가는지 (자료함에서 끈 노트는 false. 노트에서 직접 푸는 것은 된다) */
+  cards: Array<PlanCard & { note_id: string | null; key_point_id: string | null; in_review: boolean }>;
   /** 카드 전체 칸 (복습 저장에 쓴다) */
   rawCards: Map<string, CardRow>;
   subjects: SubjectRow[];
@@ -121,7 +163,7 @@ type PlanQuestion = { id: string; note_id: string | null; key_point_id: string |
 
 /** 복습 계획에 필요한 것 한 번에: 카드(쉬는 문제 빼고), 과목, 오늘 푼 수, 개념 */
 export async function fetchPlanData(): Promise<PlanData> {
-  const [subjects, cards, questions, concepts, done] = await Promise.all([
+  const [subjects, cards, questions, meta, done, reviewOff] = await Promise.all([
     fetchSubjects(),
     fetchAll<CardRow>(
       (a, b) =>
@@ -138,9 +180,11 @@ export async function fetchPlanData(): Promise<PlanData> {
           error: unknown;
         }>,
     ),
-    fetchImportance(),
+    fetchNoteMeta(),
     sb().from('review_logs').select('id', { count: 'exact', head: true }).gte('reviewed_at', kstDayStart().toISOString()),
+    fetchReviewOff(),
   ]);
+  const { concepts, noteSource } = meta;
   const qmap = new Map(questions.map((q) => [q.id, q]));
   const planCards: PlanData['cards'] = [];
   for (const c of cards) {
@@ -164,6 +208,7 @@ export async function fetchPlanData(): Promise<PlanData> {
       created_at: q.created_at,
       note_id: q.note_id,
       key_point_id: q.key_point_id,
+      in_review: !(q.note_id && reviewOff.has(noteSource.get(q.note_id) ?? '')),
     });
   }
   return {

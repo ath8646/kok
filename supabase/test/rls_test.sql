@@ -935,4 +935,70 @@ begin
   if (select count(*) from public.user_themes where user_id = a) <> 20 then raise exception 'A should have 20 themes'; end if;
 end $$;
 
+-- 자료함 정리: 복습에 넣기·별표·순서는 내 자료만 고친다 (다른 칸·다른 사람 자료는 못 고친다)
+reset role;
+do $$
+declare
+  a uuid := '11111111-1111-1111-1111-111111111111';
+  b uuid := '22222222-2222-2222-2222-222222222222';
+begin
+  if not exists (select 1 from public.sources where user_id = a and parent_id is null) then raise exception 'A needs a material'; end if;
+  if not exists (select 1 from public.sources where user_id = b) then raise exception 'B needs a material'; end if;
+  update public.sources set position = null, starred = false, in_review = true;
+end $$;
+set role authenticated;
+select set_config('request.jwt.claim.sub', '11111111-1111-1111-1111-111111111111', false);
+do $$
+declare
+  mine uuid := (select id from public.sources where parent_id is null order by created_at limit 1);
+  others uuid;
+begin
+  update public.sources set in_review = false, starred = true where id = mine;
+  if (select in_review from public.sources where id = mine) then raise exception 'in_review not saved'; end if;
+  if not (select starred from public.sources where id = mine) then raise exception 'starred not saved'; end if;
+  -- 처리 상태는 여전히 못 고친다
+  begin
+    update public.sources set status = 'ready' where id = mine;
+    raise exception 'status update should be denied';
+  exception when insufficient_privilege then null;
+  end;
+  -- 다른 사람 자료는 보이지도 않고 고쳐지지도 않는다
+  update public.sources set starred = true where user_id <> auth.uid();
+end $$;
+reset role;
+do $$
+declare
+  a uuid := '11111111-1111-1111-1111-111111111111';
+  b uuid := '22222222-2222-2222-2222-222222222222';
+begin
+  if exists (select 1 from public.sources where user_id = b and starred) then raise exception 'A must not star B materials'; end if;
+end $$;
+-- 순서 바꾸기 함수: 내 자료만 0, 1, 2 … (다른 사람 번호는 섞여 와도 건너뛴다)
+select array_to_string(array(
+  select id::text from public.sources
+   where parent_id is null and user_id in ('11111111-1111-1111-1111-111111111111', '22222222-2222-2222-2222-222222222222')
+   order by user_id = '11111111-1111-1111-1111-111111111111', id
+), ',') as reorder_ids \gset
+set role authenticated;
+select set_config('request.jwt.claim.sub', '11111111-1111-1111-1111-111111111111', false);
+select public.kok_reorder_sources(string_to_array(:'reorder_ids', ',')::uuid[]);
+reset role;
+do $$
+declare
+  a uuid := '11111111-1111-1111-1111-111111111111';
+  b uuid := '22222222-2222-2222-2222-222222222222';
+begin
+  if exists (select 1 from public.sources where user_id = b and position is not null) then raise exception 'reorder must not touch B'; end if;
+  if exists (select 1 from public.sources where user_id = a and parent_id is null and position is null) then raise exception 'reorder should number A'; end if;
+end $$;
+set role anon;
+do $$ begin
+  begin
+    perform public.kok_reorder_sources(array[]::uuid[]);
+    raise exception 'anon must not reorder';
+  exception when insufficient_privilege then null;
+  end;
+end $$;
+reset role;
+
 select 'ALL RLS TESTS PASSED' as result;

@@ -3,7 +3,7 @@
 // 노트에 자료를 더하면(Pro) 버전이 쌓인다. 원본 탭의 버전 기록에서 지난 버전을 열어(?v=번호) 보고 고치거나,
 // 그 버전을 지금 버전으로 쓰거나 지울 수 있다. 지난 버전에서 고친 것은 그 버전에 저장된다.
 // DB 에 버전·채팅 표가 아직 없으면(me.features) 예전처럼 동작한다.
-import { useParams, useRouter } from 'next/navigation';
+import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useMe } from '@/components/AppShell';
 import { SOURCES_CHANGED, useQuickAdd } from '@/components/QuickAdd';
@@ -40,6 +40,7 @@ import { subjectVar } from '@/lib/colors';
 import { VERSION_LIST_COLS, removalPlan, toVersionRow, type ChildSource, type VersionRow } from '@/lib/versions';
 import { previewText } from '@/lib/richtext';
 import { starredFirst } from '@/lib/note-order';
+import { practiceHref, rememberPracticeFrom } from '@/lib/review-mode';
 
 type Tab = 'note' | 'visual' | 'questions' | 'original';
 type SourceFull = SourceRowWithUnit & { text_content: string | null; parent_id?: string | null };
@@ -171,16 +172,18 @@ async function fetchOldDoc(noteId: string, number: number): Promise<OldDoc | nul
   };
 }
 
-function initialParam(name: string): string | null {
-  return typeof window === 'undefined' ? null : new URLSearchParams(window.location.search).get(name);
+/** 주소의 ?이름= 을 바꾼다 (방문 기록은 그대로). 새로 고치거나 뒤로 와도 같은 탭·버전이 열리게 */
+function setQueryParam(name: string, value: string | null) {
+  const url = new URL(window.location.href);
+  if (url.searchParams.get(name) === value) return;
+  if (value === null) url.searchParams.delete(name);
+  else url.searchParams.set(name, value);
+  window.history.replaceState(null, '', `${url.pathname}${url.search}${url.hash}`);
 }
 
-/** 보는 버전을 주소에 적는다 (새로 고쳐도 같은 버전이 열리게) */
+/** 보는 버전을 주소에 적는다 */
 function setViewParam(v: number | null) {
-  const url = new URL(window.location.href);
-  if (v === null) url.searchParams.delete('v');
-  else url.searchParams.set('v', String(v));
-  window.history.replaceState(null, '', `${url.pathname}${url.search}${url.hash}`);
+  setQueryParam('v', v === null ? null : String(v));
 }
 
 export default function NotePage() {
@@ -188,6 +191,9 @@ export default function NotePage() {
   const { me } = useMe();
   const router = useRouter();
   const toast = useToast();
+  // 처음 연 주소의 ?tab= · ?kp= · ?v= (다른 화면에서 눌러 들어오면 그리는 동안 window.location 은 아직 앞 화면 주소라 useSearchParams 로 읽는다)
+  const params = useSearchParams();
+  const [opened] = useState(() => ({ tab: params.get('tab'), kp: params.get('kp'), v: params.get('v') }));
   const versionsOn = !!me?.features.versions;
   const restedOn = !!me?.features.restedHidden;
   const chatOn = !!me?.features.chat;
@@ -198,10 +204,14 @@ export default function NotePage() {
   const [subbarEl, subbarRef] = useState<HTMLDivElement | null>(null);
   const subbarStuck = useStuck(subbarEl);
   const [tab, setTab] = useState<Tab>(() => {
-    const t = initialParam('tab');
+    const t = opened.tab;
     return t === 'note' || t === 'visual' || t === 'questions' || t === 'original' ? t : 'note';
   });
-  const [kp, setKp] = useState<string | null>(() => initialParam('kp'));
+  // 보는 탭은 주소에 적어 둔다 (문제 풀기에서 뒤로 오거나 새로 고쳐도 그 탭이 열리게)
+  useEffect(() => {
+    setQueryParam('tab', tab === 'note' ? null : tab);
+  }, [tab]);
+  const [kp, setKp] = useState<string | null>(() => opened.kp);
   const [page, setPage] = useState<number | null>(null);
   const [glance, setGlance] = useState(true);
   const [reporting, setReporting] = useState(false);
@@ -217,7 +227,7 @@ export default function NotePage() {
     return () => clearTimeout(t);
   }, [renaming]);
   const [viewing, setViewing] = useState<number | null>(() => {
-    const v = Number(initialParam('v'));
+    const v = Number(opened.v);
     return Number.isInteger(v) && v >= 1 ? v : null;
   });
   const [oldDoc, setOldDoc] = useState<OldDoc | null>(null);
@@ -368,15 +378,17 @@ export default function NotePage() {
 
   // 약점 개념에서 왔으면 그 개념으로 스크롤
   useEffect(() => {
-    const target = initialParam('kp');
+    const target = opened.kp;
     if (noteId && target) setTimeout(() => document.getElementById(`kp-${target}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' }), 200);
-  }, [noteId]);
+  }, [noteId, opened.kp]);
 
   // 지금 보는 것: 지금 버전(노트) 또는 지난 버전
   const raw = old ? old.body : note?.body;
   const body = useMemo<NoteBody | null>(() => (raw ? ({ ...zNote.parse(raw), recommended: raw.recommended as string | undefined } as NoteBody) : null), [raw]);
   const docVisuals = useMemo<Visuals>(() => (old ? old.visuals : (visuals ?? {})), [old, visuals]);
   const liveQuestions = useMemo(() => (questions ?? []).filter((q) => q.status !== 'hidden'), [questions]);
+  // 풀 수 있는 문제 (쉬는 문제 빼고)가 있을 때만 '이 노트 문제 풀기'
+  const canPractice = useMemo(() => liveQuestions.some((q) => q.status === 'active'), [liveQuestions]);
   const docQuestions = useMemo(() => (old ? (questions ?? []).filter((q) => old.questionIds.includes(q.id)) : liveQuestions), [old, questions, liveQuestions]);
   const existing = useMemo(() => new Set((questions ?? []).map((q) => q.id)), [questions]);
   const view = (raw?.view ?? {}) as NoteViewPrefs;
@@ -666,6 +678,11 @@ export default function NotePage() {
   // 직접 만든 노트는 AI 가 만든 것이 없으면 신고할 것도 없다 (자료를 더해 AI 가 합쳤으면 신고할 수 있다)
   const reportable = !manual || versions.length > 0;
   const title = old?.title || note?.title || source.title || (ready ? '새 자료' : '정리하는 중…');
+  /** 이 노트 문제 풀기로 갈 때: 노트에서 왔다고 남기고(돌아갈 때 뒤로 가기·제목 먼저 보이기) 주소를 준다 */
+  const openPractice = () => {
+    rememberPracticeFrom(sourceId, note?.title || source.title || '');
+    return practiceHref(sourceId);
+  };
   const meta = (
     <span className="flex flex-wrap items-center gap-1.5 text-sm">
       {subject ? (
@@ -726,7 +743,7 @@ export default function NotePage() {
           <Menu
             label="노트 메뉴"
             items={[
-              ...(liveQuestions.length ? [{ label: '이 노트 문제 풀기', icon: ICONS.retry, onSelect: () => router.push(`/review?note=${note.id}`) }] : []),
+              ...(canPractice ? [{ label: '이 노트 문제 풀기', icon: ICONS.retry, onSelect: () => router.push(openPractice()) }] : []),
               ...(old
                 ? []
                 : [
@@ -848,9 +865,13 @@ export default function NotePage() {
                   setTab('original');
                 }}
               />
-              {(!old && liveQuestions.length) || reportable ? (
+              {(!old && canPractice) || reportable ? (
                 <div className="flex flex-wrap gap-2">
-                  {!old && liveQuestions.length ? <LinkButton href={`/review?note=${note.id}`}>이 노트 문제 풀기</LinkButton> : null}
+                  {!old && canPractice ? (
+                    <LinkButton href={practiceHref(sourceId)} onClick={() => openPractice()}>
+                      이 노트 문제 풀기
+                    </LinkButton>
+                  ) : null}
                   {reportable ? (
                     <Button variant="ghost" onClick={() => setReporting(true)}>
                       이상해요
@@ -889,6 +910,7 @@ export default function NotePage() {
               questions={docQuestions}
               cards={cards}
               keyPoints={keyPoints}
+              practice={canPractice ? { href: practiceHref(sourceId), onOpen: openPractice } : undefined}
               onChanged={reload}
               removal={removal}
               oldVersion={old ? { number: old.number, addQuestion: (id) => setOldQuestionIds([...old.questionIds, id]) } : undefined}

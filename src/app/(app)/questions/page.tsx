@@ -1,6 +1,7 @@
 'use client';
 // 문제 모아 보기: 과목·단원·유형·틀린 횟수로 거르기, 고치기·잠그기·쉬게 하기·지우기
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useSearchParams } from 'next/navigation';
+import { Suspense, useCallback, useEffect, useMemo, useState } from 'react';
 import { QuestionList, type CardInfo } from '@/components/QuestionList';
 import { Select } from '@/components/Select';
 import { LargeHeader, Segmented, inputClass } from '@/components/ui';
@@ -11,11 +12,21 @@ const QCOLS =
   'id, note_id, subject_id, key_point_id, type, prompt, choices, answer, accepted, explanation, difficulty, pages, created_by, locked, edited, status, created_at';
 
 export default function QuestionsPage() {
+  return (
+    <Suspense fallback={null}>
+      <QuestionsView />
+    </Suspense>
+  );
+}
+
+function QuestionsView() {
+  // 자료함의 '문제 모아 보기'로 들어오면 그 과목 (다른 화면에서 눌러 들어오면 그리는 동안 window.location 이 아직 앞 화면 주소라 useSearchParams 로 읽는다)
+  const params = useSearchParams();
   const [subjects, setSubjects] = useState<SubjectRow[]>([]);
   const [questions, setQuestions] = useState<QuestionRow[] | null>(null);
   const [cards, setCards] = useState<Map<string, CardInfo>>(new Map());
   const [unitOf, setUnitOf] = useState<Map<string, string>>(new Map());
-  const [subject, setSubject] = useState(() => (typeof window === 'undefined' ? '' : (new URLSearchParams(window.location.search).get('subject') ?? '')));
+  const [subject, setSubject] = useState(() => params.get('subject') ?? '');
   const [unit, setUnit] = useState('');
   const [type, setType] = useState<'all' | 'mcq' | 'ox' | 'cloze' | 'short'>('all');
   const [wrong, setWrong] = useState<'all' | 'wrong' | 'resting'>('all');

@@ -573,6 +573,112 @@ async def main():
         await shot(page, "20-wrong")
         await no_hscroll(page, "wrong")
 
+        step("links from other screens open what they say (review modes, note tab)")
+        # 눌러서 들어가면(화면 안 이동) 그리는 동안 주소가 아직 앞 화면이다. 그래도 주소대로 열려야 한다
+        await page.get_by_role("link", name="전부 다시 풀기").click()
+        await page.wait_for_url(re.compile(r"/review\?mode=wrong$"))
+        await expect(page.get_by_role("heading", name="오답 다시 풀기")).to_be_visible()
+        await page.go_back()
+        await page.wait_for_url(re.compile(r"/wrong$"))
+        await expect(page.get_by_role("link", name="전부 다시 풀기")).to_be_visible()
+        weak_try = page.get_by_role("link", name="이 개념 풀기").first
+        if await weak_try.count():
+            await weak_try.click()
+            await page.wait_for_url(re.compile(r"/review\?kp="))
+            await expect(page.get_by_role("heading", name="약점 개념 풀기")).to_be_visible()
+            await page.go_back()
+            await page.wait_for_url(re.compile(r"/wrong$"))
+            await page.get_by_role("link", name="마인드맵에서 보기").first.click()
+            await page.wait_for_url(re.compile(r"/notes/[0-9a-f-]{36}\?tab=visual&kp="))
+            await expect(page.get_by_role("tab", name="그림")).to_have_attribute("aria-selected", "true")
+            print("   weak concept links ok")
+
+        step("note practice: '이 노트 문제 풀기' solves that note's questions right there")
+        note_title = db(f"select title from public.notes where source_id = '{sid}'")
+        n_active = int(db(f"select count(*) from public.questions q join public.notes n on n.id = q.note_id where n.source_id = '{sid}' and q.status = 'active'"))
+        assert n_active >= 3, n_active
+
+        async def answer_current():
+            """보이는 문제에 답하고 다음으로 (쓰는 답은 맞혀서 AI 채점을 부르지 않는다: AI 요청은 1분에 10번까지)"""
+            if await page.get_by_role("button", name="O 맞다").count():
+                await page.get_by_role("button", name="O 맞다").click()
+            elif await page.get_by_label("답").count():
+                card_text = await page.locator("main").inner_text()
+                await page.get_by_label("답").fill("기공" if "기체가 드나드는" in card_text else "녹말")
+                await page.get_by_role("button", name="확인").click()
+            else:
+                await page.locator("main button:has-text('1')").first.click()
+            await expect(page.get_by_role("button", name="다음")).to_be_visible(timeout=15000)
+            await page.get_by_role("button", name="다음").click()
+            await page.wait_for_timeout(150)
+
+        # 문제 탭에서: 고르는 화면 없이 바로 그 노트의 첫 문제. 시간 제한·아래 메뉴 없이, 위에 노트 이름
+        await page.goto(BASE + "/library")
+        await page.goto(BASE + f"/notes/{sid}")
+        await page.get_by_role("tab", name=re.compile("문제")).click()
+        await page.wait_for_url(re.compile(r"\?tab=questions$"))
+        logs0 = int(db("select count(*) from public.review_logs"))
+        await page.get_by_role("link", name="이 노트 문제 풀기").click()
+        await page.wait_for_url(re.compile(rf"/notes/{sid}/practice\?from=note$"))
+        await expect(page.get_by_text(re.compile(rf"^1 / {n_active}$"))).to_be_visible()
+        assert await page.get_by_role("button", name="시작").count() == 0
+        assert await page.get_by_label("남은 시간").count() == 0
+        await expect(page.get_by_role("navigation", name="주 메뉴")).to_have_count(0)
+        await expect(page.get_by_role("heading", name=note_title, exact=True)).to_be_visible()
+        await shot(page, "19a-practice", full=False)
+        await answer_current()
+        await answer_current()
+        await expect(page.get_by_text(re.compile(r"^3 / \d+$"))).to_be_visible()
+        await page.get_by_role("button", name="그만하기").click()
+        await expect(page.get_by_role("heading", name="여기까지 풀었어요")).to_be_visible()
+        await expect(page.locator("main").get_by_text("푼 문제")).to_be_visible()
+        await poll_db("select count(*) from public.review_logs", str(logs0 + 2))
+        await shot(page, "19b-practice-end", full=False)
+        await no_hscroll(page, "practice end")
+        # 노트로 돌아가기 = 뒤로 가기: 보던 문제 탭 그대로, 노트가 방문 기록에 두 번 쌓이지 않는다.
+        # 두 번 눌러도 한 번만 뒤로 간다
+        await page.evaluate("""() => {
+          const b = [...document.querySelectorAll('button')].find((x) => x.textContent.trim() === '노트로 돌아가기');
+          b.click();
+          b.click();
+        }""")
+        await page.wait_for_url(re.compile(rf"/notes/{sid}\?tab=questions$"))
+        await expect(page.get_by_role("tab", name=re.compile("문제"))).to_have_attribute("aria-selected", "true")
+        await expect(page.get_by_role("navigation", name="주 메뉴").first).to_be_attached()
+        await page.go_back()
+        await page.wait_for_url(re.compile(r"/library$"))
+
+        # 정리 탭의 메뉴에서: 끝까지 풀면 '다 풀었어요', 한 번 더 풀기는 바로 다시 시작, 하나도 안 풀고 그만두면 바로 노트로
+        await page.goto(BASE + f"/notes/{sid}")
+        await page.get_by_role("button", name="노트 메뉴").click()
+        await page.get_by_role("menuitem", name="이 노트 문제 풀기").click()
+        await page.wait_for_url(re.compile(rf"/notes/{sid}/practice\?from=note$"))
+        done = page.get_by_role("heading", name="다 풀었어요!")
+        for _ in range(60):
+            await expect(page.get_by_role("button", name="그만하기").or_(done)).to_be_visible()
+            if await done.count():
+                break
+            await answer_current()
+        await expect(done).to_be_visible()
+        await shot(page, "19c-practice-done", full=False)
+        await page.get_by_role("button", name="한 번 더 풀기").click()
+        await expect(page.get_by_text(re.compile(r"^1 / \d+$"))).to_be_visible()
+        await page.get_by_role("button", name="그만하기").click()
+        await page.wait_for_url(re.compile(rf"/notes/{sid}$"))
+        await expect(page.get_by_role("tab", name="정리")).to_have_attribute("aria-selected", "true")
+
+        # 주소로 바로 열어도(새로 고침) 된다. 예전 주소(/review?note=)도 노트 문제 풀기로
+        await page.goto(BASE + f"/notes/{sid}/practice")
+        await expect(page.get_by_text(re.compile(r"^1 / \d+$"))).to_be_visible()
+        await expect(page.get_by_role("heading", name=note_title, exact=True)).to_be_visible()
+        await page.get_by_role("button", name="그만하기").click()
+        await page.wait_for_url(re.compile(rf"/notes/{sid}$"))
+        nid = db(f"select id from public.notes where source_id = '{sid}'")
+        await page.goto(BASE + f"/review?note={nid}")
+        await expect(page.get_by_text(re.compile(r"^1 / \d+$"))).to_be_visible()
+        await page.get_by_role("button", name="그만하기").click()
+        await page.wait_for_url(re.compile(rf"/notes/{sid}$"))
+
         step("home / library / subject / questions")
         await page.goto(BASE + "/home")
         await page.wait_for_timeout(800)
@@ -587,6 +693,19 @@ async def main():
         await expect(page.get_by_role("heading", name="과학", exact=True)).to_be_visible()
         await page.wait_for_timeout(600)
         await shot(page, "23-subject")
+        # 과목 메뉴에서 눌러 들어가도 그 과목으로 (예전에는 오늘 복습·모든 과목이 열렸다)
+        await page.get_by_role("button", name="과목 메뉴").click()
+        await page.get_by_role("menuitem", name="이 과목만 복습").click()
+        await page.wait_for_url(re.compile(r"/review\?subject="))
+        await expect(page.get_by_role("heading", name="과목 복습")).to_be_visible()
+        await page.go_back()
+        await page.wait_for_url(LIBRARY_SUBJECT)
+        await page.get_by_role("button", name="과목 메뉴").click()
+        await page.get_by_role("menuitem", name="문제 모아 보기").click()
+        await page.wait_for_url(re.compile(r"/questions\?subject="))
+        await expect(page.get_by_role("button", name=re.compile("^과목"))).to_have_text("과학")
+        await page.go_back()
+        await page.wait_for_url(LIBRARY_SUBJECT)
         await page.get_by_role("tab", name=re.compile("^전체")).click()
         await page.wait_for_url(re.compile(r"/library$"))
         await page.goto(BASE + "/questions")

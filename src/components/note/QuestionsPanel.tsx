@@ -18,6 +18,7 @@ export function QuestionsPanel({
   questions,
   cards,
   keyPoints,
+  practice,
   onChanged,
   removal,
   oldVersion,
@@ -28,6 +29,8 @@ export function QuestionsPanel({
   questions: QuestionRow[];
   cards: Map<string, CardInfo>;
   keyPoints: Array<{ id: string; title: string }>;
+  /** 이 노트 문제 풀기 (풀 문제가 있을 때만): 주소와, 가기 전에 할 일 */
+  practice?: { href: string; onOpen: () => void };
   onChanged: () => void;
   /** 지우기 대신 (노트 버전이 있으면 다른 버전의 문제는 남긴다) */
   removal?: (q: QuestionRow) => QuestionRemoval;
@@ -45,7 +48,11 @@ export function QuestionsPanel({
   return (
     <div className="grid gap-3">
       <div className="flex flex-wrap gap-2">
-        {!oldVersion ? <LinkButton href={`/review?note=${noteId}`}>이 노트 문제 풀기</LinkButton> : null}
+        {practice && !oldVersion ? (
+          <LinkButton href={practice.href} onClick={practice.onOpen}>
+            이 노트 문제 풀기
+          </LinkButton>
+        ) : null}
         <Button variant="secondary" onClick={() => setAdding(true)}>
           직접 만들기
         </Button>

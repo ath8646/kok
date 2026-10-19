@@ -45,16 +45,19 @@ export function LinkButton({
   variant = 'primary',
   size = 'md',
   className,
+  onClick,
   children,
 }: {
   href: string;
   variant?: BtnProps['variant'];
   size?: BtnProps['size'];
   className?: string;
+  /** 이동하기 전에 할 일 (이동은 링크가 한다) */
+  onClick?: () => void;
   children: ReactNode;
 }) {
   return (
-    <Link href={href} className={cx(BTN_BASE, BTN_SIZES[size], BTN_VARIANTS[variant ?? 'primary'], className)}>
+    <Link href={href} onClick={onClick} className={cx(BTN_BASE, BTN_SIZES[size], BTN_VARIANTS[variant ?? 'primary'], className)}>
       {children}
     </Link>
   );

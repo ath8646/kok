@@ -72,6 +72,33 @@ export async function removeFolder(admin: SupabaseClient, prefix: string, bucket
   return removed;
 }
 
+/**
+ * `base/자료id` 폴더들을 지운다 (노트 채팅 파일 `내id/chat`, 잘라 둔 자료 그림 `내id/figs`).
+ * 몇 개면 그 폴더를 바로 지우고, 많으면(과목 지우기) base 의 목록을 끝까지 읽은 뒤 지운다 (읽는 중에 지우면 목록이 밀려 건너뛴다)
+ */
+export async function removeSourceFolders(admin: SupabaseClient, base: string, sourceIds: string[]): Promise<void> {
+  if (!sourceIds.length) return;
+  if (sourceIds.length <= 20) {
+    for (const id of sourceIds) await removeFolder(admin, `${base}/${id}`);
+    return;
+  }
+  const want = new Set(sourceIds);
+  const bucket = admin.storage.from(SOURCES_BUCKET);
+  const found: string[] = [];
+  for (let offset = 0; ; offset += 100) {
+    const { data, error } = await bucket.list(base, { limit: 100, offset });
+    if (error || !data?.length) break;
+    for (const item of data) if (want.has(item.name)) found.push(item.name);
+    if (data.length < 100) break;
+  }
+  for (const id of found) await removeFolder(admin, `${base}/${id}`);
+}
+
+/** 자료를 지울 때 그 자료에서 잘라 둔 그림도 지운다 (`내id/figs/자료id`: 무료 원본 파일을 지울 때는 남는다) */
+export async function removeFigureFolders(admin: SupabaseClient, userId: string, sourceIds: string[]): Promise<void> {
+  await removeSourceFolders(admin, `${userId}/figs`, sourceIds);
+}
+
 export async function removePaths(admin: SupabaseClient, paths: string[]): Promise<void> {
   if (!paths.length) return;
   for (let i = 0; i < paths.length; i += 100) {

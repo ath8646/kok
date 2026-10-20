@@ -3,13 +3,24 @@
 import type { NextRequest } from 'next/server';
 import { z } from 'zod';
 import { assertSameOrigin, assertUuid, readJson, requireAccount } from '@/lib/server/auth';
-import { getAppSettings } from '@/lib/server/account';
+import { getAppSettings, getFeatures } from '@/lib/server/account';
 import { UserFacingError, errorResponse } from '@/lib/server/errors';
 import { assertNoteHasContent, assertSameVersion, loadOwnedNote, noteForPrompt } from '@/lib/server/notes';
 import { runTask } from '@/lib/server/tasks';
 import { textBlock } from '@/lib/server/claude';
 import { checkPrompt, quizPrompt, wrap } from '@/lib/ai/prompts';
-import { checkJsonSchema, quizJsonSchema, rowToQuizItem, toQuestionRow, zCheck, zQuestionRowInput, zQuiz, zQuizItem } from '@/lib/ai/schemas';
+import {
+  checkJsonSchema,
+  quizFiguresJsonSchema,
+  quizJsonSchema,
+  rowToQuizItem,
+  toQuestionRow,
+  zCheck,
+  zQuestionRowInput,
+  zQuiz,
+  zQuizItem,
+} from '@/lib/ai/schemas';
+import { figuresForPrompt, questionFigure, readFigures, type SourceFigure } from '@/lib/source-figures';
 import { normalizeAnswer } from '@/lib/grading';
 
 // 문제 만들기(최대 140초) + 검사(최대 60초)
@@ -32,13 +43,24 @@ export async function POST(req: NextRequest, ctx: RouteContext<'/api/notes/[id]/
     const body = await readJson(req, 400_000);
     const note = await loadOwnedNote(admin, id, acc.userId);
 
+    // 자료 그림: 노트의 그림마다 그림 문제 (설정에서 켜 두었고 DB 에 칸이 있을 때)
+    const figures: SourceFigure[] = acc.settings.quiz.sourceFigures && (await getFeatures(admin)).sourceFigures ? readFigures(note.raw) : [];
+    const byId = new Map(figures.map((f) => [f.id, f]));
+
     const apply = Apply.safeParse(body);
     if (apply.success) {
       assertSameVersion(note, apply.data.version);
+      // 그림 문제의 그림은 화면이 보낸 것이 아니라 지금 노트의 그림을 붙인다 (없어진 그림의 문제는 뺀다)
       const rows = apply.data.questions
         .map((q) => zQuestionRowInput.safeParse(q))
         .filter((r) => r.success)
-        .map((r) => toQuestionRow(rowToQuizItem(r.data)))
+        .map((r) => {
+          const row = toQuestionRow(rowToQuizItem(r.data));
+          const fid = r.data.figure_id ?? '';
+          if (!row || !fid) return row;
+          const f = byId.get(fid);
+          return f ? { ...row, source_figure: questionFigure(f) } : null;
+        })
         .filter((r): r is NonNullable<typeof r> => !!r);
       if (!rows.length) throw new UserFacingError('empty', '바꿀 문제가 없어요.', 400);
       const { data, error } = await admin.rpc('kok_add_questions', { p_note: note.id, p_questions: rows, p_replace: true });
@@ -67,10 +89,11 @@ export async function POST(req: NextRequest, ctx: RouteContext<'/api/notes/[id]/
       tier: acc.settings.models.quiz,
       content: [
         textBlock(wrap('note', noteForPrompt(note.note))),
+        ...(figures.length ? [textBlock(wrap('figures', JSON.stringify(figuresForPrompt(figures))))] : []),
         textBlock(wrap('existing_questions', JSON.stringify(kept.map((q) => q.prompt)))),
-        textBlock(quizPrompt({ types: qs.types, mix: qs.mix, language: qs.language, perKeyPoint: qs.perKeyPoint })),
+        textBlock(quizPrompt({ types: qs.types, mix: qs.mix, language: qs.language, perKeyPoint: qs.perKeyPoint, figures: figures.length })),
       ],
-      schema: quizJsonSchema,
+      schema: figures.length ? quizFiguresJsonSchema : quizJsonSchema,
       maxTokens: 8000,
       // 뒤에 이어지는 검사 단계까지 생각해 넉넉히 잡는다
       outTokens: 4300,
@@ -81,7 +104,13 @@ export async function POST(req: NextRequest, ctx: RouteContext<'/api/notes/[id]/
       .parse(json)
       .questions.map((r) => zQuizItem.safeParse(r))
       .filter((r) => r.success)
-      .map((r) => toQuestionRow(r.data))
+      .map((r) => {
+        const row = toQuestionRow(r.data);
+        const fid = (r.data.figure_id ?? '').trim();
+        if (!row || !fid) return row;
+        // 없는 그림을 가리키는 그림 문제는 뺀다 ('다음 지도' 같은 말만 남지 않게)
+        return byId.has(fid) ? { ...row, figure_id: fid } : null;
+      })
       .filter((r): r is NonNullable<typeof r> => !!r)
       .filter((r) => qs.types.includes(r.type));
     // 지켜 둔 문제와 같은 문제, 새 문제끼리 겹치는 문제는 뺀다
@@ -103,8 +132,9 @@ export async function POST(req: NextRequest, ctx: RouteContext<'/api/notes/[id]/
           tier: acc.settings.models.quiz,
           content: [
             textBlock(wrap('note', noteForPrompt(note.note))),
+            ...(rows.some((x) => 'figure_id' in x) ? [textBlock(wrap('figures', JSON.stringify(figuresForPrompt(figures))))] : []),
             textBlock(wrap('questions', JSON.stringify(rows.map((x, index) => ({ index, ...x }))))),
-            textBlock(checkPrompt()),
+            textBlock(checkPrompt({ figures: rows.some((x) => 'figure_id' in x) })),
           ],
           schema: checkJsonSchema,
           maxTokens: 2500,

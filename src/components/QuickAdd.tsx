@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation';
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import type { MeResponse, SubjectRow } from '@/lib/types';
 import { fetchSources, fetchSubjects, sb } from '@/lib/data';
-import { estimateEnergy, estimateFigures, estimateSmallTask, figuresWanted } from '@/lib/ai/models';
+import { estimateEnergy, estimateFigures, estimateRedraws, estimateSmallTask, figuresWanted, redrawsWanted } from '@/lib/ai/models';
 import { clientModel } from '@/lib/client-model';
 import { energyWindow, refillText } from '@/lib/plans';
 import { shrinkImage } from '@/lib/image';
@@ -411,10 +411,17 @@ export function QuickAddProvider({
           const model = clientModel(m, m.settings.models.organize);
           // 노트에 더하는 자료는 지금 노트와 합치는 값도, Pro 그림 풀이를 만들면 그 값도 든다 (서버 계산과 같게)
           const figures = figuresWanted({ canFigures: m.canFigures, figuresSetting: m.settings.quiz.figures, featureOn: m.features.figures });
+          const redraws = redrawsWanted({
+            kind: prep.kind,
+            canFigures: m.canFigures,
+            sourceFiguresSetting: m.settings.quiz.sourceFigures,
+            featureOn: m.features.sourceFigures,
+          });
           const est =
             estimateEnergy({ kind: prep.kind, pages: prep.pages, images: prep.blobs.length, chars: prep.text.length }, model, m.usdPerEnergy) +
             (it.parentId ? Math.ceil(estimateSmallTask(model, m.usdPerEnergy, 9000, 3000)) : 0) +
-            (figures ? estimateFigures(clientModel(m, m.settings.models.quiz), m.usdPerEnergy) : 0);
+            (figures ? estimateFigures(clientModel(m, m.settings.models.quiz), m.usdPerEnergy) : 0) +
+            (redraws ? estimateRedraws(clientModel(m, m.settings.models.visual), m.usdPerEnergy) : 0);
           const left = m.energy.unlimited ? Infinity : (m.energy.remaining ?? 0);
           if (est > left) {
             throw new Error(`에너지가 부족해요. 필요: 약 ${est}, 남음: ${Math.floor(left)}. ${refillText(m.planInfo, energyWindow(m.energy))}`);

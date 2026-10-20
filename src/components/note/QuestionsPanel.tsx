@@ -8,8 +8,13 @@ import { sb } from '@/lib/data';
 import { QuestionEditor } from '../QuestionEditor';
 import { QuestionList, QuestionPreview, createOwnQuestion, type CardInfo, type QuestionRemoval } from '../QuestionList';
 import { ApiError, Button, Energy, LinkButton, Sheet, api, useToast } from '../ui';
+import { questionFigure, type SourceFigure } from '@/lib/source-figures';
 
-type PreviewRow = Pick<QuestionRow, 'type' | 'prompt' | 'choices' | 'answer' | 'accepted' | 'explanation' | 'difficulty' | 'pages'> & { key_point_id: string };
+/** figure_id: 그림 문제의 자료 그림 번호 (바꿀 때 서버가 노트의 그림을 붙인다) */
+type PreviewRow = Pick<QuestionRow, 'type' | 'prompt' | 'choices' | 'answer' | 'accepted' | 'explanation' | 'difficulty' | 'pages'> & {
+  key_point_id: string;
+  figure_id?: string;
+};
 
 export function QuestionsPanel({
   me,
@@ -22,6 +27,7 @@ export function QuestionsPanel({
   onChanged,
   removal,
   oldVersion,
+  figures = [],
 }: {
   me: MeResponse;
   noteId: string;
@@ -36,6 +42,8 @@ export function QuestionsPanel({
   removal?: (q: QuestionRow) => QuestionRemoval;
   /** 지난 버전을 보고 있을 때: 만든 문제를 그 버전 목록에 넣는다 */
   oldVersion?: { number: number; addQuestion: (id: string) => Promise<boolean> };
+  /** 노트의 자료 그림 (다시 만들기 미리보기의 그림 문제에 붙여 보여 준다) */
+  figures?: SourceFigure[];
 }) {
   const toast = useToast();
   const [adding, setAdding] = useState(false);
@@ -162,11 +170,14 @@ export function QuestionsPanel({
               새 문제 <b>{preview.rows.length}개</b>로 AI 문제 <b>{preview.replaceCount}개</b>를 바꿔요. 지켜 둔 문제 {preview.keptCount}개는 그대로예요.
             </p>
             <ol className="grid gap-2">
-              {preview.rows.map((q, i) => (
-                <li key={i} className="rounded-2xl border border-line p-3">
-                  <QuestionPreview q={q} />
-                </li>
-              ))}
+              {preview.rows.map((q, i) => {
+                const f = q.figure_id ? figures.find((x) => x.id === q.figure_id) : undefined;
+                return (
+                  <li key={i} className="rounded-2xl border border-line p-3">
+                    <QuestionPreview q={f ? { ...q, source_figure: questionFigure(f) } : q} />
+                  </li>
+                );
+              })}
             </ol>
           </div>
         ) : null}

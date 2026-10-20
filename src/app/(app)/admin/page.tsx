@@ -73,6 +73,7 @@ const EFFORT_TASKS: Array<[keyof ModelsConfig['effort'], string]> = [
   ['chat', '채팅'],
   ['theme', '테마 만들기'],
   ['solve', '풀이 (그림·단계)'],
+  ['redraw', '자료 그림 다시 그리기'],
 ];
 
 export default function AdminPage() {

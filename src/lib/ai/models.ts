@@ -132,6 +132,20 @@ export function estimateFigures(model: ModelId, usdPerEnergy: number): number {
   return Math.max(1, Math.ceil(usdToEnergy(usd, usdPerEnergy)));
 }
 
+/**
+ * Pro 자료 그림 다시 그리기의 예상 에너지: PDF·사진에서 찾은 지도·그래프·표·연표·도식을 그림마다 한 번 (4장으로 센다).
+ * 노트 만들기 예상에 더한다 (model: 그림 모델)
+ */
+export function estimateRedraws(model: ModelId, usdPerEnergy: number): number {
+  const usd = costUsd(model, { input_tokens: 2500, output_tokens: 3500 }) * 4;
+  return Math.max(1, Math.ceil(usdToEnergy(usd, usdPerEnergy)));
+}
+
+/** 자료를 넣을 때 자료 그림을 콕 스타일로 다시 그리는지 (PDF·사진, Pro 혜택, 설정에서 켜 둠, DB 칸이 있음) */
+export function redrawsWanted(o: { kind: 'text' | 'pdf' | 'image'; canFigures: boolean; sourceFiguresSetting: boolean; featureOn: boolean }): boolean {
+  return o.kind !== 'text' && o.canFigures && o.sourceFiguresSetting && o.featureOn;
+}
+
 /** 노트를 만들 때 그림 풀이를 만드는지 (Pro 혜택, 설정에서 켜 둠, DB 칸이 있음) */
 export function figuresWanted(o: { canFigures: boolean; figuresSetting: boolean; featureOn: boolean }): boolean {
   return o.canFigures && o.figuresSetting && o.featureOn;

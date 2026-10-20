@@ -36,6 +36,7 @@ import {
 } from '@/components/ui';
 import { ORGANIZE_COLS, SOURCE_COLS, questionCols, sb, type SourceRowWithUnit } from '@/lib/data';
 import { keyPointMemory } from '@/lib/memory';
+import { readFigures } from '@/lib/source-figures';
 import { zMindmap, zNote, zTable, zTimeline, type Mindmap, type TableSpec, type TimelineSpec } from '@/lib/ai/schemas';
 import type { QuestionRow, SubjectRow } from '@/lib/types';
 import { subjectVar } from '@/lib/colors';
@@ -93,7 +94,14 @@ function toVisuals(rows: Array<{ type: string; spec: unknown }>): Visuals {
   return visuals;
 }
 
-async function fetchBundle(sourceId: string, versionsOn: boolean, restedOn: boolean, figuresOn: boolean, organizeOn: boolean): Promise<Bundle> {
+async function fetchBundle(
+  sourceId: string,
+  versionsOn: boolean,
+  restedOn: boolean,
+  figuresOn: boolean,
+  organizeOn: boolean,
+  sourceFiguresOn: boolean,
+): Promise<Bundle> {
   const empty: Bundle = { source: null, note: null, visuals: {}, visualRows: {}, questions: [], cards: new Map(), subject: null, versions: [] };
   const { data: s } = await sb()
     .from('sources')
@@ -113,7 +121,7 @@ async function fetchBundle(sourceId: string, versionsOn: boolean, restedOn: bool
     sb().from('visuals').select('id, type, spec, updated_at').eq('note_id', note.id),
     sb()
       .from('questions')
-      .select(questionCols({ rested: restedOn, figures: figuresOn }))
+      .select(questionCols({ rested: restedOn, figures: figuresOn, sourceFigures: sourceFiguresOn }))
       .eq('note_id', note.id)
       .order('created_at')
       .order('id'),
@@ -199,6 +207,7 @@ export default function NotePage() {
   const restedOn = !!me?.features.restedHidden;
   const figuresOn = !!me?.features.figures;
   const organizeOn = !!me?.features.organize;
+  const sourceFiguresOn = !!me?.features.sourceFigures;
   const chatOn = !!me?.features.chat;
   const canAppend = !!me?.canAppend;
   const [bundle, setBundle] = useState<Bundle | null | undefined>(undefined);
@@ -258,7 +267,7 @@ export default function NotePage() {
   useEffect(() => {
     let alive = true;
     const gen = saveGen.current;
-    fetchBundle(sourceId, versionsOn, restedOn, figuresOn, organizeOn)
+    fetchBundle(sourceId, versionsOn, restedOn, figuresOn, organizeOn, sourceFiguresOn)
       .then((b) => {
         if (!alive || !freshSince(gen)) return;
         noteToken.current = b.note?.updated_at ?? null;
@@ -271,7 +280,7 @@ export default function NotePage() {
     return () => {
       alive = false;
     };
-  }, [sourceId, tick, versionsOn, restedOn, figuresOn, organizeOn, freshSince]);
+  }, [sourceId, tick, versionsOn, restedOn, figuresOn, organizeOn, sourceFiguresOn, freshSince]);
 
   const source = bundle === undefined ? undefined : (bundle?.source ?? null);
   const note = bundle?.note ?? null;
@@ -404,6 +413,8 @@ export default function NotePage() {
   const raw = old ? old.body : note?.body;
   const body = useMemo<NoteBody | null>(() => (raw ? ({ ...zNote.parse(raw), recommended: raw.recommended as string | undefined } as NoteBody) : null), [raw]);
   const docVisuals = useMemo<Visuals>(() => (old ? old.visuals : (visuals ?? {})), [old, visuals]);
+  // 자료 그림 (PDF·사진 속 그림을 잘라 둔 것, Pro 는 다시 그린 그림도): 개념 카드 안에 보인다
+  const docFigures = useMemo(() => readFigures(raw), [raw]);
   const liveQuestions = useMemo(() => (questions ?? []).filter((q) => q.status !== 'hidden'), [questions]);
   // 풀 수 있는 문제 (쉬는 문제 빼고)가 있을 때만 '이 노트 문제 풀기'
   const canPractice = useMemo(() => liveQuestions.some((q) => q.status === 'active'), [liveQuestions]);
@@ -914,6 +925,9 @@ export default function NotePage() {
                   setPage(p);
                   setTab('original');
                 }}
+                figures={docFigures}
+                originalFirst={!!me?.settings.visual.originalFirst}
+                onFiguresChange={(next) => saveBody({ ...raw, figures: next })}
               />
               {(!old && canPractice) || reportable ? (
                 <div className="flex flex-wrap gap-2">
@@ -967,6 +981,7 @@ export default function NotePage() {
               onChanged={reload}
               removal={removal}
               oldVersion={old ? { number: old.number, addQuestion: (id) => setOldQuestionIds([...old.questionIds, id]) } : undefined}
+              figures={docFigures}
             />
           ) : null}
 

@@ -140,6 +140,8 @@ export type Features = {
   chatFiles: boolean;
   /** 자료함 정리: 노트마다 복습에 넣기·별표·순서 (sources.in_review·starred·position, kok_reorder_sources) */
   organize: boolean;
+  /** 자료 그림: PDF·사진 속 그림을 잘라 개념·그림 문제에 쓴다 (questions.source_figure, 단계 'figures') */
+  sourceFigures: boolean;
 };
 
 let featuresCache: { at: number; value: Features } | null = null;
@@ -150,7 +152,7 @@ let featuresCache: { at: number; value: Features } | null = null;
  */
 export async function getFeatures(admin: SupabaseClient): Promise<Features> {
   if (featuresCache && Date.now() - featuresCache.at < 60_000) return featuresCache.value;
-  const [v, p, r, c, f, t, ti, ac, qf, pf, cf, og] = await Promise.all([
+  const [v, p, r, c, f, t, ti, ac, qf, pf, cf, og, sf] = await Promise.all([
     admin.from('note_versions').select('id').limit(1),
     admin.from('sources').select('parent_id').limit(1),
     admin.from('questions').select('rested_hidden').limit(1),
@@ -163,6 +165,7 @@ export async function getFeatures(admin: SupabaseClient): Promise<Features> {
     admin.from('custom_plans').select('can_figures').limit(1),
     admin.from('chat_messages').select('attachments, solution').limit(1),
     admin.from('sources').select('in_review, starred, position').limit(1),
+    admin.from('questions').select('source_figure').limit(1),
   ]);
   const value: Features = {
     versions: !v.error && !p.error,
@@ -173,6 +176,7 @@ export async function getFeatures(admin: SupabaseClient): Promise<Features> {
     figures: !qf.error && !pf.error,
     chatFiles: !c.error && !cf.error,
     organize: !og.error,
+    sourceFigures: !sf.error,
   };
   featuresCache = { at: Date.now(), value };
   return value;

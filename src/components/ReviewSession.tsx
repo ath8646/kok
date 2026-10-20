@@ -153,8 +153,11 @@ function practiceIds(p: PlanData, note: PracticeNote | null, interleave: boolean
 }
 
 /** 고른 문제를 순서대로 읽는다 (그사이 쉬게 했거나 지운 문제는 뺀다) */
-async function buildItems(ids: string[], p: PlanData, figures: boolean): Promise<Item[]> {
-  const qs = await fetchQuestionsByIds(ids, { figures });
+/** 문제에서 더 읽을 칸: figures 그림 풀이(Pro), sourceFigures 자료 그림 문제의 그림 (DB 에 칸이 있을 때만) */
+type QCols = { figures: boolean; sourceFigures: boolean };
+
+async function buildItems(ids: string[], p: PlanData, cols: QCols): Promise<Item[]> {
+  const qs = await fetchQuestionsByIds(ids, cols);
   const qmap = new Map(qs.map((q) => [q.id, q]));
   const items: Item[] = [];
   for (const id of ids) {
@@ -165,7 +168,7 @@ async function buildItems(ids: string[], p: PlanData, figures: boolean): Promise
   return items;
 }
 
-async function load(m: ReviewMode, r: ReviewSettings, latest: Map<string, CardRow>, figures: boolean): Promise<Loaded> {
+async function load(m: ReviewMode, r: ReviewSettings, latest: Map<string, CardRow>, cols: QCols): Promise<Loaded> {
   const practice = m.kind === 'practice';
   const [read, note, logs] = await Promise.all([
     fetchPlanData(),
@@ -176,7 +179,7 @@ async function load(m: ReviewMode, r: ReviewSettings, latest: Map<string, CardRo
   const plan = withLatest(read, latest);
   const types = new Map(read.cards.map((c) => [c.question_id, c.type]));
   const pace = paceFrom(logs.map((l) => ({ ms: l.ms, type: l.question_id ? types.get(l.question_id) : null })));
-  const items = practice ? await buildItems(practiceIds(plan, note, r.interleave), plan, figures) : [];
+  const items = practice ? await buildItems(practiceIds(plan, note, r.interleave), plan, cols) : [];
   return { plan, note, pace, items };
 }
 
@@ -231,6 +234,7 @@ export function ReviewSession({
   const subjectNames = useMemo(() => new Map((plan?.subjects ?? []).map((s) => [s.id, s.name])), [plan]);
   const reviewSettings = me?.settings.review;
   const figuresOn = !!me?.features.figures;
+  const qcols: QCols = { figures: figuresOn, sourceFigures: !!me?.features.sourceFigures };
 
   // 못 읽었을 때는 '오늘 할 일 끝' 대신 다시 불러오기를 보여 준다
   const [failed, setFailed] = useState(false);
@@ -288,13 +292,13 @@ export function ReviewSession({
     if (!reviewSettings) return;
     if (phase === 'end') setRound((r) => r + 1);
     setPhase('loading');
-    load(mode, reviewSettings, latest.current, figuresOn).then(applyLoaded).catch(loadFailed);
+    load(mode, reviewSettings, latest.current, qcols).then(applyLoaded).catch(loadFailed);
   };
 
   useEffect(() => {
     if (!reviewSettings) return;
     let alive = true;
-    load(mode, reviewSettings, latest.current, figuresOn)
+    load(mode, reviewSettings, latest.current, qcols)
       .then((r) => {
         if (alive) applyLoaded(r);
       })
@@ -463,7 +467,7 @@ export function ReviewSession({
       const items = await buildItems(
         pick.cards.map((c) => c.question_id),
         plan,
-        figuresOn,
+        qcols,
       );
       if (!items.length) {
         toast('문제를 불러오지 못했어요. 다시 해 주세요.', 'bad');

@@ -2,6 +2,7 @@
 // 오답노트: 약점 개념 5개, 틀린 문제 다시 풀기, 다 외운 문제 빼기
 import Link from 'next/link';
 import { useEffect, useState } from 'react';
+import { useMe } from '@/components/AppShell';
 import { QuestionPreview } from '@/components/QuestionList';
 import { Button, Card, Chip, EmptyState, ICONS, Icon, LargeHeader, LinkButton, SectionTitle, buttonClass, cx, useToast } from '@/components/ui';
 import { fetchPlanData, fetchQuestionsByIds, sb } from '@/lib/data';
@@ -10,7 +11,8 @@ import type { QuestionRow } from '@/lib/types';
 
 type NoteInfo = { id: string; source_id: string; title: string };
 
-async function fetchWrong() {
+/** sourceFigures: 자료 그림 문제의 그림도 읽는다 (DB 에 칸이 있을 때만) */
+async function fetchWrong(sourceFigures: boolean) {
   const plan = await fetchPlanData();
   const titles = plan.concepts;
   // 자료함에서 복습을 끈 노트의 문제는 빼고 (몇 개 뺐는지는 알려 준다)
@@ -20,7 +22,10 @@ async function fetchWrong() {
     wrong.map((c) => ({ question_id: c.question_id, note_id: c.note_id, key_point_id: c.key_point_id, lapses: c.wrong_count ?? 0 })),
     5,
   );
-  const qs = await fetchQuestionsByIds(wrong.map((c) => c.question_id));
+  const qs = await fetchQuestionsByIds(
+    wrong.map((c) => c.question_id),
+    { sourceFigures },
+  );
   const lapses = new Map(wrong.map((c) => [c.question_id, Math.max(1, c.wrong_count ?? 0)]));
   const noteIds = [...new Set(wrong.map((c) => c.note_id).filter((x): x is string => !!x))];
   const notes = new Map<string, NoteInfo>();
@@ -37,6 +42,8 @@ async function fetchWrong() {
 
 export default function WrongPage() {
   const toast = useToast();
+  const { me } = useMe();
+  const sourceFiguresOn = !!me?.features.sourceFigures;
   const [loading, setLoading] = useState(true);
   const [weak, setWeak] = useState<WeakConcept[]>([]);
   const [titles, setTitles] = useState<Map<string, Map<string, { title: string }>>>(new Map());
@@ -51,7 +58,7 @@ export default function WrongPage() {
 
   useEffect(() => {
     let alive = true;
-    fetchWrong()
+    fetchWrong(sourceFiguresOn)
       .then((r) => {
         if (!alive) return;
         setWeak(r.weak);
@@ -70,7 +77,7 @@ export default function WrongPage() {
     return () => {
       alive = false;
     };
-  }, [attempt]);
+  }, [attempt, sourceFiguresOn]);
 
   const retry = () => {
     setLoading(true);

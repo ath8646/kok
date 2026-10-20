@@ -36,6 +36,7 @@ function QuestionsView() {
   const { me } = useMe();
   const ready = !!me;
   const figuresOn = !!me?.features.figures;
+  const sourceFiguresOn = !!me?.features.sourceFigures;
 
   useEffect(() => {
     if (!ready) return;
@@ -46,7 +47,7 @@ function QuestionsView() {
         (a, b) =>
           sb()
             .from('questions')
-            .select(questionCols({ figures: figuresOn }))
+            .select(questionCols({ figures: figuresOn, sourceFigures: sourceFiguresOn }))
             .neq('status', 'hidden')
             .order('created_at', { ascending: false })
             .order('id')
@@ -72,7 +73,7 @@ function QuestionsView() {
     return () => {
       alive = false;
     };
-  }, [version, ready, figuresOn]);
+  }, [version, ready, figuresOn, sourceFiguresOn]);
 
   const units = useMemo(() => {
     const set = new Set<string>();

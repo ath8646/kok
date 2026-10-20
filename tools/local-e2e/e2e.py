@@ -115,6 +115,55 @@ def make_jpeg(color=(240, 240, 230), w=1600, h=1200) -> bytes:
     return b.getvalue()
 
 
+def make_figure_pdf() -> bytes:
+    """자료 그림 시험용 PDF 한 쪽: 글과 빨간 네모(지도 자리). 네모는 (100,400)~(495,700)pt = 0~1000 으로 (168,169)~(832,525)"""
+    stream = "BT /F1 20 Tf 72 780 Td (Goguryeo map) Tj ET\n1 0 0 rg 100 400 395 300 re f\n0 0 1 rg 120 650 40 30 re f"
+    objs = [
+        "<< /Type /Catalog /Pages 2 0 R >>",
+        "<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+        "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> >>",
+        f"<< /Length {len(stream)} >>\nstream\n{stream}\nendstream",
+        "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
+    ]
+    out = io.BytesIO()
+    out.write(b"%PDF-1.4\n")
+    offsets = []
+    for i, o in enumerate(objs):
+        offsets.append(out.tell())
+        out.write(f"{i + 1} 0 obj\n{o}\nendobj\n".encode())
+    xref = out.tell()
+    out.write(f"xref\n0 {len(objs) + 1}\n0000000000 65535 f \n".encode())
+    for off in offsets:
+        out.write(f"{off:010d} 00000 n \n".encode())
+    out.write(f"trailer\n<< /Size {len(objs) + 1} /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF\n".encode())
+    return out.getvalue()
+
+
+def make_tilted_jpeg() -> bytes:
+    """비스듬히 찍은 사진: 흰 바탕에 파란 사각형 (네 모서리 (400,200)(1300,300)(1200,1000)(300,900) = 0~1000 으로 (250,167)(813,250)(750,833)(188,750)),
+    왼쪽 위 모서리 가까이 노란 점 (반듯하게 편 뒤에도 왼쪽 위에 있어야 한다)"""
+    from PIL import Image, ImageDraw
+    im = Image.new("RGB", (1600, 1200), (255, 255, 255))
+    d = ImageDraw.Draw(im)
+    d.polygon([(400, 200), (1300, 300), (1200, 1000), (300, 900)], fill=(30, 60, 220))
+    d.ellipse([(430, 240), (500, 310)], fill=(255, 220, 0))
+    b = io.BytesIO()
+    im.save(b, "JPEG", quality=90)
+    return b.getvalue()
+
+
+def jpeg_look(path):
+    """저장된 자른 그림: (너비, 높이, 가운데 색, 왼쪽 위 1/5 자리의 노란 점 수)"""
+    from PIL import Image
+    im = Image.open(path).convert("RGB")
+    w, h = im.size
+    mid = im.getpixel((w // 2, h // 2))
+    corner = im.crop((0, 0, w // 4, h // 4))
+    raw = corner.tobytes()
+    yellow = sum(1 for i in range(0, len(raw), 3) if raw[i] > 200 and raw[i + 1] > 180 and raw[i + 2] < 120)
+    return w, h, mid, yellow
+
+
 LIBRARY_SUBJECT = re.compile(r"/library/[0-9a-f-]{36}")
 
 
@@ -206,6 +255,174 @@ def make_png(w=900, h=600) -> bytes:
     b = io.BytesIO()
     im.save(b, "PNG")
     return b.getvalue()
+
+
+async def figure_steps(browser):
+    """자료 그림 (따로 돌리기: python3 e2e_figs.py)"""
+    step("source figures: a figure in a PDF is cut out, put on its concept and asked about (Pro also gets a redraw)")
+    me_id = USERS["student"][0]
+    files_root = pathlib.Path(__file__).parent / "fakebase" / "files" / "sources"
+
+    async def add_one(page, uid, name, mime, data, kind, title=None):
+        """자료 하나를 넣고 정리가 끝날 때까지 기다린다 (자료 번호).
+        title 이 없으면 화면에 끌어다 놓고, 있으면 입력창에 붙이고 짧은 글(제목)과 함께 보낸다"""
+        since = db(f"select coalesce(max(created_at), now() - interval '1 day')::text from public.sources where user_id = '{uid}'")
+        await page.goto(BASE + "/library")
+        # 화면이 끌어다 놓기를 받을 준비가 된 뒤에 놓는다
+        await expect(page.get_by_role("button", name="자료 넣기", exact=True)).to_be_visible()
+        if title is None:
+            await drag_files(page, [(name, mime, data)])
+            await expect(page.get_by_text("여기에 놓으면 콕이 정리해요")).to_be_visible()
+            await drop_files(page)
+        else:
+            await page.get_by_role("button", name="자료 넣기", exact=True).click()
+            composer = page.get_by_role("dialog", name="자료 넣기")
+            await composer.locator("input[type=file][multiple]").set_input_files(files=[{"name": name, "mimeType": mime, "buffer": data}])
+            await expect(composer.get_by_role("list", name="붙인 파일").locator("li")).to_have_count(1)
+            await composer.get_by_label("공부한 내용").fill(title)
+            await composer.get_by_label("공부한 내용").press("Enter")
+            await expect(composer).to_be_hidden()
+        q = f"from public.sources where user_id = '{uid}' and kind = '{kind}' and parent_id is null and created_at > '{since}'"
+        await poll_db(f"select count(*) {q}", "1", timeout=30)
+        sid_ = db(f"select id {q}")
+        await poll_db(f"select status from public.sources where id = '{sid_}'", "ready", timeout=120)
+        return sid_
+
+    ctx, page = await new_ctx(browser, "student")
+    fsid = await add_one(page, me_id, "고구려 지도.pdf", "application/pdf", make_figure_pdf(), "pdf")
+    figs = json.loads(db(f"select coalesce(body->'figures', '[]'::jsonb)::text from public.notes where source_id = '{fsid}'"))
+    # 너무 작은 그림(장식)은 빼고 지도 하나: 개념(이름으로 찾은 k2)에 붙는다
+    assert len(figs) == 1, figs
+    fig = figs[0]
+    assert (fig["id"], fig["kind"], fig["key_point_id"], fig["page"]) == ("f1", "map", "k2", 1), fig
+    assert fig["crop"] == f"{me_id}/figs/{fsid}/f1.jpg", fig
+    crop_file = files_root / fig["crop"]
+    assert crop_file.exists(), crop_file
+    w, h, mid, _ = jpeg_look(crop_file)
+    assert abs(w / h - 395 / 300) < 0.15, (w, h)
+    assert mid[0] > 180 and mid[1] < 90 and mid[2] < 90, mid
+    # Pro: 지도를 콕 스타일로 다시 그렸다 (원본 그림은 그대로)
+    assert fig.get("art"), fig
+    assert db(f"select step from public.sources where id = '{fsid}'") == "done"
+    # 그림 문제: 그림을 그대로 남긴다
+    fq = f"from public.questions q join public.notes n on n.id = q.note_id where n.source_id = '{fsid}' and q.source_figure->>'id' = 'f1'"
+    assert db(f"select count(*) {fq}") == "1", db(f"select count(*) {fq}")
+    assert db(f"select q.source_figure->>'crop' {fq}") == fig["crop"]
+
+    # 노트: 개념 카드 안의 그림 (다시 그린 그림이 먼저, 원본으로 바꿔 보기, 크게 보기)
+    await page.goto(BASE + f"/notes/{fsid}")
+    assert await wait_ready(page)
+    fig_el = page.locator("#kp-k2 figure")
+    await expect(fig_el).to_contain_text("5세기 고구려 영토")
+    await expect(fig_el).to_contain_text("1쪽")
+    views = fig_el.get_by_role("radiogroup", name=re.compile("보기$"))
+    await expect(views.get_by_role("radio", name="다시 그린 그림")).to_have_attribute("aria-checked", "true")
+    # 다시 그린 지도: 그림 이름(화면 읽기)에 지도 속 글이 들어 있다
+    await expect(fig_el.get_by_role("img", name=re.compile("고구려"))).to_be_visible()
+    await fig_el.scroll_into_view_if_needed()
+    await shot(page, "96-figure-redraw", full=False)
+    await views.get_by_role("radio", name="원본").click()
+    img = fig_el.locator("img")
+    await expect(img).to_be_visible()
+    await page.wait_for_function("(el) => el.complete && el.naturalWidth > 0", arg=await img.element_handle(), timeout=10000)
+    await fig_el.scroll_into_view_if_needed()
+    await shot(page, "96-figure-original", full=False)
+    await no_hscroll(page, "note with figure")
+    await fig_el.get_by_role("button", name="크게 보기").click()
+    zoom = page.get_by_role("dialog", name="5세기 고구려 영토")
+    await expect(zoom).to_be_visible()
+    await expect(zoom.locator("img")).to_be_visible()
+    await shot(page, "97-figure-zoom", full=False)
+    await page.keyboard.press("Escape")
+    await expect(zoom).to_have_count(0)
+
+    # 설정: 원본 그림 먼저 보기
+    await page.goto(BASE + "/settings")
+    toggle = page.get_by_label("자료 그림은 원본으로 먼저 보기")
+    await expect(toggle).not_to_be_checked()
+    await page.get_by_text("자료 그림은 원본으로 먼저 보기", exact=True).click()
+    await expect(toggle).to_be_checked()
+    await poll_db(f"select settings->'visual'->>'originalFirst' from public.profiles where id = '{me_id}'", "true")
+    await page.goto(BASE + f"/notes/{fsid}")
+    assert await wait_ready(page)
+    await expect(page.locator("#kp-k2 figure").get_by_role("radio", name="원본")).to_have_attribute("aria-checked", "true")
+    await page.goto(BASE + "/settings")
+    await expect(page.get_by_label("자료 그림은 원본으로 먼저 보기")).to_be_checked()
+    await page.get_by_text("자료 그림은 원본으로 먼저 보기", exact=True).click()
+    await poll_db(f"select settings->'visual'->>'originalFirst' from public.profiles where id = '{me_id}'", "false")
+
+    # 이 노트 문제 풀기: 그림 문제는 문제 위에 그림 (제목은 풀고 나서)
+    await page.goto(BASE + f"/notes/{fsid}/practice")
+    seen = False
+    for _ in range(12):
+        await expect(page.get_by_role("button", name="모르겠어요")).to_be_visible(timeout=15000)
+        q_fig = page.locator("main figure")
+        if await q_fig.count():
+            seen = True
+            await expect(q_fig).to_contain_text("자료 그림")
+            await expect(page.locator("main")).not_to_contain_text("5세기 고구려 영토")
+            # 다시 그린 그림 속 제목도 문제 위에서는 숨긴다
+            await expect(page.locator("main")).not_to_contain_text("고구려의 전성기")
+            await expect(q_fig.get_by_role("radio", name="다시 그린 그림")).to_have_attribute("aria-checked", "true")
+            await shot(page, "98-figure-question", full=False)
+            # 그림의 크게 보기 창이 열려 있으면 숫자 키로 뒤의 문제에 답하지 않는다
+            await q_fig.get_by_role("button", name="크게 보기").click()
+            zoom_q = page.get_by_role("dialog", name="자료 그림")
+            await expect(zoom_q).to_be_visible()
+            await page.keyboard.press("1")
+            await page.wait_for_timeout(300)
+            await expect(page.get_by_role("button", name="모르겠어요")).to_be_visible()
+            await page.keyboard.press("Escape")
+            await expect(zoom_q).to_have_count(0)
+        await page.get_by_role("button", name="모르겠어요").click()
+        await expect(page.get_by_role("button", name="다음", exact=True)).to_be_visible(timeout=15000)
+        if seen:
+            await expect(page.locator("main")).to_contain_text("5세기 고구려 영토")
+            await shot(page, "98-figure-question-result", full=False)
+            break
+        await page.get_by_role("button", name="다음", exact=True).click()
+    assert seen, "figure question did not show up"
+    await ctx.close()
+
+    # 넓은 화면·어두운 화면에서도 그림 카드 (가로로 넘치지 않게)
+    dctx, dpage = await new_ctx(browser, "student", width=1280, scheme="dark")
+    await dpage.goto(BASE + f"/notes/{fsid}")
+    assert await wait_ready(dpage)
+    dfig = dpage.locator("#kp-k2 figure")
+    await expect(dfig.get_by_role("img", name=re.compile("고구려"))).to_be_visible()
+    await dfig.scroll_into_view_if_needed()
+    await dpage.wait_for_timeout(400)
+    await shot(dpage, "96-figure-desktop-dark", full=False)
+    await no_hscroll(dpage, "note with figure (desktop)")
+    await dctx.close()
+
+    step("source figures: a free account gets the original only, a tilted photo comes out straight, deleting the note removes the cut-outs")
+    other_id = USERS["other"][0]
+    db(f"delete from public.energy_ledger where user_id = '{other_id}'")
+    octx, opage = await new_ctx(browser, "other")
+    # 사진 파일 이름은 제목이 되지 않아서(IMG_… 처럼 뜻 없는 이름이 많다) 입력창의 짧은 글로 제목을 붙인다
+    psid = await add_one(opage, other_id, "IMG_2041.jpg", "image/jpeg", make_tilted_jpeg(), "image", title="기울어진 지도")
+    figs = json.loads(db(f"select coalesce(body->'figures', '[]'::jsonb)::text from public.notes where source_id = '{psid}'"))
+    assert len(figs) == 1 and figs[0]["kind"] == "photo" and not figs[0].get("art"), figs
+    crop_file = files_root / figs[0]["crop"]
+    w, h, mid, yellow = jpeg_look(crop_file)
+    # 사다리꼴로 찍힌 파란 네모가 반듯한 네모로 (가로·세로 비율 약 905:707), 노란 점은 왼쪽 위에 그대로
+    assert abs(w / h - 905 / 707) < 0.15, (w, h)
+    assert mid[2] > 150 and mid[0] < 100, mid
+    assert yellow > 20, yellow
+    await opage.goto(BASE + f"/notes/{psid}")
+    assert await wait_ready(opage)
+    ofig = opage.locator("article figure").first
+    await expect(ofig).to_contain_text("비스듬히 찍은 유물 사진")
+    await expect(ofig.get_by_role("radiogroup")).to_have_count(0)
+    await expect(ofig.locator("img")).to_be_visible()
+    await ofig.scroll_into_view_if_needed()
+    await shot(opage, "99-figure-free", full=False)
+    # 노트를 지우면 잘라 둔 그림도 지운다
+    r = await opage.request.delete(BASE + f"/api/sources/{psid}", headers={"origin": BASE})
+    assert r.ok, (r.status, await r.text())
+    assert not (files_root / other_id / "figs" / psid).exists() or not any((files_root / other_id / "figs" / psid).iterdir())
+    await octx.close()
 
 
 async def main():
@@ -2394,6 +2611,8 @@ async def main():
         await expect(page.get_by_role("heading", name="2개 선택", exact=True)).to_be_visible()
         await shot(page, "95-library-select-desktop", full=False)
         await ctx.close()
+
+        await figure_steps(browser)
         await browser.close()
 
     print("\nSTEPS OK:", len(STEPS))

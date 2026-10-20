@@ -110,7 +110,7 @@ create table if not exists public.sources (
   file_paths text[] not null default '{}',
   page_count int,
   status text not null default 'queued' check (status in ('queued', 'processing', 'ready', 'error')),
-  step text not null default 'organize' check (step in ('organize', 'merge', 'visual', 'quiz', 'check', 'done')),
+  step text not null default 'organize' check (step in ('organize', 'merge', 'figures', 'visual', 'quiz', 'check', 'done')),
   progress int not null default 0 check (progress between 0 and 100),
   chunk_index int not null default 0,
   chunk_total int not null default 1,
@@ -484,6 +484,21 @@ alter table public.chat_messages add column if not exists solution jsonb check (
 -- 문제 그림(설계도: 좌표와 도형 목록, 그림은 앱이 그린다)과 단계 풀이 [{ text, add, focus }]. 예전 문제는 null
 alter table public.questions add column if not exists figure jsonb check (figure is null or pg_column_size(figure) <= 32768);
 alter table public.questions add column if not exists steps jsonb check (steps is null or pg_column_size(steps) <= 16384);
+-- 자료 그림 문제: 문제에 붙은 자료 그림 한 장을 그대로 남긴다 { id, kind, title, caption, page, crop(원본에서 자른 그림 경로), w, h, art(콕 스타일로 다시 그린 설계도, Pro) }
+alter table public.questions add column if not exists source_figure jsonb check (source_figure is null or pg_column_size(source_figure) <= 65536);
+-- 자료 처리 단계에 '그림 다시 그리기'(figures, Pro)를 더한다 (정리·합치기 다음, 그림 앞).
+-- 이미 바꿨으면 건너뛴다 (다시 실행할 때마다 표 전체를 다시 검사하지 않게)
+do $$
+begin
+  if not exists (
+    select 1 from pg_constraint
+     where conrelid = 'public.sources'::regclass and conname = 'sources_step_check'
+       and pg_get_constraintdef(oid) like '%figures%'
+  ) then
+    alter table public.sources drop constraint if exists sources_step_check;
+    alter table public.sources add constraint sources_step_check check (step in ('organize', 'merge', 'figures', 'visual', 'quiz', 'check', 'done'));
+  end if;
+end $$;
 
 -- 테스트 플랜: 자료 더하기·테마·그림 풀이(문제 그림·단계 풀이)를 쓸 수 있는지
 alter table public.custom_plans add column if not exists can_append boolean not null default false;
@@ -1252,7 +1267,7 @@ begin
   for q in select * from jsonb_array_elements(coalesce(p_questions, '[]'::jsonb)) loop
     insert into public.questions (
       user_id, note_id, subject_id, key_point_id, type, prompt, choices, answer, accepted,
-      explanation, difficulty, pages, created_by, figure, steps
+      explanation, difficulty, pages, created_by, figure, steps, source_figure
     ) values (
       n.user_id, n.id, n.subject_id,
       nullif(q->>'key_point_id', ''),
@@ -1272,7 +1287,9 @@ begin
       -- 그림·단계 풀이 (Pro 가 노트를 만들 때). 없거나 칸 한도보다 크면 null (풀이 때문에 노트 저장이 멈추지 않게)
       case when jsonb_typeof(q->'figure') = 'object' and pg_column_size(q->'figure') <= 32768 then q->'figure' else null end,
       case when jsonb_typeof(q->'steps') = 'array' and jsonb_array_length(q->'steps') > 0 and pg_column_size(q->'steps') <= 16384
-           then q->'steps' else null end
+           then q->'steps' else null end,
+      -- 자료 그림 문제의 그림. 없거나 칸 한도보다 크면 null
+      case when jsonb_typeof(q->'source_figure') = 'object' and pg_column_size(q->'source_figure') <= 65536 then q->'source_figure' else null end
     )
     returning id into qid;
     insert into public.cards (question_id, user_id, subject_id, due)
@@ -1515,6 +1532,7 @@ declare
   n public.notes%rowtype;
   v_other int;
   v_paths text[];
+  v_gone uuid[];
 begin
   select * into n from public.notes where id = p_note and user_id = p_user for update;
   if not found then
@@ -1551,12 +1569,18 @@ begin
    where s.parent_id = n.source_id and s.status = 'ready'
      and not exists (select 1 from public.note_versions v, jsonb_array_elements(v.materials) m
                       where v.note_id = n.id and m->>'source_id' = s.id::text);
-  delete from public.sources s
-   where s.parent_id = n.source_id and s.status = 'ready'
-     and not exists (select 1 from public.note_versions v, jsonb_array_elements(v.materials) m
-                      where v.note_id = n.id and m->>'source_id' = s.id::text);
+  -- 지운 더한 자료 번호도 돌려준다 (자료 그림을 잘라 둔 폴더 {user_id}/figs/{자료 id}/ 를 서버가 지운다)
+  with gone as (
+    delete from public.sources s
+     where s.parent_id = n.source_id and s.status = 'ready'
+       and not exists (select 1 from public.note_versions v, jsonb_array_elements(v.materials) m
+                        where v.note_id = n.id and m->>'source_id' = s.id::text)
+    returning s.id
+  )
+  select coalesce(array_agg(id), '{}') into v_gone from gone;
   return jsonb_build_object(
     'paths', to_jsonb(v_paths),
+    'sources', to_jsonb(v_gone),
     'current', (select current_version from public.notes where id = n.id)
   );
 end;

@@ -1,12 +1,14 @@
 'use client';
 // 문제 관리: 보기, 고치기, 잠그기, 쉬게 하기, 지우기, 이상해요 신고
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import type { QuestionRow } from '@/lib/types';
 import { THINK_OUT, estimateSmallTask } from '@/lib/ai/models';
 import { clientModel } from '@/lib/client-model';
 import { sb } from '@/lib/data';
 import { useMe } from './AppShell';
 import { QuestionFigure, StepsDisclosure, useSolution } from './figure/SolutionView';
+import { SourceFigureView } from './figure/SourceFigureView';
+import { readQuestionFigure } from '@/lib/source-figures';
 import { QuestionEditor, type QuestionDraft } from './QuestionEditor';
 import { answerText, type ReviewQuestion } from './QuestionCard';
 import { RichText } from './RichText';
@@ -18,16 +20,22 @@ export function QuestionPreview({
   q,
   showAnswer = true,
 }: {
-  q: Pick<QuestionRow, 'type' | 'prompt' | 'choices' | 'answer' | 'explanation'> & { figure?: unknown; steps?: unknown };
+  q: Pick<QuestionRow, 'type' | 'prompt' | 'choices' | 'answer' | 'explanation'> & { figure?: unknown; steps?: unknown; source_figure?: unknown };
   showAnswer?: boolean;
 }) {
   const solution = useSolution(q);
+  const { me } = useMe();
+  // 자료 그림 문제: 답을 보여 줄 때는 그림의 제목·설명도 (풀기 전에는 숨긴다)
+  const sourceFig = useMemo(() => readQuestionFigure(q.source_figure), [q.source_figure]);
   return (
     <div className="grid gap-1.5">
       <p className="font-semibold leading-relaxed">
         <RichText text={q.prompt} />
       </p>
       <QuestionFigure solution={solution} className="my-1" />
+      {sourceFig ? (
+        <SourceFigureView fig={sourceFig} variant={showAnswer ? 'card' : 'question'} originalFirst={!!me?.settings.visual.originalFirst} className="my-1" />
+      ) : null}
       {q.type === 'mcq' && q.choices ? (
         <ol className="grid gap-0.5 pl-1 text-sm">
           {q.choices.map((c, i) => (
@@ -179,7 +187,7 @@ export function QuestionList({
                       {q.status === 'active' ? '잠깐 쉬기' : '다시 내기'}
                     </Button>
                   ) : null}
-                  {figuresOn && me?.canFigures && !q.steps ? (
+                  {figuresOn && me?.canFigures && !q.steps && !q.source_figure ? (
                     <Button size="sm" variant="secondary" busy={solving === q.id} disabled={!!solving && solving !== q.id} onClick={() => solve(q)}>
                       그림 풀이 만들기 <Energy n={solveEst} />
                     </Button>

@@ -4,6 +4,7 @@
 // 2) zod 스키마: 받은 JSON 을 한 번 더 검사하고 빈 값을 채운다.
 import { z } from 'zod';
 import { figureJsonSchema, stepsJsonSchema, textStepsJsonSchema } from '@/lib/figure/spec';
+import { FIG_KINDS } from '@/lib/source-figures';
 
 type JsonSchema = Record<string, unknown>;
 
@@ -38,6 +39,26 @@ export const noteJsonSchema: JsonSchema = obj({
   examples: { type: 'array', items: obj({ text: str, key_point_id: str }) },
   checks: { type: 'array', items: obj({ text: str }) },
   changes: { type: 'array', items: obj({ text: str }) },
+});
+
+/**
+ * 정리 + 자료 그림 (PDF·사진에서 그림을 찾을 때). 그림은 노트 뒤에 쓴다: 개념을 먼저 정해야 그림을 붙일 개념 이름을 적을 수 있다.
+ * corners: 네 모서리 (0~1000, 왼쪽 위·오른쪽 위·오른쪽 아래·왼쪽 아래의 x, y)
+ */
+export const organizeFiguresJsonSchema: JsonSchema = obj({
+  ...(noteJsonSchema.properties as Record<string, unknown>),
+  figures: {
+    type: 'array',
+    items: obj({
+      page: int,
+      kind: { type: 'string', enum: [...FIG_KINDS] },
+      title: str,
+      caption: str,
+      asks: str,
+      key_point_title: str,
+      corners: intArr,
+    }),
+  },
 });
 
 const zImportance = z
@@ -147,24 +168,22 @@ export const zVisualResult = z.object({
 export type VisualResult = z.infer<typeof zVisualResult>;
 
 // ---------------------------------------------------------------- 문제
-export const quizJsonSchema: JsonSchema = obj({
-  questions: {
-    type: 'array',
-    items: obj({
-      type: { type: 'string', enum: ['mcq', 'ox', 'cloze', 'short'] },
-      prompt: str,
-      choices: strArr,
-      answer_index: int,
-      answer_bool: { type: 'boolean' },
-      answer_text: str,
-      accepted: strArr,
-      explanation: str,
-      key_point_id: str,
-      difficulty: { type: 'string', enum: ['easy', 'medium', 'hard'] },
-      pages: intArr,
-    }),
-  },
-});
+const quizItemProps = {
+  type: { type: 'string', enum: ['mcq', 'ox', 'cloze', 'short'] },
+  prompt: str,
+  choices: strArr,
+  answer_index: int,
+  answer_bool: { type: 'boolean' },
+  answer_text: str,
+  accepted: strArr,
+  explanation: str,
+  key_point_id: str,
+  difficulty: { type: 'string', enum: ['easy', 'medium', 'hard'] },
+  pages: intArr,
+};
+export const quizJsonSchema: JsonSchema = obj({ questions: { type: 'array', items: obj(quizItemProps) } });
+/** 자료 그림이 있을 때: 그림 문제는 figure_id 에 그림 번호 ('' 이면 그림 없는 문제) */
+export const quizFiguresJsonSchema: JsonSchema = obj({ questions: { type: 'array', items: obj({ ...quizItemProps, figure_id: str }) } });
 
 export const zQuizItem = z.object({
   type: z
@@ -185,6 +204,8 @@ export const zQuizItem = z.object({
     .pipe(z.enum(['easy', 'medium', 'hard']))
     .catch('medium'),
   pages: zPages,
+  /** 그림 문제의 자료 그림 번호 (자료 그림이 있을 때만) */
+  figure_id: z.string().catch('').optional(),
 });
 export type QuizItem = z.infer<typeof zQuizItem>;
 
@@ -391,6 +412,8 @@ export const zQuestionRowInput = z.object({
   key_point_id: z.string().max(40).nullable().catch(null),
   difficulty: z.enum(['easy', 'medium', 'hard']).catch('medium'),
   pages: z.array(z.number().int()).max(20).catch([]),
+  /** 문제 다시 만들기 미리보기의 그림 문제: 노트의 자료 그림 번호 (그림은 서버가 노트에서 붙인다) */
+  figure_id: z.string().max(16).optional().catch(undefined),
 });
 export type QuestionRowInput = z.infer<typeof zQuestionRowInput>;
 
@@ -407,5 +430,6 @@ export function rowToQuizItem(r: QuestionRowInput): QuizItem {
     key_point_id: r.key_point_id ?? '',
     difficulty: r.difficulty,
     pages: r.pages,
+    figure_id: r.figure_id ?? '',
   };
 }

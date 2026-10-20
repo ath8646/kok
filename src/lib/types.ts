@@ -36,6 +36,8 @@ export type MeResponse = {
     chatFiles: boolean;
     /** 자료함 정리: 노트마다 복습에 넣기·별표·순서 */
     organize: boolean;
+    /** 자료 그림: PDF·사진 속 그림을 개념·그림 문제에 (questions.source_figure) */
+    sourceFigures: boolean;
   };
   consented: boolean;
   settings: UserSettings;
@@ -121,6 +123,8 @@ export type QuestionRow = {
   figure?: unknown;
   /** 단계 풀이 [{ text, add, focus }]. readSteps 로 읽는다 */
   steps?: unknown;
+  /** 자료 그림 문제의 그림 (schema.sql 전에는 없다). readQuestionFigure 로 읽는다 */
+  source_figure?: unknown;
   created_at: string;
 };
 

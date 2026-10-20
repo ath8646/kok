@@ -9,7 +9,7 @@ import { PdfError, pdfPageCount } from '@/lib/pdf';
 import { SOURCES_BUCKET } from '@/lib/supabase/admin';
 import { imageBlock, pdfBlock, textBlock, type ContentPart } from './claude';
 import { UserFacingError } from './errors';
-import { removeFolder, sniff } from './files';
+import { removeSourceFolders, sniff } from './files';
 
 const BAD_FILE = '붙인 파일을 읽지 못했어요. 다시 붙여 주세요.';
 
@@ -154,21 +154,7 @@ export function chatFolder(userId: string, sourceId: string): string {
  * 많으면(과목 지우기) 보관한 폴더 목록을 끝까지 읽은 뒤 지운다 (읽는 중에 지우면 목록이 밀려 건너뛴다)
  */
 export async function removeChatFolders(admin: SupabaseClient, userId: string, sourceIds: string[]): Promise<void> {
-  if (!sourceIds.length) return;
-  if (sourceIds.length <= 20) {
-    for (const id of sourceIds) await removeFolder(admin, chatFolder(userId, id));
-    return;
-  }
-  const want = new Set(sourceIds);
-  const bucket = admin.storage.from(SOURCES_BUCKET);
-  const found: string[] = [];
-  for (let offset = 0; ; offset += 100) {
-    const { data, error } = await bucket.list(`${userId}/chat`, { limit: 100, offset });
-    if (error || !data?.length) break;
-    for (const item of data) if (want.has(item.name)) found.push(item.name);
-    if (data.length < 100) break;
-  }
-  for (const id of found) await removeFolder(admin, chatFolder(userId, id));
+  await removeSourceFolders(admin, `${userId}/chat`, sourceIds);
 }
 
 export { finishReply, historyLine, readChatSolution } from '@/lib/chat-solution';

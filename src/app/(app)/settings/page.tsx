@@ -51,6 +51,7 @@ const TASK_NAME: Record<string, string> = {
   chat: '노트 채팅',
   ask: 'AI에게 물어보기',
   solve: '그림 풀이',
+  redraw: '자료 그림 다시 그리기',
   theme: '테마 만들기',
   refund: '돌려받음',
 };
@@ -435,6 +436,22 @@ export default function SettingsPage() {
           checked={draft.visual.hideMode === 'on'}
           onChange={(v) => set('visual', { hideMode: v ? 'on' : 'off' })}
         />
+        {me.features.sourceFigures ? (
+          <div className="grid gap-1.5">
+            <Toggle
+              id="set-original-first"
+              label="자료 그림은 원본으로 먼저 보기"
+              checked={!me.canFigures || draft.visual.originalFirst}
+              disabled={!me.canFigures}
+              onChange={(v) => set('visual', { originalFirst: v })}
+            />
+            <p className="text-xs text-muted">
+              {me.canFigures
+                ? '끄면 콕 스타일로 다시 그린 그림부터 보여 줘요. 그림마다 원본과 바꿔 볼 수 있어요.'
+                : '자료 그림은 원본에서 잘라 보여 줘요. Pro는 지도·그래프·표·연표·도식을 콕 스타일로 다시 그려 줘요.'}
+            </p>
+          </div>
+        ) : null}
       </Card>
 
       <SectionTitle>복습</SectionTitle>
@@ -557,6 +574,17 @@ export default function SettingsPage() {
             ]}
           />
         </Field>
+        {me.features.sourceFigures ? (
+          <div className="grid gap-1.5">
+            <Toggle
+              id="set-source-figures"
+              label="자료의 그림으로 문제 만들기"
+              checked={draft.quiz.sourceFigures}
+              onChange={(v) => set('quiz', { sourceFigures: v })}
+            />
+            <p className="text-xs text-muted">PDF·사진 속 지도·그래프·사진 같은 중요한 그림을 찾아 개념에 붙이고, 그 그림을 보고 푸는 문제를 만들어요.</p>
+          </div>
+        ) : null}
         {me.features.figures ? (
           <div className="grid gap-1.5">
             <Toggle

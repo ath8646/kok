@@ -93,11 +93,15 @@ export function remergeState(draft: Record<string, unknown>): RemergeState | nul
   const times = Number(draft.remerged ?? 0) + 1;
   if (times > MAX_REMERGES) return null;
   const keep: Record<string, unknown> = { ...draft };
-  // 검사·그림 풀이 표시도 지운다 (다시 합친 노트로 만든 문제를 다시 검사한다)
-  for (const k of ['note', 'visual', 'questions', 'base', 'baseVersion', 'checked', 'solveRound']) delete keep[k];
+  // 검사·그림 풀이 표시도 지운다 (다시 합친 노트로 만든 문제를 다시 검사한다).
+  // 자료 그림: 다시 합치면 지금 노트의 그림(baseFigures)과 다시 그리기 차례를 새로 정한다 (자른 그림·다시 그린 그림은 그대로 쓴다)
+  for (const k of ['note', 'visual', 'questions', 'base', 'baseVersion', 'checked', 'solveRound', 'baseFigures', 'figRound']) delete keep[k];
   const parts = Array.isArray(draft.newParts) ? draft.newParts : [];
-  // 새 자료의 정리가 남아 있지 않으면 처음부터 다시 정리한다
-  if (!parts.length) return { step: 'organize', chunk_index: 0, partials: [], progress: 3, draft: { ...keep, newParts: [], attempts: 0, remerged: times } };
+  // 새 자료의 정리가 남아 있지 않으면 처음부터 다시 정리한다 (그림도 다시 찾으니 예전 그림은 모두 버린다)
+  if (!parts.length) {
+    for (const k of ['figures', 'figCuts', 'figFound', 'figCutTries']) delete keep[k];
+    return { step: 'organize', chunk_index: 0, partials: [], progress: 3, draft: { ...keep, newParts: [], attempts: 0, remerged: times } };
+  }
   return { step: 'merge', partials: parts, progress: 60, draft: { ...keep, attempts: 0, remerged: times } };
 }
 

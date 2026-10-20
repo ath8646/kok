@@ -681,6 +681,7 @@ begin
   if (r->>'current')::int <> 1 then raise exception 'current after delete: %', r; end if;
   if exists (select 1 from public.questions where id = q_new) then raise exception 'v2-only question should be deleted'; end if;
   if exists (select 1 from public.sources where id = child) then raise exception 'unused added material should be deleted'; end if;
+  if not (r->'sources') @> to_jsonb(array[child::text]) then raise exception 'deleted material ids should come back: %', r; end if;
   if not exists (select 1 from public.sources where id = parent) then raise exception 'first material must stay'; end if;
   begin
     perform public.kok_delete_version(nid, a, 1);
@@ -735,6 +736,32 @@ begin
     raise exception 'question without figure';
   end if;
   delete from public.questions where note_id = nid and prompt in ('그림 문제', '큰 그림', '그림 없음');
+end $$;
+
+-- ---------- 자료 그림: 그림 문제는 그림을 그대로 남기고(칸 한도보다 크면 빼고), 처리 단계에 그림 다시 그리기가 있다 ----------
+do $$
+declare nid uuid := current_setting('kok.v_note')::uuid;
+begin
+  perform public.kok_add_questions(nid, jsonb_build_array(
+    jsonb_build_object('type', 'ox', 'prompt', '위 지도의 나라는 한강 유역을 차지했다.', 'answer', true, 'explanation', '',
+      'source_figure', '{"id":"f1","kind":"map","title":"지도","caption":"","page":3,"crop":"x/figs/y/f1.jpg","w":800,"h":600,"art":null}'::jsonb),
+    jsonb_build_object('type', 'ox', 'prompt', '큰 자료 그림', 'answer', true, 'explanation', '',
+      'source_figure', jsonb_build_object('id', 'f2', 'big', repeat('가', 40000)))
+  ), false);
+  if (select count(*) from public.questions where note_id = nid and source_figure->>'kind' = 'map' and source_figure->>'crop' = 'x/figs/y/f1.jpg') <> 1 then
+    raise exception 'figure question should keep its source figure';
+  end if;
+  if (select count(*) from public.questions where note_id = nid and prompt = '큰 자료 그림' and source_figure is null) <> 1 then
+    raise exception 'oversize source figure should be dropped';
+  end if;
+  delete from public.questions where note_id = nid and prompt in ('위 지도의 나라는 한강 유역을 차지했다.', '큰 자료 그림');
+  update public.sources set step = 'figures' where id = (select source_id from public.notes where id = nid);
+  begin
+    update public.sources set step = 'drawing' where id = (select source_id from public.notes where id = nid);
+    raise exception 'unknown step should be refused';
+  exception when check_violation then null;
+  end;
+  update public.sources set step = 'done' where id = (select source_id from public.notes where id = nid);
 end $$;
 
 -- 학생: 내 버전·채팅만 보이고, 지난 버전의 정리는 고칠 수 있지만 번호·자료·지금 버전은 못 바꾼다

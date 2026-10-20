@@ -153,6 +153,15 @@ describe('노트에 자료 더하기: 지금 버전에 다시 합치기', () => 
     expect(s).toMatchObject({ step: 'organize', chunk_index: 0, partials: [] });
   });
 
+  it('자료 그림: 다시 합치면 자른 그림·다시 그린 그림은 쓰고 차례는 새로, 처음부터 다시 정리하면 모두 버린다', () => {
+    const figs = { figures: [{ id: 'f3' }], figCuts: [{ page: 1 }], baseFigures: [{ id: 'f1' }], figRound: 1 };
+    const merge = remergeState({ ...draft, ...figs })!;
+    expect(merge.draft).toMatchObject({ figures: figs.figures, figCuts: figs.figCuts });
+    for (const k of ['baseFigures', 'figRound']) expect(merge.draft).not.toHaveProperty(k);
+    const again = remergeState({ ...draft, ...figs, figFound: { chunk: 0, found: [] }, figCutTries: 1, newParts: [] })!;
+    for (const k of ['figures', 'figCuts', 'figFound', 'figCutTries', 'baseFigures', 'figRound']) expect(again.draft).not.toHaveProperty(k);
+  });
+
   it('끝없이 다시 하지 않는다', () => {
     expect(remergeState({ ...draft, remerged: MAX_REMERGES - 1 })?.draft.remerged).toBe(MAX_REMERGES);
     expect(remergeState({ ...draft, remerged: MAX_REMERGES })).toBeNull();

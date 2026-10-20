@@ -3,6 +3,7 @@
 // 고치기: 칸마다 쉬운 꾸미기(굵게·형광펜·빨간 글씨·목록·수식)와 미리보기 (note/NoteEditors).
 // 순서 바꾸기: 개념·공식·용어 머리의 '순서 바꾸기' → 줄을 꾹 눌러 끌기 (note/SortList).
 // 개념 순서 = 저장된 배열 순서. 화면에는 별표한 개념을 먼저 (별표끼리·나머지끼리는 그 순서대로).
+// 자료 그림: 개념에 붙은 그림은 개념 카드 안에, 개념이 없는 그림은 '자료 그림'에 (figure/SourceFigureView).
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from 'react';
 import type { KeyPoint, Note } from '@/lib/ai/schemas';
 import { previewText } from '@/lib/richtext';
@@ -13,6 +14,8 @@ import { StarButton, StarGlyph } from './note/StarButton';
 import { SortList } from './note/SortList';
 import { FormulaEditor, KeyPointEditor, SummaryEditor, TermEditor, type KeyPointDraft } from './note/NoteEditors';
 import { prefersReducedMotion } from './useReducedMotion';
+import { SourceFigureView } from './figure/SourceFigureView';
+import { figuresByKeyPoint, type SourceFigure } from '@/lib/source-figures';
 
 export type NoteBody = Note & { recommended?: string };
 
@@ -201,6 +204,9 @@ export function NoteView({
   onSelectKeyPoint,
   onOpenPage,
   reservedIds,
+  figures = [],
+  originalFirst = false,
+  onFiguresChange,
 }: {
   note: NoteBody;
   kind: string;
@@ -211,6 +217,12 @@ export function NoteView({
   onOpenPage?: (page: number) => void;
   /** 문제·마인드맵이 가리키는 개념 번호 (새 개념에 쓰지 않는다) */
   reservedIds?: ReadonlySet<string>;
+  /** 자료 그림 (body.figures): 개념 카드 안과 '자료 그림'에 */
+  figures?: SourceFigure[];
+  /** 설정: 자료 그림을 원본으로 먼저 보기 */
+  originalFirst?: boolean;
+  /** 자료 그림을 빼면 (고칠 수 있을 때만) */
+  onFiguresChange?: (next: SourceFigure[]) => void;
 }) {
   const toast = useToast();
   const [editing, setEditing] = useState<string | null>(null);
@@ -339,7 +351,9 @@ export function NoteView({
   };
 
   const saveKeyPoint = (d: KeyPointDraft, isNew: boolean) => {
-    const kp = { ...d.kp, id: isNew ? newKeyPointId(note, reservedIds) : d.kp.id, edited: true };
+    // 그림이 가리키는 개념 번호도 새 개념에 쓰지 않는다 (지운 개념의 그림이 새 개념에 붙지 않게)
+    const reserved = new Set([...(reservedIds ?? []), ...figures.map((f) => f.key_point_id).filter(Boolean)]);
+    const kp = { ...d.kp, id: isNew ? newKeyPointId(note, reserved) : d.kp.id, edited: true };
     save(
       {
         ...note,
@@ -350,6 +364,33 @@ export function NoteView({
       `kp-${kp.id}`,
     );
   };
+
+  // 자료 그림: 개념마다, 개념이 없는 그림은 따로
+  const figs = useMemo(() => figuresByKeyPoint(figures, new Set(note.key_points.map((k) => k.id))), [figures, note.key_points]);
+  const figure = (f: SourceFigure) => (
+    <SourceFigureView
+      key={f.id}
+      fig={f}
+      originalFirst={originalFirst}
+      pageLabel={f.page && kind !== 'text' ? pageLabel(kind, f.page) : undefined}
+      onOpenPage={onOpenPage}
+      menu={
+        editable && onFiguresChange
+          ? [
+              {
+                label: '이 그림 빼기',
+                icon: ICONS.trash,
+                danger: true,
+                onSelect: () => {
+                  if (!window.confirm('이 그림을 노트에서 뺄까요? 이 그림으로 만든 문제는 그대로 남아요.')) return;
+                  onFiguresChange(figures.filter((x) => x.id !== f.id));
+                },
+              },
+            ]
+          : undefined
+      }
+    />
+  );
 
   const pages = (ps: number[]) =>
     ps.length && kind !== 'text' ? (
@@ -557,6 +598,7 @@ export function NoteView({
                               ))}
                             </ul>
                           ) : null}
+                          {figs.byKp.get(kp.id)?.length ? <div className="mt-3 grid gap-4">{figs.byKp.get(kp.id)!.map(figure)}</div> : null}
                           {kp.pages.length || editable ? (
                             <div className="mt-2 flex flex-wrap items-center justify-between gap-2" onClick={(e) => e.stopPropagation()}>
                               {pages(kp.pages)}
@@ -614,6 +656,14 @@ export function NoteView({
           </div>
         )}
       </section>
+
+      {/* 자료 그림: 개념에 붙지 않은 그림 (개념을 지웠거나 개념 없이 중요한 그림) */}
+      {figs.loose.length ? (
+        <section className="grid gap-3" aria-label="자료 그림">
+          <SectionHead title="자료 그림" count={figs.loose.length} canSort={false} sorting={false} onSort={() => {}} focusKey="figs" />
+          <div className="kok-card kok-paper grid gap-6 p-4">{figs.loose.map(figure)}</div>
+        </section>
+      ) : null}
 
       {/* 공식 */}
       {showFormulas ? (

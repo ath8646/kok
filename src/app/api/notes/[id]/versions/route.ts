@@ -4,7 +4,7 @@ import { z } from 'zod';
 import { assertSameOrigin, assertUuid, readJson, requireAccount } from '@/lib/server/auth';
 import { getFeatures } from '@/lib/server/account';
 import { UserFacingError, errorResponse } from '@/lib/server/errors';
-import { removePaths } from '@/lib/server/files';
+import { removeFigureFolders, removePaths } from '@/lib/server/files';
 
 const Body = z.object({ action: z.enum(['switch', 'delete']), number: z.number().int().min(1).max(10_000) });
 
@@ -35,15 +35,16 @@ export async function POST(req: NextRequest, ctx: RouteContext<'/api/notes/[id]/
       throw error;
     }
     if (action === 'delete') {
-      const r = (data ?? {}) as { paths?: string[]; current?: number };
+      const r = (data ?? {}) as { paths?: string[]; sources?: string[]; current?: number };
       // 어느 버전에도 안 쓰이게 된 더한 자료의 파일 (내 폴더 것만)
       const paths = (r.paths ?? []).filter((p) => typeof p === 'string' && p.startsWith(`${acc.userId}/`));
-      if (paths.length) {
-        try {
-          await removePaths(admin, paths);
-        } catch (e) {
-          console.warn('[kok] could not remove version files', e);
-        }
+      // 그 자료에서 잘라 둔 자료 그림 (예전 함수는 sources 를 돌려주지 않는다)
+      const gone = (r.sources ?? []).filter((s) => typeof s === 'string' && /^[0-9a-f-]{36}$/.test(s));
+      try {
+        if (paths.length) await removePaths(admin, paths);
+        if (gone.length) await removeFigureFolders(admin, acc.userId, gone);
+      } catch (e) {
+        console.warn('[kok] could not remove version files', e);
       }
       return Response.json({ ok: true, current: r.current ?? null });
     }

@@ -17,6 +17,9 @@ export function stepLabel(s: Pick<SourceRowWithUnit, 'status' | 'step' | 'chunk_
       return s.chunk_total > 1 ? `정리 중 (${Math.min(s.chunk_index + 1, s.chunk_total)}/${s.chunk_total})` : '글자 읽고 정리하는 중';
     case 'merge':
       return '정리 합치는 중';
+    case 'figures':
+      // Pro: 자료 속 지도·그래프·표·연표·도식을 콕 스타일로 다시 그린다
+      return '자료 그림 다시 그리는 중';
     case 'visual':
     case 'quiz':
       return '마인드맵·문제 만드는 중';

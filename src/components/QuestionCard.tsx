@@ -2,9 +2,12 @@
 // 복습 문제 한 개: 풀기 → 채점 → 해설 → 평가 고르기.
 // 채점 움직임(globals.css '채점'): 맞으면 고른 칸이 살짝 부풀고 체크가 톡, 틀리면 고른 칸이 작게 흔들리고 조금 뒤 정답 칸에 체크.
 // 다음 문제는 살짝 떠오르며 나타난다 (첫 문제는 제자리에)
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import type { Rating } from '@/lib/grading';
+import { readQuestionFigure } from '@/lib/source-figures';
+import { useMe } from './AppShell';
 import { QuestionFigure, StepsDisclosure, useSolution } from './figure/SolutionView';
+import { SourceFigureView } from './figure/SourceFigureView';
 import { RichText } from './RichText';
 import { Button, Chip, ICONS, Icon, cx, inputClass, Spinner } from './ui';
 import { pageLabel } from './NoteView';
@@ -25,6 +28,8 @@ export type ReviewQuestion = {
   /** 그림 풀이 (Pro): 문제 그림과 단계 풀이 (없으면 undefined·null) */
   figure?: unknown;
   steps?: unknown;
+  /** 자료 그림 문제: 문제 위에 보여 줄 자료 그림 (readQuestionFigure 로 읽는다) */
+  source_figure?: unknown;
 };
 
 export type GradeOutcome = {
@@ -121,6 +126,9 @@ export function QuestionCard({
   const inputRef = useRef<HTMLInputElement>(null);
   const resultTitle = useRef<HTMLParagraphElement>(null);
   const solution = useSolution(q);
+  // 자료 그림 문제: 문제 위에 그림을 (제목·설명은 채점 뒤에)
+  const sourceFig = useMemo(() => readQuestionFigure(q.source_figure), [q.source_figure]);
+  const { me } = useMe();
   const graded = !!outcome;
 
   useEffect(() => {
@@ -167,8 +175,9 @@ export function QuestionCard({
       const target = e.target as HTMLElement | null;
       const tag = target?.tagName;
       if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
-      // 단계별 풀이 안의 버튼·화살표 키는 풀이가 쓴다 (Enter 로 다음 단계를 누르다가 다음 문제로 넘어가지 않게)
-      if (target?.closest?.('[data-own-keys]')) return;
+      // 단계별 풀이·자료 그림 안의 버튼·화살표 키는 그쪽이 쓴다 (Enter 로 다음 단계를 누르다가 다음 문제로 넘어가지 않게).
+      // 창(시트)이 열려 있으면 뒤의 문제에 답하지 않는다 (크게 보기 같은 창은 화면 맨 위에 따로 뜬다)
+      if (target?.closest?.('[data-own-keys], [role="dialog"]')) return;
       if (outcome) {
         if (e.key === 'Enter') {
           e.preventDefault();
@@ -211,6 +220,7 @@ export function QuestionCard({
           <Prompt q={q} />
         </p>
         <QuestionFigure solution={solution} className="mt-4" />
+        {sourceFig ? <SourceFigureView fig={sourceFig} variant="question" originalFirst={!!me?.settings.visual.originalFirst} className="mt-4" /> : null}
 
         {/* 풀기 */}
         {q.type === 'mcq' && q.choices ? (
@@ -355,6 +365,13 @@ export function QuestionCard({
           {q.explanation ? (
             <p className="text-[15px] leading-relaxed">
               <RichText text={q.explanation} />
+            </p>
+          ) : null}
+          {/* 자료 그림 문제: 풀고 나면 그림이 무엇인지 알려 준다 */}
+          {sourceFig && (sourceFig.title || sourceFig.caption) ? (
+            <p className="rounded-xl bg-surface-2 px-3 py-2 text-sm leading-relaxed">
+              <b>자료 그림</b> {sourceFig.title}
+              {sourceFig.caption ? <span className="text-muted"> · {sourceFig.caption}</span> : null}
             </p>
           ) : null}
           {/* 그림으로 보는 단계별 풀이 (Pro): 틀렸으면 펼쳐 둔다 */}

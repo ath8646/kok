@@ -21,7 +21,8 @@ export async function POST(req: NextRequest, ctx: RouteContext<'/api/questions/[
     assertUuid(id);
     const { admin, acc } = await requireAccount();
     if (!acc.canFigures) throw new UserFacingError('pro_only', '그림 풀이는 Pro 기능이에요.', 403);
-    if (!(await getFeatures(admin)).figures) {
+    const features = await getFeatures(admin);
+    if (!features.figures) {
       throw new UserFacingError('schema_outdated', '그림 풀이를 아직 쓸 수 없어요. 운영자가 준비하고 있어요.', 503);
     }
 
@@ -34,6 +35,11 @@ export async function POST(req: NextRequest, ctx: RouteContext<'/api/questions/[
     if (!q || q.user_id !== acc.userId) throw new UserFacingError('not_found', '문제를 찾을 수 없어요.', 404);
     // 이미 풀이가 있으면 에너지를 쓰기 전에 거절한다 (화면도 풀이가 없는 문제에만 버튼을 보여 준다)
     if (q.steps) throw new UserFacingError('already_solved', '이 문제에는 이미 풀이가 있어요.', 409);
+    // 자료 그림 문제는 그 그림을 보고 푸는 문제라 그림 풀이를 만들지 않는다 (AI 는 그 그림을 볼 수 없다). 칸은 schema.sql 을 다시 실행한 뒤에만 있다
+    if (features.sourceFigures) {
+      const { data: sf } = await admin.from('questions').select('source_figure').eq('id', id).maybeSingle();
+      if (sf?.source_figure) throw new UserFacingError('figure_question', '자료 그림을 보고 푸는 문제는 그림 풀이를 만들지 않아요.', 409);
+    }
 
     // 내 노트만 (문제의 노트 번호를 믿지 않는다). 직접 만든 문제는 노트가 없을 수 있다
     let note = '';

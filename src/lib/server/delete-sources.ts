@@ -1,6 +1,6 @@
 // 자료 지우기: 노트·그림·문제·복습 기록은 자료 행과 함께 지워지고, 올린 파일·노트에 더한 자료의 파일·채팅에 보관한 파일은 여기서 지운다
 import type { SupabaseClient } from '@supabase/supabase-js';
-import { removeFolder } from './files';
+import { removeFigureFolders, removeFolder } from './files';
 import { removeChatFolders } from './chat-input';
 
 /** 저장소 폴더를 한 번에 몇 개씩 지울지 (요청이 몰리지 않게) */
@@ -21,8 +21,9 @@ export async function deleteOwnSources(admin: SupabaseClient, userId: string, id
   for (let i = 0; i < folders.length; i += FOLDERS_AT_ONCE) {
     await Promise.all(folders.slice(i, i + FOLDERS_AT_ONCE).map((f) => removeFolder(admin, f)));
   }
-  // 노트 채팅에 보관한 사진·파일 (Pro)
+  // 노트 채팅에 보관한 사진·파일 (Pro), 원본에서 잘라 둔 자료 그림 (더한 자료의 그림도)
   await removeChatFolders(admin, userId, mine);
+  await removeFigureFolders(admin, userId, [...mine, ...(kids ?? []).map((k) => String(k.id))]);
   const { error } = await admin.from('sources').delete().in('id', mine).eq('user_id', userId);
   if (error) throw error;
   return mine.length;

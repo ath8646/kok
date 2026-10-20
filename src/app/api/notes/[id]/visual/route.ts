@@ -6,7 +6,7 @@ import { getAppSettings } from '@/lib/server/account';
 import { UserFacingError, errorResponse } from '@/lib/server/errors';
 import { assertNoAppendRunning, assertNoteHasContent, assertSameVersion, loadOwnedNote, noteForPrompt, updateNoteBody } from '@/lib/server/notes';
 import { runTask } from '@/lib/server/tasks';
-import { cleanMindmap, maxNodesFor } from '@/lib/server/pipeline';
+import { cleanMindmap, maxNodesFor } from '@/lib/mindmap-clean';
 import { textBlock } from '@/lib/server/claude';
 import { visualPrompt, wrap } from '@/lib/ai/prompts';
 import { visualJsonSchema, zMindmap, zTable, zTimeline, zVisualResult, type Mindmap } from '@/lib/ai/schemas';

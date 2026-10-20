@@ -670,6 +670,26 @@ function fakeNote(text) {
   };
 }
 
+/**
+ * 자료 그림 (정리할 때 그림도 찾으라고 했을 때): 시험용 자료의 이름으로 그림 자리를 알려 준다.
+ * '고구려 지도' PDF: 1쪽의 빨간 네모 (e2e.py make_figure_pdf), '기울어진 지도' 사진: 비스듬히 찍힌 파란 네모 (make_tilted_jpeg)
+ */
+function fakeFigures(text) {
+  const title = (text.match(/study material titled "([^"]*)"/) || [])[1] || '';
+  const base = { kind: 'map', asks: '(가) 나라가 차지한 지역을 묻는다.', key_point_title: '광합성 장소: 엽록체' };
+  if (/고구려 지도/.test(title)) {
+    return [
+      { ...base, page: 1, title: '5세기 고구려 영토', caption: '(가) 나라가 한강 유역까지 내려온 모습을 보여 주는 지도. 화살표는 남쪽을 가리킨다.', corners: [168, 169, 832, 169, 832, 525, 168, 525] },
+      // 너무 작은 그림은 서버가 뺀다
+      { ...base, page: 1, title: '작은 장식', caption: '장식', corners: [10, 10, 20, 10, 20, 20, 10, 20] },
+    ];
+  }
+  if (/기울어진 지도/.test(title)) {
+    return [{ ...base, kind: 'photo', page: 1, title: '비스듬히 찍은 유물 사진', caption: '(나) 유물을 비스듬히 찍은 사진', corners: [250, 167, 813, 250, 750, 833, 188, 750] }];
+  }
+  return [];
+}
+
 function fakeVisual(prompt) {
   const wantTable = /asked for a table/.test(prompt);
   const wantTimeline = /asked for a timeline/.test(prompt);
@@ -896,6 +916,81 @@ function fakeQuiz() {
   };
 }
 
+/** 다시 그린 자료 그림 (가짜): 스키마에 있는 칸을 채운다 */
+/** 자료 그림 다시 그리기 (Pro): 설계도 칸으로 종류를 알아내 그 종류의 그림 하나 (v·kind 는 서버가 붙인다) */
+function fakeArt(props) {
+  if (props.view) {
+    return {
+      title: '<5세기 고구려의 전성기>',
+      notes: '',
+      view: { west: 121, east: 132, south: 33.5, north: 43.5 },
+      land: true,
+      borders: false,
+      areas: [{ label: '(가)', tone: 'red', pts: [122, 40, 125, 43, 129, 42.5, 129.5, 37, 126.5, 37, 124, 39], style: 'fill', clip: true }],
+      lines: [{ label: '남진', tone: 'red', pts: [125.75, 39.02, 126.6, 38.2, 127, 37.55], kind: 'route', arrow: true }],
+      places: [
+        { label: '평양', lon: 125.75, lat: 39.02, kind: 'capital' },
+        { label: '한성', lon: 127, lat: 37.55, kind: 'battle' },
+      ],
+      labels: [{ text: '동해', lon: 130.6, lat: 38.4, kind: 'sea' }],
+      legend: [{ tone: 'red', text: '고구려의 진출', kind: 'line' }],
+    };
+  }
+  if (props.series) {
+    return {
+      title: '서울의 기후',
+      notes: '자료: 기상청',
+      type: 'combo',
+      categories: ['1월', '4월', '7월', '10월'],
+      series: [
+        { name: '강수량', tone: 'blue', values: [17, 72, 415, 52], as: 'bar', axis: 'left' },
+        { name: '기온', tone: 'red', values: [-2.4, 12.5, 25.7, 14.8], as: 'line', axis: 'right' },
+      ],
+      x_label: '',
+      y_label: '강수량',
+      unit: 'mm',
+      right_label: '기온',
+      right_unit: '℃',
+      y_min: 0,
+      y_max: 0,
+      value_labels: false,
+      slice_tones: [],
+    };
+  }
+  if (props.columns) {
+    return { title: '', notes: '', columns: ['구분', '(가)', '(나)'], rows: [['수도', '국내성', '㉠'], ['왕', '장수왕', '']], row_header: true };
+  }
+  if (props.events) {
+    return {
+      title: '',
+      notes: '',
+      events: [
+        { when: '1392', year: 1392, label: '조선 건국', detail: '', tone: 'blue' },
+        { when: '1446', year: 1446, label: '훈민정음 반포', detail: '', tone: 'blue' },
+        { when: '1592', year: 1592, label: '임진왜란', detail: '', tone: 'red' },
+      ],
+      spans: [{ from: 1446, to: 1592, label: '(가)', tone: 'purple', lane: 0 }],
+      even: false,
+    };
+  }
+  return {
+    title: '',
+    notes: '',
+    cols: 3,
+    rows: 2,
+    nodes: [
+      { id: 'k', label: '왕', col: 1, row: 0, span: 1, shape: 'round', tone: 'orange', strong: true },
+      { id: 'a', label: '의정부', col: 0, row: 1, span: 1, shape: 'box', tone: 'blue', strong: false },
+      { id: 'b', label: '(가)', col: 2, row: 1, span: 1, shape: 'box', tone: 'gray', strong: false },
+    ],
+    links: [
+      { from: 'k', to: 'a', label: '', kind: 'arrow' },
+      { from: 'k', to: 'b', label: '', kind: 'arrow' },
+    ],
+    groups: [],
+  };
+}
+
 // ------------------------------------------------------------------ 테마 (가짜 AI·가짜 Cloudflare)
 /** 96×96 그라데이션 JPEG (가짜 AI 그림) */
 const TINY_JPEG = '/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAAoHBwgHBgoICAgLCgoLDhgQDg0NDh0VFhEYIx8lJCIfIiEmKzcvJik0KSEiMEExNDk7Pj4+JS5ESUM8SDc9Pjv/2wBDAQoLCw4NDhwQEBw7KCIoOzs7Ozs7Ozs7Ozs7Ozs7Ozs7Ozs7Ozs7Ozs7Ozs7Ozs7Ozs7Ozs7Ozs7Ozs7Ozs7Ozv/wAARCABgAGADASIAAhEBAxEB/8QAHwAAAQUBAQEBAQEAAAAAAAAAAAECAwQFBgcICQoL/8QAtRAAAgEDAwIEAwUFBAQAAAF9AQIDAAQRBRIhMUEGE1FhByJxFDKBkaEII0KxwRVS0fAkM2JyggkKFhcYGRolJicoKSo0NTY3ODk6Q0RFRkdISUpTVFVWV1hZWmNkZWZnaGlqc3R1dnd4eXqDhIWGh4iJipKTlJWWl5iZmqKjpKWmp6ipqrKztLW2t7i5usLDxMXGx8jJytLT1NXW19jZ2uHi4+Tl5ufo6erx8vP09fb3+Pn6/8QAHwEAAwEBAQEBAQEBAQAAAAAAAAECAwQFBgcICQoL/8QAtREAAgECBAQDBAcFBAQAAQJ3AAECAxEEBSExBhJBUQdhcRMiMoEIFEKRobHBCSMzUvAVYnLRChYkNOEl8RcYGRomJygpKjU2Nzg5OkNERUZHSElKU1RVVldYWVpjZGVmZ2hpanN0dXZ3eHl6goOEhYaHiImKkpOUlZaXmJmaoqOkpaanqKmqsrO0tba3uLm6wsPExcbHyMnK0tPU1dbX2Nna4uPk5ebn6Onq8vP09fb3+Pn6/9oADAMBAAIRAxEAPwDVApcUuKdivSbPOixuKdilxSgVk2axYmKUClApcVk2bRYgFLinAUuKybNosTFLilxSgVk2bRYgFLilApwFYtm0WVAKUClApcV67Z89FiYpcUoFOArJs2ixAKXFLilxWTZtFiYpcUuKdismzaLG4p2KUClArJs2ixMUuKXFLismzaLKmKdilApQK9ds+eixAKUClxSgVk2bRYmKXFOApcVk2bRYgFKBSgUuKxbNYsQClxSgU7FZNm0WNxTsUuKXFZNm0WVAKXFKBTgK9ds+eixAKUClApcVk2bRYmKXFLinYrJs2ixuKdilApQKybNosQClApcUuKybNosTFKBTgKXFZNm0WVAKUClApQK9Zs+eixAKXFOxS4rJs2ixMUoFLilArJs2ixAKXFKBTgKybNosbinAUoFKBWTZtFiYpcUuKUCsmzWLKmKdilApcV67Z8/FiYpcUuKUCsmzaLEAp2KXFKBWTZtFiAUoFLilxWLZrFiYpcU7FKBWTZtFiYpQKXFLismzaLP/2Q==';
@@ -954,7 +1049,10 @@ async function handleClaude(req, res) {
   let task;
   const images = Array.isArray(content) ? content.filter((c) => c?.type === 'image').length : 0;
   if (Array.isArray(content)) stats.images = (stats.images || 0) + images;
-  if (props.reply) {
+  if (/^The attached picture is a figure cut out of a study material/.test(textOf.trim()) && images === 1) {
+    task = 'redraw';
+    out = fakeArt(props);
+  } else if (props.reply) {
     task = props.outside_note ? 'chat' : 'ask';
     out = fakeChat(textOf, props, images);
   } else if (props.solutions) {
@@ -966,6 +1064,8 @@ async function handleClaude(req, res) {
   } else if (props.key_points) {
     task = 'organize';
     out = fakeNote(textOf);
+    // 그림도 찾으라고 했으면 (PDF·사진, 자료 그림이 켜져 있을 때)
+    if (props.figures) out.figures = fakeFigures(textOf);
   } else if (props.mindmap) {
     task = 'visual';
     out = fakeVisual(textOf);
@@ -976,6 +1076,28 @@ async function handleClaude(req, res) {
   } else if (props.questions) {
     task = /looks wrong/.test(textOf) ? 'fix' : 'quiz';
     out = task === 'fix' ? { questions: [fakeQuiz().questions[0]] } : /comes from the new material/.test(textOf) ? fakeNewQuiz() : fakeQuiz();
+    // 자료 그림이 있으면 그림마다 그림 문제 하나 (<figures> 의 번호로)
+    const figIds = [...((textOf.match(/<figures>\n([\s\S]*?)\n<\/figures>/) || [])[1] || '').matchAll(/"id":"(f\d+)"/g)].map((m) => m[1]);
+    const withFig = props.questions?.items?.properties?.figure_id;
+    if (withFig) {
+      out = { questions: out.questions.map((q) => ({ ...q, figure_id: '' })) };
+      for (const id of figIds) {
+        out.questions.push({
+          type: 'mcq',
+          prompt: '다음 지도의 (가) 나라가 차지한 지역으로 옳은 것은?',
+          choices: ['한강 유역', '낙동강 하류', '제주도', '대동강 하구만'],
+          answer_index: 0,
+          answer_bool: false,
+          answer_text: '',
+          accepted: [],
+          explanation: '지도에서 (가) 나라는 한강 유역까지 내려왔어요.',
+          key_point_id: 'k2',
+          difficulty: 'medium',
+          pages: [1],
+          figure_id: id,
+        });
+      }
+    }
   } else if (props.result) {
     task = 'grade';
     const ans = (textOf.match(/<answer>\n([\s\S]*?)\n<\/answer>/) || [])[1] || '';

@@ -3,8 +3,8 @@ import { z } from 'zod';
 import { REVIEW_PERIODS } from './review-plan';
 
 export type Effort = 'low' | 'medium' | 'high';
-/** solve: 문제 그림·단계 풀이, 사진·파일로 보낸 문제 풀기 (홈 채팅) */
-export type AiTask = 'organize' | 'merge' | 'visual' | 'quiz' | 'check' | 'grade' | 'chat' | 'theme' | 'solve';
+/** solve: 문제 그림·단계 풀이, 사진·파일로 보낸 문제 풀기 (홈 채팅). redraw: 자료 그림을 콕 스타일로 다시 그리기 (Pro) */
+export type AiTask = 'organize' | 'merge' | 'visual' | 'quiz' | 'check' | 'grade' | 'chat' | 'theme' | 'solve' | 'redraw';
 
 // ------------------------------------------------------------- 운영 설정 (app_settings)
 /**
@@ -49,8 +49,20 @@ export const zModelsConfig = z.object({
       chat: zEffort.catch('low'),
       theme: zEffort.catch('low'),
       solve: zEffort.catch('medium'),
+      redraw: zEffort.catch('medium'),
     })
-    .catch({ organize: 'medium', merge: 'low', visual: 'low', quiz: 'medium', check: 'low', grade: 'low', chat: 'low', theme: 'low', solve: 'medium' }),
+    .catch({
+      organize: 'medium',
+      merge: 'low',
+      visual: 'low',
+      quiz: 'medium',
+      check: 'low',
+      grade: 'low',
+      chat: 'low',
+      theme: 'low',
+      solve: 'medium',
+      redraw: 'medium',
+    }),
 });
 export type ModelsConfig = z.infer<typeof zModelsConfig>;
 export const DEFAULT_MODELS: ModelsConfig = zModelsConfig.parse({});
@@ -127,6 +139,8 @@ export const zUserSettings = z.object({
       reveal: z.enum(['all', 'step']).catch('all'),
       hideMode: z.enum(['off', 'on']).catch('off'),
       fontSize: z.enum(['sm', 'md', 'lg']).catch('md'),
+      /** 자료 그림을 원본(자른 그림)으로 먼저 보기. 끄면 콕 스타일로 다시 그린 그림이 있을 때 그것부터 (Pro) */
+      originalFirst: z.boolean().catch(false),
     })
     .catch({
       defaultType: 'auto',
@@ -139,6 +153,7 @@ export const zUserSettings = z.object({
       reveal: 'all',
       hideMode: 'off',
       fontSize: 'md',
+      originalFirst: false,
     }),
   review: z
     .preprocess(
@@ -176,8 +191,17 @@ export const zUserSettings = z.object({
       language: z.enum(['ko', 'material']).catch('ko'),
       /** Pro: 노트를 만들 때 필요한 문제에 그림과 단계 풀이를 붙인다 */
       figures: z.boolean().catch(true),
+      /** PDF·사진 속 중요한 그림을 찾아 개념에 붙이고 그림 문제를 만든다 (자료 그림) */
+      sourceFigures: z.boolean().catch(true),
     })
-    .catch({ types: ['mcq', 'ox', 'cloze', 'short'], perKeyPoint: 'auto', mix: { easy: 30, medium: 50, hard: 20 }, language: 'ko', figures: true }),
+    .catch({
+      types: ['mcq', 'ox', 'cloze', 'short'],
+      perKeyPoint: 'auto',
+      mix: { easy: 30, medium: 50, hard: 20 },
+      language: 'ko',
+      figures: true,
+      sourceFigures: true,
+    }),
 });
 export type UserSettings = z.infer<typeof zUserSettings>;
 export const DEFAULT_SETTINGS: UserSettings = zUserSettings.parse({});

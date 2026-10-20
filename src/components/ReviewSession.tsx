@@ -647,6 +647,7 @@ export function ReviewSession({
             review={settings}
             starting={starting}
             onStart={start}
+            drawer={!!me?.features.subjectDrawer}
           />
         )}
       </div>

@@ -665,6 +665,41 @@ alter table public.sources add column if not exists in_review boolean not null d
 alter table public.sources add column if not exists starred boolean not null default false;
 alter table public.sources add column if not exists position int;
 
+-- ---------------------------------------------------------------------
+-- 과목 서랍 (과목이 많을 때): 위에 고정(pinned), 보관(archived: 자료함 '전체'·과목 칩·자료 넣기·복습 고르기 목록에서만 뺀다.
+-- 그 과목의 복습 카드는 그대로 나온다), 최근 쓴 때(used_at: 자료를 넣으면 지금으로. 보관한 과목에 자료를 넣으면 보관도 푼다).
+-- 학생은 과목 칸을 모두 고칠 수 있다 (과목 표는 내 것만 보기·만들기·고치기)
+-- ---------------------------------------------------------------------
+alter table public.subjects add column if not exists pinned boolean not null default false;
+alter table public.subjects add column if not exists archived boolean not null default false;
+alter table public.subjects add column if not exists used_at timestamptz;
+-- 예전 과목: 마지막으로 자료를 넣은 때로 채운다 (빈 것만, 여러 번 실행해도 같다)
+update public.subjects s
+   set used_at = x.last
+  from (select subject_id, max(created_at) as last from public.sources group by subject_id) x
+ where s.id = x.subject_id
+   and s.used_at is null;
+
+create or replace function public.kok_touch_subject()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  -- 같은 과목에 자료를 한꺼번에 넣어도 과목 행은 몇 초에 한 번만 고친다
+  update public.subjects
+     set used_at = now(), archived = false
+   where id = new.subject_id
+     and (used_at is null or used_at < now() - interval '10 seconds' or archived);
+  return new;
+end;
+$$;
+revoke execute on function public.kok_touch_subject() from public, anon, authenticated;
+drop trigger if exists sources_touch_subject on public.sources;
+create trigger sources_touch_subject after insert on public.sources
+  for each row execute function public.kok_touch_subject();
+
 -- =====================================================================
 -- 권한(GRANT): 로그인 안 한 사람(anon)은 아무것도 못 하고,
 -- 로그인한 사람(authenticated)은 아래에 적은 것만 할 수 있다.

@@ -105,7 +105,12 @@ export default function HomePage() {
   const loaded = !!plan || err;
   const week = weekDots(days);
   const nextDue = live.length ? live.map((c) => c.due).sort()[0] : null;
-  const exams = (plan?.subjects ?? []).filter((s) => s.exam_date && daysUntil(s.exam_date) >= 0).sort((a, b) => (a.exam_date! < b.exam_date! ? -1 : 1));
+  // 보관한 과목(과목 서랍)은 목록에서만 뺀다: 시험 날·최근 노트에 안 보인다 (복습은 그대로)
+  const archived = new Set((plan?.subjects ?? []).filter((s) => s.archived).map((s) => s.id));
+  const exams = (plan?.subjects ?? [])
+    .filter((s) => !s.archived && s.exam_date && daysUntil(s.exam_date) >= 0)
+    .sort((a, b) => (a.exam_date! < b.exam_date! ? -1 : 1));
+  const recentShown = recent ? recent.filter((s) => !archived.has(s.subject_id)) : null;
   const wrongCount = live.filter((c) => c.in_wrong_note).length;
   const hasCards = !!plan?.cards.length;
   const doneToday = plan?.doneToday ?? 0;
@@ -309,11 +314,11 @@ export default function HomePage() {
             ))}
           </div>
         </>
-      ) : recent && recent.length ? (
+      ) : recentShown && recentShown.length ? (
         <>
           <SectionTitle action={recentLink}>최근 노트</SectionTitle>
           <div className="no-scrollbar -mx-4 flex snap-x gap-3 overflow-x-auto px-4 pb-1 md:mx-0 md:grid md:grid-cols-4 md:overflow-visible md:px-0">
-            {recent.map((s, i) => {
+            {recentShown.map((s, i) => {
               const subj = subjectOf.get(s.subject_id);
               const busy = s.status === 'queued' || s.status === 'processing';
               return (

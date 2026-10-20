@@ -23,10 +23,30 @@ export async function fetchAll<T>(make: (from: number, to: number) => PromiseLik
   return out;
 }
 
+const SUBJECT_COLS = 'id, name, color, exam_date, position, created_at';
+/** 과목 서랍 칸 (고정·보관·최근 쓴 때). schema.sql 을 다시 실행하기 전에는 없어서, 처음 읽을 때 알아낸다 */
+const DRAWER_COLS = 'pinned, archived, used_at';
+let drawerCols: boolean | null = null;
+
 export async function fetchSubjects(): Promise<SubjectRow[]> {
-  const { data, error } = await sb().from('subjects').select('id, name, color, exam_date, position, created_at').order('position').order('created_at');
+  const read = (more: boolean) =>
+    sb()
+      .from('subjects')
+      .select(more ? `${SUBJECT_COLS}, ${DRAWER_COLS}` : SUBJECT_COLS)
+      .order('position')
+      .order('created_at');
+  if (drawerCols !== false) {
+    const { data, error } = await read(true);
+    if (!error) {
+      drawerCols = true;
+      return (data ?? []) as unknown as SubjectRow[];
+    }
+    if (!missingColumn(error, 'pinned|archived|used_at')) throw error;
+    drawerCols = false;
+  }
+  const { data, error } = await read(false);
   if (error) throw error;
-  return (data ?? []) as SubjectRow[];
+  return (data ?? []) as unknown as SubjectRow[];
 }
 
 export const SOURCE_COLS =

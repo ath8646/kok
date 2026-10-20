@@ -6,6 +6,7 @@ import { QuestionList, type CardInfo } from '@/components/QuestionList';
 import { Select } from '@/components/Select';
 import { LargeHeader, Segmented, inputClass } from '@/components/ui';
 import { fetchAll, fetchSubjects, questionCols, sb } from '@/lib/data';
+import { pickerOrder } from '@/lib/subject-order';
 import { useMe } from '@/components/AppShell';
 import type { QuestionRow, SubjectRow } from '@/lib/types';
 
@@ -115,7 +116,11 @@ function QuestionsView() {
               setSubject(v);
               setUnit('');
             }}
-            options={[{ value: '', label: '모든 과목' }, ...subjects.map((s) => ({ value: s.id, label: s.name }))]}
+            // 고정 → 최근 쓴 과목 → 보관한 과목 (보관한 과목의 문제도 볼 수 있게 맨 아래에)
+            options={[
+              { value: '', label: '모든 과목' },
+              ...[...pickerOrder(subjects), ...subjects.filter((s) => s.archived)].map((s) => ({ value: s.id, label: s.archived ? `${s.name} (보관)` : s.name })),
+            ]}
           />
           <Select
             aria-label="단원"

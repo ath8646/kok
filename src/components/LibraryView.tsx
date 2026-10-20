@@ -48,6 +48,8 @@ import { subjectVar } from '@/lib/colors';
 import { previewText } from '@/lib/richtext';
 import { daysUntil } from '@/lib/time';
 import { dropView, readView, writeView } from '@/lib/view-cache';
+import { QUICK_MAX, quickSubjects } from '@/lib/subject-order';
+import { SubjectDrawer } from './SubjectDrawer';
 
 /** manual: AI 없이 직접 만든 노트 */
 type LibSource = SourceRowWithUnit & { summary: string | null; manual?: boolean };
@@ -139,6 +141,8 @@ export function LibraryView() {
   const [searching, setSearching] = useState(false);
   const [fresh, setFresh] = useState<Set<string>>(() => new Set());
   const [editingSubject, setEditingSubject] = useState<SubjectRow | 'new' | null>(null);
+  // 과목 서랍 ('모든 과목')
+  const [drawer, setDrawer] = useState(false);
   const [renaming, setRenaming] = useState<LibSource | null>(null);
   const [saving, setSaving] = useState(false);
   const [version, setVersion] = useState(0);
@@ -295,11 +299,17 @@ export function LibraryView() {
     for (const s of data?.sources ?? []) m.set(s.subject_id, (m.get(s.subject_id) ?? 0) + 1);
     return m;
   }, [data]);
+  // 과목 서랍 (features.subjectDrawer): 칩 줄에는 고정 + 최근 쓴 과목만, 보관한 과목은 '전체'에서도 뺀다 (찾을 때는 보인다)
+  const drawerOn = !!me?.features.subjectDrawer;
+  const archivedIds = useMemo(() => new Set(drawerOn ? subjects.filter((s) => s.archived).map((s) => s.id) : []), [subjects, drawerOn]);
+  const chipSubjects = useMemo(() => (drawerOn ? quickSubjects(subjects, QUICK_MAX, selected) : subjects), [subjects, drawerOn, selected]);
+  const moreSubjects = drawerOn && subjects.length > chipSubjects.length;
+  const allCount = data ? data.sources.filter((s) => !archivedIds.has(s.subject_id)).length : undefined;
 
   const shown = useMemo(() => {
     const q = query.trim().toLowerCase();
     const list = (data?.sources ?? [])
-      .filter((s) => !selected || s.subject_id === selected)
+      .filter((s) => (selected ? s.subject_id === selected : q || !archivedIds.has(s.subject_id)))
       .filter((s) => !q || [s.title, s.unit, s.summary ? previewText(s.summary) : ''].some((x) => (x ?? '').toLowerCase().includes(q)))
       .map((s) => {
         const l = live.get(s.id);
@@ -312,7 +322,7 @@ export function LibraryView() {
     // 별이 튀는 동안에는 자리를 그대로 둔다 (그 뒤 새 자리로 미끄러진다)
     const at = new Map(hold.map((id, i) => [id, i]));
     return [...ordered].sort((a, b) => (at.get(a.id) ?? Infinity) - (at.get(b.id) ?? Infinity));
-  }, [data, selected, query, live, organize, hold]);
+  }, [data, selected, query, live, organize, hold, archivedIds]);
   const gridRef = useRef<HTMLDivElement>(null);
   const flip = useGridFlip(gridRef, shown.map((s) => s.id).join('|'));
   // 키보드로 별표를 빼면 카드가 제자리로 옮겨 간 뒤 그 카드의 별 버튼으로 초점을 되돌린다
@@ -356,6 +366,28 @@ export function LibraryView() {
         reload();
       }
     }
+  };
+
+  /** 과목 위에 고정·보관 (과목 서랍). 화면은 바로 바꾸고, 저장하지 못하면 다시 읽는다 */
+  const setSubjectFlag = async (s: SubjectRow, patch: { pinned?: boolean; archived?: boolean }) => {
+    if (!data) return;
+    const next = { ...data, subjects: data.subjects.map((x) => (x.id === s.id ? { ...x, ...patch } : x)) };
+    setData(next);
+    writeView(LIBRARY_VIEW, owner, next);
+    let failed = false;
+    await keepWhileSaving(async () => {
+      const { error } = await sb().from('subjects').update(patch).eq('id', s.id);
+      if (error) failed = true;
+    });
+    if (failed) {
+      toast('저장하지 못했어요. 다시 해 주세요.', 'bad');
+      reload();
+      return;
+    }
+    // 다른 화면(자료 넣기 등)의 과목 목록도 새로
+    window.dispatchEvent(new Event(SUBJECTS_CHANGED));
+    if (patch.archived === true) toast(`'${s.name}' 과목을 보관했어요. 복습은 그대로 나오고, '모든 과목'에서 다시 꺼낼 수 있어요.`);
+    else if (patch.archived === false) toast(`'${s.name}' 과목을 다시 꺼냈어요.`);
   };
 
   /**
@@ -487,14 +519,18 @@ export function LibraryView() {
   }
 
   const exam = subject?.exam_date ? daysUntil(subject.exam_date) : null;
-  const total = selected ? (counts.get(selected) ?? 0) : (data?.sources.length ?? 0);
+  const total = selected ? (counts.get(selected) ?? 0) : (allCount ?? 0);
   // 읽는 동안에도 줄 높이를 지켜서, 다 읽었을 때 제목이 위로 튀지 않게 한다
   const subtitle = data ? (
     <span key={`${total}:${exam ?? ''}`} className="kok-swap flex flex-wrap items-center gap-x-2">
       <span>자료 {total}개</span>
       {exam !== null && exam >= 0 ? (
-        <span className={cx('font-semibold', exam <= 3 ? 'text-bad' : 'text-accent')}>· 시험 {exam === 0 ? 'D-DAY' : `D-${exam}`}</span>
+        // 큰 제목 아래(화면 위 빛 위)라 색 글자는 연한 알약 안에
+        <span className={cx('rounded-full px-2 text-sm font-semibold', exam <= 3 ? 'bg-bad-soft text-bad' : 'bg-accent-soft text-accent')}>
+          시험 {exam === 0 ? 'D-DAY' : `D-${exam}`}
+        </span>
       ) : null}
+      {subject?.archived ? <span>· 보관한 과목</span> : null}
     </span>
   ) : (
     <span className="kok-skel inline-block h-6 align-top" aria-hidden="true">
@@ -529,6 +565,14 @@ export function LibraryView() {
         { label: '이 과목만 복습', icon: ICONS.retry, onSelect: () => router.push(`/review?subject=${subject.id}`) },
         { label: '문제 모아 보기', icon: ICONS.grid, onSelect: () => router.push(`/questions?subject=${subject.id}`) },
         { label: '과목 고치기', icon: ICONS.edit, onSelect: () => setEditingSubject(subject) },
+        ...(drawerOn
+          ? subject.archived
+            ? [{ label: '보관 풀기', icon: ICONS.archive, onSelect: () => setSubjectFlag(subject, { archived: false }) }]
+            : [
+                { label: subject.pinned ? '고정 풀기' : '위에 고정', icon: ICONS.pin, onSelect: () => setSubjectFlag(subject, { pinned: !subject.pinned }) },
+                { label: '보관하기', icon: ICONS.archive, onSelect: () => setSubjectFlag(subject, { archived: true }) },
+              ]
+          : []),
       ]
     : [
         ...organizeMenu,
@@ -616,10 +660,10 @@ export function LibraryView() {
 
       {/* 과목 칩 (폴더) */}
       <div ref={chipsRef} className="no-scrollbar relative -mx-4 mb-3 flex gap-2 overflow-x-auto px-4 pb-1 md:-mx-6 md:px-6" role="tablist" aria-label="과목">
-        <FolderChip id="all" on={!selected} onClick={() => select(null)} label="전체" count={data?.sources.length} loading={!data} />
+        <FolderChip id="all" on={!selected} onClick={() => select(null)} label="전체" count={allCount} loading={!data} />
         {/* 과목을 읽는 동안: 과목 칩 자리 */}
         {!data ? [0, 1].map((i) => <span key={i} className="kok-skel kok-bone h-10 w-20 shrink-0" aria-hidden="true" />) : null}
-        {subjects.map((s) => {
+        {chipSubjects.map((s) => {
           const d = s.exam_date ? daysUntil(s.exam_date) : null;
           return (
             <FolderChip
@@ -635,6 +679,18 @@ export function LibraryView() {
             />
           );
         })}
+        {/* 칩 줄에 안 보이는 과목(최근에 안 쓴 것·보관한 것)은 서랍에서 */}
+        {moreSubjects ? (
+          <button
+            type="button"
+            aria-haspopup="dialog"
+            className="press inline-flex h-10 shrink-0 items-center gap-1.5 rounded-full bg-surface px-4 text-sm font-semibold text-ink shadow-[0_1px_2px_var(--shadow)] hover:bg-surface-2"
+            onClick={() => setDrawer(true)}
+          >
+            <Icon d={ICONS.grid} size={16} strokeWidth={2.2} />
+            모든 과목 <span className="tabular-nums text-muted">{subjects.length}</span>
+          </button>
+        ) : null}
         <button
           type="button"
           className="press inline-flex h-10 shrink-0 items-center gap-1.5 rounded-full border-2 border-dashed border-line px-4 text-sm font-semibold text-muted hover:text-ink"
@@ -643,6 +699,26 @@ export function LibraryView() {
           <Icon d={ICONS.plus} size={16} strokeWidth={2.4} />새 과목
         </button>
       </div>
+      {drawerOn ? (
+        <SubjectDrawer
+          open={drawer}
+          onClose={() => setDrawer(false)}
+          subjects={subjects}
+          selected={selected}
+          onPick={(id) => select(id)}
+          counts={counts}
+          all={{ label: '전체', count: allCount }}
+          manage={{ onPin: (x, on) => setSubjectFlag(x, { pinned: on }), onArchive: (x, on) => setSubjectFlag(x, { archived: on }) }}
+        />
+      ) : null}
+      {subject?.archived && drawerOn && !selecting ? (
+        <div className="kok-attach mb-3 flex flex-wrap items-center justify-between gap-2 rounded-2xl bg-surface px-4 py-3 shadow-[0_1px_2px_var(--shadow)]">
+          <p className="min-w-0 flex-1 text-sm text-muted">보관한 과목이에요. 자료함 목록에는 안 보이고, 복습은 그대로 나와요.</p>
+          <Button size="sm" variant="secondary" onClick={() => setSubjectFlag(subject, { archived: false })}>
+            보관 풀기
+          </Button>
+        </div>
+      ) : null}
 
       {data === null ? (
         <div className="kok-skel grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4" aria-busy="true">

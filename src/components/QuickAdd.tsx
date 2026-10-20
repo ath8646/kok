@@ -12,6 +12,7 @@ import { shrinkImage } from '@/lib/image';
 import { MIN_TEXT_CHARS, checkText, fileKind, groupFiles, isSubmitKey, splitComposer, titleFromName } from '@/lib/quick-add';
 import { SUBJECT_COLORS } from '@/lib/settings';
 import { subjectVar } from '@/lib/colors';
+import { matchesSubject, pickerOrder } from '@/lib/subject-order';
 import { SOURCES_CHANGED, SUBJECTS_CHANGED } from '@/lib/events';
 import { topFileSink } from '@/lib/file-sink';
 import { ApiError, Button, EnergyEstimate, ICONS, Icon, Sheet, Spinner, api, cx, inputClass, useToast } from './ui';
@@ -231,10 +232,12 @@ export function QuickAddProvider({
   const resolveSubject = useCallback((): string => {
     const list = subjectsRef.current;
     const has = (id: string | null | undefined) => !!id && list.some((s) => s.id === id);
+    // 보고 있는 과목(자료함·노트)은 보관한 과목이어도 그대로 (넣으면 보관이 풀린다)
     if (has(contextSubject.current)) return contextSubject.current!;
+    // 지난번 과목·첫 과목은 보관하지 않은 것 중에서 (고정 → 최근 쓴 차례)
     const last = readLast(meRef.current.userId);
-    if (has(last)) return last!;
-    return list[0]?.id ?? '';
+    if (has(last) && !list.find((s) => s.id === last)?.archived) return last!;
+    return pickerOrder(list)[0]?.id ?? list[0]?.id ?? '';
   }, []);
 
   // ---------------------------------------------------------- 올리기 줄
@@ -1000,6 +1003,8 @@ function Composer({
   const fileInput = useRef<HTMLInputElement>(null);
   const cameraInput = useRef<HTMLInputElement>(null);
   const [picking, setPicking] = useState(false);
+  // 과목이 많으면 찾기 (이름이나 첫 자음)
+  const [pickQuery, setPickQuery] = useState('');
   const [newName, setNewName] = useState('');
   const [creating, setCreating] = useState(false);
   // 빈 노트 만들기 (AI 없이): 이름만 받는다
@@ -1029,6 +1034,13 @@ function Composer({
   }, [text]);
 
   const subject = subjects.find((s) => s.id === subjectId) ?? null;
+  // 고르는 목록: 고정 → 최근 쓴 과목 (보관한 과목은 빼고, 지금 고른 것은 남긴다)
+  const pickList = pickerOrder(subjects, subjectId).filter((s) => matchesSubject(s.name, pickQuery));
+  const pickSearch = subjects.length >= 7;
+  const togglePicking = () => {
+    setPicking((p) => !p);
+    setPickQuery('');
+  };
   const trimmed = text.trim();
   const { textAsSource } = splitComposer(text, attachments.length);
   const textReady = textAsSource !== null && trimmed.length >= MIN_TEXT_CHARS;
@@ -1113,7 +1125,7 @@ function Composer({
                 className="press inline-flex max-w-[220px] items-center gap-2 rounded-full bg-surface-2 py-1.5 pl-3 pr-2.5 text-sm font-semibold"
                 aria-haspopup="listbox"
                 aria-expanded={picking}
-                onClick={() => setPicking((p) => !p)}
+                onClick={togglePicking}
               >
                 <span className="h-2.5 w-2.5 shrink-0 rounded-full" style={{ background: subjectVar(subject?.color) }} aria-hidden="true" />
                 <span className="truncate">{subject?.name ?? '과목 고르기'}</span>
@@ -1123,8 +1135,19 @@ function Composer({
               </button>
               {picking ? (
                 <div className="kok-pop absolute left-0 top-10 z-10 grid w-60 origin-top-left rounded-2xl bg-surface p-1.5 shadow-[0_12px_32px_var(--shadow-strong)] ring-1 ring-line sm:bottom-10 sm:top-auto sm:origin-bottom-left">
+                  {pickSearch ? (
+                    <input
+                      type="search"
+                      aria-label="과목 찾기"
+                      className="mb-1 min-w-0 rounded-xl bg-surface-2 px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-accent"
+                      placeholder="과목 찾기 (ㄱㅎ처럼도)"
+                      value={pickQuery}
+                      onChange={(e) => setPickQuery(e.target.value)}
+                    />
+                  ) : null}
                   <div className="grid max-h-60 gap-0.5 overflow-y-auto" role="listbox" aria-label="과목">
-                    {subjects.map((s) => (
+                    {pickList.length === 0 ? <p className="px-3 py-2 text-sm text-muted">맞는 과목이 없어요</p> : null}
+                    {pickList.map((s) => (
                       <button
                         key={s.id}
                         type="button"
@@ -1137,11 +1160,13 @@ function Composer({
                         onClick={() => {
                           onSubject(s.id);
                           setPicking(false);
+                          setPickQuery('');
                           area.current?.focus();
                         }}
                       >
                         <span className="h-2.5 w-2.5 shrink-0 rounded-full" style={{ background: subjectVar(s.color) }} aria-hidden="true" />
                         <span className="min-w-0 flex-1 truncate">{s.name}</span>
+                        {s.pinned && !s.archived ? <Icon d={ICONS.pin} size={13} strokeWidth={2.2} className="shrink-0 text-muted" /> : null}
                         {s.id === subjectId ? <Icon d={ICONS.check} size={16} className="text-accent" /> : null}
                       </button>
                     ))}

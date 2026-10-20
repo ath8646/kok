@@ -38,6 +38,8 @@ export type MeResponse = {
     organize: boolean;
     /** 자료 그림: PDF·사진 속 그림을 개념·그림 문제에 (questions.source_figure) */
     sourceFigures: boolean;
+    /** 과목 서랍: 과목 위에 고정·보관·최근 쓴 때 (subjects.pinned·archived·used_at) */
+    subjectDrawer: boolean;
   };
   consented: boolean;
   settings: UserSettings;
@@ -72,6 +74,12 @@ export type SubjectRow = {
   exam_date: string | null;
   position: number;
   created_at: string;
+  /** 과목 서랍 (features.subjectDrawer, 칸이 없는 예전 DB 면 없다): 위에 고정 */
+  pinned?: boolean;
+  /** 보관: 목록(자료함 '전체'·과목 칩·자료 넣기·복습 고르기)에서만 뺀다. 복습 카드는 그대로 */
+  archived?: boolean;
+  /** 마지막으로 자료를 넣은 때 */
+  used_at?: string | null;
 };
 
 export type SourceListRow = {

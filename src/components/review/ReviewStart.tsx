@@ -1,9 +1,11 @@
 'use client';
 // 복습 시작 화면: 언제 공부한 문제(기간) · 과목 · 얼마나(5·15·30분)를 고르면 핵심 문제부터 골라 준다.
 // 시간은 문제 수만 정한다 (지나도 멈추지 않는다). 계산은 src/lib/review-plan.ts (시험 있음).
-import { useMemo, type CSSProperties, type ReactNode } from 'react';
+import { useMemo, useState, type CSSProperties, type ReactNode } from 'react';
 import { Button, ICONS, Icon, cx, radioKeys } from '@/components/ui';
+import { SubjectDrawer } from '@/components/SubjectDrawer';
 import { subjectVar } from '@/lib/colors';
+import { QUICK_MAX, quickSubjects } from '@/lib/subject-order';
 import type { PlanData } from '@/lib/data';
 import {
   PERIOD_LABEL,
@@ -44,6 +46,7 @@ export function ReviewStart({
   review,
   starting,
   onStart,
+  drawer = false,
 }: {
   plan: PlanData;
   /** 이 복습 방법의 문제 (오답·약점 개념은 그 문제만) */
@@ -57,7 +60,10 @@ export function ReviewStart({
   review: { dailyMax: number; interleave: boolean };
   starting: boolean;
   onStart: (pick: StartPick) => void;
+  /** 과목 서랍 (features.subjectDrawer): 과목 칩은 고정 + 최근 쓴 과목만, 나머지는 '과목 더 보기' */
+  drawer?: boolean;
 }) {
+  const [drawerOpen, setDrawerOpen] = useState(false);
   const opts = { dailyMax: review.dailyMax, doneToday: plan.doneToday, interleave: review.interleave };
   const view = useMemo(() => {
     const now = new Date();
@@ -97,6 +103,9 @@ export function ReviewStart({
 
   const set = (patch: Partial<StartChoice>) => onChoice({ ...choice, ...patch });
   const { counts, pool, plans, timed, chosen, kinds } = view;
+  // 과목 칩: 서랍이 있으면 고정 + 최근 쓴 과목만 (보관한 과목은 빼고, 고른 과목은 남긴다)
+  const chips = drawer ? quickSubjects(view.subjects, QUICK_MAX, view.subjectId) : view.subjects;
+  const more = drawer && view.subjects.length > chips.length;
   const kindList = KIND_ORDER.filter((k) => kinds[k] > 0);
 
   return (
@@ -121,24 +130,50 @@ export function ReviewStart({
 
       {view.subjects.length > 1 ? (
         <Group label="과목" id="rv-subject" style={{ ['--i' as string]: 1 }}>
-          {/* 과목이 많으면 옆으로 민다 */}
-          <div role="radiogroup" aria-labelledby="rv-subject" className="no-scrollbar -mx-5 flex gap-2 overflow-x-auto px-5 pb-0.5">
-            {[null, ...view.subjects].map((s, i, all) => {
-              const id = s?.id ?? null;
-              return (
-                <ChoiceChip
-                  key={id ?? 'all'}
-                  on={view.subjectId === id}
-                  onPick={() => set({ subjectId: id })}
-                  onKeyDown={(e) => radioKeys(e, i, all.length, (n) => set({ subjectId: all[n]?.id ?? null }))}
-                  count={id ? (view.subjectCounts.get(id) ?? 0) : view.allCount}
-                  dot={s ? subjectVar(s.color) : undefined}
-                >
-                  {s ? s.name : '모든 과목'}
-                </ChoiceChip>
-              );
-            })}
+          {/* 과목이 많으면 옆으로 민다. 칩에 없는 과목은 '과목 더 보기'(과목 서랍)에서 */}
+          <div className="no-scrollbar -mx-5 flex gap-2 overflow-x-auto px-5 pb-0.5">
+            <div role="radiogroup" aria-labelledby="rv-subject" className="contents">
+              {[null, ...chips].map((s, i, all) => {
+                const id = s?.id ?? null;
+                return (
+                  <ChoiceChip
+                    key={id ?? 'all'}
+                    on={view.subjectId === id}
+                    onPick={() => set({ subjectId: id })}
+                    onKeyDown={(e) => radioKeys(e, i, all.length, (n) => set({ subjectId: all[n]?.id ?? null }))}
+                    count={id ? (view.subjectCounts.get(id) ?? 0) : view.allCount}
+                    dot={s ? subjectVar(s.color) : undefined}
+                  >
+                    {s ? s.name : '모든 과목'}
+                  </ChoiceChip>
+                );
+              })}
+            </div>
+            {more ? (
+              <button
+                type="button"
+                aria-haspopup="dialog"
+                onClick={() => setDrawerOpen(true)}
+                className="press inline-flex h-9 shrink-0 items-center gap-1.5 rounded-full border-2 border-dashed border-line px-3.5 text-sm font-semibold text-muted hover:text-ink"
+              >
+                <Icon d={ICONS.grid} size={15} strokeWidth={2.2} />
+                과목 더 보기 <span className="tabular-nums">{view.subjects.length - chips.length}</span>
+              </button>
+            ) : null}
           </div>
+          {drawer ? (
+            <SubjectDrawer
+              open={drawerOpen}
+              onClose={() => setDrawerOpen(false)}
+              subjects={view.subjects}
+              selected={view.subjectId}
+              onPick={(id) => set({ subjectId: id })}
+              counts={view.subjectCounts}
+              countLabel={(n) => `${n}문제`}
+              all={{ label: '모든 과목', count: view.allCount }}
+              currentLabel="고름"
+            />
+          ) : null}
         </Group>
       ) : null}
 

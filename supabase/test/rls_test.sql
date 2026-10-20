@@ -1028,4 +1028,40 @@ do $$ begin
 end $$;
 reset role;
 
+-- 과목 서랍: 고정·보관은 내 과목만 고치고, 자료를 넣으면 최근 쓴 때가 바뀌고 보관이 풀린다
+set role authenticated;
+select set_config('request.jwt.claim.sub', '11111111-1111-1111-1111-111111111111', false);
+do $$
+declare
+  mine uuid;
+  n int;
+begin
+  select id into mine from public.subjects limit 1;
+  update public.subjects set pinned = true, archived = true where id = mine;
+  if not (select pinned and archived from public.subjects where id = mine) then raise exception 'pin/archive not saved'; end if;
+  -- 남의 과목은 보이지 않아서 고쳐지지 않는다
+  update public.subjects set archived = true where user_id = '22222222-2222-2222-2222-222222222222';
+  get diagnostics n = row_count;
+  if n <> 0 then raise exception 'A must not archive B subjects'; end if;
+  begin
+    perform public.kok_touch_subject();
+    raise exception 'students must not call the trigger function';
+  exception when insufficient_privilege or feature_not_supported then null;
+  end;
+end $$;
+reset role;
+do $$
+declare
+  a uuid := '11111111-1111-1111-1111-111111111111';
+  sub uuid;
+begin
+  if exists (select 1 from public.subjects where user_id = '22222222-2222-2222-2222-222222222222' and archived) then raise exception 'B subject archived'; end if;
+  select id into sub from public.subjects where user_id = a and archived limit 1;
+  update public.subjects set used_at = now() - interval '3 days' where id = sub;
+  insert into public.sources (user_id, subject_id, kind, title) values (a, sub, 'text', '보관 풀기');
+  if (select archived from public.subjects where id = sub) then raise exception 'adding material should unarchive'; end if;
+  if (select used_at from public.subjects where id = sub) < now() - interval '1 minute' then raise exception 'used_at not touched'; end if;
+  if not (select pinned from public.subjects where id = sub) then raise exception 'pin kept'; end if;
+end $$;
+
 select 'ALL RLS TESTS PASSED' as result;

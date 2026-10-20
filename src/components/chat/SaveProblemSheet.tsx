@@ -8,6 +8,7 @@ import { QuestionPreview } from '@/components/QuestionList';
 import { Button, ICONS, Icon, Sheet, api, cx, inputClass, useToast } from '@/components/ui';
 import { fetchSources, fetchSubjects, sb } from '@/lib/data';
 import { subjectVar } from '@/lib/colors';
+import { pickerOrder } from '@/lib/subject-order';
 import { SUBJECT_COLORS } from '@/lib/settings';
 import type { ChatSolution } from '@/lib/chat';
 import type { SubjectRow } from '@/lib/types';
@@ -75,7 +76,7 @@ export function SaveProblemSheet({ solution, onClose, onSaved }: { solution: Cha
           setSubjectId(NEW);
           setUnit(NEW);
           setNoteId(NEW);
-        } else setSubjectId(subs[0].id);
+        } else setSubjectId((pickerOrder(subs)[0] ?? subs[0]).id);
       })
       .catch(() => alive && setSubjects([]));
     return () => {
@@ -227,7 +228,8 @@ export function SaveProblemSheet({ solution, onClose, onSaved }: { solution: Cha
             ) : (
               <>
                 <div className="flex flex-wrap gap-2" role="radiogroup" aria-label="과목">
-                  {subjects.map((s) => (
+                  {/* 고정 → 최근 쓴 과목 (보관한 과목은 빼고, 고른 것은 남긴다) */}
+                  {pickerOrder(subjects, subjectId).map((s) => (
                     <button
                       key={s.id}
                       type="button"

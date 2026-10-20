@@ -1,5 +1,5 @@
 'use client';
-// 콕 공통 화면 조각 (버튼, 카드, 시트, 큰 제목, 메뉴, 알림 등)
+// KOK 공통 화면 조각 (버튼, 카드, 시트, 큰 제목, 메뉴, 알림 등)
 import Link from 'next/link';
 import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from 'react';
 import { ICONS } from '@/lib/icons';

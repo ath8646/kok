@@ -1,5 +1,6 @@
+import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
-import { contrast, deriveTokens, fitPalette, normalizeHex, CORE_TOKENS, type Mode } from '@/lib/themes/colors';
+import { contrast, deriveTokens, fitPalette, mix, normalizeHex, toRgb, CORE_TOKENS, type Mode, type TokenMap } from '@/lib/themes/colors';
 import { BASE_TOKENS, presetTokens } from '@/lib/themes/presets';
 import { readSpec, zThemeSpec } from '@/lib/themes/spec';
 import { imageCss, themeCss } from '@/lib/themes/css';
@@ -7,7 +8,8 @@ import { CODE_PATTERNS, codePatternSvg, patternInks, sanitizePatternSvg } from '
 import { backdropColors, imageInks, specLook } from '@/lib/themes/backdrop';
 import { classifyCfError } from '@/lib/themes/cf-errors';
 import { sniffImage } from '@/lib/themes/image-sniff';
-import { THEME_COLORS } from '@/lib/settings';
+import { DEFAULT_GLOW, GLOW_TONES, THEME_COLORS, zUserSettings } from '@/lib/settings';
+import { GLOW_TOKENS, SEMANTIC_TEXT, glowPair, glowTokens, type GlowMap } from '@/lib/themes/glow';
 import { customIds, lookFor, rememberCustomThemes, resolveTheme, themeRef, type Theme } from '@/lib/theme';
 
 const MODES: Mode[] = ['light', 'dark'];
@@ -80,6 +82,150 @@ describe('기본 테마', () => {
         expect(contrast(t['--accent-ink'], t['--accent']), `${c} ${mode} button`).toBeGreaterThanOrEqual(4.5);
       }
   });
+
+  it('본문 글자는 7 이상, 흐린 글자는 4.5 이상 (바탕·카드·회색 칸), + 버튼 아이콘은 3 이상', () => {
+    for (const c of THEME_COLORS)
+      for (const mode of MODES) {
+        const t = presetTokens(c, mode);
+        for (const bg of [t['--bg'], t['--surface'], t['--surface-2']]) {
+          expect(contrast(t['--ink'], bg), `${c} ${mode} ink`).toBeGreaterThanOrEqual(7);
+          expect(contrast(t['--muted'], bg), `${c} ${mode} muted`).toBeGreaterThanOrEqual(4.5);
+        }
+        expect(contrast(t['--fab-ink'], t['--fab']), `${c} ${mode} fab`).toBeGreaterThanOrEqual(3);
+      }
+  });
+
+  it('초록·빨강·주황 글자는 카드·바탕·회색 칸에서 4.5 이상', () => {
+    for (const c of THEME_COLORS)
+      for (const mode of MODES) {
+        const t = presetTokens(c, mode);
+        for (const ink of SEMANTIC_TEXT[mode])
+          for (const bg of [t['--bg'], t['--surface'], t['--surface-2']]) expect(contrast(ink, bg), `${c} ${mode} ${ink} on ${bg}`).toBeGreaterThanOrEqual(4.5);
+      }
+  });
+});
+
+/** globals.css 의 한 블록에서 '--이름: 값' 을 읽는다 */
+function cssVars(block: string): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const m of block.matchAll(/(--[a-z0-9-]+):\s*([^;]+);/g)) out[m[1]] = m[2].trim();
+  return out;
+}
+
+describe('globals.css 의 기본 색 = 기본 테마(KOK) + 기본 별표 빛', () => {
+  const css = readFileSync('src/app/globals.css', 'utf8');
+  const light = cssVars(css.slice(css.indexOf(':root {'), css.indexOf('/* 어두운 화면')));
+  const darkStart = css.indexOf(":root[data-mode='dark'] {");
+  const dark = cssVars(css.slice(darkStart, css.indexOf('}', darkStart)));
+  const media = css.slice(css.indexOf('@media (prefers-color-scheme: dark) {', css.indexOf('/* 어두운 화면')), darkStart);
+  const both = { light, dark };
+
+  it('색 칸이 기본 테마와 같다 (밝게·어둡게, 어두운 화면 두 곳 모두)', () => {
+    for (const mode of MODES) for (const k of CORE_TOKENS) expect(both[mode][k], `${mode} ${k}`).toBe(BASE_TOKENS[mode][k]);
+    expect(cssVars(media)).toEqual(dark);
+  });
+
+  it('별표 빛 칸이 기본 빛(골드, 60)과 같다', () => {
+    for (const mode of MODES) {
+      const g = glowTokens(BASE_TOKENS[mode], DEFAULT_GLOW, mode);
+      for (const k of GLOW_TOKENS) expect(both[mode][k], `${mode} ${k}`).toBe(g[k]);
+    }
+  });
+
+  it('초록·빨강·주황 글자가 glow.ts 의 SEMANTIC_TEXT 와 같다', () => {
+    for (const mode of MODES) expect([both[mode]['--ok'], both[mode]['--bad'], both[mode]['--warn']]).toEqual([...SEMANTIC_TEXT[mode]]);
+  });
+});
+
+/** rgba(r, g, b, a) → [#rrggbb, a] */
+function rgbaParts(v: string): [string, number] {
+  const m = /^rgba\((\d+), (\d+), (\d+), ([\d.]+)\)$/.exec(v);
+  if (!m) throw new Error(`rgba 가 아니에요: ${v}`);
+  const hex = `#${[m[1], m[2], m[3]].map((x) => Number(x).toString(16).padStart(2, '0')).join('')}`;
+  return [hex, Number(m[4])];
+}
+
+/** 카드 안 빛 위에서 글자가 읽히는지: 두 끝과 그 사이(그라데이션) 모두 */
+function checkGlowText(t: TokenMap, g: GlowMap, mode: Mode, label: string) {
+  const [c1, a1] = rgbaParts(g['--glow-1']);
+  const [c2, a2] = rgbaParts(g['--glow-2']);
+  const p = mix(t['--surface'], c1, a1);
+  const q = mix(t['--surface'], c2, a2);
+  const texts: Array<[string, number]> = [
+    [t['--ink'], 7],
+    [t['--muted'], 4.5],
+    [t['--accent'], 4.5],
+    ...SEMANTIC_TEXT[mode].map((c): [string, number] => [c, 4.5]),
+  ];
+  for (const u of [0, 0.2, 0.4, 0.5, 0.6, 0.8, 1]) {
+    const bg = mix(p, q, u);
+    for (const [ink, min] of texts) {
+      const need = Math.min(min, contrast(ink, t['--surface']));
+      expect(contrast(ink, bg), `${label} ${ink} on ${bg}`).toBeGreaterThanOrEqual(need - 0.02);
+    }
+  }
+}
+
+describe('별표 빛', () => {
+  it('모든 테마·모드·빛·세기에서 카드 안 글자가 읽히고, 별 테두리는 3 이상, 번호 글자는 두 색 위에서 4.5 이상', () => {
+    for (const c of THEME_COLORS)
+      for (const mode of MODES)
+        for (const tone of GLOW_TONES)
+          for (const strength of [0, 25, 60, 100]) {
+            const t = presetTokens(c, mode);
+            const g = glowTokens(t, { tone, strength }, mode);
+            const label = `${c} ${mode} ${tone} ${strength}`;
+            for (const k of GLOW_TOKENS) expect(g[k], `${label} ${k}`).toMatch(/^(#[0-9a-f]{6}|rgba\(\d{1,3}, \d{1,3}, \d{1,3}, (0|1|0?\.\d{1,3})\))$/);
+            checkGlowText(t, g, mode, label);
+            expect(contrast(g['--glow-star-edge'], t['--surface']), `${label} edge`).toBeGreaterThanOrEqual(3);
+            for (const stop of [g['--glow-star-1'], g['--glow-star-2']])
+              expect(contrast(g['--glow-on'], stop), `${label} on ${stop}`).toBeGreaterThanOrEqual(4.5);
+          }
+  });
+
+  it('내가 만든 테마(아무 색)에서도 카드 안 글자가 읽힌다', () => {
+    for (let i = 0; i < 120; i++)
+      for (const mode of MODES) {
+        const base = BASE_TOKENS[mode];
+        const p = fitPalette({ bg: randomHex(i + 31), surface: randomHex(i + 1031), accent: randomHex(i + 2031) }, mode, {
+          bg: base['--bg'],
+          surface: base['--surface'],
+          accent: base['--accent'],
+        });
+        const t = deriveTokens(p, mode);
+        const tone = GLOW_TONES[i % GLOW_TONES.length];
+        const g = glowTokens(t, { tone, strength: 100 }, mode);
+        checkGlowText(t, g, mode, `custom ${i} ${mode} ${tone}`);
+        for (const stop of [g['--glow-star-1'], g['--glow-star-2']])
+          expect(contrast(g['--glow-on'], stop), `custom ${i} ${mode} ${tone} on`).toBeGreaterThanOrEqual(4.5);
+      }
+  });
+
+  it('세기 0 이면 빛이 모두 투명하고 (별만), 세기가 크면 더 진하다', () => {
+    const t = presetTokens('default', 'light');
+    const off = glowTokens(t, { tone: 'aurora', strength: 0 }, 'light');
+    for (const k of ['--glow-1', '--glow-2', '--glow-ring-1', '--glow-ring-2', '--glow-halo'] as const) expect(off[k].endsWith(', 0)'), k).toBe(true);
+    const soft = glowTokens(t, { tone: 'aurora', strength: 30 }, 'light');
+    const strong = glowTokens(t, { tone: 'aurora', strength: 90 }, 'light');
+    expect(rgbaParts(strong['--glow-1'])[1]).toBeGreaterThan(rgbaParts(soft['--glow-1'])[1]);
+    expect(rgbaParts(strong['--glow-ring-2'])[1]).toBeGreaterThan(rgbaParts(soft['--glow-ring-2'])[1]);
+    expect(rgbaParts(strong['--glow-halo'])[1]).toBeGreaterThan(rgbaParts(soft['--glow-halo'])[1]);
+  });
+
+  it("'테마 색' 빛은 라임 테마의 검정 버튼 대신 라임을 쓴다", () => {
+    const [, c2] = glowPair('accent', presetTokens('forest', 'light'));
+    expect(toRgb(c2)[1]).toBeGreaterThan(200);
+  });
+
+  it('예전 설정(빛 없음)·이상한 값은 기본 빛으로 읽는다', () => {
+    const old = zUserSettings.parse({ theme: { color: 'ocean', font: 'default', paper: 'none', mode: 'system', light: null, dark: null } });
+    expect(old.theme.glow).toEqual(DEFAULT_GLOW);
+    expect(old.theme.color).toBe('ocean');
+    const odd = zUserSettings.parse({ theme: { color: 'nope', glow: { tone: 'rainbow', strength: 400 } } });
+    expect(odd.theme.color).toBe('default');
+    expect(odd.theme.glow).toEqual(DEFAULT_GLOW);
+    expect(zUserSettings.parse({ theme: { glow: { tone: 'berry', strength: 35 } } }).theme.glow).toEqual({ tone: 'berry', strength: 35 });
+  });
 });
 
 const goodSpec = {
@@ -128,11 +274,20 @@ describe('테마 CSS', () => {
 
   it('두 모드를 모두 적고, data-mode 를 따른다', () => {
     const css = themeCss(look('light'), look('dark'));
-    expect(css).toContain(':root:root{--bg:#f3f3f6');
+    expect(css).toContain(':root:root{--bg:#f2f2f7');
     expect(css).toContain('@media (prefers-color-scheme: dark){:root:root:not([data-mode=light]){');
     expect(css).toContain(':root:root[data-mode=dark]{');
-    expect(css).toContain('--accent:#1a5fc2');
-    expect(css).toContain('--accent:#7cb0ff');
+    expect(css).toContain('--accent:#0168db');
+    expect(css).toContain('--accent:#4da3ff');
+    expect(css).not.toContain('--glow-');
+  });
+
+  it('별표 빛이 있으면 두 모드 모두 빛 칸을 적는다', () => {
+    const withGlow = (mode: Mode) => ({ ...look(mode), glow: glowTokens(presetTokens('ocean', mode), { tone: 'berry', strength: 80 }, mode) });
+    const css = themeCss(withGlow('light'), withGlow('dark'));
+    for (const k of GLOW_TOKENS) expect(css.split(`${k}:`).length - 1, k).toBe(3);
+    const bad = { ...withGlow('light'), glow: { ...withGlow('light').glow, '--glow-1': 'red;}body{display:none' } };
+    expect(themeCss(bad, withGlow('dark'))).not.toContain('display:none');
   });
 
   it('색 칸에는 검사한 값만 들어간다 (CSS 를 깨는 글은 빠진다)', () => {
@@ -207,7 +362,7 @@ describe('그림 파일 확인 (앞부분 바이트)', () => {
 });
 
 describe('밝을 때·어두울 때 테마 고르기', () => {
-  const base: Theme = { color: 'ocean', font: 'default', paper: 'none', mode: 'system', light: null, dark: null };
+  const base: Theme = { color: 'ocean', font: 'default', paper: 'none', mode: 'system', light: null, dark: null, glow: { ...DEFAULT_GLOW } };
   const id = '0b1c2d3e-4f50-4a61-8b72-9c8d7e6f5a4b';
 
   it('따로 고르지 않았으면 예전 한 가지 테마를 두 모드에 쓴다', () => {
@@ -223,9 +378,13 @@ describe('밝을 때·어두울 때 테마 고르기', () => {
     rememberCustomThemes([{ id, name: '모카', spec: goodSpec }]);
     const r = resolveTheme(t);
     expect(r.dark.tokens['--bg']).not.toBe(BASE_TOKENS.dark['--bg']);
-    expect(r.light.tokens['--accent']).toBe('#1a5fc2');
+    expect(r.light.tokens['--accent']).toBe('#0168db');
     expect(r.plain).toBe(false);
     expect(resolveTheme({ ...base, color: 'default' }).plain).toBe(true);
+    // 별표 빛만 바꿔도 테마 CSS 를 넣는다 (빛 칸은 두 모드 모두)
+    const glowOnly = resolveTheme({ ...base, color: 'default', glow: { tone: 'ocean', strength: 40 } });
+    expect(glowOnly.plain).toBe(false);
+    expect(glowOnly.dark.glow?.['--glow-star-2']).toBe('#4a86ff');
   });
 });
 

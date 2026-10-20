@@ -9,6 +9,7 @@ import { QuickAddProvider } from './QuickAdd';
 import { applyTheme, clearTheme, missingCustomIds, rememberCustomThemes, type CustomTheme, type Theme } from '@/lib/theme';
 import { sb } from '@/lib/data';
 import { Button, ICONS, Icon, Spinner, cx } from './ui';
+import { BrandMark, Wordmark } from './Brand';
 
 type MeCtx = {
   me: MeResponse | null;
@@ -180,7 +181,7 @@ export function AppShell({ children }: { children: ReactNode }) {
     return (
       <div className="mx-auto grid min-h-dvh max-w-md place-items-center px-6 text-center">
         <div className="grid gap-3">
-          <p className="font-brand text-4xl text-accent">콕</p>
+          <BrandMark size={56} className="justify-self-center" />
           <p>{error}</p>
           <Button onClick={() => refresh()}>다시 하기</Button>
         </div>
@@ -207,8 +208,8 @@ export function AppShell({ children }: { children: ReactNode }) {
         <div className={bare ? '' : 'md:flex'}>
           {!bare ? (
             <nav className="sticky top-0 hidden h-dvh w-60 shrink-0 flex-col gap-1 px-4 pb-6 pt-7 md:flex" aria-label="주 메뉴">
-              <Link href="/home" className="mb-6 px-3 font-brand text-4xl text-accent">
-                콕
+              <Link href="/home" className="mb-6 px-3" aria-label="KOK 홈">
+                <Wordmark mark={30} className="text-[26px]" />
               </Link>
               {TABS.map((t) => {
                 const on = under(pathname, t.href);

@@ -141,7 +141,7 @@ export function estimateRedraws(model: ModelId, usdPerEnergy: number): number {
   return Math.max(1, Math.ceil(usdToEnergy(usd, usdPerEnergy)));
 }
 
-/** 자료를 넣을 때 자료 그림을 콕 스타일로 다시 그리는지 (PDF·사진, Pro 혜택, 설정에서 켜 둠, DB 칸이 있음) */
+/** 자료를 넣을 때 자료 그림을 KOK 스타일로 다시 그리는지 (PDF·사진, Pro 혜택, 설정에서 켜 둠, DB 칸이 있음) */
 export function redrawsWanted(o: { kind: 'text' | 'pdf' | 'image'; canFigures: boolean; sourceFiguresSetting: boolean; featureOn: boolean }): boolean {
   return o.kind !== 'text' && o.canFigures && o.sourceFiguresSetting && o.featureOn;
 }

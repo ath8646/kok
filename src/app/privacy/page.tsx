@@ -10,7 +10,7 @@ export default async function PrivacyPage() {
   const site = await getSiteInfo();
   return (
     <LegalPage title="개인정보처리방침" updated="2026년 10월 18일">
-      <p>콕(이하 &lsquo;서비스&rsquo;)은 공부에 꼭 필요한 정보만 모으고, 이용자가 언제든 내려받거나 지울 수 있게 해요.</p>
+      <p>KOK(이하 &lsquo;서비스&rsquo;)은 공부에 꼭 필요한 정보만 모으고, 이용자가 언제든 내려받거나 지울 수 있게 해요.</p>
 
       <Sec title="1. 모으는 정보와 이유">
         <div className="overflow-x-auto">
@@ -65,7 +65,7 @@ export default async function PrivacyPage() {
           </table>
         </div>
         <p>
-          콕은 실명, 생일, 학교, 전화번호를 따로 묻지 않아요. 로그인한 회사가 보낸 이름·프로필 사진은 로그인 정보에만 남고, 화면에는 직접 정한 닉네임만 보여요.
+          KOK은 실명, 생일, 학교, 전화번호를 따로 묻지 않아요. 로그인한 회사가 보낸 이름·프로필 사진은 로그인 정보에만 남고, 화면에는 직접 정한 닉네임만 보여요.
         </p>
       </Sec>
 

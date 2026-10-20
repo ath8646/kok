@@ -1,6 +1,7 @@
 // 고른 테마(밝을 때·어두울 때)를 CSS 글로 바꾼다. <style id="kok-theme"> 에 넣고, 다음에 열 때를 위해 브라우저에도 적어 둔다.
 // 값은 모두 이 파일에서 만든 것(검사한 #rrggbb, 정해진 rgba, 검사한 그림 주소)만 들어가서, 이상한 글이 CSS 로 새지 않는다.
 import { CORE_TOKENS, isHex, type TokenMap } from './colors';
+import { GLOW_TOKENS, type GlowMap } from './glow';
 import { UUID, type ThemeImage } from './spec';
 import { PATTERN_SIZE, svgDataUrl } from './pattern';
 
@@ -10,6 +11,8 @@ export type ModeLook = {
   image: ThemeImage | null;
   /** 그림 위에 바탕색을 덮는 정도 */
   dim: number;
+  /** 별표 빛 색 (themes/glow.ts). 없으면 globals.css 의 기본 빛 */
+  glow?: GlowMap;
 };
 
 const RGBA = /^rgba\(\d{1,3}, \d{1,3}, \d{1,3}, (0|1|0?\.\d{1,3})\)$/;
@@ -26,6 +29,12 @@ function block(look: ModeLook): string {
   for (const k of CORE_TOKENS) {
     const v = look.tokens[k];
     if (isHex(v) || RGBA.test(v)) parts.push(`${k}:${v}`);
+  }
+  if (look.glow) {
+    for (const k of GLOW_TOKENS) {
+      const v = look.glow[k];
+      if (isHex(v) || RGBA.test(v)) parts.push(`${k}:${v}`);
+    }
   }
   const dim = Number.isFinite(look.dim) ? Math.min(0.92, Math.max(0.2, look.dim)) : 0.6;
   // 사진·AI 그림은 화면을 덮고, 무늬는 작은 조각을 이어 붙인다

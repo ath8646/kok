@@ -39,7 +39,7 @@ export async function GET() {
     ]);
     const body = JSON.stringify(
       {
-        app: '콕',
+        app: 'KOK',
         exported_at: new Date().toISOString(),
         profile: profile[0] ?? null,
         subjects,

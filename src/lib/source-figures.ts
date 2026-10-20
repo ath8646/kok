@@ -1,6 +1,6 @@
 // 자료 그림: PDF·사진 속 중요한 그림(지도·그래프·표·연표·도식·사진·작품 …).
 // 정리할 때 AI 가 그림과 네 모서리를 찾고(readFoundFigures), 서버가 원본에서 잘라 저장한다(모두).
-// Pro 는 지도·그래프·표·연표·도식을 콕 스타일로 다시 그린다(art). 사진·작품·사료·삽화는 원본만 쓴다
+// Pro 는 지도·그래프·표·연표·도식을 KOK 스타일로 다시 그린다(art). 사진·작품·사료·삽화는 원본만 쓴다
 // (다시 그리면 모양이 틀어져 틀린 것을 외우게 될 수 있어서).
 // 노트 정리(body.figures)에 두고 개념 카드에 보여 주며, 그림 문제는 그림을 그대로 남긴다(questions.source_figure).
 import { z } from 'zod';
@@ -22,7 +22,7 @@ export const FIG_KIND_LABEL: Record<FigKind, string> = {
   other: '그림',
 };
 
-/** 콕 스타일로 다시 그리는 그림인지 (지도·그래프·표·연표·도식) */
+/** KOK 스타일로 다시 그리는 그림인지 (지도·그래프·표·연표·도식) */
 export function canRedraw(kind: FigKind): kind is ArtKind {
   return (ART_KINDS as readonly string[]).includes(kind);
 }
@@ -54,7 +54,7 @@ export type SourceFigure = {
   /** 자른 그림 크기 (자리를 먼저 잡아 두려고) */
   w: number;
   h: number;
-  /** 콕 스타일로 다시 그린 그림 (Pro, 지도·그래프·표·연표·도식만) */
+  /** KOK 스타일로 다시 그린 그림 (Pro, 지도·그래프·표·연표·도식만) */
   art: Art | null;
 };
 

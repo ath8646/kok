@@ -3,7 +3,7 @@ import { z } from 'zod';
 import { REVIEW_PERIODS } from './review-plan';
 
 export type Effort = 'low' | 'medium' | 'high';
-/** solve: 문제 그림·단계 풀이, 사진·파일로 보낸 문제 풀기 (홈 채팅). redraw: 자료 그림을 콕 스타일로 다시 그리기 (Pro) */
+/** solve: 문제 그림·단계 풀이, 사진·파일로 보낸 문제 풀기 (홈 채팅). redraw: 자료 그림을 KOK 스타일로 다시 그리기 (Pro) */
 export type AiTask = 'organize' | 'merge' | 'visual' | 'quiz' | 'check' | 'grade' | 'chat' | 'theme' | 'solve' | 'redraw';
 
 // ------------------------------------------------------------- 운영 설정 (app_settings)
@@ -76,9 +76,18 @@ export type ModelTier = z.infer<typeof zTier>;
 
 export const VISUAL_TYPES = ['mindmap', 'table', 'timeline'] as const;
 
-/** 테마 (Pro): 색, 글꼴, 노트 종이 무늬. 무료는 기본만 쓴다 */
-export const THEME_COLORS = ['default', 'ocean', 'forest', 'lavender', 'cherry', 'mint', 'mocha', 'night'] as const;
+/**
+ * 테마 (Pro): 색, 글꼴, 노트 종이 무늬, 별표 빛. 무료는 기본만 쓴다.
+ * 고르는 화면의 차례대로 (default = KOK 인디고, ocean = 블루, forest = 라임, night = 미드나잇 …: 번호는 예전 이름 그대로 둔다)
+ */
+export const THEME_COLORS = ['default', 'ocean', 'lavender', 'cherry', 'coral', 'forest', 'mint', 'mocha', 'night'] as const;
 export type ThemeColor = (typeof THEME_COLORS)[number];
+/** 별표 빛: 별표한 카드에 번지는 두 가지 색 그라데이션 (accent = 테마 포인트 색) */
+export const GLOW_TONES = ['gold', 'sunset', 'aurora', 'ocean', 'berry', 'accent'] as const;
+export type GlowTone = (typeof GLOW_TONES)[number];
+/** 별표 빛 세기 0 ~ 100 (0 이면 빛 없이 별만) */
+export const DEFAULT_GLOW = { tone: 'gold', strength: 60 } as const satisfies { tone: GlowTone; strength: number };
+export type Glow = { tone: GlowTone; strength: number };
 export const THEME_FONTS = ['default', 'round', 'hand', 'serif'] as const;
 export type ThemeFont = (typeof THEME_FONTS)[number];
 export const THEME_PAPERS = ['none', 'lined', 'grid', 'dots'] as const;
@@ -96,7 +105,8 @@ export const DEFAULT_THEME = {
   mode: 'system',
   light: null,
   dark: null,
-} as const satisfies { color: ThemeColor; font: ThemeFont; paper: ThemePaper; mode: ThemeMode; light: ThemeRef | null; dark: ThemeRef | null };
+  glow: DEFAULT_GLOW,
+} as const satisfies { color: ThemeColor; font: ThemeFont; paper: ThemePaper; mode: ThemeMode; light: ThemeRef | null; dark: ThemeRef | null; glow: Glow };
 export type VisualType = (typeof VISUAL_TYPES)[number];
 
 export const zUserSettings = z.object({
@@ -125,8 +135,15 @@ export const zUserSettings = z.object({
       mode: z.enum(THEME_MODES).catch('system'),
       light: z.string().regex(THEME_REF).nullable().catch(null),
       dark: z.string().regex(THEME_REF).nullable().catch(null),
+      // 별표 빛 (예전 설정에는 없다: 기본 금빛)
+      glow: z
+        .object({
+          tone: z.enum(GLOW_TONES).catch(DEFAULT_GLOW.tone),
+          strength: z.number().int().min(0).max(100).catch(DEFAULT_GLOW.strength),
+        })
+        .catch({ ...DEFAULT_GLOW }),
     })
-    .catch({ ...DEFAULT_THEME }),
+    .catch({ ...DEFAULT_THEME, glow: { ...DEFAULT_GLOW } }),
   visual: z
     .object({
       defaultType: z.enum(['auto', 'mindmap', 'table', 'timeline']).catch('auto'),
@@ -139,7 +156,7 @@ export const zUserSettings = z.object({
       reveal: z.enum(['all', 'step']).catch('all'),
       hideMode: z.enum(['off', 'on']).catch('off'),
       fontSize: z.enum(['sm', 'md', 'lg']).catch('md'),
-      /** 자료 그림을 원본(자른 그림)으로 먼저 보기. 끄면 콕 스타일로 다시 그린 그림이 있을 때 그것부터 (Pro) */
+      /** 자료 그림을 원본(자른 그림)으로 먼저 보기. 끄면 KOK 스타일로 다시 그린 그림이 있을 때 그것부터 (Pro) */
       originalFirst: z.boolean().catch(false),
     })
     .catch({

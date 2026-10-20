@@ -6,7 +6,7 @@ export const metadata: Metadata = { title: 'AI 사용 안내' };
 export default function AiGuidePage() {
   return (
     <LegalPage title="AI 사용 안내" updated="2026년 10월 18일">
-      <p>콕에서 정리 노트, 그림, 문제, 단답형 채점은 사람이 아니라 AI(Anthropic의 Claude)가 만들어요. 안심하고 쓰려면 아래를 꼭 기억해 주세요.</p>
+      <p>KOK에서 정리 노트, 그림, 문제, 단답형 채점은 사람이 아니라 AI(Anthropic의 Claude)가 만들어요. 안심하고 쓰려면 아래를 꼭 기억해 주세요.</p>
       <Sec title="AI는 틀릴 수 있어요">
         <ul className="list-disc pl-5">
           <li>AI가 만든 내용에는 &lsquo;AI&rsquo; 표시와 출처 쪽이 붙어요. 중요한 내용은 원본과 비교해 확인해 주세요.</li>
@@ -24,7 +24,7 @@ export default function AiGuidePage() {
       </Sec>
       <Sec title="공부를 대신하지 않아요">
         <ul className="list-disc pl-5">
-          <li>콕은 준비(정리, 문제 만들기, 복습 일정)를 AI가 맡고, 외우는 것은 내가 하는 앱이에요.</li>
+          <li>KOK은 준비(정리, 문제 만들기, 복습 일정)를 AI가 맡고, 외우는 것은 내가 하는 앱이에요.</li>
           <li>숙제나 수행평가를 대신 써 주는 기능은 없어요.</li>
           <li>오래 붙잡지 않아요. 오늘 할 복습이 끝나면 &lsquo;오늘 할 일 끝&rsquo; 화면을 보여 줘요.</li>
         </ul>

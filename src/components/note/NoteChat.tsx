@@ -1,5 +1,5 @@
 'use client';
-// 노트 채팅: 노트 화면의 주황 버튼을 누르면 '자료 넣기' 창처럼 이 화면 안에서 열린다.
+// 노트 채팅: 노트 화면 오른쪽 아래의 채팅 버튼을 누르면 '자료 넣기' 창처럼 이 화면 안에서 열린다.
 // 노트 내용(과 일반 지식)으로 답하고, 답마다 에너지를 쓴다. 대화는 노트마다 저장된다.
 // 사진·파일을 붙이거나 사진을 찍어 물어볼 수 있다: 문제를 보내면 단계로 풀어 주고(Pro 는 그림으로), 푼 문제는 이 노트 문제로 넣을 수 있다.
 // 붙인 파일은 Pro 만 기록에 보관하고, 아니면 이름만 남는다.
@@ -359,7 +359,7 @@ export function NoteChat({
       {open ? (
         <div className="fixed inset-0 z-50" role="dialog" aria-modal="true" aria-label="노트에게 물어보기">
           <button type="button" aria-label="닫기" className="kok-scrim absolute inset-0 cursor-default" onClick={hide} />
-          {/* 폰: 위에서 내려오고, 아래쪽 주황 버튼(닫기)을 가리지 않는 높이까지만 커진다 */}
+          {/* 폰: 위에서 내려오고, 아래쪽 채팅 버튼(닫기)을 가리지 않는 높이까지만 커진다 */}
           <div
             data-closing={closing}
             style={kb ? { top: kb.top + 8, maxHeight: kb.height - 16 } : undefined}

@@ -1,5 +1,5 @@
 'use client';
-// 홈 (오늘): AI에게 물어보기, 오늘 복습, 5분 콕, 이번 주 공부한 날, 남은 에너지, 시험 D-day, 정리 중인 자료, 최근 노트
+// 홈 (오늘): AI에게 물어보기, 오늘 복습, 5분 KOK, 이번 주 공부한 날, 남은 에너지, 시험 D-day, 정리 중인 자료, 최근 노트
 import Link from 'next/link';
 import { useEffect, useState } from 'react';
 import { EnergyPill, useMe } from '@/components/AppShell';
@@ -163,7 +163,7 @@ export default function HomePage() {
       {/* AI에게 물어보기: 누르면 채팅 창 (대화는 홈을 떠나면 사라진다) */}
       <HomeAsk />
 
-      {/* 5분 콕 */}
+      {/* 5분 KOK */}
       {!plan && !err ? (
         <TodaySkeleton />
       ) : hasCards ? (
@@ -181,14 +181,14 @@ export default function HomePage() {
               )}
             </ProgressRing>
             <div className="min-w-0">
-              <p className="text-sm font-semibold text-muted">오늘의 콕</p>
+              <p className="text-sm font-semibold text-muted">오늘의 KOK</p>
               <p className="font-display text-xl leading-snug">{today.length ? `${today.length}문제 남았어요` : '복습 완료'}</p>
               <p className="text-sm text-muted">{doneToday ? `오늘 ${doneToday}문제 풀었어요` : '하루 5분이면 충분해요'}</p>
             </div>
           </div>
           {today.length ? (
             <LinkButton href="/review" size="lg" className="kok-fill w-full">
-              {settings.minutes}분 콕 시작
+              {settings.minutes}분 KOK 시작
             </LinkButton>
           ) : (
             // 오늘 복습을 다 했으면: 오답 다시 보기, 오답이 없으면 지난 공부를 기간으로 골라 다시 풀기

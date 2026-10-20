@@ -1,5 +1,5 @@
 'use client';
-// 고르기 칸: 기본 <select> 대신 콕 디자인의 펼침 목록 (ARIA listbox 패턴)
+// 고르기 칸: 기본 <select> 대신 KOK 디자인의 펼침 목록 (ARIA listbox 패턴)
 // - 칸은 입력칸과 같은 모양의 <button>, 누르거나 ↓↑·Enter·Space 로 열면 목록(role="listbox")에 초점이 가고 aria-activedescendant 로 줄을 가리킨다
 // - 목록은 portal 로 띄워(position: fixed) 스크롤 상자에 잘리지 않고, 스크롤·화면 크기가 바뀌면 칸을 따라간다
 // - 열려 있는 동안 목록 밖을 누르면 닫기만 한다 (밑에 있는 버튼·시트 바깥이 같이 눌리지 않게)

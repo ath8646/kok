@@ -1,4 +1,4 @@
-"""콕 v0.1 끝-끝 시험 (가짜 Supabase·Claude + 로컬 Postgres).
+"""KOK v0.1 끝-끝 시험 (가짜 Supabase·Claude + 로컬 Postgres).
 사용: python3 e2e.py  (앱: localhost:3000, 가짜 백엔드: localhost:54321)
 """
 import asyncio, base64, json, os, pathlib, sys, time, io, re, urllib.parse, urllib.request
@@ -272,7 +272,7 @@ async def figure_steps(browser):
         await expect(page.get_by_role("button", name="자료 넣기", exact=True)).to_be_visible()
         if title is None:
             await drag_files(page, [(name, mime, data)])
-            await expect(page.get_by_text("여기에 놓으면 콕이 정리해요")).to_be_visible()
+            await expect(page.get_by_text("여기에 놓으면 KOK이 정리해요")).to_be_visible()
             await drop_files(page)
         else:
             await page.get_by_role("button", name="자료 넣기", exact=True).click()
@@ -301,7 +301,7 @@ async def figure_steps(browser):
     w, h, mid, _ = jpeg_look(crop_file)
     assert abs(w / h - 395 / 300) < 0.15, (w, h)
     assert mid[0] > 180 and mid[1] < 90 and mid[2] < 90, mid
-    # Pro: 지도를 콕 스타일로 다시 그렸다 (원본 그림은 그대로)
+    # Pro: 지도를 KOK 스타일로 다시 그렸다 (원본 그림은 그대로)
     assert fig.get("art"), fig
     assert db(f"select step from public.sources where id = '{fsid}'") == "done"
     # 그림 문제: 그림을 그대로 남긴다
@@ -471,7 +471,7 @@ async def main():
         await expect(page.get_by_role("heading", name=re.compile("세 가지만"))).to_be_visible()
         await shot(page, "05-welcome")
         await page.get_by_role("button", name="모두 동의").click()
-        await page.get_by_label(re.compile("콕에서 쓸 이름")).fill("공부하는 고래")
+        await page.get_by_label(re.compile("KOK에서 쓸 이름")).fill("공부하는 고래")
         await page.get_by_role("button", name="과학", exact=True).click()
         await page.get_by_role("button", name="시작하기").click()
         await page.wait_for_url(LIBRARY_SUBJECT)
@@ -546,6 +546,9 @@ async def main():
         cards = page.locator("article[data-flip]")
         await expect(cards.first).to_contain_text("광합성의 결과물")
         await expect(cards.nth(1)).to_contain_text("광합성의 재료")
+        # 별표한 카드에만 별표 빛, 번호는 별표 빛 색
+        await expect(page.locator("article.kok-glow.is-starred")).to_have_count(1)
+        await expect(cards.first.locator(".kok-star-badge")).to_have_count(1)
         await page.wait_for_timeout(400)
         await shot(page, "08-note-starred", full=False)
         await poll_db(f"select string_agg(k->>'id', ',') from public.notes n, jsonb_array_elements(n.body->'key_points') k where n.source_id = '{sid}' and k->>'starred' = 'true'", "k3")
@@ -1043,10 +1046,10 @@ async def main():
         assert len(big_pdf) > 12000, len(big_pdf)
         before = json.loads(urllib.request.urlopen("http://localhost:54321/__stats").read())
         await drag_files(page, [("3단원_광합성.pdf", "application/pdf", big_pdf)])
-        await expect(page.get_by_text("여기에 놓으면 콕이 정리해요")).to_be_visible()
+        await expect(page.get_by_text("여기에 놓으면 KOK이 정리해요")).to_be_visible()
         await shot(page, "25-drop-overlay", full=False)
         await drop_files(page)
-        await expect(page.get_by_text("여기에 놓으면 콕이 정리해요")).to_be_hidden()
+        await expect(page.get_by_text("여기에 놓으면 KOK이 정리해요")).to_be_hidden()
         await expect(page.get_by_label("넣는 중인 자료")).to_be_visible()
         await shot(page, "25-drop-tray", full=False)
         pdf_card = page.get_by_role("link", name="3단원 광합성", exact=True)
@@ -1218,7 +1221,7 @@ async def main():
         ctx, page = await new_ctx(browser, "admin", width=1280)
         await page.goto(BASE + "/welcome")
         await page.get_by_role("button", name="모두 동의").click()
-        await page.get_by_label(re.compile("콕에서 쓸 이름")).fill("운영자")
+        await page.get_by_label(re.compile("KOK에서 쓸 이름")).fill("운영자")
         await page.get_by_label("과목 이름").fill("수학")
         await page.get_by_role("button", name="시작하기").click()
         await page.wait_for_url(LIBRARY_SUBJECT)
@@ -1252,7 +1255,7 @@ async def main():
         ctx, page = await new_ctx(browser, "other")
         await page.goto(BASE + "/welcome")
         await page.get_by_role("button", name="모두 동의").click()
-        await page.get_by_label(re.compile("콕에서 쓸 이름")).fill("다른학생")
+        await page.get_by_label(re.compile("KOK에서 쓸 이름")).fill("다른학생")
         await page.get_by_label("과목 이름").fill("영어")
         await page.get_by_role("button", name="시작하기").click()
         await page.wait_for_url(LIBRARY_SUBJECT)
@@ -2070,28 +2073,28 @@ async def main():
         ctx, page = await new_ctx(browser, "student")
         await page.goto(BASE + "/settings#theme")
         brightness = page.get_by_role("radiogroup", name="화면 밝기")
-        await page.get_by_role("radiogroup", name="테마", exact=True).get_by_role("radio", name="바다", exact=True).click()
-        await wait_css(page, "--accent", "#1a5fc2")
+        await page.get_by_role("radiogroup", name="테마", exact=True).get_by_role("radio", name="블루", exact=True).click()
+        await wait_css(page, "--accent", "#0168db")
         await brightness.get_by_role("radio", name="어둡게").click()
         await expect(page.locator("html")).to_have_attribute("data-mode", "dark")
-        await wait_css(page, "--accent", "#7cb0ff")
+        await wait_css(page, "--accent", "#4da3ff")
         await wait_css(page, "--bg", "#000000")
         # 밝은 기기에서도 어둡게 (Tailwind dark: 와 브라우저 기본 색도 같이)
         await wait_js(page, "getComputedStyle(document.documentElement).colorScheme === 'dark'")
         await page.locator("#theme").scroll_into_view_if_needed()
         await shot(page, "48-settings-theme-dark", full=False)
         await page.get_by_text("밝을 때와 어두울 때 테마를 따로 고르기").click()
-        await page.get_by_role("radiogroup", name="어두울 때 테마").get_by_role("radio", name="밤하늘", exact=True).click()
-        await wait_css(page, "--accent", "#9ca6ff")
-        await wait_css(page, "--bg", "#04050d")
+        await page.get_by_role("radiogroup", name="어두울 때 테마").get_by_role("radio", name="미드나잇", exact=True).click()
+        await wait_css(page, "--accent", "#90aff8")
+        await wait_css(page, "--bg", "#05070f")
         await brightness.get_by_role("radio", name="밝게").click()
         await expect(page.locator("html")).to_have_attribute("data-mode", "light")
-        await wait_css(page, "--accent", "#1a5fc2")
-        await page.get_by_role("radiogroup", name="밝을 때 테마").get_by_role("radio", name="벚꽃", exact=True).click()
-        await wait_css(page, "--accent", "#c0185a")
+        await wait_css(page, "--accent", "#0168db")
+        await page.get_by_role("radiogroup", name="밝을 때 테마").get_by_role("radio", name="핑크", exact=True).click()
+        await wait_css(page, "--accent", "#d5005b")
         await brightness.get_by_role("radio", name="기기 설정").click()
         await wait_js(page, "!document.documentElement.hasAttribute('data-mode')")
-        await wait_css(page, "--accent", "#c0185a")
+        await wait_css(page, "--accent", "#d5005b")
         await page.get_by_role("radiogroup", name="테마 글꼴").get_by_role("radio", name=re.compile("둥근 글씨")).click()
         await expect(page.locator("html")).to_have_attribute("data-font", "round")
         await page.get_by_role("radiogroup", name="노트 종이 무늬").get_by_role("radio", name="줄 노트").click()
@@ -2100,6 +2103,39 @@ async def main():
         await page.locator("#theme").scroll_into_view_if_needed()
         await shot(page, "48-settings-theme", full=False)
         await no_hscroll(page, "settings theme")
+
+        step("themes (Pro): star glow — colour and strength, with light and dark previews")
+        glow_tones = page.get_by_role("radiogroup", name="별표 빛 색")
+        await glow_tones.get_by_role("radio", name="오로라", exact=True).click()
+        await wait_css(page, "--glow-star-1", "#52e5c4")
+        await wait_css(page, "--glow-star-2", "#8d7bff")
+        strength = page.get_by_role("slider", name="별표 빛 세기")
+        await strength.focus()
+        await page.keyboard.press("End")
+        await wait_css(page, "--glow-ring-1", "rgba(82, 229, 196, 1)")
+        await wait_saved({"glow": {"tone": "aurora", "strength": 100}})
+        # 미리보기 (밝을 때·어두울 때): 별을 누르면 빛이 오므라들고 다시 누르면 번진다
+        preview = page.get_by_role("button", name="어두울 때 미리보기 별표")
+        await expect(preview).to_have_attribute("aria-pressed", "true")
+        await preview.scroll_into_view_if_needed()
+        await page.evaluate("window.scrollBy(0, 120)")
+        await shot(page, "48-settings-star-glow", full=False)
+        await preview.click()
+        await expect(preview).to_have_attribute("aria-pressed", "false")
+        await preview.click()
+        await expect(preview).to_have_attribute("aria-pressed", "true")
+        await strength.focus()
+        await page.keyboard.press("Home")
+        await expect(page.get_by_text("빛 없이 별만", exact=True)).to_be_visible()
+        await wait_css(page, "--glow-halo", "rgba(141, 123, 255, 0)")
+        await wait_saved({"glow": {"tone": "aurora", "strength": 0}})
+        # 기본으로 (골드, 60): 기본 색·기본 빛이면 테마 CSS 를 넣지 않는다 (아래 시험이 기대한다)
+        await glow_tones.get_by_role("radio", name="골드", exact=True).click()
+        await strength.focus()
+        for _ in range(12):
+            await page.keyboard.press("ArrowRight")
+        await wait_saved({"glow": {"tone": "gold", "strength": 60}})
+        await wait_css(page, "--glow-star-1", "#ffd60a")
 
         step("themes (Pro): the saved look is on before the app loads")
 
@@ -2110,7 +2146,7 @@ async def main():
         await page.route("**/api/me", slow_me)
         await page.goto(BASE + f"/notes/{note_sid}", wait_until="domcontentloaded")
         assert await page.evaluate("!!document.getElementById('kok-theme')"), "THEME_BOOT did not add the theme style"
-        assert await css_var(page, "--accent") == "#c0185a"
+        assert await css_var(page, "--accent") == "#d5005b"
         assert await page.evaluate("[document.documentElement.dataset.font, document.documentElement.dataset.paper].join()") == "round,lined"
         assert await wait_ready(page)
         font = await page.evaluate("getComputedStyle(document.body).fontFamily")
@@ -2120,8 +2156,8 @@ async def main():
         ctx, page = await new_ctx(browser, "student", scheme="dark")
         await page.goto(BASE + f"/notes/{note_sid}")
         assert await wait_ready(page)
-        await wait_css(page, "--bg", "#04050d")
-        assert await css_var(page, "--accent") == "#9ca6ff"
+        await wait_css(page, "--bg", "#05070f")
+        assert await css_var(page, "--accent") == "#90aff8"
         await shot(page, "49-note-theme-dark", full=False)
         await ctx.close()
 
@@ -2156,7 +2192,7 @@ async def main():
         await expect(page.locator("html")).to_have_attribute("data-font", "hand")
         await poll_db(f"select spec->>'font' from public.user_themes where id = '{ai_theme}'", "hand")
         theme_radios = page.get_by_role("radiogroup", name="테마", exact=True)
-        await theme_radios.get_by_role("radio", name="바다", exact=True).click()
+        await theme_radios.get_by_role("radio", name="블루", exact=True).click()
         await fonts.get_by_role("radio", name=re.compile("기본$")).click()
         await wait_js(page, "!document.documentElement.hasAttribute('data-font')")
         await theme_radios.get_by_role("radio", name=ai_name, exact=True).click()
@@ -2236,7 +2272,7 @@ async def main():
         await editor.get_by_role("button", name="지우기").click()
         await expect(editor).to_be_hidden()
         await wait_js(page, "!document.documentElement.hasAttribute('data-bg') && !document.getElementById('kok-theme')")
-        await wait_css(page, "--accent", "#b84c08")
+        await wait_css(page, "--accent", "#6057e7")
         await wait_saved({"light": "preset:default", "dark": "preset:default"})
         assert sql(f"select count(*) from public.user_themes where user_id = '{student_id}' and name = '물결 테마'") == "0"
 
@@ -2254,7 +2290,7 @@ async def main():
             f"'{ai_theme}'::text)) where id = '{student_id}'"
         )
         await page.goto(BASE + "/home")
-        await wait_js(page, "getComputedStyle(document.documentElement).getPropertyValue('--accent').trim() === '#b84c08'", timeout=10000)
+        await wait_js(page, "getComputedStyle(document.documentElement).getPropertyValue('--accent').trim() === '#6057e7'", timeout=10000)
         await expect(page.locator("html")).to_have_attribute("data-bg", "1")
         await ctx.close()
 
@@ -2304,7 +2340,8 @@ async def main():
         sql(f"insert into public.user_themes (user_id, name, spec) values ('{other_id}', 'Pro 때 테마', '{json.dumps(spec)}'::jsonb)")
         octx, opage = await new_ctx(browser, "other")
         await opage.goto(BASE + "/settings#theme")
-        await expect(opage.get_by_role("radiogroup", name="테마", exact=True).get_by_role("radio", name="바다", exact=True)).to_be_disabled()
+        await expect(opage.get_by_role("radiogroup", name="테마", exact=True).get_by_role("radio", name="블루", exact=True)).to_be_disabled()
+        await expect(opage.get_by_role("slider", name="별표 빛 세기")).to_be_disabled()
         await expect(opage.get_by_role("radiogroup", name="화면 밝기").get_by_role("radio", name="어둡게")).to_be_disabled()
         assert await opage.evaluate("document.documentElement.hasAttribute('data-mode') || !!document.getElementById('kok-theme')") is False
         # Pro 가 끝나도 내 테마는 보이고 지울 수 있다 (고치기는 없다)
@@ -2396,6 +2433,31 @@ async def main():
         await poll_db(f"select starred from public.sources where id = '{oldest}'", "t")
         # 다시 들어와도 맨 위 (저장된 별표)
         await page.reload()
+        await expect(cards.first).to_have_attribute("data-flip", oldest)
+        await expect(card(oldest).locator("a.kok-glow.is-starred")).to_have_count(1)
+        # 카드의 별 버튼: 누르면 별이 튀고(자리는 잠깐 그대로) 맨 위로 미끄러지며 별표 빛이 번진다. 노트로 가지 않는다
+        second = ready[1]
+        star_btn = card(second).get_by_role("button", name=re.compile(" 별표$"))
+        await expect(star_btn).to_have_attribute("aria-pressed", "false")
+        before_star = [await cards.nth(i).get_attribute("data-flip") for i in range(await cards.count())]
+        assert before_star.index(second) > 1, before_star
+        await star_btn.click()
+        await expect(star_btn).to_have_attribute("aria-pressed", "true")
+        assert page.url.endswith("/library"), page.url
+        await expect(card(second).locator("a.kok-glow.is-starred")).to_have_count(1)
+        await expect(page.get_by_text("별표했어요. 맨 위에 보여요.")).to_be_visible()
+        # 별표한 자료끼리는 내가 정한 순서·새 자료 먼저: 둘 다 맨 위 두 자리
+        await expect(cards.nth(0)).to_have_attribute("data-flip", re.compile(f"^({oldest}|{second})$"))
+        await expect(cards.nth(1)).to_have_attribute("data-flip", re.compile(f"^({oldest}|{second})$"))
+        await poll_db(f"select starred from public.sources where id = '{second}'", "t")
+        await page.evaluate("window.scrollTo(0, 0)")
+        await page.wait_for_timeout(400)
+        await shot(page, "92-library-star-glow", full=False)
+        # 다시 누르면 별표를 빼고 제자리로
+        await star_btn.click()
+        await expect(star_btn).to_have_attribute("aria-pressed", "false")
+        await expect(card(second).locator("a.kok-glow.is-starred")).to_have_count(0)
+        await poll_db(f"select starred from public.sources where id = '{second}'", "f")
         await expect(cards.first).to_have_attribute("data-flip", oldest)
 
         # 꾹 누르기(마우스 0.45초)로 고르기 시작 → 눌러서 더 고르기 → 스페이스로 고르고 풀기

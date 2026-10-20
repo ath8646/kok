@@ -97,7 +97,7 @@ export async function callJson(req: JsonCall): Promise<JsonResult> {
   };
 
   if (res.stop_reason === 'refusal') {
-    const err = new AiCallError('refusal', '이 자료는 콕에서 다룰 수 없는 내용이 있어서 정리하지 못했어요.');
+    const err = new AiCallError('refusal', '이 자료는 KOK에서 다룰 수 없는 내용이 있어서 정리하지 못했어요.');
     (err as AiCallError & { usage?: Usage }).usage = usage;
     throw err;
   }

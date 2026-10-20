@@ -351,7 +351,7 @@ async function stepCutFigures(ctx: Ctx): Promise<Partial<SourceRow>> {
 }
 
 /**
- * 그림 다시 그리기 (Pro): 아직 다시 그리지 않은 지도·그래프·표·연표·도식 한 장을 콕 스타일로 다시 그린다 (한 번 부를 때 AI 한 번).
+ * 그림 다시 그리기 (Pro): 아직 다시 그리지 않은 지도·그래프·표·연표·도식 한 장을 KOK 스타일로 다시 그린다 (한 번 부를 때 AI 한 번).
  * 못 그려도 원본 그림은 그대로 쓴다. 다 그리면 그림(마인드맵) 단계로
  */
 async function stepFigures(ctx: Ctx): Promise<Partial<SourceRow>> {

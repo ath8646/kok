@@ -1,5 +1,5 @@
 -- =====================================================================
--- 콕 v0.1 데이터베이스
+-- KOK v0.1 데이터베이스
 -- Supabase → SQL Editor → 새 쿼리에 이 파일 전체를 붙여 넣고 Run 하세요.
 -- 여러 번 실행해도 안전해요 (이미 있는 것은 건너뛰거나 다시 만들어요).
 -- =====================================================================
@@ -484,7 +484,7 @@ alter table public.chat_messages add column if not exists solution jsonb check (
 -- 문제 그림(설계도: 좌표와 도형 목록, 그림은 앱이 그린다)과 단계 풀이 [{ text, add, focus }]. 예전 문제는 null
 alter table public.questions add column if not exists figure jsonb check (figure is null or pg_column_size(figure) <= 32768);
 alter table public.questions add column if not exists steps jsonb check (steps is null or pg_column_size(steps) <= 16384);
--- 자료 그림 문제: 문제에 붙은 자료 그림 한 장을 그대로 남긴다 { id, kind, title, caption, page, crop(원본에서 자른 그림 경로), w, h, art(콕 스타일로 다시 그린 설계도, Pro) }
+-- 자료 그림 문제: 문제에 붙은 자료 그림 한 장을 그대로 남긴다 { id, kind, title, caption, page, crop(원본에서 자른 그림 경로), w, h, art(KOK 스타일로 다시 그린 설계도, Pro) }
 alter table public.questions add column if not exists source_figure jsonb check (source_figure is null or pg_column_size(source_figure) <= 65536);
 -- 자료 처리 단계에 '그림 다시 그리기'(figures, Pro)를 더한다 (정리·합치기 다음, 그림 앞).
 -- 이미 바꿨으면 건너뛴다 (다시 실행할 때마다 표 전체를 다시 검사하지 않게)

@@ -206,7 +206,7 @@ export async function getAppSettings(admin: SupabaseClient, fresh = false): Prom
     aiEnabled: map.get('ai_enabled') !== false,
     site: {
       contactEmail: typeof site.contactEmail === 'string' ? site.contactEmail : '',
-      operatorName: typeof site.operatorName === 'string' ? site.operatorName : '콕 운영자',
+      operatorName: typeof site.operatorName === 'string' ? site.operatorName : 'KOK 운영자',
     },
   };
   settingsCache = { at: Date.now(), value };

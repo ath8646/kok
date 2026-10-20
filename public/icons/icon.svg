@@ -1,0 +1,24 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 1024 1024">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#8f7dff"/>
+      <stop offset="1" stop-color="#4b33ea"/>
+    </linearGradient>
+    <radialGradient id="hi" cx="0.3" cy="0.08" r="0.9">
+      <stop offset="0" stop-color="#ffffff" stop-opacity="0.28"/>
+      <stop offset="0.55" stop-color="#ffffff" stop-opacity="0"/>
+    </radialGradient>
+    <filter id="sh" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="18" stdDeviation="22" flood-color="#000000" flood-opacity="0.22"/>
+    </filter>
+  </defs>
+  <rect width="1024" height="1024" rx="229" ry="229" fill="url(#bg)"/>
+  <rect width="1024" height="1024" rx="229" ry="229" fill="url(#hi)"/>
+  <g filter="url(#sh)" transform="translate(-44 0)">
+    <g fill="none" stroke="#ffffff" stroke-width="116" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M372 300V724"/>
+      <path d="M648 300L430 512L656 724"/>
+    </g>
+    <circle cx="790" cy="668" r="62" fill="#c9ff4f"/>
+  </g>
+</svg>

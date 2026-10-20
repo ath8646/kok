@@ -8,7 +8,7 @@ export default function TermsPage() {
   return (
     <LegalPage title="이용약관" updated="2026년 10월 18일">
       <Sec title="1. 목적">
-        <p>이 약관은 공부 앱 &lsquo;콕&rsquo;(이하 &lsquo;서비스&rsquo;)을 쓰는 데 필요한 운영자와 이용자의 권리, 의무, 책임을 정해요.</p>
+        <p>이 약관은 공부 앱 &lsquo;KOK&rsquo;(이하 &lsquo;서비스&rsquo;)을 쓰는 데 필요한 운영자와 이용자의 권리, 의무, 책임을 정해요.</p>
       </Sec>
       <Sec title="2. 가입과 계정">
         <ul className="list-disc pl-5">
@@ -37,7 +37,7 @@ export default function TermsPage() {
       <Sec title="5. 이용자가 지킬 것">
         <ul className="list-disc pl-5">
           <li>다른 사람의 개인정보(이름, 전화번호 등)가 들어 있는 자료는 그 부분을 지우고 올려 주세요.</li>
-          <li>저작권을 가진 사람이 허락하지 않은 방법으로 자료를 퍼뜨리는 데 콕을 쓰면 안 돼요. 올린 원본은 본인만 볼 수 있어요.</li>
+          <li>저작권을 가진 사람이 허락하지 않은 방법으로 자료를 퍼뜨리는 데 KOK을 쓰면 안 돼요. 올린 원본은 본인만 볼 수 있어요.</li>
           <li>불법이거나 학생에게 맞지 않는 내용, 다른 사람을 괴롭히는 내용을 올리면 안 돼요.</li>
           <li>자동 프로그램으로 대량 요청을 보내거나, 한도를 피하려고 여러 계정을 만드는 등 서비스를 방해하면 안 돼요.</li>
         </ul>

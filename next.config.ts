@@ -1,6 +1,6 @@
 import type { NextConfig } from 'next';
 
-// 콕은 거의 모든 화면이 사용자마다 달라서 cacheComponents 를 끈다.
+// KOK은 거의 모든 화면이 사용자마다 달라서 cacheComponents 를 끈다.
 // (끄면 partialPrefetching 도 같이 빼야 한다)
 const securityHeaders = [
   { key: 'X-Content-Type-Options', value: 'nosniff' },

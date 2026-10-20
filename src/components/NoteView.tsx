@@ -413,7 +413,7 @@ export function NoteView({
       <span
         className={cx(
           'grid h-7 w-7 shrink-0 place-items-center rounded-full text-sm font-bold tabular-nums',
-          k.starred ? 'bg-hl text-hl-ink' : 'bg-accent text-accent-ink',
+          k.starred ? 'kok-star-badge' : 'bg-accent text-accent-ink',
         )}
       >
         {n}
@@ -506,12 +506,7 @@ export function NoteView({
                   key={kp.id}
                   id={`kp-${kp.id}`}
                   data-flip={kp.id}
-                  className={cx(
-                    'kok-card kok-paper kok-kp p-4 transition-shadow',
-                    hl && 'shadow-[0_0_0_3px_var(--hl)]',
-                    kp.starred && 'is-starred',
-                    flash === kp.id && 'is-flash',
-                  )}
+                  className={cx('kok-card kok-paper kok-glow p-4 transition-shadow', hl && 'shadow-[0_0_0_3px_var(--hl)]', kp.starred && 'is-starred')}
                   onClick={() => (isEditing ? undefined : onSelectKeyPoint?.(hl ? null : kp.id))}
                 >
                   {isEditing ? (
@@ -521,7 +516,7 @@ export function NoteView({
                         <span
                           className={cx(
                             'grid h-7 w-7 shrink-0 place-items-center rounded-full text-sm font-bold tabular-nums',
-                            kp.starred ? 'bg-hl text-hl-ink' : 'bg-accent text-accent-ink',
+                            kp.starred ? 'kok-star-badge' : 'bg-accent text-accent-ink',
                           )}
                         >
                           {idx + 1}
@@ -553,7 +548,7 @@ export function NoteView({
                       <span
                         className={cx(
                           'mt-0.5 grid h-7 w-7 shrink-0 place-items-center rounded-full text-sm font-bold tabular-nums transition-colors',
-                          kp.starred ? 'bg-hl text-hl-ink' : 'bg-accent text-accent-ink',
+                          kp.starred ? 'kok-star-badge' : 'bg-accent text-accent-ink',
                           flash === kp.id && 'kok-badge-pop',
                         )}
                       >
@@ -620,7 +615,7 @@ export function NoteView({
               );
             })}
             {editing === 'kp-new' ? (
-              <article className="kok-card kok-paper kok-kp kok-appear grid gap-3 p-4">
+              <article className="kok-card kok-paper kok-glow kok-appear grid gap-3 p-4">
                 <p className="flex items-center gap-2 text-sm font-bold text-muted">
                   <span className="grid h-7 w-7 shrink-0 place-items-center rounded-full bg-accent text-sm font-bold text-accent-ink">
                     {note.key_points.length + 1}

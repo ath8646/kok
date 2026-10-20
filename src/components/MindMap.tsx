@@ -45,17 +45,17 @@ function readPalette(): Palette {
   const cs = getComputedStyle(document.documentElement);
   const v = (name: string, fb: string) => cs.getPropertyValue(name).trim() || fb;
   return {
-    ink: v('--ink', '#18212e'),
-    muted: v('--muted', '#566378'),
-    line: v('--line', '#d6deea'),
+    ink: v('--ink', '#1c1c1e'),
+    muted: v('--muted', '#6b6b70'),
+    line: v('--line', '#e3e3e8'),
     surface: v('--surface', '#ffffff'),
-    surface2: v('--surface-2', '#f6f8fc'),
-    hl: v('--hl', '#ffd93d'),
-    accent: v('--accent', '#2456e8'),
-    ok: v('--ok', '#1a7f4b'),
-    warn: v('--warn', '#b25e09'),
-    bad: v('--bad', '#c92a2a'),
-    branches: [1, 2, 3, 4, 5, 6, 7, 8].map((i) => v(`--b${i}`, '#2456e8')),
+    surface2: v('--surface-2', '#efeff4'),
+    hl: v('--hl', '#ffd60a'),
+    accent: v('--accent', '#6057e7'),
+    ok: v('--ok', '#047c2d'),
+    warn: v('--warn', '#9c5901'),
+    bad: v('--bad', '#d80309'),
+    branches: [1, 2, 3, 4, 5, 6, 7, 8].map((i) => v(`--b${i}`, '#007aff')),
   };
 }
 

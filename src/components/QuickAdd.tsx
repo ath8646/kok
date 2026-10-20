@@ -1463,7 +1463,7 @@ function DropOverlay({ subjectName, intoComposer, note }: { subjectName: string;
           <Icon d={ICONS.upload} size={30} strokeWidth={2.2} />
         </div>
         <p className="font-display text-xl">
-          {intoComposer ? '여기에 놓으면 입력창에 붙여요' : note ? '여기에 놓으면 이 노트에 더해요' : '여기에 놓으면 콕이 정리해요'}
+          {intoComposer ? '여기에 놓으면 입력창에 붙여요' : note ? '여기에 놓으면 이 노트에 더해요' : '여기에 놓으면 KOK이 정리해요'}
         </p>
         <p className="text-sm text-muted">
           PDF · 사진 · 글 파일

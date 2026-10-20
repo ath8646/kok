@@ -187,6 +187,15 @@ export default function SettingsPage() {
       </Card>
 
       <SectionTitle>
+        <span id="theme" className="scroll-mt-24 inline-flex items-center gap-2">
+          테마 {!canTheme ? <Chip tone="accent">Pro</Chip> : null}
+        </span>
+      </SectionTitle>
+      <Card className="grid gap-6">
+        <ThemeSettings me={me} theme={draft.theme} onChange={pickTheme} />
+      </Card>
+
+      <SectionTitle>
         <span id="energy" className="scroll-mt-24">
           AI 에너지
         </span>
@@ -271,7 +280,7 @@ export default function SettingsPage() {
             </span>
           </SectionTitle>
           <Card className="grid gap-4">
-            <p className="text-sm text-muted">노트 화면의 주황 버튼을 누르면 그 노트에 대해 AI에게 물어볼 수 있어요. 답마다 에너지를 써요.</p>
+            <p className="text-sm text-muted">노트 화면 오른쪽 아래의 채팅 버튼을 누르면 그 노트에 대해 AI에게 물어볼 수 있어요. 답마다 에너지를 써요.</p>
             <Field label="처음 고를 모델 (채팅 창에서 바꾸면 그 모델을 기억해요)">
               <Segmented
                 label="채팅 모델"
@@ -303,15 +312,6 @@ export default function SettingsPage() {
           </Card>
         </>
       ) : null}
-
-      <SectionTitle>
-        <span id="theme" className="scroll-mt-24 inline-flex items-center gap-2">
-          테마 {!canTheme ? <Chip tone="accent">Pro</Chip> : null}
-        </span>
-      </SectionTitle>
-      <Card className="grid gap-5">
-        <ThemeSettings me={me} theme={draft.theme} onChange={pickTheme} />
-      </Card>
 
       <SectionTitle>시각화</SectionTitle>
       <Card className="grid gap-4">
@@ -447,8 +447,8 @@ export default function SettingsPage() {
             />
             <p className="text-xs text-muted">
               {me.canFigures
-                ? '끄면 콕 스타일로 다시 그린 그림부터 보여 줘요. 그림마다 원본과 바꿔 볼 수 있어요.'
-                : '자료 그림은 원본에서 잘라 보여 줘요. Pro는 지도·그래프·표·연표·도식을 콕 스타일로 다시 그려 줘요.'}
+                ? '끄면 KOK 스타일로 다시 그린 그림부터 보여 줘요. 그림마다 원본과 바꿔 볼 수 있어요.'
+                : '자료 그림은 원본에서 잘라 보여 줘요. Pro는 지도·그래프·표·연표·도식을 KOK 스타일로 다시 그려 줘요.'}
             </p>
           </div>
         ) : null}
@@ -647,7 +647,7 @@ export default function SettingsPage() {
         <Link href="/privacy">개인정보처리방침</Link>
         <Link href="/ai-guide">AI 사용 안내</Link>
         {me.isAdmin ? <Link href="/admin">관리자</Link> : null}
-        <span>콕 v0.1</span>
+        <span>KOK v0.1</span>
       </div>
     </div>
   );

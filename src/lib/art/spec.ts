@@ -1,4 +1,4 @@
-// 자료 그림을 '콕 스타일로 다시 그리기' 위한 설계도 (Pro).
+// 자료 그림을 'KOK 스타일로 다시 그리기' 위한 설계도 (Pro).
 // AI 는 잘라 낸 그림(사진 한 장)을 보고 종류별 JSON 만 준다: 지도·그래프·표·연표·도식. 그림은 앱이 그린다 (src/components/art).
 // 1) artJsonSchema(kind): Claude structured outputs 에 넣는다 (종류마다 따로, 모든 칸 필수, 재귀 없음, 안 쓰는 칸은 빈 값).
 // 2) normalizeArt(kind, raw): 받은 값을 검사해 그릴 수 있는 것만 남긴다 (DB·노트에도 이 모양으로 저장, 16000바이트 안).

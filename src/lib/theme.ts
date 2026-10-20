@@ -1,11 +1,12 @@
-// 테마 (Pro): 화면 밝기(기기 설정·밝게·어둡게), 밝을 때·어두울 때 쓸 테마(기본 테마나 내가 만든 테마), 글꼴, 노트 종이 무늬, 배경 그림.
-// 색은 두 모드의 색 칸을 모두 적은 CSS 를 <style id="kok-theme"> 에 넣어 바꾸고(src/lib/themes/css.ts),
+// 테마 (Pro): 화면 밝기(기기 설정·밝게·어둡게), 밝을 때·어두울 때 쓸 테마(기본 테마나 내가 만든 테마), 글꼴, 노트 종이 무늬, 배경 그림, 별표 빛.
+// 색은 두 모드의 색 칸(별표 빛 포함)을 모두 적은 CSS 를 <style id="kok-theme"> 에 넣어 바꾸고(src/lib/themes/css.ts),
 // <html> 에는 data-mode·data-font·data-paper·data-bg 를 붙인다.
 // 다음에 열 때 기본 색이 잠깐 보이지 않게 브라우저에도 적어 두고, layout 의 작은 글(THEME_BOOT)이 그리기 전에 먼저 붙인다.
-import { THEME_COLORS, type ThemeColor, type ThemeFont, type ThemeMode, type ThemePaper, type UserSettings } from './settings';
+import { DEFAULT_GLOW, THEME_COLORS, type Glow, type ThemeColor, type ThemeFont, type ThemeMode, type ThemePaper, type UserSettings } from './settings';
 import type { Mode } from './themes/colors';
 import { specLook } from './themes/backdrop';
 import { themeCss, type ModeLook } from './themes/css';
+import { glowTokens, isDefaultGlow } from './themes/glow';
 import { BASE_TOKENS, presetTokens } from './themes/presets';
 import { readSpec, type ThemeSpec } from './themes/spec';
 
@@ -13,16 +14,17 @@ export type Theme = UserSettings['theme'];
 /** 내가 만든 테마 (user_themes 행) */
 export type CustomTheme = { id: string; name: string; spec: unknown };
 
-/** 고르는 화면에 보일 이름과 색 (기본 테마의 + 버튼 색) */
-export const THEME_COLOR_INFO: Record<ThemeColor, { label: string; light: string; dark: string }> = {
-  default: { label: '콕 주황', light: '#eb6a0f', dark: '#ff9b45' },
-  ocean: { label: '바다', light: '#2b6fe0', dark: '#7cb0ff' },
-  forest: { label: '숲', light: '#2f8a43', dark: '#6ccf86' },
-  lavender: { label: '라벤더', light: '#7656e0', dark: '#b8a2ff' },
-  cherry: { label: '벚꽃', light: '#df3f77', dark: '#ff8db4' },
-  mint: { label: '민트', light: '#119c88', dark: '#5adfc8' },
-  mocha: { label: '모카', light: '#a46a34', dark: '#e2b388' },
-  night: { label: '밤하늘', light: '#4552d6', dark: '#9ca6ff' },
+/** 고르는 화면에 보일 이름 (색은 presetTokens 로 그린다) */
+export const THEME_COLOR_INFO: Record<ThemeColor, { label: string }> = {
+  default: { label: 'KOK' },
+  ocean: { label: '블루' },
+  lavender: { label: '라벤더' },
+  cherry: { label: '핑크' },
+  coral: { label: '코럴' },
+  forest: { label: '라임' },
+  mint: { label: '민트' },
+  mocha: { label: '모카' },
+  night: { label: '미드나잇' },
 };
 
 export const THEME_FONT_INFO: Record<ThemeFont, { label: string; family: string }> = {
@@ -116,11 +118,17 @@ export function lookFor(ref: string, mode: Mode): ModeLook {
 
 export type ResolvedTheme = { mode: ThemeMode; light: ModeLook; dark: ModeLook; font: ThemeFont; paper: ThemePaper; plain: boolean };
 
+/** 한 모드의 모습에 별표 빛을 더한다 (빛은 그 테마의 카드·글자 색에 맞춘다) */
+function withGlow(look: ModeLook, glow: Glow, mode: Mode): ModeLook {
+  return { ...look, glow: glowTokens(look.tokens, glow, mode) };
+}
+
 export function resolveTheme(t: Theme): ResolvedTheme {
-  const light = lookFor(themeRef(t, 'light'), 'light');
-  const dark = lookFor(themeRef(t, 'dark'), 'dark');
-  // 기본 색 그대로면 CSS 를 넣지 않는다 (globals.css 의 기본 색)
-  const plain = themeRef(t, 'light') === 'preset:default' && themeRef(t, 'dark') === 'preset:default';
+  const glow = t.glow ?? DEFAULT_GLOW;
+  const light = withGlow(lookFor(themeRef(t, 'light'), 'light'), glow, 'light');
+  const dark = withGlow(lookFor(themeRef(t, 'dark'), 'dark'), glow, 'dark');
+  // 기본 색·기본 빛 그대로면 CSS 를 넣지 않는다 (globals.css 의 기본 색)
+  const plain = themeRef(t, 'light') === 'preset:default' && themeRef(t, 'dark') === 'preset:default' && isDefaultGlow(glow);
   return { mode: t.mode, light, dark, font: t.font, paper: t.paper, plain };
 }
 

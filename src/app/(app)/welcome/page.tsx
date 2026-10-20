@@ -10,6 +10,7 @@ import { clearTheme } from '@/lib/theme';
 import { dropView } from '@/lib/view-cache';
 import { SUBJECT_COLORS } from '@/lib/settings';
 import { SUBJECT_COLOR_LABEL, subjectVar } from '@/lib/colors';
+import { BrandMark } from '@/components/Brand';
 
 const SUGGEST = ['국어', '영어', '수학', '과학', '사회', '역사'];
 
@@ -65,10 +66,8 @@ export default function WelcomePage() {
 
   return (
     <div className="mx-auto grid max-w-lg gap-4 pb-6 pt-[calc(28px+env(safe-area-inset-top))]">
-      <div className="text-center">
-        <p className="font-brand text-6xl text-accent">
-          <span className="hl-mark">콕</span>
-        </p>
+      <div className="grid justify-items-center text-center">
+        <BrandMark size={72} className="shadow-[0_16px_36px_-14px_rgba(75,51,234,0.6)]" />
         <h1 className="mt-3 font-display text-2xl">반가워요! 세 가지만 정하면 시작해요</h1>
       </div>
 
@@ -112,7 +111,7 @@ export default function WelcomePage() {
 
       <Card className="kok-rise grid gap-3" style={{ ['--i' as string]: 2 }}>
         <h2 className="font-bold">2. 닉네임</h2>
-        <Field label="콕에서 쓸 이름 (실명이 아니어도 돼요)" htmlFor="nick">
+        <Field label="KOK에서 쓸 이름 (실명이 아니어도 돼요)" htmlFor="nick">
           <input
             id="nick"
             className={inputClass}

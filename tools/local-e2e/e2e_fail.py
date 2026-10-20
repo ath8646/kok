@@ -22,7 +22,7 @@ async def main():
         # 가입 확인
         await page.goto(BASE + "/welcome")
         await page.get_by_role("button", name="모두 동의").click()
-        await page.get_by_label(re.compile("콕에서 쓸 이름")).fill("실패시험")
+        await page.get_by_label(re.compile("KOK에서 쓸 이름")).fill("실패시험")
         await page.get_by_label("과목 이름").fill("과학")
         await page.get_by_role("button", name="시작하기").click()
         await page.wait_for_url(LIBRARY_SUBJECT)
@@ -57,7 +57,7 @@ async def main():
         actx, apage = await new_ctx(b, "admin", width=1280)
         await apage.goto(BASE + "/welcome")
         await apage.get_by_role("button", name="모두 동의").click()
-        await apage.get_by_label(re.compile("콕에서 쓸 이름")).fill("운영자")
+        await apage.get_by_label(re.compile("KOK에서 쓸 이름")).fill("운영자")
         await apage.get_by_label("과목 이름").fill("수학")
         await apage.get_by_role("button", name="시작하기").click()
         await apage.wait_for_url(LIBRARY_SUBJECT)

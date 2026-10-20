@@ -7,10 +7,10 @@ export async function getSiteInfo(): Promise<{ operatorName: string; contactEmai
     const { data } = await adminClient().from('app_settings').select('value').eq('key', 'site').maybeSingle();
     const v = (data?.value ?? {}) as Record<string, unknown>;
     return {
-      operatorName: typeof v.operatorName === 'string' && v.operatorName ? v.operatorName : '콕 운영자',
+      operatorName: typeof v.operatorName === 'string' && v.operatorName ? v.operatorName : 'KOK 운영자',
       contactEmail: typeof v.contactEmail === 'string' ? v.contactEmail : '',
     };
   } catch {
-    return { operatorName: '콕 운영자', contactEmail: '' };
+    return { operatorName: 'KOK 운영자', contactEmail: '' };
   }
 }

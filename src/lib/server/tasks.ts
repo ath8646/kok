@@ -74,7 +74,7 @@ export async function runTaskFull(
     const usage = usageOf(e);
     if (usage) await charge(admin, { acc, task: t.task, model, usage, usdPerEnergy: app.limits.usdPerEnergy, sourceId: t.sourceId });
     if (e instanceof AiCallError) {
-      if (e.kind === 'refusal') throw new UserFacingError('ai_refusal', '이 내용은 콕에서 다룰 수 없어요.', 422);
+      if (e.kind === 'refusal') throw new UserFacingError('ai_refusal', '이 내용은 KOK에서 다룰 수 없어요.', 422);
       if (e.kind === 'retryable') throw new UserFacingError('ai_busy', 'AI 서버가 바빠요. 잠시 뒤에 다시 해 주세요.', 503);
       throw new UserFacingError('ai_bad_output', 'AI가 답을 제대로 만들지 못했어요. 다시 해 주세요.', 502);
     }

@@ -1,11 +1,12 @@
 import Link from 'next/link';
 import type { ReactNode } from 'react';
+import { Wordmark } from './Brand';
 
 export function LegalPage({ title, updated, children }: { title: string; updated: string; children: ReactNode }) {
   return (
     <main className="mx-auto grid max-w-2xl gap-6 px-5 pb-16 pt-[calc(24px+env(safe-area-inset-top))]">
-      <Link href="/" className="font-display text-3xl text-accent">
-        콕
+      <Link href="/" className="justify-self-start" aria-label="KOK 처음 화면">
+        <Wordmark mark={30} className="text-[26px]" />
       </Link>
       <header>
         <h1 className="font-display text-3xl">{title}</h1>

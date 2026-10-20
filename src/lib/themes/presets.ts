@@ -1,111 +1,127 @@
-// 기본 테마 색: globals.css 의 기본 색 + 예전 [data-theme] 색 그대로 (밝게·어둡게 모두 빠짐없이 적는다).
+// KOK 의 기본 테마 색 (밝게·어둡게 모두 빠짐없이 적는다). 기본(인디고)은 globals.css 의 기본 색과 같다.
+// 바탕·카드·글자는 애플 앱처럼 맑은 회색이고(모카는 따뜻한 바탕, 미드나잇은 남색 바탕), 테마마다 포인트 색만 다르다.
+// 글자로 쓰는 포인트 색(--accent)은 바탕·카드·연한 포인트 바탕에서 4.5 이상, 버튼 글자 4.5 이상,
+// + 버튼(--fab)은 맑은 색 그대로 두고 아이콘이 3 이상 (흰색이 되면 흰색). themes.test.ts 가 모두 확인한다.
 // 테마 CSS 는 늘 모든 칸을 적어서, 밝은 테마와 어두운 테마가 서로 섞이지 않게 한다.
 import type { ThemeColor } from '../settings';
-import type { CoreToken, Mode, TokenMap } from './colors';
+import type { Mode, TokenMap } from './colors';
 
-export const BASE_TOKENS: Record<Mode, TokenMap> = {
+type AccentToken = '--accent' | '--accent-soft' | '--accent-ink' | '--fab' | '--fab-ink';
+type Neutral = Omit<TokenMap, AccentToken>;
+
+const PAPER: Record<Mode, Pick<TokenMap, '--paper-line' | '--paper-dot'>> = {
+  light: { '--paper-line': 'rgba(60, 60, 67, 0.09)', '--paper-dot': 'rgba(60, 60, 67, 0.2)' },
+  dark: { '--paper-line': 'rgba(235, 235, 245, 0.07)', '--paper-dot': 'rgba(235, 235, 245, 0.16)' },
+};
+
+/** 애플 앱 같은 회색 (밝게: 연한 회색 바탕에 흰 카드, 어둡게: 검정 바탕에 짙은 회색 카드) */
+const GRAY: Record<Mode, Neutral> = {
   light: {
-    '--bg': '#f3f3f6',
+    '--bg': '#f2f2f7',
     '--surface': '#ffffff',
-    '--surface-2': '#efeff3',
-    '--surface-3': '#e5e5eb',
+    '--surface-2': '#efeff4',
+    '--surface-3': '#e5e5ea',
     '--raised': '#ffffff',
-    '--line': '#e1e1e7',
-    '--ink': '#17171a',
-    '--muted': '#6b6b74',
-    '--accent': '#b84c08',
-    '--accent-soft': '#fff0e3',
-    '--accent-ink': '#ffffff',
-    '--fab': '#eb6a0f',
-    '--fab-ink': '#ffffff',
-    '--paper-line': 'rgba(40, 60, 110, 0.085)',
-    '--paper-dot': 'rgba(40, 60, 110, 0.2)',
+    '--line': '#e3e3e8',
+    '--ink': '#1c1c1e',
+    '--muted': '#6b6b70',
+    ...PAPER.light,
   },
   dark: {
     '--bg': '#000000',
-    '--surface': '#17171a',
-    '--surface-2': '#222226',
-    '--surface-3': '#2d2d32',
-    '--raised': '#3a3a41',
-    '--line': '#2b2b30',
-    '--ink': '#f2f2f4',
-    '--muted': '#9c9ca6',
-    '--accent': '#ff9b45',
-    '--accent-soft': '#3a240f',
-    '--accent-ink': '#1d0f00',
-    '--fab': '#ff9b45',
-    '--fab-ink': '#1d0f00',
-    '--paper-line': 'rgba(255, 255, 255, 0.07)',
-    '--paper-dot': 'rgba(255, 255, 255, 0.16)',
+    '--surface': '#1c1c1e',
+    '--surface-2': '#2c2c2e',
+    '--surface-3': '#3a3a3c',
+    '--raised': '#48484a',
+    '--line': '#38383a',
+    '--ink': '#f5f5f7',
+    '--muted': '#98989f',
+    ...PAPER.dark,
   },
 };
 
-type Partial = { [K in CoreToken]?: string };
-
-/** 기본 테마가 기본 색에서 바꾸는 칸 */
-const PRESET_PATCH: Record<ThemeColor, Record<Mode, Partial>> = {
-  default: { light: {}, dark: {} },
-  ocean: {
-    light: { '--accent': '#1a5fc2', '--accent-soft': '#e7f0fd', '--fab': '#2b6fe0' },
-    dark: { '--accent': '#7cb0ff', '--accent-soft': '#132541', '--accent-ink': '#04122b', '--fab': '#7cb0ff', '--fab-ink': '#04122b' },
+/** 모카: 크림빛 따뜻한 바탕 */
+const WARM: Record<Mode, Neutral> = {
+  light: {
+    '--bg': '#f5f1ec',
+    '--surface': '#fffdfa',
+    '--surface-2': '#f1ebe4',
+    '--surface-3': '#e7dfd6',
+    '--raised': '#fffdfa',
+    '--line': '#e6ded4',
+    '--ink': '#221d19',
+    '--muted': '#6c635c',
+    ...PAPER.light,
   },
-  forest: {
-    light: { '--accent': '#2b7a3a', '--accent-soft': '#e6f4e8', '--fab': '#2f8a43' },
-    dark: { '--accent': '#6ccf86', '--accent-soft': '#12291a', '--accent-ink': '#03210d', '--fab': '#6ccf86', '--fab-ink': '#03210d' },
-  },
-  lavender: {
-    light: { '--accent': '#6a48c7', '--accent-soft': '#f0ebfd', '--fab': '#7656e0' },
-    dark: { '--accent': '#b8a2ff', '--accent-soft': '#251c3e', '--accent-ink': '#170b35', '--fab': '#b8a2ff', '--fab-ink': '#170b35' },
-  },
-  cherry: {
-    light: { '--accent': '#c0185a', '--accent-soft': '#fde8f0', '--fab': '#df3f77' },
-    dark: { '--accent': '#ff8db4', '--accent-soft': '#3b1625', '--accent-ink': '#2c0615', '--fab': '#ff8db4', '--fab-ink': '#2c0615' },
-  },
-  mint: {
-    light: { '--accent': '#0b7a6b', '--accent-soft': '#dff5f1', '--fab': '#119c88' },
-    dark: { '--accent': '#5adfc8', '--accent-soft': '#0e2b27', '--accent-ink': '#032520', '--fab': '#5adfc8', '--fab-ink': '#032520' },
-  },
-  mocha: {
-    light: {
-      '--accent': '#8a5524',
-      '--accent-soft': '#f6ece1',
-      '--fab': '#a46a34',
-      '--bg': '#f6f2ed',
-      '--surface-2': '#f0e9e1',
-      '--surface-3': '#e6ddd2',
-      '--line': '#e6ddd2',
-    },
-    dark: {
-      '--accent': '#e2b388',
-      '--accent-soft': '#33261a',
-      '--accent-ink': '#2a1706',
-      '--fab': '#e2b388',
-      '--fab-ink': '#2a1706',
-      '--bg': '#0b0806',
-      '--surface-2': '#231e1a',
-      '--surface-3': '#2e2823',
-      '--line': '#2e2823',
-    },
-  },
-  night: {
-    light: { '--accent': '#3a45b8', '--accent-soft': '#eaecfd', '--fab': '#4552d6' },
-    dark: {
-      '--accent': '#9ca6ff',
-      '--accent-soft': '#1d2042',
-      '--accent-ink': '#0b0f33',
-      '--fab': '#9ca6ff',
-      '--fab-ink': '#0b0f33',
-      '--bg': '#04050d',
-      '--surface': '#12142a',
-      '--surface-2': '#1b1e38',
-      '--surface-3': '#252949',
-      '--raised': '#2e3358',
-      '--line': '#22264a',
-      '--muted': '#a3a7c4',
-    },
+  dark: {
+    '--bg': '#0d0b09',
+    '--surface': '#1e1b18',
+    '--surface-2': '#2b2723',
+    '--surface-3': '#38332e',
+    '--raised': '#4a443e',
+    '--line': '#38332e',
+    '--ink': '#f6f1ec',
+    '--muted': '#a69c92',
+    ...PAPER.dark,
   },
 };
+
+/** 미드나잇: 남색 바탕 */
+const NAVY: Record<Mode, Neutral> = {
+  light: {
+    '--bg': '#eff1f7',
+    '--surface': '#ffffff',
+    '--surface-2': '#ebeef5',
+    '--surface-3': '#e0e4ee',
+    '--raised': '#ffffff',
+    '--line': '#dfe3ec',
+    '--ink': '#161a26',
+    '--muted': '#636a7d',
+    ...PAPER.light,
+  },
+  dark: {
+    '--bg': '#05070f',
+    '--surface': '#121729',
+    '--surface-2': '#1b2137',
+    '--surface-3': '#252c46',
+    '--raised': '#323a58',
+    '--line': '#222941',
+    '--ink': '#f1f3ff',
+    '--muted': '#a1a8c6',
+    ...PAPER.dark,
+  },
+};
+
+/** 포인트 색: 글자용 포인트, 연한 포인트 바탕, 버튼 글자, + 버튼, + 버튼 아이콘 */
+const accent = (text: string, soft: string, ink: string, fab: string, fabInk: string): Pick<TokenMap, AccentToken> => ({
+  '--accent': text,
+  '--accent-soft': soft,
+  '--accent-ink': ink,
+  '--fab': fab,
+  '--fab-ink': fabInk,
+});
+
+const theme = (n: Record<Mode, Neutral>, light: Pick<TokenMap, AccentToken>, dark: Pick<TokenMap, AccentToken>): Record<Mode, TokenMap> => ({
+  light: { ...n.light, ...light },
+  dark: { ...n.dark, ...dark },
+});
+
+const PRESETS: Record<ThemeColor, Record<Mode, TokenMap>> = {
+  default: theme(GRAY, accent('#6057e7', '#efeefd', '#ffffff', '#635aea', '#ffffff'), accent('#888aff', '#2d2b4c', '#111111', '#6861f1', '#ffffff')),
+  ocean: theme(GRAY, accent('#0168db', '#e6f2ff', '#ffffff', '#007aff', '#ffffff'), accent('#4da3ff', '#183350', '#111111', '#0a84ff', '#ffffff')),
+  lavender: theme(GRAY, accent('#9446cb', '#f6effc', '#ffffff', '#a85be1', '#ffffff'), accent('#c58ff3', '#3c2c49', '#111111', '#ac65e3', '#ffffff')),
+  cherry: theme(GRAY, accent('#d5005b', '#feeaf1', '#ffffff', '#f53071', '#ffffff'), accent('#fe6c8f', '#4c2632', '#111111', '#f54879', '#ffffff')),
+  coral: theme(GRAY, accent('#ca3609', '#fdefeb', '#ffffff', '#ef5b36', '#ffffff'), accent('#ff8162', '#4b2c26', '#111111', '#f26644', '#ffffff')),
+  // 라임: 검정·흰색에 형광 라임 하나 (밝을 때는 검정 버튼에 라임 아이콘)
+  forest: theme(GRAY, accent('#1c1c1e', '#f1f8d9', '#ffffff', '#1c1c1e', '#c3f74c'), accent('#c6fb50', '#232a10', '#111111', '#c6fb50', '#111111')),
+  mint: theme(GRAY, accent('#057a74', '#e6f8f7', '#ffffff', '#08beaf', '#111111'), accent('#63e6e2', '#2c4849', '#111111', '#63e6e2', '#111111')),
+  mocha: theme(WARM, accent('#905f3c', '#f5eee8', '#ffffff', '#996845', '#ffffff'), accent('#d2a883', '#3f3327', '#111111', '#b6875e', '#ffffff')),
+  night: theme(NAVY, accent('#334f9d', '#ebedf5', '#ffffff', '#334f9d', '#ffffff'), accent('#90aff8', '#212d50', '#111111', '#567ad9', '#ffffff')),
+};
+
+/** 기본 테마 (인디고) = globals.css 의 기본 색 */
+export const BASE_TOKENS: Record<Mode, TokenMap> = PRESETS.default;
 
 export function presetTokens(color: ThemeColor, mode: Mode): TokenMap {
-  return { ...BASE_TOKENS[mode], ...(PRESET_PATCH[color]?.[mode] ?? {}) };
+  return { ...(PRESETS[color] ?? PRESETS.default)[mode] };
 }

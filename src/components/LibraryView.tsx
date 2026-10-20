@@ -9,7 +9,7 @@ import { useMe, EnergyPill } from './AppShell';
 import { SOURCES_CHANGED, SUBJECTS_CHANGED, useQuickAdd } from './QuickAdd';
 import { stepLabel, useActiveSources } from './ProcessingList';
 import { SubjectForm } from './SubjectForm';
-import { StarGlyph } from './note/StarButton';
+import { StarButton, StarGlyph } from './note/StarButton';
 import { SortList } from './note/SortList';
 import { useLongPress } from './useLongPress';
 import { prefersReducedMotion } from './useReducedMotion';
@@ -186,6 +186,16 @@ export function LibraryView() {
   // 화면에서 바로 고친 것(별표·복습·순서)이 읽는 사이에 생겼으면, 읽은 목록은 옛것이라 버리고 저장이 끝난 뒤 다시 읽는다
   const edits = useRef({ seq: 0, saving: 0, stale: false });
 
+  // 카드에서 별표를 누르면: 별이 튀고 빛이 번지는 동안 자리를 그대로 두었다가 맨 위로 미끄러진다
+  const [hold, setHold] = useState<string[] | null>(null);
+  const holdTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(
+    () => () => {
+      if (holdTimer.current) clearTimeout(holdTimer.current);
+    },
+    [],
+  );
+
   // 불러오기 (처음, 새 자료가 들어왔을 때, 정리가 끝났을 때)
   const organize = !!me?.features.organize;
   useEffect(() => {
@@ -297,8 +307,12 @@ export function LibraryView() {
         return l ? { ...s, ...l, summary: s.summary, starred: s.starred, position: s.position, in_review: s.in_review } : s;
       });
     // 별표한 자료가 맨 위, 과목 안에서는 내가 정한 순서
-    return libraryOrder(list, !!selected && organize);
-  }, [data, selected, query, live, organize]);
+    const ordered = libraryOrder(list, !!selected && organize);
+    if (!hold) return ordered;
+    // 별이 튀는 동안에는 자리를 그대로 둔다 (그 뒤 새 자리로 미끄러진다)
+    const at = new Map(hold.map((id, i) => [id, i]));
+    return [...ordered].sort((a, b) => (at.get(a.id) ?? Infinity) - (at.get(b.id) ?? Infinity));
+  }, [data, selected, query, live, organize, hold]);
   const gridRef = useRef<HTMLDivElement>(null);
   const flip = useGridFlip(gridRef, shown.map((s) => s.id).join('|'));
 
@@ -342,10 +356,21 @@ export function LibraryView() {
     }
   };
 
-  /** 자료 칸을 한꺼번에 바꾼다: 화면은 바로 바꾸고(카드가 새 자리로 미끄러진다), 저장하지 못하면 다시 읽는다 */
-  const patchSources = async (ids: string[], patch: { starred?: boolean; in_review?: boolean }, done: string): Promise<boolean> => {
+  /**
+   * 자료 칸을 한꺼번에 바꾼다: 화면은 바로 바꾸고(카드가 새 자리로 미끄러진다), 저장하지 못하면 다시 읽는다.
+   * holdMs: 그동안은 카드 자리를 그대로 두고(별이 튀고 빛이 번지는 것을 본 뒤) 새 자리로 미끄러진다
+   */
+  const patchSources = async (ids: string[], patch: { starred?: boolean; in_review?: boolean }, done: string, holdMs = 0): Promise<boolean> => {
     if (!ids.length || !data) return false;
-    flip();
+    if (holdMs > 0) {
+      setHold(shown.map((s) => s.id));
+      if (holdTimer.current) clearTimeout(holdTimer.current);
+      holdTimer.current = setTimeout(() => {
+        holdTimer.current = null;
+        flip();
+        setHold(null);
+      }, holdMs);
+    } else flip();
     const next = { ...data, sources: data.sources.map((s) => (ids.includes(s.id) ? { ...s, ...patch } : s)) };
     setData(next);
     writeView(LIBRARY_VIEW, owner, next);
@@ -367,7 +392,8 @@ export function LibraryView() {
     toast(done);
     return true;
   };
-  const starOne = (s: LibSource) => patchSources([s.id], { starred: !s.starred }, s.starred ? '별표를 뺐어요.' : '별표했어요. 맨 위에 보여요.');
+  const starOne = (s: LibSource) =>
+    patchSources([s.id], { starred: !s.starred }, s.starred ? '별표를 뺐어요.' : '별표했어요. 맨 위에 보여요.', s.starred ? 80 : 220);
   const reviewOne = (s: LibSource) =>
     patchSources([s.id], { in_review: s.in_review === false }, s.in_review === false ? '다시 복습에 넣었어요.' : '복습에서 뺐어요.');
 
@@ -920,16 +946,13 @@ function NoteCard({
   // 화면 읽기 이름: 제목(없으면 '제목 없는 자료') + 진행·별표·복습 끔
   const label = s.title || '제목 없는 자료';
   const marks = `${organize && s.starred ? ' (별표)' : ''}${reviewOff ? ' (복습 끔)' : ''}`;
+  // 별표한 카드는 별에서부터 별표 빛이 번진다 (멈춘 카드는 빨간 테두리가 먼저라 빛을 켜지 않는다)
+  const glowing = organize && !!s.starred && !failed;
+  // 오른쪽 위 버튼 자리 (별표 + 메뉴, 또는 메뉴만): 글이 버튼 밑으로 들어가지 않게
+  const corner = organize ? 'pr-14' : 'pr-7';
   const footer = (
     <>
-      <p className="line-clamp-2 text-[15px] font-bold leading-snug">
-        {organize && s.starred ? (
-          <span className="mr-1 inline-block align-[-2px]">
-            <StarGlyph on size={15} />
-          </span>
-        ) : null}
-        {name}
-      </p>
+      <p className="line-clamp-2 text-[15px] font-bold leading-snug">{name}</p>
       <p className="mt-1 flex min-w-0 items-center gap-1.5 text-xs text-muted">
         {subject ? <span className="h-2 w-2 shrink-0 rounded-full" style={{ background: subjectVar(subject.color) }} aria-hidden="true" /> : null}
         {reviewOff ? (
@@ -948,7 +971,6 @@ function NoteCard({
       </p>
     </>
   );
-  const fade = <div className="pointer-events-none absolute inset-x-0 bottom-0 h-8 bg-gradient-to-t from-surface to-transparent" aria-hidden="true" />;
   // 고르는 중: 카드를 누르면 고르기 (링크로 가지 않는다). 키보드는 스페이스·엔터
   const pickKeys = (e: KeyboardEvent) => {
     if (e.key === ' ' || e.key === 'Enter') {
@@ -984,7 +1006,7 @@ function NoteCard({
         // 멈춘 자료: 카드 안에서 바로 다시 하기 (단추를 링크 안에 넣지 않도록 제목만 링크)
         <div className={cx('kok-card flex h-[196px] flex-col overflow-hidden', ring || 'ring-2 ring-bad/40')}>
           <div className={cx('relative grid min-h-0 flex-1 content-start gap-1.5 overflow-hidden px-4 pt-4', fill)}>
-            <span className={cx('text-xs font-bold text-bad', selecting ? 'pl-7' : 'pr-7')}>멈췄어요 · 에너지는 돌려줬어요</span>
+            <span className={cx('text-xs font-bold text-bad', selecting ? 'pl-7' : corner)}>멈췄어요 · 에너지는 돌려줬어요</span>
             <p className="line-clamp-2 text-[13px] leading-relaxed text-muted">{s.error ?? '정리하다가 문제가 생겼어요.'}</p>
             <button
               type="button"
@@ -1005,14 +1027,18 @@ function NoteCard({
           href={href}
           // 꾹 누른 채 움직여도 링크를 끌지 않는다 (꾹 누르기는 고르기)
           draggable={false}
-          className={cx('kok-card press flex h-[196px] flex-col overflow-hidden', !selecting && 'kok-card-hover', ring)}
+          // 카드 밖으로 번지는 별표 빛이 잘리지 않게 카드는 자르지 않는다 (글은 안쪽 칸이 자른다)
+          className={cx('kok-card kok-glow press flex h-[196px] flex-col', glowing && 'is-starred', !selecting && 'kok-card-hover', ring)}
           aria-label={`${label}${processing ? ` (${stepLabel(s)})` : ''}${marks}`}
           {...selectProps}
         >
-          <div className={cx('relative min-h-0 flex-1 overflow-hidden px-4 pt-4', fill)}>
+          {/* 아래 끝은 바탕(별표 빛·테마)과 상관없이 흐려지게 mask 로 */}
+          <div
+            className={cx('relative min-h-0 flex-1 overflow-hidden px-4 pt-4 [mask-image:linear-gradient(to_bottom,#000_calc(100%-2rem),transparent)]', fill)}
+          >
             {processing ? (
               <div className="grid gap-2">
-                <div className={cx('flex items-center gap-2.5', selecting ? 'pl-7' : 'pr-7')}>
+                <div className={cx('flex items-center gap-2.5', selecting ? 'pl-7' : corner)}>
                   <ProgressRing value={s.progress} label={`${s.title || '자료'} 진행`} />
                   <span className="min-w-0 text-xs font-bold leading-snug text-accent">{stepLabel(s)}</span>
                 </div>
@@ -1023,11 +1049,10 @@ function NoteCard({
             ) : (
               // 정리 중이던 카드가 끝나면 미리보기가 번지며 나타난다
               <p className={cx('line-clamp-5 text-[13px] leading-relaxed text-muted', startedBusy && 'kok-fade')}>
-                <span className={cx('h-5 w-6', selecting ? 'float-left' : 'float-right')} aria-hidden="true" />
+                <span className={cx('h-5', selecting ? 'float-left w-6' : organize ? 'float-right w-14' : 'float-right w-6')} aria-hidden="true" />
                 {s.summary ? previewText(s.summary) : s.manual ? '직접 만든 노트예요. 눌러서 채워 보세요.' : '정리 노트가 준비됐어요.'}
               </p>
             )}
-            {fade}
           </div>
           <div className={cx('px-4 pb-3.5 pt-1.5', fill)}>{footer}</div>
         </Link>
@@ -1044,7 +1069,9 @@ function NoteCard({
           {picked ? <Icon key="on" d={ICONS.check} size={14} strokeWidth={3} className="kok-check-in" /> : null}
         </span>
       ) : (
-        <div className="absolute right-1.5 top-1.5 z-10">
+        // 오른쪽 위: 별표(한 번 누르면 별이 튀고 카드가 맨 위로) + 메뉴
+        <div className="absolute right-1.5 top-1.5 z-10 flex items-center">
+          {organize ? <StarButton small on={!!s.starred} label={`${label} 별표`} onToggle={onStar} /> : null}
           <Menu label={`${s.title || '자료'} 메뉴`} items={items} small />
         </div>
       )}

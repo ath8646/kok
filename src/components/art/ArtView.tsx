@@ -1,5 +1,5 @@
 'use client';
-// 자료 그림을 콕 스타일로 다시 그린 것 (Pro): 지도·그래프·표·연표·도식. 설계도(Art)는 src/lib/art/spec.ts
+// 자료 그림을 KOK 스타일로 다시 그린 것 (Pro): 지도·그래프·표·연표·도식. 설계도(Art)는 src/lib/art/spec.ts
 // 색은 화면 색 변수만 써서 밝은·어두운 화면과 테마를 따른다. 그림 속 제목은 위에, 범례·출처는 아래에
 import { artAlt, type Art } from '@/lib/art/spec';
 import { ChartArtView } from './ChartArt';

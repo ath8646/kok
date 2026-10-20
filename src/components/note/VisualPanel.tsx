@@ -11,7 +11,7 @@ import { sb } from '@/lib/data';
 import { MindMap, type RecallResult } from '../MindMap';
 import { MindMapView, initialMindMapMode, rememberMindMapMode, type MindMapMode } from '../mindmap/MindMapView';
 import { TableView, TimelineView } from '../VisualViews';
-import { ApiError, Button, Chip, Energy, ICONS, Icon, Segmented, Sheet, api, cx, useToast } from '../ui';
+import { ApiError, Button, Chip, Energy, ICONS, Icon, Segmented, Sheet, api, cx, useToast, DONE } from '../ui';
 
 export type Visuals = { mindmap?: Mindmap; table?: TableSpec; timeline?: TimelineSpec };
 export type VisualType = 'mindmap' | 'table' | 'timeline';
@@ -158,7 +158,7 @@ export function VisualPanel({
         onViewChange?.({ ...view, type: preview.want });
       }
       setPreview(null);
-      toast('새 그림으로 바꿨어요.', 'ok');
+      toast('새 그림으로 바꿨어요.', 'ok', DONE);
       onSaved();
     } catch (e) {
       toast((e as Error).message, 'bad');
@@ -181,7 +181,7 @@ export function VisualPanel({
     const { data: qs } = await sb().from('questions').select('id').eq('note_id', noteId).in('key_point_id', confused).eq('status', 'active');
     const ids = (qs ?? []).map((q) => q.id as string);
     if (ids.length) await sb().from('cards').update({ due: new Date().toISOString() }).in('question_id', ids);
-    toast(`헷갈린 개념 ${confused.length}개의 문제 ${ids.length}개를 오늘 복습에 넣었어요.`, 'ok');
+    toast(`헷갈린 개념 ${confused.length}개의 문제 ${ids.length}개를 오늘 복습에 넣었어요.`, 'ok', DONE);
   };
 
   const types = (['mindmap', 'table', 'timeline'] as VisualType[]).filter((t) => !!local[t]);

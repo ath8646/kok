@@ -158,7 +158,7 @@ export function SubjectDrawer({
     >
       <div ref={listRef} className="grid gap-4">
         {manage ? (
-          <p className="-mt-1 text-xs text-muted">
+          <p className="text-xs text-muted">
             자주 쓰는 과목은 ⋮에서 &lsquo;위에 고정&rsquo;, 다 끝난 과목은 &lsquo;보관하기&rsquo;를 누르면 목록이 깔끔해져요. 보관해도 복습은 그대로 나와요.
           </p>
         ) : null}

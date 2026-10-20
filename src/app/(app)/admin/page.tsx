@@ -5,7 +5,7 @@ import { AdminPlans } from '@/components/AdminPlans';
 import { useMe } from '@/components/AppShell';
 import { QuestionPreview } from '@/components/QuestionList';
 import { Select } from '@/components/Select';
-import { Button, Card, Chip, EmptyState, Field, LargeHeader, SectionTitle, Segmented, Toggle, api, cx, inputClass, useToast } from '@/components/ui';
+import { Button, Card, Chip, EmptyState, Field, LargeHeader, SectionTitle, Segmented, Toggle, api, cx, inputClass, useToast, DONE } from '@/components/ui';
 import { costMultiplier } from '@/lib/ai/models';
 import { MAX_FILE_MB, type Limits, type ModelsConfig, type Notice } from '@/lib/settings';
 import type { QuestionRow } from '@/lib/types';
@@ -146,7 +146,7 @@ export default function AdminPage() {
     setBusy(key);
     try {
       await api('/api/admin/settings', { method: 'POST', body: JSON.stringify({ key, value }) });
-      toast(`${label} 저장했어요.`, 'ok');
+      toast(`${label} 저장했어요.`, 'ok', DONE);
       await load();
       refreshMe();
     } catch (e) {
@@ -377,7 +377,7 @@ export default function AdminPage() {
                         if (!confirm(`'${u.custom_plan!.name}' 플랜을 지금 끝낼까요? 원래 요금제로 돌아가요.`)) return;
                         try {
                           await api(`/api/admin/users/${u.id}`, { method: 'PATCH', body: JSON.stringify({ endCustomPlan: true }) });
-                          toast('테스트 플랜을 끝냈어요.', 'ok');
+                          toast('테스트 플랜을 끝냈어요.', 'ok', DONE);
                           loadUsers(q);
                           setPlansKey((k) => k + 1);
                         } catch (e) {

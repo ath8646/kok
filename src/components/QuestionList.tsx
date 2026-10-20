@@ -12,7 +12,7 @@ import { readQuestionFigure } from '@/lib/source-figures';
 import { QuestionEditor, type QuestionDraft } from './QuestionEditor';
 import { answerText, type ReviewQuestion } from './QuestionCard';
 import { RichText } from './RichText';
-import { Button, Chip, Energy, ICONS, Icon, Sheet, cx, inputClass, api, useToast } from './ui';
+import { Button, Chip, Energy, ICONS, Icon, Sheet, cx, inputClass, api, useToast, DONE } from './ui';
 
 const TYPE_LABEL = { mcq: '객관식', ox: 'OX', cloze: '빈칸', short: '단답' } as const;
 
@@ -105,7 +105,7 @@ export function QuestionList({
     setSolving(q.id);
     try {
       await api(`/api/questions/${q.id}/solve`, { method: 'POST', body: '{}' });
-      toast('그림 풀이를 만들었어요.', 'ok');
+      toast('그림 풀이를 만들었어요.', 'ok', DONE);
       onChanged();
     } catch (e) {
       toast((e as Error).message, 'bad');
@@ -118,7 +118,7 @@ export function QuestionList({
     const { error } = await sb().from('questions').update(patch).eq('id', id);
     if (error) toast('저장하지 못했어요.', 'bad');
     else {
-      if (msg) toast(msg, 'ok');
+      if (msg) toast(msg, 'ok', DONE);
       onChanged();
     }
   };
@@ -297,7 +297,7 @@ export function ReportSheet({
                   body: JSON.stringify({ reason: reason.trim(), fix }),
                 });
                 if (!fix) {
-                  toast('신고했어요. 고마워요!', 'ok');
+                  toast('신고했어요. 고마워요!', 'ok', DONE);
                   close();
                   return;
                 }
@@ -342,7 +342,7 @@ export function ReportSheet({
                       .eq('id', q.id);
                     if (error) toast('바꾸지 못했어요.', 'bad');
                     else {
-                      toast('고친 문제로 바꿨어요.', 'ok');
+                      toast('고친 문제로 바꿨어요.', 'ok', DONE);
                       onChanged();
                       close();
                     }

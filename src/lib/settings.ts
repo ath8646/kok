@@ -219,6 +219,12 @@ export const zUserSettings = z.object({
       figures: true,
       sourceFigures: true,
     }),
+  /** 알림: 내가 한 일이 끝났다는 알림('지웠어요' …)을 보일지. 오류·꼭 알아야 할 안내는 늘 보인다 */
+  notify: z
+    .object({
+      done: z.boolean().catch(true),
+    })
+    .catch({ done: true }),
 });
 export type UserSettings = z.infer<typeof zUserSettings>;
 export const DEFAULT_SETTINGS: UserSettings = zUserSettings.parse({});

@@ -3,7 +3,7 @@
 // 테스트 플랜: 번개(에너지) 총량과 한도를 정해 만든다. 코드를 쓴 사람은 코드에 정한 날수 동안 이 플랜을 쓰고, 끝나면 원래 요금제로 돌아간다.
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Select } from '@/components/Select';
-import { ApiError, Button, Card, Chip, Energy, Field, SectionTitle, Sheet, Toggle, api, cx, inputClass, useToast } from '@/components/ui';
+import { ApiError, Button, Card, Chip, Energy, Field, SectionTitle, Sheet, Toggle, api, cx, inputClass, useToast, DONE } from '@/components/ui';
 import { MAX_FILE_MB, type Limits } from '@/lib/settings';
 
 export type PlanRow = {
@@ -229,7 +229,7 @@ export function AdminPlans({
         ? await api<{ warning?: string }>(`/api/admin/plans/${form.id}`, { method: 'PATCH', body: JSON.stringify(v.body) })
         : await api<{ warning?: string }>('/api/admin/plans', { method: 'POST', body: JSON.stringify(v.body) });
       if (r.warning) toast(r.warning, 'bad');
-      else toast(form.id ? '플랜을 고쳤어요.' : `'${form.name.trim()}' 플랜을 만들었어요. 이제 코드를 만들어 나눠 주세요.`, 'ok');
+      else toast(form.id ? '플랜을 고쳤어요.' : `'${form.name.trim()}' 플랜을 만들었어요. 이제 코드를 만들어 나눠 주세요.`, 'ok', DONE);
       setForm(null);
       await loadPlans();
       onChanged?.();
@@ -248,7 +248,7 @@ export function AdminPlans({
     setBusy(`del-${p.id}`);
     try {
       await api(`/api/admin/plans/${p.id}`, { method: 'DELETE' });
-      toast('플랜을 지웠어요.', 'ok');
+      toast('플랜을 지웠어요.', 'ok', DONE);
       if (newCoupon.planId === p.id) setNewCoupon((c) => ({ ...c, planId: null }));
       await Promise.all([loadPlans(), loadCoupons()]);
       onChanged?.();
@@ -282,7 +282,7 @@ export function AdminPlans({
 
   const copy = (text: string, label = '복사했어요.') =>
     navigator.clipboard?.writeText(text).then(
-      () => toast(label),
+      () => toast(label, 'plain', DONE),
       () => toast('복사하지 못했어요. 길게 눌러 직접 복사해 주세요.', 'bad'),
     );
 

@@ -22,6 +22,7 @@ import {
   cx,
   inputClass,
   useToast,
+  DONE,
 } from '@/components/ui';
 import { fetchSubjects, sb } from '@/lib/data';
 import { supabaseBrowser } from '@/lib/supabase/client';
@@ -162,7 +163,7 @@ export default function SettingsPage() {
                 const { error } = await sb().from('profiles').update({ nickname: nickname.trim() }).eq('id', me.userId);
                 if (error) toast('저장하지 못했어요.', 'bad');
                 else {
-                  toast('바꿨어요.', 'ok');
+                  toast('바꿨어요.', 'ok', DONE);
                   refresh();
                 }
               }}
@@ -607,6 +608,17 @@ export default function SettingsPage() {
             </p>
           </div>
         ) : null}
+      </Card>
+
+      <SectionTitle>알림</SectionTitle>
+      <Card className="grid gap-1">
+        <Toggle
+          id="set-done-toasts"
+          label="완료 알림 보이기"
+          hint="무언가를 하고 나면 화면 아래에 '지웠어요'·'보관했어요' 같은 알림이 떠요. 꺼도 오류나 꼭 알아야 할 안내는 보여요."
+          checked={draft.notify.done}
+          onChange={(v) => set('notify', { done: v })}
+        />
       </Card>
 
       <SectionTitle>내 데이터</SectionTitle>

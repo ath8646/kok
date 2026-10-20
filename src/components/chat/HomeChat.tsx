@@ -7,7 +7,7 @@ import { useRouter } from 'next/navigation';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useMe } from '@/components/AppShell';
 import { RichText } from '@/components/RichText';
-import { Energy, EnergyEstimate, ICONS, Icon, Menu, api, cx, useToast } from '@/components/ui';
+import { Energy, EnergyEstimate, ICONS, Icon, Menu, api, cx, useToast, DONE } from '@/components/ui';
 import { THINK_OUT, estimateSmallTask } from '@/lib/ai/models';
 import { clientModel } from '@/lib/client-model';
 import { sb } from '@/lib/data';
@@ -402,7 +402,7 @@ export function HomeAsk() {
           const id = saving?.id;
           setMessages((ms) => ms.map((x) => (x.id === id ? { ...x, saved: place } : x)));
           setSaving(null);
-          toast(`'${place.noteTitle}'에 문제를 넣었어요.`, 'ok');
+          toast(`'${place.noteTitle}'에 문제를 넣었어요.`, 'ok', DONE);
         }}
       />
       {viewer?.url ? <ImageViewer src={viewer.url} alt={viewer.name} onClose={() => setViewer(null)} /> : null}

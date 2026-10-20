@@ -50,7 +50,7 @@ import { estimateSmallTask } from '@/lib/ai/models';
 import { clientModel } from '@/lib/client-model';
 import { shrinkImage } from '@/lib/image';
 import { sb } from '@/lib/data';
-import { ApiError, Button, Chip, Energy, Field, ICONS, Icon, LinkButton, Segmented, Sheet, Toggle, api, cx, inputClass, radioKeys, useToast } from './ui';
+import { ApiError, Button, Chip, Energy, Field, ICONS, Icon, LinkButton, Segmented, Sheet, Toggle, api, cx, inputClass, radioKeys, useToast, DONE } from './ui';
 
 /** user_themes 행 (updated_at: 고칠 때 '읽은 그대로인지' 확인한다) */
 type ThemeRow = CustomTheme & { updated_at?: string | null };
@@ -287,7 +287,7 @@ export function ThemeSettings({ me, theme, onChange }: { me: MeResponse; theme: 
     if (!confirm(`'${t.name}'를 지울까요?`)) return;
     try {
       await api(`/api/themes/${t.id}`, { method: 'DELETE' });
-      toast('테마를 지웠어요.');
+      toast('테마를 지웠어요.', 'plain', DONE);
       removed(t.id);
     } catch (e) {
       toast((e as Error).message, 'bad');
@@ -491,11 +491,12 @@ export function ThemeSettings({ me, theme, onChange }: { me: MeResponse; theme: 
         est={est}
         pictures={me.themePictures}
         onClose={() => setMaking(false)}
-        onMade={(row, message) => {
+        onMade={(row, message, notice) => {
           setMaking(false);
           saved(row);
           applyNew(`custom:${row.id}`);
-          toast(message, 'ok');
+          // 그림 대신 무늬를 넣었다는 등 알아야 할 말이 있으면 늘, 아니면 완료 알림으로
+          toast(message, 'ok', notice ? undefined : DONE);
         }}
       />
       <ThemeEditor
@@ -1276,7 +1277,7 @@ function ThemeEditor({
         setKind(ready.spec.image?.kind === 'pattern' ? 'pattern' : 'file');
       }
       onSaved(r.theme, false);
-      toast(r.note ?? '그림을 그렸어요.', r.note ? 'bad' : 'ok');
+      toast(r.note ?? '그림을 그렸어요.', r.note ? 'bad' : 'ok', r.note ? undefined : DONE);
     } catch (e) {
       toast((e as Error).message, 'bad');
       if (e instanceof ApiError && e.code === 'need_prompt') setKind('ai');
@@ -1309,7 +1310,7 @@ function ThemeEditor({
               setBusy(null);
               if (!row) return;
               onSaved(row, true);
-              toast('테마를 저장하고 썼어요.', 'ok');
+              toast('테마를 저장하고 썼어요.', 'ok', DONE);
               onClose();
             }}
           >
@@ -1327,7 +1328,7 @@ function ThemeEditor({
                 if (!confirm(`'${name || '이 테마'}'를 지울까요?`)) return;
                 try {
                   await api(`/api/themes/${id}`, { method: 'DELETE' });
-                  toast('테마를 지웠어요.');
+                  toast('테마를 지웠어요.', 'plain', DONE);
                   onDeleted(id);
                 } catch (e) {
                   toast((e as Error).message, 'bad');
@@ -1520,7 +1521,8 @@ function ThemeMaker({
   /** Cloudflare 로 그림을 그릴 수 있는지 (없으면 AI 가 무늬를 그린다) */
   pictures: boolean;
   onClose: () => void;
-  onMade: (row: ThemeRow, message: string) => void;
+  /** notice: 꼭 알아야 할 말이 들어 있다 (그림 대신 무늬 등) */
+  onMade: (row: ThemeRow, message: string, notice: boolean) => void;
 }) {
   const toast = useToast();
   const [text, setText] = useState('');
@@ -1535,7 +1537,7 @@ function ThemeMaker({
         body: JSON.stringify({ prompt: text.trim(), image }),
       });
       setText('');
-      onMade(r.theme, [`'${r.theme.name}' 테마를 만들어 썼어요.`, r.summary, r.note].filter(Boolean).join(' '));
+      onMade(r.theme, [`'${r.theme.name}' 테마를 만들어 썼어요.`, r.summary, r.note].filter(Boolean).join(' '), !!r.note);
     } catch (e) {
       toast((e as Error).message, 'bad');
     } finally {

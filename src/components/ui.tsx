@@ -489,11 +489,24 @@ export function Sheet({
 
 // ------------------------------------------------------------- 알림(토스트)
 type Toast = { id: number; text: string; tone: 'plain' | 'ok' | 'bad' };
-const ToastCtx = createContext<(text: string, tone?: Toast['tone']) => void>(() => {});
+/**
+ * 알림의 종류. done: 내가 한 일이 끝났다는 알림('지웠어요', '보관을 풀었어요' …) — 설정 '완료 알림 보이기'를 끄면 안 뜬다.
+ * 표시가 없는 알림(오류, 'Pro에서 쓸 수 있어요'처럼 꼭 알아야 할 안내, 졸업 축하 …)은 늘 뜬다
+ */
+export type ToastOpts = { done?: boolean };
+export const DONE: ToastOpts = { done: true };
+const ToastCtx = createContext<(text: string, tone?: Toast['tone'], opts?: ToastOpts) => void>(() => {});
+
+/** 완료 알림을 보일지 (AppShell 이 내 설정 notify.done 으로 정한다) */
+let showDone = true;
+export function setShowDoneToasts(on: boolean) {
+  showDone = on;
+}
 
 export function ToastProvider({ children }: { children: ReactNode }) {
   const [items, setItems] = useState<Toast[]>([]);
-  const push = useCallback((text: string, tone: Toast['tone'] = 'plain') => {
+  const push = useCallback((text: string, tone: Toast['tone'] = 'plain', opts?: ToastOpts) => {
+    if (opts?.done && !showDone && tone !== 'bad') return;
     const id = Date.now() + Math.random();
     setItems((xs) => [...xs, { id, text, tone }]);
     setTimeout(() => setItems((xs) => xs.filter((x) => x.id !== id)), 3400);

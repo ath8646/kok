@@ -8,7 +8,7 @@ import type { MeResponse } from '@/lib/types';
 import { QuickAddProvider } from './QuickAdd';
 import { applyTheme, clearTheme, missingCustomIds, rememberCustomThemes, type CustomTheme, type Theme } from '@/lib/theme';
 import { sb } from '@/lib/data';
-import { Button, ICONS, Icon, Spinner, cx } from './ui';
+import { Button, ICONS, Icon, Spinner, cx, setShowDoneToasts } from './ui';
 import { BrandMark, Wordmark } from './Brand';
 
 type MeCtx = {
@@ -169,6 +169,12 @@ export function AppShell({ children }: { children: ReactNode }) {
       if (timer) clearTimeout(timer);
     };
   }, [themeKey, themesOn]);
+
+  // 완료 알림('지웠어요' …)을 보일지: 설정 > 알림 (오류·꼭 알아야 할 안내는 늘 보인다)
+  const showDone = me ? me.settings.notify?.done !== false : true;
+  useEffect(() => {
+    setShowDoneToasts(showDone);
+  }, [showDone]);
 
   // 다른 화면으로 가면 집중 모드를 끈다
   const [prevPath, setPrevPath] = useState(pathname);

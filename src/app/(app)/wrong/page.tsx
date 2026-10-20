@@ -4,7 +4,7 @@ import Link from 'next/link';
 import { useEffect, useState } from 'react';
 import { useMe } from '@/components/AppShell';
 import { QuestionPreview } from '@/components/QuestionList';
-import { Button, Card, Chip, EmptyState, ICONS, Icon, LargeHeader, LinkButton, SectionTitle, buttonClass, cx, useToast } from '@/components/ui';
+import { Button, Card, Chip, EmptyState, ICONS, Icon, LargeHeader, LinkButton, SectionTitle, buttonClass, cx, useToast, DONE } from '@/components/ui';
 import { fetchPlanData, fetchQuestionsByIds, sb } from '@/lib/data';
 import { weakConcepts, type WeakConcept } from '@/lib/review-plan';
 import type { QuestionRow } from '@/lib/types';
@@ -210,7 +210,7 @@ export default function WrongPage() {
                       if (error) toast('빼지 못했어요.', 'bad');
                       else {
                         setItems((xs) => xs.filter((x) => x.q.id !== q.id));
-                        toast('다 외운 문제로 뺐어요.', 'ok');
+                        toast('다 외운 문제로 뺐어요.', 'ok', DONE);
                       }
                     }}
                   >

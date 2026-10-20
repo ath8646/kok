@@ -29,6 +29,7 @@ import {
   inputClass,
   useToast,
   type MenuItem,
+  DONE,
 } from './ui';
 import {
   NOTE_PEEK,
@@ -386,8 +387,8 @@ export function LibraryView() {
     }
     // 다른 화면(자료 넣기 등)의 과목 목록도 새로
     window.dispatchEvent(new Event(SUBJECTS_CHANGED));
-    if (patch.archived === true) toast(`'${s.name}' 과목을 보관했어요. 복습은 그대로 나오고, '모든 과목'에서 다시 꺼낼 수 있어요.`);
-    else if (patch.archived === false) toast(`'${s.name}' 과목을 다시 꺼냈어요.`);
+    if (patch.archived === true) toast(`'${s.name}' 과목을 보관했어요. 복습은 그대로 나오고, '모든 과목'에서 다시 꺼낼 수 있어요.`, 'plain', DONE);
+    else if (patch.archived === false) toast(`'${s.name}' 과목을 다시 꺼냈어요.`, 'plain', DONE);
   };
 
   /**
@@ -423,7 +424,7 @@ export function LibraryView() {
       reload();
       return false;
     }
-    if (done) toast(done);
+    if (done) toast(done, 'plain', DONE);
     return true;
   };
   const starOne = (s: LibSource) => {
@@ -465,7 +466,7 @@ export function LibraryView() {
       }
       dropView(LIBRARY_VIEW);
       setData((cur) => (cur ? { ...cur, sources: cur.sources.filter((s) => !ids.includes(s.id)) } : cur));
-      toast(`${deleted}개를 지웠어요.`);
+      toast(`${deleted}개를 지웠어요.`, 'plain', DONE);
       endSelect();
       reload();
       active.reload();
@@ -771,7 +772,7 @@ export function LibraryView() {
                         await api(`/api/sources/${s.id}`, { method: 'DELETE' });
                         dropView(LIBRARY_VIEW);
                         setData((cur) => (cur ? { ...cur, sources: cur.sources.filter((x) => x.id !== s.id) } : cur));
-                        toast('지웠어요.');
+                        toast('지웠어요.', 'plain', DONE);
                         reload();
                       } catch (e) {
                         toast((e as Error).message, 'bad');
@@ -781,7 +782,7 @@ export function LibraryView() {
                       try {
                         await api(`/api/sources/${s.id}/retry`, { method: 'POST', body: '{}' });
                         dropView(LIBRARY_VIEW);
-                        toast('다시 시작했어요.');
+                        toast('다시 시작했어요.', 'plain', DONE);
                         active.reload();
                         reload();
                       } catch (e) {
@@ -967,7 +968,9 @@ function FolderChip({
       ) : loading ? (
         <span className="inline-block h-2 w-3 rounded-full bg-current opacity-20" aria-hidden="true" />
       ) : null}
-      {badge ? <span className={cx('rounded-full px-1.5 text-[11px] font-bold', on ? 'ring-1 ring-inset ring-current' : 'bg-bad-soft text-bad')}>{badge}</span> : null}
+      {badge ? (
+        <span className={cx('rounded-full px-1.5 text-[11px] font-bold', on ? 'ring-1 ring-inset ring-current' : 'bg-bad-soft text-bad')}>{badge}</span>
+      ) : null}
     </button>
   );
 }

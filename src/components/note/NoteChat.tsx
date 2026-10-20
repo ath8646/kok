@@ -8,7 +8,7 @@ import { useRouter } from 'next/navigation';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { RichText } from '@/components/RichText';
 import { useMe } from '@/components/AppShell';
-import { ApiError, Button, Energy, EnergyEstimate, ICONS, Icon, Menu, api, cx, useToast } from '@/components/ui';
+import { ApiError, Button, Energy, EnergyEstimate, ICONS, Icon, Menu, api, cx, useToast, DONE } from '@/components/ui';
 import {
   ChatDropHint,
   ChatInput,
@@ -288,7 +288,7 @@ export function NoteChat({
         (m ?? []).map((x) => (x.id === msg.id && x.proposal && x.proposal.kind !== 'none' ? { ...x, proposal: { ...x.proposal, status: r.status } } : x)),
       );
       if (r.status === 'applied') {
-        toast(msg.proposal?.kind === 'questions' ? `문제 ${r.added}개를 넣었어요.` : '노트에 넣었어요.', 'ok');
+        toast(msg.proposal?.kind === 'questions' ? `문제 ${r.added}개를 넣었어요.` : '노트에 넣었어요.', 'ok', DONE);
         onApplied();
       }
     } catch (e) {
@@ -305,7 +305,7 @@ export function NoteChat({
     try {
       await api(`/api/notes/${noteId}/chat/apply`, { method: 'POST', body: JSON.stringify({ messageId: msg.id, action: 'save_problem' }) });
       setMessages((m) => (m ?? []).map((x) => (x.id === msg.id && x.solution ? { ...x, solution: { ...x.solution, saved: true } } : x)));
-      toast('이 노트 문제로 넣었어요. 오늘부터 복습에 나와요.', 'ok');
+      toast('이 노트 문제로 넣었어요. 오늘부터 복습에 나와요.', 'ok', DONE);
       onApplied();
     } catch (e) {
       if (e instanceof ApiError && e.code === 'done') load();

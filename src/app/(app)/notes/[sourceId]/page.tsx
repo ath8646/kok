@@ -33,6 +33,7 @@ import {
   cx,
   inputClass,
   useToast,
+  DONE,
 } from '@/components/ui';
 import { ORGANIZE_COLS, SOURCE_COLS, questionCols, sb, type SourceRowWithUnit } from '@/lib/data';
 import { keyPointMemory } from '@/lib/memory';
@@ -305,7 +306,7 @@ export default function NotePage() {
     }
     // 자료함·홈이 새로 읽게 (기억해 둔 목록도 버린다)
     window.dispatchEvent(new CustomEvent(SOURCES_CHANGED));
-    toast(on ? '다시 복습에 넣었어요.' : '복습에서 뺐어요.');
+    toast(on ? '다시 복습에 넣었어요.' : '복습에서 뺐어요.', 'plain', DONE);
   };
 
   // 노트에 더한 자료의 주소로 들어오면 그 노트로 보낸다
@@ -325,7 +326,7 @@ export default function NotePage() {
       prevKids.current = new Map(rows.map((r) => [r.id, r.status]));
       setKids(rows);
       if (finished) {
-        toast('자료를 더해 새 버전을 만들었어요.', 'ok');
+        toast('자료를 더해 새 버전을 만들었어요.', 'ok', DONE);
         setTick((t) => t + 1);
       }
       // 멈춘 처리는 이어서 하게 한다 (화면이 열려 있을 때)
@@ -561,7 +562,7 @@ export default function NotePage() {
       );
       window.dispatchEvent(new Event(SOURCES_CHANGED));
       setRenaming(false);
-      toast('이름을 바꿨어요.', 'ok');
+      toast('이름을 바꿨어요.', 'ok', DONE);
     } finally {
       setRenameBusy(false);
     }
@@ -664,7 +665,7 @@ export default function NotePage() {
       await api(`/api/notes/${note.id}/versions`, { method: 'POST', body: JSON.stringify({ action: 'switch', number: n }) });
       setViewing(null);
       setViewParam(null);
-      toast(`지금 버전을 바꿨어요 (버전 ${n}).`, 'ok');
+      toast(`지금 버전을 바꿨어요 (버전 ${n}).`, 'ok', DONE);
       reload();
     } catch (e) {
       toast((e as Error).message, 'bad');
@@ -684,7 +685,7 @@ export default function NotePage() {
         setViewing(null);
         setViewParam(null);
       }
-      toast('버전을 지웠어요.', 'ok');
+      toast('버전을 지웠어요.', 'ok', DONE);
       reload();
     } catch (e) {
       toast((e as Error).message, 'bad');
@@ -1060,7 +1061,7 @@ export default function NotePage() {
               const { error } = await sb().from('reports').insert({ target_type: 'note', target_id: note.id, reason: reason.trim() });
               if (error) toast('보내지 못했어요.', 'bad');
               else {
-                toast('신고했어요. 고마워요!', 'ok');
+                toast('신고했어요. 고마워요!', 'ok', DONE);
                 setReason('');
                 setReporting(false);
               }

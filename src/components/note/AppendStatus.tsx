@@ -3,7 +3,7 @@
 import { useState } from 'react';
 import type { ChildSource } from '@/lib/versions';
 import { stepLabel } from '../ProcessingList';
-import { Button, ICONS, Icon, ProgressRing, api, cx, useToast } from '../ui';
+import { Button, ICONS, Icon, ProgressRing, api, cx, useToast, DONE } from '../ui';
 
 const KIND_ICON = { text: ICONS.pen, pdf: ICONS.file, image: ICONS.image } as const;
 const KIND_LABEL = { text: '글', pdf: 'PDF', image: '사진' } as const;
@@ -51,7 +51,7 @@ export function AppendStatus({ kids, onChanged }: { kids: ChildSource[]; onChang
                       setBusy(k.id);
                       try {
                         await api(`/api/sources/${k.id}/retry`, { method: 'POST', body: '{}' });
-                        toast('다시 시작했어요.');
+                        toast('다시 시작했어요.', 'plain', DONE);
                         onChanged();
                       } catch (e) {
                         toast((e as Error).message, 'bad');

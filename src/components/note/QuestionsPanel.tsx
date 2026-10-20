@@ -7,7 +7,7 @@ import { clientModel } from '@/lib/client-model';
 import { sb } from '@/lib/data';
 import { QuestionEditor } from '../QuestionEditor';
 import { QuestionList, QuestionPreview, createOwnQuestion, type CardInfo, type QuestionRemoval } from '../QuestionList';
-import { ApiError, Button, Energy, LinkButton, Sheet, api, useToast } from '../ui';
+import { ApiError, Button, Energy, LinkButton, Sheet, api, useToast, DONE } from '../ui';
 import { questionFigure, type SourceFigure } from '@/lib/source-figures';
 
 /** figure_id: 그림 문제의 자료 그림 번호 (바꿀 때 서버가 노트의 그림을 붙인다) */
@@ -117,7 +117,7 @@ export function QuestionsPanel({
             if (id && !ok) await sb().from('questions').delete().eq('id', id);
             setSaving(false);
             if (!ok) return toast('저장하지 못했어요.', 'bad');
-            toast(oldVersion ? `버전 ${oldVersion.number}에 문제를 만들었어요.` : '문제를 만들었어요. 오늘 복습에 나와요.', 'ok');
+            toast(oldVersion ? `버전 ${oldVersion.number}에 문제를 만들었어요.` : '문제를 만들었어요. 오늘 복습에 나와요.', 'ok', DONE);
             setAdding(false);
             onChanged();
           }}
@@ -140,7 +140,7 @@ export function QuestionsPanel({
                       method: 'POST',
                       body: JSON.stringify({ action: 'apply', questions: preview.rows, version: preview.version ?? undefined }),
                     });
-                    toast('새 문제로 바꿨어요.', 'ok');
+                    toast('새 문제로 바꿨어요.', 'ok', DONE);
                     setPreview(null);
                     onChanged();
                   } catch (e) {

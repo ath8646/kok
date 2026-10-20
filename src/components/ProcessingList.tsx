@@ -6,7 +6,7 @@ import type { SourceRowWithUnit } from '@/lib/data';
 import { fetchSources } from '@/lib/data';
 import { SOURCES_CHANGED } from '@/lib/events';
 import { dropView } from '@/lib/view-cache';
-import { Button, ICONS, Icon, ProgressRing, api, cx, useToast } from './ui';
+import { Button, ICONS, Icon, ProgressRing, api, cx, useToast, DONE } from './ui';
 
 export function stepLabel(s: Pick<SourceRowWithUnit, 'status' | 'step' | 'chunk_index' | 'chunk_total' | 'progress'>): string {
   if (s.status === 'error') return '멈췄어요';
@@ -133,7 +133,7 @@ export function ProcessingList({ items, justDone, reload }: Pick<ReturnType<type
                       setBusy(s.id);
                       try {
                         await api(`/api/sources/${s.id}/retry`, { method: 'POST', body: '{}' });
-                        toast('다시 시작했어요.');
+                        toast('다시 시작했어요.', 'plain', DONE);
                         window.dispatchEvent(new Event(SOURCES_CHANGED));
                         await reload();
                       } catch (e) {

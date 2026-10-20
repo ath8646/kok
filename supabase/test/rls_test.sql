@@ -1068,4 +1068,218 @@ begin
   if not (select pinned from public.subjects where id = sub) then raise exception 'pin kept'; end if;
 end $$;
 
+-- ---------- 자료함 정리 2: 고정한 과목 순서, 자료 옮기기, 과목 합치기, 노트 합치기, AI 로 다시 정리 ----------
+do $$ begin
+  if has_function_privilege('authenticated', 'public.kok_move_sources(uuid, uuid[], uuid)', 'execute') then raise exception 'students must not call kok_move_sources'; end if;
+  if has_function_privilege('authenticated', 'public.kok_merge_subjects(uuid, uuid, uuid)', 'execute') then raise exception 'students must not call kok_merge_subjects'; end if;
+  if has_function_privilege('authenticated', 'public.kok_merge_notes(uuid, uuid, uuid[], jsonb, jsonb, jsonb, jsonb)', 'execute') then
+    raise exception 'students must not call kok_merge_notes';
+  end if;
+  if has_function_privilege('authenticated', 'public.kok_reorganize_note(uuid, uuid, jsonb, jsonb, jsonb, timestamptz)', 'execute') then
+    raise exception 'students must not call kok_reorganize_note';
+  end if;
+  if has_function_privilege('anon', 'public.kok_move_sources(uuid, uuid[], uuid)', 'execute') then raise exception 'anon must not call kok_move_sources'; end if;
+  if has_function_privilege('anon', 'public.kok_reorder_subjects(uuid[])', 'execute') then raise exception 'anon must not reorder subjects'; end if;
+  if not has_function_privilege('authenticated', 'public.kok_reorder_subjects(uuid[])', 'execute') then raise exception 'students reorder their subjects'; end if;
+  if not has_function_privilege('service_role', 'public.kok_merge_notes(uuid, uuid, uuid[], jsonb, jsonb, jsonb, jsonb)', 'execute') then
+    raise exception 'the server merges notes';
+  end if;
+end $$;
+
+insert into public.subjects (id, user_id, name, position, pinned, exam_date) values
+  ('aaaaaaaa-0000-0000-0000-000000000001', '11111111-1111-1111-1111-111111111111', '국어', 5, true, '2026-12-01'),
+  ('aaaaaaaa-0000-0000-0000-000000000002', '11111111-1111-1111-1111-111111111111', '영어', 6, false, null),
+  ('bbbbbbbb-0000-0000-0000-000000000001', '22222222-2222-2222-2222-222222222222', 'B 과목', 9, false, null);
+
+-- 과목 순서: 받은 차례대로 내 과목만 0, 1, 2 … (남의 과목 번호가 섞여 와도 건너뛴다)
+set role authenticated;
+select set_config('request.jwt.claim.sub', '11111111-1111-1111-1111-111111111111', false);
+select public.kok_reorder_subjects(array[
+  'aaaaaaaa-0000-0000-0000-000000000002', 'bbbbbbbb-0000-0000-0000-000000000001', 'aaaaaaaa-0000-0000-0000-000000000001'
+]::uuid[]);
+reset role;
+do $$ begin
+  if (select position from public.subjects where id = 'aaaaaaaa-0000-0000-0000-000000000002') <> 0 then raise exception 'reorder subjects: first'; end if;
+  if (select position from public.subjects where id = 'aaaaaaaa-0000-0000-0000-000000000001') <> 2 then raise exception 'reorder subjects: third'; end if;
+  if (select position from public.subjects where id = 'bbbbbbbb-0000-0000-0000-000000000001') <> 9 then raise exception 'reorder must not touch B subjects'; end if;
+end $$;
+
+do $$
+declare
+  a uuid := '11111111-1111-1111-1111-111111111111';
+  b uuid := '22222222-2222-2222-2222-222222222222';
+  s1 uuid := 'aaaaaaaa-0000-0000-0000-000000000001';
+  s2 uuid := 'aaaaaaaa-0000-0000-0000-000000000002';
+  sbb uuid := 'bbbbbbbb-0000-0000-0000-000000000001';
+  src1 uuid := gen_random_uuid();
+  src2 uuid := gen_random_uuid();
+  src3 uuid := gen_random_uuid();
+  src4 uuid := gen_random_uuid();
+  kid uuid := gen_random_uuid();
+  bad uuid := gen_random_uuid();
+  n1 uuid;
+  n2 uuid;
+  n3 uuid;
+  q1 uuid;
+  q2 uuid;
+  q3 uuid;
+  r jsonb;
+  v int;
+  stamp timestamptz;
+begin
+  insert into public.sources (id, user_id, subject_id, kind, title, status, position) values
+    (src1, a, s1, 'text', '첫 노트', 'ready', 3),
+    (src2, a, s1, 'text', '둘째 노트', 'ready', 4),
+    (src3, a, s1, 'text', '셋째 노트', 'ready', null),
+    (src4, a, s2, 'text', '영어 노트', 'ready', 0);
+  -- 둘째 노트에 더한 자료 (정리를 마친 것과 실패한 것)
+  insert into public.sources (id, user_id, subject_id, kind, title, status, parent_id, file_paths) values
+    (kid, a, s1, 'text', '더한 자료', 'ready', src2, '{}'),
+    (bad, a, s1, 'pdf', '실패한 자료', 'error', src2, array[a::text || '/' || bad::text || '/x.pdf']);
+  insert into public.notes (user_id, source_id, subject_id, title, body)
+    values (a, src1, s1, '첫 노트', '{"key_points":[{"id":"k1","title":"가"}]}') returning id into n1;
+  insert into public.notes (user_id, source_id, subject_id, title, body)
+    values (a, src2, s1, '둘째 노트', '{"key_points":[{"id":"k1","title":"나"}]}') returning id into n2;
+  insert into public.notes (user_id, source_id, subject_id, title, body)
+    values (a, src3, s1, '셋째 노트', '{"key_points":[]}') returning id into n3;
+  insert into public.questions (user_id, note_id, subject_id, key_point_id, type, prompt, answer, pages)
+    values (a, n1, s1, 'k1', 'ox', '첫 문제', 'true', '{1}') returning id into q1;
+  insert into public.questions (user_id, note_id, subject_id, key_point_id, type, prompt, answer, pages)
+    values (a, n2, s1, 'k1', 'ox', '둘째 문제', 'true', '{2}') returning id into q2;
+  insert into public.questions (user_id, note_id, subject_id, key_point_id, type, prompt, answer, status)
+    values (a, n2, s1, 'k9', 'ox', '지난 버전 문제', 'true', 'hidden') returning id into q3;
+  insert into public.cards (question_id, user_id, subject_id) values (q1, a, s1), (q2, a, s1);
+  insert into public.review_logs (user_id, question_id, subject_id, rating, correct) values (a, q2, s1, 3, true);
+  insert into public.chat_messages (user_id, note_id, role, content, proposal)
+    values (a, n2, 'assistant', '넣을까요?', '{"kind":"questions","status":"pending"}');
+
+  -- 자료 옮기기: 남의 과목으로는 못 옮기고, 남의 자료는 옮겨지지 않는다
+  begin
+    perform public.kok_move_sources(a, array[src2], sbb);
+    raise exception 'moved into a subject of B';
+  exception when others then
+    if sqlerrm <> 'subject_not_found' then raise; end if;
+  end;
+  if public.kok_move_sources(b, array[src2], sbb) <> 0 then raise exception 'B moved a material of A'; end if;
+  -- 둘째 노트를 영어로 (더한 자료 번호는 건너뛴다): 더한 자료·노트·문제·카드·푼 기록이 같이 가고, 순서는 비운다
+  if public.kok_move_sources(a, array[src2, kid], s2) <> 1 then raise exception 'move count'; end if;
+  if (select subject_id from public.sources where id = src2) <> s2 or (select subject_id from public.sources where id = kid) <> s2 then
+    raise exception 'material and its child should move';
+  end if;
+  if (select position from public.sources where id = src2) is not null then raise exception 'moved material keeps an old position'; end if;
+  if (select subject_id from public.notes where id = n2) <> s2 then raise exception 'note did not move'; end if;
+  if (select subject_id from public.questions where id = q2) <> s2 then raise exception 'question did not move'; end if;
+  if (select subject_id from public.cards where question_id = q2) <> s2 then raise exception 'card did not move'; end if;
+  if (select subject_id from public.review_logs where question_id = q2) <> s2 then raise exception 'review log did not move'; end if;
+  if (select subject_id from public.questions where id = q1) <> s1 then raise exception 'another note moved'; end if;
+
+  -- 노트 합치기: 남의 노트·읽은 뒤에 바뀐 노트는 안 된다
+  begin
+    perform public.kok_merge_notes(b, n1, array[n2], '{}'::jsonb, '[]'::jsonb, '{}'::jsonb,
+      jsonb_build_object(n1::text, (select updated_at from public.notes where id = n1), n2::text, (select updated_at from public.notes where id = n2)));
+    raise exception 'B merged notes of A';
+  exception when others then
+    if sqlerrm <> 'note_not_found' then raise; end if;
+  end;
+  begin
+    perform public.kok_merge_notes(a, n1, array[n2], '{}'::jsonb, '[]'::jsonb, '{}'::jsonb,
+      jsonb_build_object(n1::text, (select updated_at from public.notes where id = n1), n2::text, '2001-01-01T00:00:00Z'));
+    raise exception 'merged a note changed after reading';
+  exception when others then
+    if sqlerrm <> 'stale_note' then raise; end if;
+  end;
+  -- 둘째 노트(영어)를 첫 노트(국어)에 합친다
+  r := public.kok_merge_notes(a, n1, array[n2],
+    '{"key_points":[{"id":"k1","title":"가"},{"id":"k2","title":"나"}],"merged":{"count":2}}'::jsonb,
+    '[{"type":"mindmap","spec":{"root_label":"합침","nodes":[]}}]'::jsonb,
+    jsonb_build_object(n2::text, jsonb_build_object('k1', 'k2')),
+    jsonb_build_object(n1::text, (select updated_at from public.notes where id = n1), n2::text, (select updated_at from public.notes where id = n2)));
+  if (r->>'merged')::int <> 1 then raise exception 'merge count'; end if;
+  if exists (select 1 from public.notes where id = n2) then raise exception 'merged note should be gone'; end if;
+  if (select note_id from public.questions where id = q2) <> n1 then raise exception 'question should move to the kept note'; end if;
+  if (select key_point_id from public.questions where id = q2) <> 'k2' then raise exception 'question concept should be renumbered'; end if;
+  if (select cardinality(pages) from public.questions where id = q2) <> 0 then raise exception 'pages of another material should be cleared'; end if;
+  if (select subject_id from public.questions where id = q2) <> s1 or (select subject_id from public.cards where question_id = q2) <> s1
+     or (select subject_id from public.review_logs where question_id = q2) <> s1 then
+    raise exception 'merged question follows the kept subject';
+  end if;
+  if exists (select 1 from public.questions where id = q3) then raise exception 'hidden question of an old version should go'; end if;
+  if (select note_id from public.chat_messages where note_id = n1 limit 1) is null then raise exception 'chat should move'; end if;
+  if (select proposal->>'status' from public.chat_messages where note_id = n1 limit 1) <> 'cancelled' then raise exception 'pending proposal should stop'; end if;
+  if (select parent_id from public.sources where id = src2) <> src1 or (select parent_id from public.sources where id = kid) <> src1 then
+    raise exception 'materials of the merged note become added materials';
+  end if;
+  if (select subject_id from public.sources where id = src2) <> s1 then raise exception 'merged material follows the kept subject'; end if;
+  if exists (select 1 from public.sources where id = bad) then raise exception 'failed child should be removed'; end if;
+  if not (r->'sources') ? bad::text then raise exception 'removed child should be reported'; end if;
+  if (select (body->'merged'->>'count')::int from public.notes where id = n1) <> 2 then raise exception 'merged body not saved'; end if;
+  if (select count(*) from public.visuals where note_id = n1) <> 1 then raise exception 'merged visuals not saved'; end if;
+  begin
+    perform public.kok_merge_notes(a, n1, array[n1], '{}'::jsonb, '[]'::jsonb, '{}'::jsonb, '{}'::jsonb);
+    raise exception 'merged a note into itself';
+  exception when others then
+    if sqlerrm <> 'bad_notes' then raise; end if;
+  end;
+
+  -- AI 로 다시 정리: 다시 정리하기 전 노트가 버전 1 (합쳐 들어온 자료까지), 다시 정리한 노트가 버전 2
+  stamp := (select updated_at from public.notes where id = n1);
+  begin
+    perform public.kok_reorganize_note(a, n1, '{}'::jsonb, '{}'::jsonb, null, stamp - interval '1 second');
+    raise exception 'reorganized a note changed after reading';
+  exception when others then
+    if sqlerrm <> 'stale_note' then raise; end if;
+  end;
+  begin
+    perform public.kok_reorganize_note(b, n1, '{}'::jsonb, '{}'::jsonb, null, stamp);
+    raise exception 'B reorganized a note of A';
+  exception when others then
+    if sqlerrm <> 'note_not_found' then raise; end if;
+  end;
+  v := public.kok_reorganize_note(a, n1, '{"key_points":[{"id":"k1","title":"가나"}]}'::jsonb, '{"k2":"k1"}'::jsonb,
+    '{"root_label":"다시","nodes":[]}'::jsonb, stamp);
+  if v <> 2 then raise exception 'reorganized note should be version 2'; end if;
+  if (select current_version from public.notes where id = n1) <> 2 then raise exception 'current version'; end if;
+  if (select kind from public.note_versions where note_id = n1 and number = 1) <> 'first' then raise exception 'first version kind'; end if;
+  if (select kind from public.note_versions where note_id = n1 and number = 2) <> 'reorganize' then raise exception 'reorganized version kind'; end if;
+  if (select jsonb_array_length(materials) from public.note_versions where note_id = n1 and number = 1) <> 3 then
+    raise exception 'first version should list the merged materials too';
+  end if;
+  if (select materials->0->>'source_id' from public.note_versions where note_id = n1 and number = 1) <> src1::text then
+    raise exception 'first material comes first';
+  end if;
+  if (select key_point_id from public.questions where id = q2) <> 'k1' or (select key_point_id from public.questions where id = q1) <> 'k1' then
+    raise exception 'questions should follow the combined concept';
+  end if;
+  if (select spec->>'root_label' from public.visuals where note_id = n1 and type = 'mindmap') <> '다시' then raise exception 'mind map not updated'; end if;
+  if (select body->'key_points'->0->>'title' from public.note_versions where note_id = n1 and number = 1) <> '가' then
+    raise exception 'the note before reorganizing stays in version 1';
+  end if;
+
+  -- 과목 합치기: 국어(s1)를 영어(s2)에. 순서를 정한 자료는 영어 자료 뒤에, 시험 날·고정은 넘겨받는다
+  begin
+    perform public.kok_merge_subjects(a, s1, sbb);
+    raise exception 'merged into a subject of B';
+  exception when others then
+    if sqlerrm <> 'subject_not_found' then raise; end if;
+  end;
+  begin
+    perform public.kok_merge_subjects(a, s1, s1);
+    raise exception 'merged a subject into itself';
+  exception when others then
+    if sqlerrm <> 'same_subject' then raise; end if;
+  end;
+  v := public.kok_merge_subjects(a, s1, s2);
+  if v <> 2 then raise exception 'subject merge count (top-level materials): %', v; end if;
+  if exists (select 1 from public.subjects where id = s1) then raise exception 'merged subject should be gone'; end if;
+  if exists (select 1 from public.sources where subject_id = s1) or exists (select 1 from public.notes where subject_id = s1)
+     or exists (select 1 from public.questions where subject_id = s1) or exists (select 1 from public.cards where subject_id = s1)
+     or exists (select 1 from public.review_logs where subject_id = s1) then
+    raise exception 'everything should move to the kept subject';
+  end if;
+  if (select position from public.sources where id = src1) <> 4 then raise exception 'ordered materials go after the kept ones'; end if;
+  if (select position from public.sources where id = src3) is not null then raise exception 'unordered materials stay new'; end if;
+  if (select exam_date from public.subjects where id = s2) <> '2026-12-01' then raise exception 'exam date should carry over'; end if;
+  if not (select pinned from public.subjects where id = s2) then raise exception 'pin should carry over'; end if;
+end $$;
+
 select 'ALL RLS TESTS PASSED' as result;

@@ -107,6 +107,26 @@ export function appendMergePrompt(parts: number, maxKeyPoints = 9): string {
   ].join('\n');
 }
 
+/**
+ * 합친 노트를 AI 로 다시 정리할 때 (Pro): 노트 여러 개를 이어 붙인 노트(<note>)를 하나의 노트로 다듬는다.
+ * <used_ids>: 새 개념에 쓰면 안 되는 번호 (문제·마인드맵·자료 그림이 가리키는 번호)
+ */
+export function reorganizePrompt(maxKeyPoints: number): string {
+  return [
+    "The study note in <note> was made by joining several of the student's notes one after another, so it may repeat itself and jump between topics.",
+    'Rewrite it as one well-organized study note with the same fields. Do not add facts that are not in the note, and keep every fact that is in it.',
+    `- Combine key points that cover the same idea, and order the key points so that related ideas sit together in a sensible learning order. Use at most ${maxKeyPoints} key points.`,
+    '- Keep the id of each key point you keep ("k1", "k2", ...). When you combine key points, the combined one keeps the id of the one that comes first in <note>. A key point that is really new gets an id that is not in <used_ids>.',
+    '- id_map: one item for every key point id in <note>. from is that id, and to is the id of the key point that now holds its content.',
+    '- Update every key_point_id in pitfalls and examples to match.',
+    '- The student may mark text in the note with **bold**, ==highlight== and !!red!!, start lines with "- " or "1. " to make lists, and write math as $...$. Keep these marks exactly as written in the text you keep.',
+    '- pages: keep the page numbers of every key point you combine.',
+    '- Merge terms and formulas, dropping duplicates. Keep pitfalls and examples, dropping duplicates.',
+    '- title: copy the current title. unit: the unit or chapter the note covers, at most 20 characters. summary: one or two sentences for the whole note.',
+    '- Keep the "checks" and "changes" items.',
+  ].join('\n');
+}
+
 export type VisualOptions = {
   depth: 2 | 3 | 4;
   labelStyle: 'keyword' | 'phrase';

@@ -40,6 +40,8 @@ export type MeResponse = {
     sourceFigures: boolean;
     /** 과목 서랍: 과목 위에 고정·보관·최근 쓴 때 (subjects.pinned·archived·used_at) */
     subjectDrawer: boolean;
+    /** 자료함 정리 2: 고정한 과목 순서, 자료 옮기기, 과목 합치기, 노트 합치기·AI로 다시 정리 (note_versions.kind, kok_reorder_subjects …) */
+    merge: boolean;
   };
   consented: boolean;
   settings: UserSettings;

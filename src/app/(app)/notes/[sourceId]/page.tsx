@@ -6,7 +6,7 @@
 import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useMe } from '@/components/AppShell';
-import { SOURCES_CHANGED, useQuickAdd } from '@/components/QuickAdd';
+import { SOURCES_CHANGED, SUBJECTS_CHANGED, useQuickAdd } from '@/components/QuickAdd';
 import { NoteView, type NoteBody } from '@/components/NoteView';
 import { ProcessingView } from '@/components/note/ProcessingView';
 import { OriginalPanel } from '@/components/note/OriginalPanel';
@@ -21,6 +21,7 @@ import {
   Button,
   Chip,
   EmptyState,
+  EnergyEstimate,
   ICONS,
   Icon,
   LargeHeader,
@@ -35,13 +36,18 @@ import {
   useToast,
   DONE,
 } from '@/components/ui';
-import { ORGANIZE_COLS, SOURCE_COLS, questionCols, sb, type SourceRowWithUnit } from '@/lib/data';
+import { SubjectPickSheet } from '@/components/SubjectPick';
+import { ORGANIZE_COLS, SOURCE_COLS, fetchSubjects, questionCols, sb, type SourceRowWithUnit } from '@/lib/data';
+import { readMergedMark } from '@/lib/note-merge';
+import { estimateTokens, MERGE_OUT_TOKENS } from '@/lib/append-merge';
+import { estimateSmallTask } from '@/lib/ai/models';
+import { clientModel } from '@/lib/client-model';
 import { keyPointMemory } from '@/lib/memory';
 import { readFigures } from '@/lib/source-figures';
 import { zMindmap, zNote, zTable, zTimeline, type Mindmap, type TableSpec, type TimelineSpec } from '@/lib/ai/schemas';
 import type { QuestionRow, SubjectRow } from '@/lib/types';
 import { subjectVar } from '@/lib/colors';
-import { VERSION_LIST_COLS, removalPlan, toVersionRow, type ChildSource, type VersionRow } from '@/lib/versions';
+import { VERSION_LIST_COLS, VERSION_LIST_COLS_KIND, removalPlan, toVersionRow, type ChildSource, type VersionRow } from '@/lib/versions';
 import { previewText } from '@/lib/richtext';
 import { starredFirst } from '@/lib/note-order';
 import { practiceHref, rememberPracticeFrom } from '@/lib/review-mode';
@@ -67,6 +73,7 @@ const VISUAL_TYPES: VisualType[] = ['mindmap', 'table', 'timeline'];
 const STALE_LIVE = '그사이 다른 곳에서 노트가 바뀌어서 방금 고친 것은 저장하지 못했어요. 새로 불러왔어요.';
 const STALE_OLD = '이 버전이 그사이 다른 곳에서 바뀌어서 저장하지 못했어요. 새로 불러왔어요.';
 const APPEND_LOCK = '이 노트에 자료를 더하는 중이에요. 끝나면 고칠 수 있어요.';
+const REORG_LOCK = 'AI가 노트를 다시 정리하고 있어요. 끝나면 고칠 수 있어요.';
 
 type Bundle = {
   source: SourceFull | null;
@@ -102,6 +109,8 @@ async function fetchBundle(
   figuresOn: boolean,
   organizeOn: boolean,
   sourceFiguresOn: boolean,
+  /** 버전이 생긴 까닭 칸 (note_versions.kind, features.merge) */
+  kindOn: boolean,
 ): Promise<Bundle> {
   const empty: Bundle = { source: null, note: null, visuals: {}, visualRows: {}, questions: [], cards: new Map(), subject: null, versions: [] };
   const { data: s } = await sb()
@@ -128,7 +137,11 @@ async function fetchBundle(
       .order('id'),
     sb().from('subjects').select('id, name, color, exam_date, position, created_at').eq('id', note.subject_id).maybeSingle(),
     versionsOn
-      ? sb().from('note_versions').select(VERSION_LIST_COLS).eq('note_id', note.id).order('number')
+      ? sb()
+          .from('note_versions')
+          .select(kindOn ? VERSION_LIST_COLS_KIND : VERSION_LIST_COLS)
+          .eq('note_id', note.id)
+          .order('number')
       : Promise.resolve({ data: [] as Record<string, unknown>[] }),
   ]);
   const questions = (qs ?? []) as unknown as QuestionRow[];
@@ -210,6 +223,8 @@ export default function NotePage() {
   const organizeOn = !!me?.features.organize;
   const sourceFiguresOn = !!me?.features.sourceFigures;
   const chatOn = !!me?.features.chat;
+  // 노트 옮기기·합친 노트 다시 정리·버전 까닭 (schema.sql 을 다시 실행한 뒤)
+  const mergeOn = !!me?.features.merge;
   const canAppend = !!me?.canAppend;
   const [bundle, setBundle] = useState<Bundle | null | undefined>(undefined);
   const [tick, setTick] = useState(0);
@@ -247,6 +262,9 @@ export default function NotePage() {
   const [kids, setKids] = useState<ChildSource[]>([]);
   const [kidsTick, setKidsTick] = useState(0);
   const [verBusy, setVerBusy] = useState<string | null>(null);
+  // 합친 노트를 AI 로 다시 정리하는 중 (노트 → 그림 차례), 다른 과목으로 옮기기 (고를 과목 목록)
+  const [reorg, setReorg] = useState<'note' | 'visual' | null>(null);
+  const [moveSubjects, setMoveSubjects] = useState<SubjectRow[] | null>(null);
   const reload = useCallback(() => setTick((v) => v + 1), []);
   // 저장할 때 '읽은 그대로인지' 확인하는 값 (노트·그림 행·지난 버전 행의 updated_at). 저장하면 새 값으로 바꾼다
   const noteToken = useRef<string | null>(null);
@@ -268,7 +286,7 @@ export default function NotePage() {
   useEffect(() => {
     let alive = true;
     const gen = saveGen.current;
-    fetchBundle(sourceId, versionsOn, restedOn, figuresOn, organizeOn, sourceFiguresOn)
+    fetchBundle(sourceId, versionsOn, restedOn, figuresOn, organizeOn, sourceFiguresOn, mergeOn)
       .then((b) => {
         if (!alive || !freshSince(gen)) return;
         noteToken.current = b.note?.updated_at ?? null;
@@ -281,7 +299,7 @@ export default function NotePage() {
     return () => {
       alive = false;
     };
-  }, [sourceId, tick, versionsOn, restedOn, figuresOn, organizeOn, sourceFiguresOn, freshSince]);
+  }, [sourceId, tick, versionsOn, restedOn, figuresOn, organizeOn, sourceFiguresOn, mergeOn, freshSince]);
 
   const source = bundle === undefined ? undefined : (bundle?.source ?? null);
   const note = bundle?.note ?? null;
@@ -501,6 +519,11 @@ export default function NotePage() {
       toast(APPEND_LOCK, 'bad');
       return;
     }
+    // AI 가 다시 정리하는 동안에도 (끝나면 새 버전이 되어 고친 것이 덮인다)
+    if (!old && reorg) {
+      toast(REORG_LOCK, 'bad');
+      return;
+    }
     if (old) {
       const number = old.number;
       setOldDoc((d) => (d && d.number === number ? { ...d, body: next } : d));
@@ -570,9 +593,9 @@ export default function NotePage() {
 
   /** 지금 버전의 그림 저장: 읽은 그림 행 그대로일 때만 (새 버전이면 행이 새로 생겨 0행) */
   const saveLiveVisual = async (t: VisualType, spec: Mindmap | TableSpec | TimelineSpec): Promise<boolean | 'stale'> => {
-    // 자료를 더하는 동안에는 지금 버전의 그림을 고치지 않는다 (알리고 새로 읽어 고친 것을 되돌린다)
-    if (appendRunning) {
-      staleReload(APPEND_LOCK);
+    // 자료를 더하거나 AI 가 다시 정리하는 동안에는 지금 버전의 그림을 고치지 않는다 (알리고 새로 읽어 고친 것을 되돌린다)
+    if (appendRunning || reorg) {
+      staleReload(appendRunning ? APPEND_LOCK : REORG_LOCK);
       return 'stale';
     }
     return queued(async () => {
@@ -694,6 +717,69 @@ export default function NotePage() {
     }
   };
 
+  /** 합친 노트 안내 닫기 (메뉴의 'AI로 다시 정리'는 남는다) */
+  const hideMerged = () => {
+    const mark = readMergedMark(note?.body);
+    if (!note || !mark) return;
+    saveBody({ ...note.body, merged: { ...mark, hide: true } });
+  };
+
+  /**
+   * 합친 노트를 AI 로 다시 정리 (Pro): 겹치는 개념을 하나로 묶고 차례를 다듬어 새 버전으로. 이어서 새 정리에 맞게 그림을 다시 그린다.
+   * 그림을 못 그려도 노트는 다시 정리된 채로 둔다 (그림 탭에서 다시 만들 수 있다)
+   */
+  const reorganize = async () => {
+    if (!note || reorg) return;
+    if (
+      !confirm('겹치는 개념을 AI가 하나로 묶고 차례를 다듬을까요?\n지금 노트는 원본 탭의 버전 기록에 남아서 언제든 돌아갈 수 있어요. 문제와 푼 기록은 그대로예요.')
+    )
+      return;
+    setReorg('note');
+    try {
+      await api(`/api/notes/${note.id}/reorganize`, { method: 'POST', body: '{}' });
+    } catch (e) {
+      setReorg(null);
+      toast((e as Error).message, 'bad');
+      reload();
+      return;
+    }
+    setReorg('visual');
+    try {
+      type Preview = {
+        version: number | null;
+        preview: { recommended: string; mindmap: unknown; table: unknown; timeline: unknown };
+      };
+      const p = await api<Preview>(`/api/notes/${note.id}/visual`, { method: 'POST', body: JSON.stringify({ action: 'preview' }) });
+      await api(`/api/notes/${note.id}/visual`, {
+        method: 'POST',
+        body: JSON.stringify({
+          action: 'apply',
+          version: p.version ?? undefined,
+          recommended: p.preview.recommended,
+          mindmap: p.preview.mindmap,
+          table: p.preview.table,
+          timeline: p.preview.timeline,
+        }),
+      });
+      toast('AI로 다시 정리했어요. 정리하기 전 노트는 원본 탭의 버전 기록에 있어요.', 'ok', DONE);
+    } catch (e) {
+      toast(`노트는 다시 정리했어요. 그림은 다시 그리지 못했으니 그림 탭에서 다시 만들어 주세요. (${(e as Error).message})`, 'bad');
+    } finally {
+      setReorg(null);
+      reload();
+      window.dispatchEvent(new Event(SOURCES_CHANGED));
+    }
+  };
+
+  /** 다른 과목으로 옮기기: 고를 과목 목록을 읽고 시트를 연다 */
+  const startMove = async () => {
+    try {
+      setMoveSubjects(await fetchSubjects());
+    } catch {
+      toast('과목 목록을 불러오지 못했어요.', 'bad');
+    }
+  };
+
   if (!me) return null;
   const back = { href: subject ? `/library/${subject.id}` : source?.subject_id ? `/library/${source.subject_id}` : '/library', label: '자료함으로' };
   if (source === undefined || parentId)
@@ -766,8 +852,19 @@ export default function NotePage() {
   const loadingOld = showOld && !old;
   // 자료를 더하는 동안에는 지금 노트의 정리·그림을 고치지 않는다 (합치는 바탕이 바뀌면 처음부터 다시 합쳐야 해서)
   const appendRunning = versionsOn && kidsActive && !old;
-  const aiLocked = old ? '지난 버전에서는 AI로 다시 만들 수 없어요. 이 버전을 쓰면 할 수 있어요.' : appendRunning ? APPEND_LOCK : undefined;
-  const editLocked = appendRunning ? APPEND_LOCK : undefined;
+  const aiLocked = old ? '지난 버전에서는 AI로 다시 만들 수 없어요. 이 버전을 쓰면 할 수 있어요.' : appendRunning ? APPEND_LOCK : reorg ? REORG_LOCK : undefined;
+  const editLocked = appendRunning ? APPEND_LOCK : reorg && !old ? REORG_LOCK : undefined;
+  // 여러 노트를 합친 노트 (지금 버전만): 'AI로 다시 정리' 안내 (Pro). 다시 정리하면 표시가 없어진다
+  const mergedMark = !old && mergeOn ? readMergedMark(note.body) : null;
+  // 다시 정리의 예상 번개: 노트를 다시 쓰는 답 + 이어서 그림 다시 그리기
+  const reorgEst = (() => {
+    if (!mergedMark) return null;
+    const json = JSON.stringify(note.body);
+    const out = Math.min(MERGE_OUT_TOKENS, estimateTokens(json) + 400);
+    const noteEst = estimateSmallTask(clientModel(me, me.settings.models.organize), me.usdPerEnergy, 1500 + Math.ceil(json.length * 0.9), out);
+    const visualEst = estimateSmallTask(clientModel(me, me.settings.models.visual), me.usdPerEnergy, 4500, 2500);
+    return Math.round((noteEst + visualEst) * 10) / 10;
+  })();
 
   return (
     <div className="grid gap-4">
@@ -801,6 +898,8 @@ export default function NotePage() {
                       : { label: '복습에 다시 넣기', icon: ICONS.review, onSelect: () => setInReview(true) },
                   ]
                 : []),
+              ...(mergedMark ? [{ label: 'AI로 다시 정리', icon: ICONS.sparkle, onSelect: () => (me.canAppend ? reorganize() : router.push('/plan')) }] : []),
+              ...(mergeOn && !old ? [{ label: '다른 과목으로 옮기기', icon: ICONS.move, onSelect: startMove }] : []),
               ...(versionsOn ? [{ label: versions.length ? '버전 기록' : '자료 더하기', icon: ICONS.file, onSelect: () => setTab('original') }] : []),
               ...(reportable ? [{ label: '이상해요 (신고)', icon: ICONS.edit, onSelect: () => setReporting(true) }] : []),
             ]}
@@ -829,6 +928,60 @@ export default function NotePage() {
       </div>
 
       {versionsOn ? <AppendStatus kids={kids} onChanged={() => setKidsTick((x) => x + 1)} /> : null}
+
+      {/* 여러 노트를 합친 노트: 겹치는 개념을 AI 가 하나로 다듬을 수 있다 (Pro). 닫아도 메뉴에 남는다 */}
+      {mergedMark && (!mergedMark.hide || reorg) ? (
+        <section className="kok-card kok-rise grid gap-3 p-4" aria-label="합친 노트">
+          <div className="flex items-start gap-3">
+            <span className="grid h-9 w-9 shrink-0 place-items-center rounded-full bg-accent-soft text-accent" aria-hidden="true">
+              <Icon d={ICONS.merge} size={19} />
+            </span>
+            <div className="min-w-0 flex-1">
+              <p className="font-semibold leading-snug">노트 {mergedMark.count}개를 합친 노트예요</p>
+              <p className="mt-0.5 text-sm leading-relaxed text-muted">
+                {me.canAppend
+                  ? '겹치는 개념은 AI가 하나로 묶고 차례를 다듬어 줄 수 있어요. 지금 노트는 버전 기록에 남아요.'
+                  : '겹치는 개념은 정리 탭에서 직접 고칠 수 있어요. Pro에서는 AI가 한 번에 다듬어 줘요.'}
+              </p>
+            </div>
+            {!reorg ? (
+              <button
+                type="button"
+                aria-label="합친 노트 안내 닫기"
+                title="닫기"
+                onClick={hideMerged}
+                disabled={appendRunning}
+                className="press -mr-1.5 -mt-1.5 grid h-9 w-9 shrink-0 place-items-center rounded-full text-muted hover:bg-surface-2 hover:text-ink"
+              >
+                <Icon d={ICONS.close} size={18} />
+              </button>
+            ) : null}
+          </div>
+          <div className="flex flex-wrap items-center gap-2 pl-12">
+            {me.canAppend ? (
+              <Button size="sm" busy={!!reorg} disabled={!!reorg || appendRunning || !me.aiEnabled} onClick={reorganize}>
+                {!reorg ? <Icon d={ICONS.sparkle} size={16} /> : null}
+                AI로 다시 정리
+                {reorgEst !== null ? (
+                  <span className="opacity-85">
+                    <EnergyEstimate est={reorgEst} />
+                  </span>
+                ) : null}
+              </Button>
+            ) : (
+              <LinkButton href="/plan" size="sm" variant="secondary">
+                Pro 알아보기
+              </LinkButton>
+            )}
+          </div>
+          {reorg ? (
+            <p className="flex items-center gap-2 pl-12 text-sm text-muted" role="status">
+              <Spinner />
+              {reorg === 'note' ? 'AI가 노트를 다시 정리하고 있어요. 1~2분쯤 걸려요.' : '새 정리에 맞게 그림을 다시 그리고 있어요.'}
+            </p>
+          ) : null}
+        </section>
+      ) : null}
 
       {/* 복습에서 뺀 노트: 문제는 여기서 직접 풀 수 있고, 바로 다시 넣을 수 있다 */}
       {organizeOn && !inReview && !old ? (
@@ -917,7 +1070,7 @@ export default function NotePage() {
                 key={old ? `v${old.number}` : 'live'}
                 note={body}
                 kind={source.kind}
-                editable={!appendRunning}
+                editable={!appendRunning && !(reorg && !old)}
                 onChange={(next) => saveBody({ ...raw, ...next })}
                 highlightKeyPoint={kp}
                 onSelectKeyPoint={setKp}
@@ -1021,6 +1174,31 @@ export default function NotePage() {
           onApplied={reload}
         />
       ) : null}
+
+      {/* 다른 과목으로 옮기기: 노트·문제·복습 기록이 함께 옮겨진다 */}
+      <SubjectPickSheet
+        open={!!moveSubjects}
+        onClose={() => setMoveSubjects(null)}
+        title="다른 과목으로 옮기기"
+        intro="이 노트를 옮길 과목을 골라요. 노트·문제·복습 기록이 함께 옮겨져요."
+        subjects={moveSubjects ?? []}
+        exclude={[note.subject_id]}
+        allowNew
+        actionLabel={(name) => (name ? `'${name}' 과목으로 옮기기` : '옮길 과목을 골라 주세요')}
+        onConfirm={async (target) => {
+          try {
+            await api('/api/sources/move', { method: 'POST', body: JSON.stringify({ ids: [sourceId], subject: target.id }) });
+            toast(`'${target.name}' 과목으로 옮겼어요.`, 'plain', DONE);
+            window.dispatchEvent(new Event(SOURCES_CHANGED));
+            window.dispatchEvent(new Event(SUBJECTS_CHANGED));
+            reload();
+            return true;
+          } catch (e) {
+            toast((e as Error).message, 'bad');
+            return false;
+          }
+        }}
+      />
 
       <Sheet open={renaming} onClose={() => setRenaming(false)} title="노트 이름">
         <form

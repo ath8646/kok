@@ -1,7 +1,7 @@
 // 자료 지우기: 노트·그림·문제·복습 기록은 자료 행과 함께 지워지고, 올린 파일·노트에 더한 자료의 파일·채팅에 보관한 파일은 여기서 지운다
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { removeFigureFolders, removeFolder } from './files';
-import { removeChatFolders } from './chat-input';
+import { chatFolderIdsOfNotes, removeChatFolders } from './chat-input';
 
 /** 저장소 폴더를 한 번에 몇 개씩 지울지 (요청이 몰리지 않게) */
 const FOLDERS_AT_ONCE = 5;
@@ -21,9 +21,16 @@ export async function deleteOwnSources(admin: SupabaseClient, userId: string, id
   for (let i = 0; i < folders.length; i += FOLDERS_AT_ONCE) {
     await Promise.all(folders.slice(i, i + FOLDERS_AT_ONCE).map((f) => removeFolder(admin, f)));
   }
-  // 노트 채팅에 보관한 사진·파일 (Pro), 원본에서 잘라 둔 자료 그림 (더한 자료의 그림도)
-  await removeChatFolders(admin, userId, mine);
-  await removeFigureFolders(admin, userId, [...mine, ...(kids ?? []).map((k) => String(k.id))]);
+  // 노트 채팅에 보관한 사진·파일 (Pro: 합친 노트면 합쳐 들어온 자료의 폴더도), 원본에서 잘라 둔 자료 그림 (더한 자료의 그림도)
+  const kidIds = (kids ?? []).map((k) => String(k.id));
+  const { data: notes } = await admin.from('notes').select('id').in('source_id', mine).eq('user_id', userId);
+  const chatIds = await chatFolderIdsOfNotes(
+    admin,
+    userId,
+    (notes ?? []).map((n) => String(n.id)),
+  );
+  await removeChatFolders(admin, userId, [...mine, ...kidIds, ...chatIds]);
+  await removeFigureFolders(admin, userId, [...mine, ...kidIds]);
   const { error } = await admin.from('sources').delete().in('id', mine).eq('user_id', userId);
   if (error) throw error;
   return mine.length;

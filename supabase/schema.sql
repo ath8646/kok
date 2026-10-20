@@ -448,6 +448,10 @@ drop trigger if exists note_versions_touch on public.note_versions;
 create trigger note_versions_touch before update on public.note_versions
   for each row execute function public.kok_touch_updated_at();
 
+-- 버전이 생긴 까닭: first(처음 자료) · append(자료를 더함) · reorganize(합친 노트를 AI 로 다시 정리).
+-- 예전 버전은 null (번호 1이면 처음 자료, 아니면 더한 자료로 본다). 학생은 읽기만 한다
+alter table public.note_versions add column if not exists kind text check (kind is null or kind in ('first', 'append', 'reorganize'));
+
 -- version_seq 가 생기기 전에 만든 버전 번호도 다시 쓰지 않게 채운다 (모자란 노트만 한 번 바뀐다)
 update public.notes n
    set version_seq = v.top
@@ -1389,10 +1393,10 @@ set search_path = public
 as $$
 declare
   n public.notes%rowtype;
-  s public.sources%rowtype;
   v_visuals jsonb;
   v_qids uuid[];
   v_materials jsonb;
+  v_first boolean;
 begin
   select * into n from public.notes where id = p_note;
   if not found then
@@ -1406,14 +1410,20 @@ begin
      set title = n.title, body = n.body, visuals = v_visuals, question_ids = v_qids
    where note_id = n.id and number = n.current_version;
   if not found then
-    -- 처음 자료를 더할 때: 지금 노트가 버전 1 (자료는 처음 넣은 자료 하나)
-    select * into s from public.sources where id = n.source_id;
-    v_materials := case
-      when exists (select 1 from public.note_versions where note_id = n.id) then '[]'::jsonb
-      else jsonb_build_array(jsonb_build_object('source_id', s.id, 'kind', s.kind, 'title', s.title, 'page_count', s.page_count))
-    end;
-    insert into public.note_versions (user_id, note_id, number, title, body, visuals, question_ids, materials)
-    values (n.user_id, n.id, n.current_version, n.title, n.body, v_visuals, v_qids, v_materials);
+    -- 처음 버전을 만들 때 (자료를 처음 더하거나 AI 로 다시 정리할 때): 지금 노트가 버전 1.
+    -- 자료는 처음 넣은 자료와, 노트를 합쳐서 들어온 자료 (정리를 마친 더한 자료. 지금 더하는 자료는 아직 정리 중이라 빠진다)
+    v_first := not exists (select 1 from public.note_versions where note_id = n.id);
+    if v_first then
+      select coalesce(jsonb_agg(jsonb_build_object('source_id', x.id, 'kind', x.kind, 'title', x.title, 'page_count', x.page_count)
+                                order by (x.id = n.source_id) desc, x.created_at, x.id), '[]'::jsonb)
+        into v_materials
+        from public.sources x
+       where x.id = n.source_id or (x.parent_id = n.source_id and x.status = 'ready');
+    else
+      v_materials := '[]'::jsonb;
+    end if;
+    insert into public.note_versions (user_id, note_id, number, title, body, visuals, question_ids, materials, kind)
+    values (n.user_id, n.id, n.current_version, n.title, n.body, v_visuals, v_qids, v_materials, case when v_first then 'first' end);
   end if;
 end;
 $$;
@@ -1500,8 +1510,8 @@ begin
     into v_visuals from public.visuals where note_id = n.id;
   select coalesce(array_agg(id order by created_at, id), '{}')
     into v_qids from public.questions where note_id = n.id and status <> 'hidden';
-  insert into public.note_versions (user_id, note_id, number, title, body, visuals, question_ids, materials)
-  values (n.user_id, n.id, v_no, n.title, p_note, v_visuals, v_qids, v_materials);
+  insert into public.note_versions (user_id, note_id, number, title, body, visuals, question_ids, materials, kind)
+  values (n.user_id, n.id, v_no, n.title, p_note, v_visuals, v_qids, v_materials, 'append');
 
   update public.sources
      set status = 'ready', step = 'done', progress = 100, error = null, locked_until = null,
@@ -1655,6 +1665,318 @@ as $$
 $$;
 revoke execute on function public.kok_reorder_sources(uuid[]) from public, anon;
 grant execute on function public.kok_reorder_sources(uuid[]) to authenticated;
+
+-- ---------------------------------------------------------------------
+-- 자료함 정리 2: 고정한 과목의 순서, 자료 옮기기, 과목 합치기, 노트 합치기, 합친 노트를 AI 로 다시 정리
+-- ---------------------------------------------------------------------
+
+-- 과목 순서 바꾸기 (고정한 과목을 꾹 눌러 끌어서): 받은 순서대로 position 을 0, 1, 2 … 로 (내 과목만, 500개까지).
+-- 로그인한 사람의 권한으로 돌아서 RLS 가 그대로 적용된다
+create or replace function public.kok_reorder_subjects(p_ids uuid[])
+returns void
+language sql
+security invoker
+set search_path = public
+as $$
+  update public.subjects s
+     set position = o.ord - 1
+    from unnest(p_ids) with ordinality as o(id, ord)
+   where s.id = o.id
+     and s.user_id = (select auth.uid())
+     and cardinality(p_ids) <= 500;
+$$;
+revoke execute on function public.kok_reorder_subjects(uuid[]) from public, anon;
+grant execute on function public.kok_reorder_subjects(uuid[]) to authenticated, service_role;
+
+-- 자료 옮기기 (서버 전용): 내 자료(처음 넣은 자료)를 다른 내 과목으로. 더한 자료·노트·문제·복습 카드·푼 기록의 과목도 같이 바꾼다.
+-- 옮긴 자료는 새 과목에서 새 자료처럼 맨 앞에 온다 (내가 정한 순서 position 을 비운다).
+-- 정리 중인 자료도 옮길 수 있다 (노트는 마무리할 때의 과목에 만들어진다). 옮긴 자료 수를 돌려준다
+create or replace function public.kok_move_sources(p_user uuid, p_ids uuid[], p_subject uuid)
+returns int
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_top uuid[];
+  v_notes uuid[];
+begin
+  if p_ids is null or cardinality(p_ids) > 500 then
+    raise exception 'too_many';
+  end if;
+  if not exists (select 1 from public.subjects where id = p_subject and user_id = p_user) then
+    raise exception 'subject_not_found';
+  end if;
+  -- 처음 넣은 자료만 (더한 자료는 노트를 따라간다). 이미 그 과목에 있는 것은 그대로
+  select coalesce(array_agg(s.id), '{}') into v_top
+    from public.sources s
+   where s.id = any(p_ids) and s.user_id = p_user and s.parent_id is null and s.subject_id <> p_subject;
+  if cardinality(v_top) = 0 then
+    return 0;
+  end if;
+  update public.sources set subject_id = p_subject, position = null where id = any(v_top);
+  update public.sources set subject_id = p_subject where parent_id = any(v_top) and user_id = p_user;
+  select coalesce(array_agg(n.id), '{}') into v_notes from public.notes n where n.source_id = any(v_top);
+  update public.notes set subject_id = p_subject where id = any(v_notes);
+  update public.questions set subject_id = p_subject where note_id = any(v_notes);
+  update public.cards c set subject_id = p_subject
+    from public.questions q
+   where q.id = c.question_id and q.note_id = any(v_notes) and c.subject_id <> p_subject;
+  update public.review_logs r set subject_id = p_subject
+    from public.questions q
+   where q.id = r.question_id and q.note_id = any(v_notes);
+  update public.subjects set used_at = now() where id = p_subject;
+  return cardinality(v_top);
+end;
+$$;
+
+-- 과목 합치기 (서버 전용): p_from 과목의 자료·노트·문제(노트 없는 문제도)·복습 카드·푼 기록을 모두 p_into 과목으로 옮기고
+-- p_from 과목은 지운다. p_into 의 이름·색은 그대로, 시험 날이 없으면 p_from 의 것을 쓴다.
+-- 둘 중 하나라도 고정이면 고정, 둘 다 보관이었을 때만 보관. 순서를 정해 둔 자료는 p_into 의 자료 뒤에 그 차례 그대로 붙는다.
+-- 옮긴 자료 수를 돌려준다
+create or replace function public.kok_merge_subjects(p_user uuid, p_from uuid, p_into uuid)
+returns int
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  f public.subjects%rowtype;
+  t public.subjects%rowtype;
+  v_shift int;
+  v_n int;
+begin
+  if p_from = p_into then
+    raise exception 'same_subject';
+  end if;
+  -- 두 과목을 같은 차례로 잠근다 (동시에 서로를 합쳐도 멈추지 않게)
+  perform 1 from public.subjects where id in (p_from, p_into) and user_id = p_user order by id for update;
+  select * into f from public.subjects where id = p_from and user_id = p_user;
+  if not found then
+    raise exception 'subject_not_found';
+  end if;
+  select * into t from public.subjects where id = p_into and user_id = p_user;
+  if not found then
+    raise exception 'subject_not_found';
+  end if;
+  select count(*) into v_n from public.sources where subject_id = p_from and parent_id is null;
+  select coalesce(max(position), -1) + 1 into v_shift from public.sources where subject_id = p_into and parent_id is null;
+  update public.sources
+     set subject_id = p_into,
+         position = case when position is null then null else position + v_shift end
+   where subject_id = p_from;
+  update public.notes set subject_id = p_into where subject_id = p_from;
+  update public.questions set subject_id = p_into where subject_id = p_from;
+  update public.cards set subject_id = p_into where subject_id = p_from;
+  update public.review_logs set subject_id = p_into where subject_id = p_from and user_id = p_user;
+  update public.subjects
+     set exam_date = coalesce(t.exam_date, f.exam_date),
+         pinned = t.pinned or f.pinned,
+         archived = t.archived and f.archived,
+         used_at = greatest(t.used_at, f.used_at)
+   where id = p_into;
+  delete from public.subjects where id = p_from;
+  return v_n;
+end;
+$$;
+
+-- 노트 합치기 (서버 전용, AI 없이): p_from 노트들을 p_into 노트에 합친다. 합친 정리·그림은 서버가 만들어 보낸다 (p_body, p_visuals).
+-- - 합쳐지는 노트의 문제는 p_into 노트로 옮긴다: 개념 번호는 p_maps({노트 번호: {예전 번호: 새 번호}})로 바꾸고 출처 쪽은 비운다
+--   (다른 자료의 쪽이라서). 푼 기록·복습 카드는 그대로 (과목만 따라간다). 지난 버전에만 있던 숨긴 문제는 지운다
+-- - 채팅도 옮긴다 (넣기를 기다리던 제안은 그만둔다: 예전 노트의 개념 번호라서)
+-- - 합쳐지는 노트의 자료는 p_into 의 더한 자료가 된다 (원본 탭에 남는다). 지금 내용에 안 쓰이는 더한 자료
+--   (지난 버전에만 있던 것, 실패한 것)는 지운다
+-- - 별표·복습은 하나라도 켜져 있으면 켠다 (복습에 나오던 문제가 빠지지 않게)
+-- p_updated: 노트마다 읽은 때의 updated_at ({노트 번호: 값}). 그사이 바뀐 노트가 있으면 'stale_note'.
+-- 지울 파일 경로(paths)와 지운 자료 번호(sources: 자료 그림·채팅 폴더는 서버가 지운다)를 돌려준다
+create or replace function public.kok_merge_notes(
+  p_user uuid, p_into uuid, p_from uuid[], p_body jsonb, p_visuals jsonb, p_maps jsonb, p_updated jsonb
+)
+returns jsonb
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  k public.notes%rowtype;
+  m public.notes%rowtype;
+  v_from uuid;
+  v_all uuid[];
+  v_mat jsonb := '[]'::jsonb;
+  v_mmat jsonb;
+  v_drop uuid[];
+  v_paths text[] := '{}';
+  v_gone uuid[] := '{}';
+  v_moved uuid[];
+  v_star boolean := false;
+  v_review boolean := false;
+  v jsonb;
+begin
+  if p_from is null or cardinality(p_from) < 1 or cardinality(p_from) > 20 or p_into = any(p_from)
+     or cardinality(p_from) <> (select count(distinct x) from unnest(p_from) x) then
+    raise exception 'bad_notes';
+  end if;
+  v_all := p_from || p_into;
+  -- 모든 노트를 같은 차례로 잠근다 (동시에 다른 차례로 합쳐도 멈추지 않게)
+  perform 1 from public.notes where id = any(v_all) order by id for update;
+  if (select count(*) from public.notes where id = any(v_all) and user_id = p_user) <> cardinality(v_all) then
+    raise exception 'note_not_found';
+  end if;
+  -- 읽은 뒤에 바뀐 노트가 있으면 합치지 않는다 (고친 것을 덮어쓰지 않게)
+  if exists (
+    select 1 from public.notes n
+     where n.id = any(v_all)
+       and n.updated_at is distinct from nullif(p_updated->>(n.id::text), '')::timestamptz
+  ) then
+    raise exception 'stale_note';
+  end if;
+  -- 정리를 마친 처음 자료의 노트만, 자료를 더하는 중이 아닐 때만
+  if exists (
+    select 1 from public.notes n join public.sources s on s.id = n.source_id
+     where n.id = any(v_all) and (s.parent_id is not null or s.status <> 'ready')
+  ) then
+    raise exception 'not_ready';
+  end if;
+  if exists (
+    select 1 from public.notes n join public.sources c on c.parent_id = n.source_id
+     where n.id = any(v_all) and c.status in ('queued', 'processing')
+  ) then
+    raise exception 'append_running';
+  end if;
+
+  select * into k from public.notes where id = p_into;
+  foreach v_from in array p_from loop
+    select * into m from public.notes where id = v_from;
+    -- 합쳐지는 노트의 지금 자료: 버전이 있으면 지금 버전의 자료(처음 자료는 늘), 없으면 처음 자료와 정리를 마친 더한 자료
+    if exists (select 1 from public.note_versions where note_id = m.id) then
+      select materials into v_mmat from public.note_versions where note_id = m.id and number = m.current_version;
+      v_mmat := coalesce(v_mmat, '[]'::jsonb);
+      if not exists (select 1 from jsonb_array_elements(v_mmat) e where e->>'source_id' = m.source_id::text) then
+        select jsonb_build_array(jsonb_build_object('source_id', x.id, 'kind', x.kind, 'title', x.title, 'page_count', x.page_count)) || v_mmat
+          into v_mmat from public.sources x where x.id = m.source_id;
+      end if;
+    else
+      select coalesce(jsonb_agg(jsonb_build_object('source_id', x.id, 'kind', x.kind, 'title', x.title, 'page_count', x.page_count)
+                                order by (x.id = m.source_id) desc, x.created_at, x.id), '[]'::jsonb)
+        into v_mmat
+        from public.sources x
+       where x.id = m.source_id or (x.parent_id = m.source_id and x.status = 'ready');
+    end if;
+    v_mat := v_mat || v_mmat;
+
+    -- 지금 내용에 안 쓰이는 더한 자료 (지난 버전에만 있던 것, 실패한 것)는 지운다
+    select coalesce(array_agg(x.id), '{}') into v_drop
+      from public.sources x
+     where x.parent_id = m.source_id
+       and not exists (select 1 from jsonb_array_elements(v_mmat) e where e->>'source_id' = x.id::text);
+    v_paths := v_paths || coalesce((select array_agg(fp) from public.sources x, unnest(x.file_paths) fp where x.id = any(v_drop)), '{}');
+    v_gone := v_gone || v_drop;
+    delete from public.sources where id = any(v_drop);
+
+    -- 지난 버전에만 있던 숨긴 문제는 지운다 (합친 노트에는 지금 버전만 들어간다)
+    delete from public.questions where note_id = m.id and status = 'hidden';
+    with moved as (
+      update public.questions q
+         set note_id = k.id,
+             subject_id = k.subject_id,
+             key_point_id = case when q.key_point_id is null then null else nullif(p_maps->(m.id::text)->>q.key_point_id, '') end,
+             pages = '{}'
+       where q.note_id = m.id
+      returning q.id
+    )
+    select coalesce(array_agg(moved.id), '{}') into v_moved from moved;
+    update public.cards set subject_id = k.subject_id where question_id = any(v_moved) and subject_id <> k.subject_id;
+    update public.review_logs set subject_id = k.subject_id where question_id = any(v_moved);
+
+    update public.chat_messages
+       set note_id = k.id,
+           proposal = case when proposal is not null and proposal->>'status' = 'pending'
+                           then jsonb_set(proposal, '{status}', '"cancelled"') else proposal end
+     where note_id = m.id;
+
+    select v_star or coalesce(x.starred, false), v_review or coalesce(x.in_review, true)
+      into v_star, v_review
+      from public.sources x where x.id = m.source_id;
+    delete from public.notes where id = m.id;
+    update public.sources
+       set parent_id = k.source_id, subject_id = k.subject_id
+     where id = m.source_id or parent_id = m.source_id;
+  end loop;
+
+  update public.notes set body = p_body where id = k.id;
+  delete from public.visuals where note_id = k.id;
+  for v in select * from jsonb_array_elements(coalesce(p_visuals, '[]'::jsonb)) loop
+    insert into public.visuals (user_id, note_id, type, spec) values (k.user_id, k.id, v->>'type', v->'spec');
+  end loop;
+  -- 버전이 있는 노트: 지금 버전의 자료 목록에 더한다 (버전 기록·버전 지우기가 합친 자료를 알게)
+  update public.note_versions set materials = materials || v_mat where note_id = k.id and number = k.current_version;
+  update public.sources
+     set starred = starred or v_star, in_review = in_review or v_review
+   where id = k.source_id;
+  return jsonb_build_object('paths', to_jsonb(v_paths), 'sources', to_jsonb(v_gone), 'merged', cardinality(p_from));
+end;
+$$;
+
+-- 합친 노트를 AI 로 다시 정리한 결과를 새 버전으로 저장한다 (서버 전용). 다시 정리하기 전의 노트는 그 버전 행에 남는다
+-- (버전 기록에서 돌아갈 수 있다). 문제의 개념 번호는 p_qmap({예전 번호: 새 번호, '' 는 개념 없음})으로 바꾸고,
+-- 마인드맵은 p_mindmap(개념 번호를 바꾼 것, null 이면 그대로)으로. p_updated: 읽은 때의 노트 updated_at
+-- (그사이 바뀌었으면 'stale_note'). 새 버전 번호를 돌려준다
+create or replace function public.kok_reorganize_note(
+  p_user uuid, p_note uuid, p_body jsonb, p_qmap jsonb, p_mindmap jsonb, p_updated timestamptz
+)
+returns int
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  n public.notes%rowtype;
+  v_no int;
+  v_materials jsonb;
+  v_visuals jsonb;
+  v_qids uuid[];
+begin
+  select * into n from public.notes where id = p_note and user_id = p_user for update;
+  if not found then
+    raise exception 'note_not_found';
+  end if;
+  if n.updated_at is distinct from p_updated then
+    raise exception 'stale_note';
+  end if;
+  if exists (select 1 from public.sources where parent_id = n.source_id and status in ('queued', 'processing')) then
+    raise exception 'append_running';
+  end if;
+  perform 1 from public.visuals where note_id = n.id for update;
+  perform public.kok_note_snapshot(n.id);
+  select greatest(coalesce(max(number), 0), n.version_seq, n.current_version) + 1 into v_no from public.note_versions where note_id = n.id;
+  select materials into v_materials from public.note_versions where note_id = n.id and number = n.current_version;
+
+  update public.notes set body = p_body, current_version = v_no, version_seq = v_no where id = n.id;
+  update public.questions q
+     set key_point_id = nullif(p_qmap->>q.key_point_id, '')
+   where q.note_id = n.id and q.status <> 'hidden' and q.key_point_id is not null and p_qmap ? q.key_point_id;
+  if p_mindmap is not null and jsonb_typeof(p_mindmap) = 'object' then
+    update public.visuals set spec = p_mindmap where note_id = n.id and type = 'mindmap';
+  end if;
+
+  select coalesce(jsonb_agg(jsonb_build_object('type', type, 'spec', spec) order by type), '[]'::jsonb)
+    into v_visuals from public.visuals where note_id = n.id;
+  select coalesce(array_agg(id order by created_at, id), '{}')
+    into v_qids from public.questions where note_id = n.id and status <> 'hidden';
+  insert into public.note_versions (user_id, note_id, number, title, body, visuals, question_ids, materials, kind)
+  values (n.user_id, n.id, v_no, n.title, p_body, v_visuals, v_qids, coalesce(v_materials, '[]'::jsonb), 'reorganize');
+  return v_no;
+end;
+$$;
+
+revoke execute on function public.kok_move_sources(uuid, uuid[], uuid) from public, anon, authenticated;
+revoke execute on function public.kok_merge_subjects(uuid, uuid, uuid) from public, anon, authenticated;
+revoke execute on function public.kok_merge_notes(uuid, uuid, uuid[], jsonb, jsonb, jsonb, jsonb) from public, anon, authenticated;
+revoke execute on function public.kok_reorganize_note(uuid, uuid, jsonb, jsonb, jsonb, timestamptz) from public, anon, authenticated;
+grant execute on function public.kok_move_sources(uuid, uuid[], uuid) to service_role;
+grant execute on function public.kok_merge_subjects(uuid, uuid, uuid) to service_role;
+grant execute on function public.kok_merge_notes(uuid, uuid, uuid[], jsonb, jsonb, jsonb, jsonb) to service_role;
+grant execute on function public.kok_reorganize_note(uuid, uuid, jsonb, jsonb, jsonb, timestamptz) to service_role;
 
 revoke execute on function public.kok_add_questions(uuid, jsonb, boolean) from public, anon, authenticated;
 revoke execute on function public.kok_finalize_source(uuid, text, jsonb, jsonb, jsonb, timestamptz) from public, anon, authenticated;

@@ -4,6 +4,9 @@ import type { SourceListRow } from './types';
 /** 버전에 들어간 자료 (note_versions.materials 의 한 칸) */
 export type Material = { source_id: string; kind: 'text' | 'pdf' | 'image'; title: string; page_count: number | null };
 
+/** 버전이 생긴 까닭 (note_versions.kind): 처음 자료, 자료를 더함, 합친 노트를 AI 로 다시 정리. 예전 행은 null */
+export type VersionKind = 'first' | 'append' | 'reorganize';
+
 /** note_versions 행 (목록용: 정리·그림 본문은 빼고) */
 export type VersionRow = {
   id: string;
@@ -13,9 +16,12 @@ export type VersionRow = {
   question_ids: string[];
   created_at: string;
   updated_at: string;
+  kind?: VersionKind | null;
 };
 
 export const VERSION_LIST_COLS = 'id, number, title, materials, question_ids, created_at, updated_at';
+/** 버전이 생긴 까닭 칸까지 (features.merge: schema.sql 을 다시 실행한 뒤) */
+export const VERSION_LIST_COLS_KIND = `${VERSION_LIST_COLS}, kind`;
 
 /** 노트에 더한 자료 (부모를 가리키는 자료 행) */
 export type ChildSource = SourceListRow & { text_content: string | null; unit: string };
@@ -23,7 +29,9 @@ export type ChildSource = SourceListRow & { text_content: string | null; unit: s
 export type VersionItem = {
   number: number;
   current: boolean;
-  /** 이 버전을 만든 자료 (버전 1은 처음 자료, 그 뒤는 그때 더한 자료) */
+  /** 버전이 생긴 까닭: 처음 자료 · 자료를 더함 · AI 로 다시 정리 */
+  kind: 'first' | 'added' | 'reorganized';
+  /** 이 버전을 만든 자료 (버전 1은 처음 자료, 더한 버전은 그때 더한 자료, 다시 정리한 버전은 없음) */
   added: Material | null;
   /** 이 버전에 들어 있는 자료 수 */
   materialCount: number;
@@ -53,32 +61,54 @@ export function toVersionRow(r: Record<string, unknown>): VersionRow {
     question_ids: Array.isArray(r.question_ids) ? r.question_ids.map(String) : [],
     created_at: String(r.created_at ?? ''),
     updated_at: String(r.updated_at ?? ''),
+    kind: r.kind === 'first' || r.kind === 'append' || r.kind === 'reorganize' ? r.kind : null,
   };
 }
 
+/** 버전이 생긴 까닭 (예전 행은 번호로: 1이면 처음 자료, 아니면 더한 자료) */
+function kindOf(r: VersionRow): VersionItem['kind'] {
+  if (r.kind === 'reorganize') return 'reorganized';
+  if (r.kind === 'first' || (!r.kind && r.number === 1)) return 'first';
+  return 'added';
+}
+
 /**
- * 버전 기록 목록 (번호 순). 버전 행이 없으면 지금 노트를 '버전 1'로 본다.
+ * 버전 기록 목록 (번호 순). 버전 행이 없으면 지금 노트를 '버전 1'로 본다 (합친 노트면 합쳐 들어온 자료까지 센다: kids).
  * 지금 버전의 문제 수는 노트에 지금 있는 문제로 센다 (버전 행은 버전을 바꿀 때만 저장되므로).
  * 지난 버전의 문제 수는 그 버전 목록 중 아직 있는 문제만 센다.
  */
 export function versionItems(
   rows: VersionRow[],
   current: number,
-  live: { first: Material; questionCount: number; createdAt: string | null; existing: Set<string> },
+  live: { first: Material; questionCount: number; createdAt: string | null; existing: Set<string>; kids?: number },
 ): VersionItem[] {
   if (!rows.length) {
-    return [{ number: 1, current: true, added: live.first, materialCount: 1, questionCount: live.questionCount, createdAt: live.createdAt }];
+    return [
+      {
+        number: 1,
+        current: true,
+        kind: 'first',
+        added: live.first,
+        materialCount: 1 + (live.kids ?? 0),
+        questionCount: live.questionCount,
+        createdAt: live.createdAt,
+      },
+    ];
   }
   return [...rows]
     .sort((a, b) => a.number - b.number)
-    .map((r) => ({
-      number: r.number,
-      current: r.number === current,
-      added: r.materials[r.materials.length - 1] ?? (r.number === 1 ? live.first : null),
-      materialCount: Math.max(1, r.materials.length),
-      questionCount: r.number === current ? live.questionCount : r.question_ids.filter((id) => live.existing.has(id)).length,
-      createdAt: r.created_at || null,
-    }));
+    .map((r) => {
+      const kind = kindOf(r);
+      return {
+        number: r.number,
+        current: r.number === current,
+        kind,
+        added: kind === 'reorganized' ? null : kind === 'first' ? (r.materials[0] ?? live.first) : (r.materials[r.materials.length - 1] ?? null),
+        materialCount: Math.max(1, r.materials.length),
+        questionCount: r.number === current ? live.questionCount : r.question_ids.filter((id) => live.existing.has(id)).length,
+        createdAt: r.created_at || null,
+      };
+    });
 }
 
 /**

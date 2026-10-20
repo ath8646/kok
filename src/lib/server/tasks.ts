@@ -38,6 +38,8 @@ export async function runTask(
     system?: string;
     /** 문제 풀기: 먼저 생각하고 답한다 (callJson think) */
     think?: boolean;
+    /** 답이 최대 길이에 닿아 잘렸을 때 보여 줄 말 (다시 해도 같으니 '다시 해 주세요' 대신). 없으면 보통 오류 */
+    tooLong?: string;
   },
 ): Promise<unknown> {
   return (await runTaskFull(admin, acc, app, t)).json;
@@ -74,6 +76,7 @@ export async function runTaskFull(
     const usage = usageOf(e);
     if (usage) await charge(admin, { acc, task: t.task, model, usage, usdPerEnergy: app.limits.usdPerEnergy, sourceId: t.sourceId });
     if (e instanceof AiCallError) {
+      if (e.truncated && t.tooLong) throw new UserFacingError('ai_too_long', t.tooLong, 400);
       if (e.kind === 'refusal') throw new UserFacingError('ai_refusal', '이 내용은 KOK에서 다룰 수 없어요.', 422);
       if (e.kind === 'retryable') throw new UserFacingError('ai_busy', 'AI 서버가 바빠요. 잠시 뒤에 다시 해 주세요.', 503);
       throw new UserFacingError('ai_bad_output', 'AI가 답을 제대로 만들지 못했어요. 다시 해 주세요.', 502);

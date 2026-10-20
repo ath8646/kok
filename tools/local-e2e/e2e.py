@@ -280,6 +280,40 @@ async def poll_db(q, want, timeout=8):
     raise AssertionError(f"{q}: {got!r} != {want!r}")
 
 
+async def mouse_drag(page, src, dst):
+    """마우스로 끌어서 옮기기 (조금씩 움직여 끌기를 시작하게 한다)"""
+    a = await src.bounding_box()
+    b = await dst.bounding_box()
+    x0, y0 = a["x"] + a["width"] / 2, a["y"] + a["height"] / 2
+    x1, y1 = b["x"] + b["width"] / 2, b["y"] + b["height"] / 2
+    await page.mouse.move(x0, y0)
+    await page.mouse.down()
+    for i in range(1, 13):
+        await page.mouse.move(x0 + (x1 - x0) * i / 12, y0 + (y1 - y0) * i / 12)
+        await page.wait_for_timeout(30)
+    await page.wait_for_timeout(200)
+    await page.mouse.up()
+    await page.wait_for_timeout(400)
+
+
+async def touch_drag(page, src, dst, hold_ms=450):
+    """손가락으로 꾹 누른 채 끌기 (Chromium 터치 이벤트)"""
+    cdp = await page.context.new_cdp_session(page)
+    a = await src.bounding_box()
+    b = await dst.bounding_box()
+    x0, y0 = a["x"] + a["width"] / 2, a["y"] + a["height"] / 2
+    x1, y1 = b["x"] + b["width"] / 2, b["y"] + b["height"] / 2
+    await cdp.send("Input.dispatchTouchEvent", {"type": "touchStart", "touchPoints": [{"x": x0, "y": y0}]})
+    await page.wait_for_timeout(hold_ms)
+    for i in range(1, 13):
+        await cdp.send("Input.dispatchTouchEvent", {"type": "touchMove", "touchPoints": [{"x": x0 + (x1 - x0) * i / 12, "y": y0 + (y1 - y0) * i / 12}]})
+        await page.wait_for_timeout(30)
+    await page.wait_for_timeout(200)
+    await cdp.send("Input.dispatchTouchEvent", {"type": "touchEnd", "touchPoints": []})
+    await page.wait_for_timeout(500)
+    await cdp.detach()
+
+
 def luminance(hexv):
     h = hexv.lstrip("#")
     def f(c):
@@ -2829,19 +2863,26 @@ async def main():
         more = chips.get_by_role("button", name=re.compile("^모든 과목"))
         await expect(more).to_contain_text(str(n_subjects))
         await more.click()
-        drawer = page.get_by_role("dialog", name="모든 과목")
-        await expect(drawer).to_be_visible()
+        # 서랍은 목록 → 과목 관리 → 과목 합치기로 이름이 바뀐다
+        DRAWER = re.compile("^(모든 과목|과목 관리|과목 합치기)$")
+        drawer = page.get_by_role("dialog", name=DRAWER)
+        await expect(drawer).to_have_attribute("aria-label", "모든 과목")
         # 첫 자음으로 찾기 (ㅁㅅ → 미술)
         await drawer.get_by_label("과목 찾기").fill("ㅁㅅ")
         await expect(drawer.get_by_role("button", name=re.compile("^미술"))).to_be_visible()
         await expect(drawer.get_by_role("button", name=re.compile("^음악"))).to_have_count(0)
         await shot(page, "96-subject-drawer-search", full=False)
         await drawer.get_by_label("과목 찾기").fill("")
-        # 위에 고정 → '고정한 과목' 묶음, 칩 줄 맨 앞
-        await drawer.get_by_role("button", name="'미술' 과목 메뉴").click()
-        await drawer.get_by_role("menuitem", name="위에 고정").click()
-        await expect(drawer.get_by_role("heading", name="고정한 과목")).to_be_visible()
+        # 과목 관리(⋯): 설명이 붙은 줄을 눌러 위에 고정 → '고정한 과목' 묶음, 칩 줄 맨 앞
+        await drawer.get_by_role("button", name="'미술' 과목 관리").click()
+        await expect(drawer).to_have_attribute("aria-label", "과목 관리")
+        await expect(drawer.get_by_role("heading", name="미술")).to_be_visible()
+        await expect(drawer.get_by_text("과목 칩 줄 맨 앞에 늘 보여요")).to_be_visible()
+        await drawer.get_by_role("button", name=re.compile("^위에 고정")).click()
         await poll_db(f"select pinned from public.subjects where user_id = '{me_id}' and name = '미술'", "t")
+        await expect(drawer.get_by_role("button", name=re.compile("^고정 풀기"))).to_be_visible()
+        await drawer.get_by_role("button", name="모든 과목", exact=True).click()
+        await expect(drawer.get_by_role("heading", name="고정한 과목")).to_be_visible()
         await shot(page, "96-subject-drawer", full=False)
         await drawer.get_by_role("button", name=re.compile("^미술")).click()
         await expect(drawer).to_be_hidden()
@@ -2878,11 +2919,244 @@ async def main():
         # 서랍의 '보관한 과목'에서 다시 꺼낸다
         await chips.get_by_role("button", name=re.compile("^모든 과목")).click()
         await drawer.get_by_role("button", name=re.compile("^보관한 과목 1개")).click()
-        await drawer.get_by_role("button", name="'과학' 과목 메뉴").click()
-        await drawer.get_by_role("menuitem", name="보관 풀기").click()
+        await drawer.get_by_role("button", name="'과학' 과목 관리").click()
+        await drawer.get_by_role("button", name=re.compile("^보관 풀기")).click()
         await poll_db(f"select archived from public.subjects where id = '{sci}'", "f")
+        # Esc 는 한 단계씩: 과목 관리 → 목록 → 닫기
+        await page.keyboard.press("Escape")
+        await expect(drawer).to_have_attribute("aria-label", "모든 과목")
         await page.keyboard.press("Escape")
         await expect(drawer).to_be_hidden()
+        await ctx.close()
+
+        # ---------- 자료함 정리 2: 고정한 과목 순서, 과목 합치기, 노트 옮기기, 노트 합치기, AI로 다시 정리 ----------
+        pinned_sql = f"select string_agg(name, ',' order by position, created_at) from public.subjects where user_id = '{me_id}' and pinned and not archived"
+        other_id = USERS["other"][0]
+        other_subject = db(f"select id from public.subjects where user_id = '{other_id}' limit 1") or db(
+            f"insert into public.subjects (user_id, name) values ('{other_id}', '남의 과목') returning id"
+        ).splitlines()[0]
+
+        step("library: pinned subjects — long-press drag (finger) or mouse drag reorders them, and 과목 관리 has 앞으로·뒤로 for the keyboard")
+        db(f"update public.subjects set pinned = false where user_id = '{me_id}'")
+        for i, name in enumerate(["체육", "국어", "미술"]):
+            db(f"update public.subjects set pinned = true, position = {300 + i} where user_id = '{me_id}' and name = '{name}'")
+        ctx, phone = await new_ctx(browser, "student")
+        await phone.goto(BASE + "/library")
+        await phone.get_by_role("tablist", name="과목").get_by_role("button", name=re.compile("^모든 과목")).click()
+        drawer = phone.get_by_role("dialog", name=DRAWER)
+        tiles = drawer.locator('section[aria-labelledby="drawer-pinned"] [data-tile]')
+        await expect(tiles).to_have_count(3)
+        await expect(drawer.get_by_text("꾹 눌러 끌면 순서가 바뀌어요")).to_be_visible()
+        # 손가락으로 꾹 눌러 첫 과목을 끝으로 (놓은 뒤 따라오는 누르기로 과목이 열리지 않는다)
+        await touch_drag(phone, tiles.nth(0), tiles.nth(2))
+        await poll_db(pinned_sql, "국어,미술,체육")
+        await expect(drawer).to_have_attribute("aria-label", "모든 과목")
+        # 키보드로는 과목 관리의 앞으로·뒤로
+        await drawer.get_by_role("button", name="'체육' 과목 관리").click()
+        await expect(drawer.get_by_text("고정한 과목 3개 중 3번째")).to_be_visible()
+        await expect(drawer.get_by_role("button", name="뒤로 옮기기")).to_be_disabled()
+        await drawer.get_by_role("button", name="앞으로 옮기기").click()
+        await expect(drawer.get_by_text("고정한 과목 3개 중 2번째")).to_be_visible()
+        await poll_db(pinned_sql, "국어,체육,미술")
+        await shot(phone, "97-subject-panel", full=False)
+        await phone.keyboard.press("Escape")
+        await expect(drawer).to_have_attribute("aria-label", "모든 과목")
+        await expect(drawer.get_by_role("button", name="'체육' 과목 관리")).to_be_focused()
+        await phone.keyboard.press("Escape")
+        await expect(drawer).to_be_hidden()
+        chips = phone.get_by_role("tablist", name="과목")
+        await expect(chips.get_by_role("tab").nth(1)).to_contain_text("국어")
+        await expect(chips.get_by_role("tab").nth(2)).to_contain_text("체육")
+        await ctx.close()
+        ctx, page = await new_ctx(browser, "student", width=1280)
+        await page.goto(BASE + "/library")
+        await page.get_by_role("tablist", name="과목").get_by_role("button", name=re.compile("^모든 과목")).click()
+        drawer = page.get_by_role("dialog", name=DRAWER)
+        tiles = drawer.locator('section[aria-labelledby="drawer-pinned"] [data-tile]')
+        await mouse_drag(page, tiles.nth(2), tiles.nth(0))
+        await poll_db(pinned_sql, "미술,국어,체육")
+        await expect(drawer).to_have_attribute("aria-label", "모든 과목")
+        await ctx.close()
+
+        step("library: merge one subject into another (drawer, subject menu) — notes, questions, cards and review records move, the subject is gone")
+        music = db(f"select id from public.subjects where user_id = '{me_id}' and name = '음악'")
+        social = db(f"select id from public.subjects where user_id = '{me_id}' and name = '사회'")
+        art = db(f"select id from public.subjects where user_id = '{me_id}' and name = '미술'")
+        ctx, page = await new_ctx(browser, "student")
+        page.on("dialog", lambda d: asyncio.ensure_future(d.accept()))
+        r = await page.request.post(BASE + "/api/notes/blank", headers={"origin": BASE}, data={"subjectId": music, "title": "음악 노트"})
+        assert r.ok, await r.text()
+        made = await r.json()
+        music_src, music_note = made["id"], made["noteId"]
+        mq = db(
+            f"insert into public.questions (user_id, note_id, subject_id, type, prompt, answer) values ('{me_id}', '{music_note}', '{music}', 'ox', '음표는 소리의 길이를 나타낸다.', 'true') returning id"
+        ).splitlines()[0]
+        db(f"insert into public.cards (question_id, user_id, subject_id) values ('{mq}', '{me_id}', '{music}')")
+        db(f"insert into public.review_logs (user_id, question_id, subject_id, rating, correct) values ('{me_id}', '{mq}', '{music}', 3, true)")
+        await page.goto(BASE + "/library")
+        await page.get_by_role("tablist", name="과목").get_by_role("button", name=re.compile("^모든 과목")).click()
+        drawer = page.get_by_role("dialog", name=DRAWER)
+        await drawer.get_by_role("button", name="'음악' 과목 관리").click()
+        await drawer.get_by_role("button", name=re.compile("^다른 과목과 합치기")).click()
+        await expect(drawer).to_have_attribute("aria-label", "과목 합치기")
+        await expect(drawer.get_by_text("‘음악’ 과목을 어느 과목으로 합칠까요?")).to_be_visible()
+        await expect(drawer.get_by_role("button", name="합칠 과목을 골라 주세요")).to_be_disabled()
+        await expect(drawer.get_by_role("radio", name=re.compile("^음악"))).to_have_count(0)
+        await drawer.get_by_role("radio", name=re.compile("^미술")).click()
+        await shot(page, "97-subject-merge", full=False)
+        await drawer.get_by_role("button", name="'미술' 과목으로 합치기").click()
+        await expect(drawer).to_be_hidden()
+        await page.wait_for_url(re.compile(rf"/library/{art}$"))
+        await poll_db(f"select count(*) from public.subjects where id = '{music}'", "0")
+        assert db(f"select subject_id from public.sources where id = '{music_src}'") == art
+        assert db(f"select subject_id from public.notes where id = '{music_note}'") == art
+        assert db(f"select subject_id from public.questions where id = '{mq}'") == art
+        assert db(f"select subject_id from public.cards where question_id = '{mq}'") == art
+        assert db(f"select subject_id from public.review_logs where question_id = '{mq}'") == art
+        await expect(page.locator("main [data-flip]")).to_have_count(1)
+        # 과목 메뉴에서도 (사회 → 미술)
+        await page.goto(BASE + f"/library/{social}")
+        await page.get_by_role("button", name="과목 메뉴").click()
+        await page.get_by_role("menuitem", name="다른 과목과 합치기").click()
+        sheet = page.get_by_role("dialog", name="다른 과목과 합치기")
+        await sheet.get_by_role("radio", name=re.compile("^미술")).click()
+        await sheet.get_by_role("button", name="'미술' 과목으로 합치기").click()
+        await expect(sheet).to_be_hidden()
+        await poll_db(f"select count(*) from public.subjects where id = '{social}'", "0")
+        await page.wait_for_url(re.compile(rf"/library/{art}$"))
+        # 남의 과목과는 합칠 수 없다 (서버)
+        r = await page.request.post(BASE + "/api/subjects/merge", headers={"origin": BASE}, data={"from": art, "into": other_subject})
+        assert r.status == 404, r.status
+        await ctx.close()
+
+        step("library: move notes to another subject (card menu, several at once into a new subject) — questions and cards follow")
+        math = db(f"select id from public.subjects where user_id = '{me_id}' and name = '수학'")
+        ctx, page = await new_ctx(browser, "student")
+        await page.goto(BASE + f"/library/{sci}")
+        cards = page.locator("main [data-flip]")
+        sid = await cards.first.get_attribute("data-flip")
+        await cards.first.get_by_role("button", name=re.compile("메뉴$")).click()
+        await page.get_by_role("menuitem", name="다른 과목으로 옮기기").click()
+        sheet = page.get_by_role("dialog", name="다른 과목으로 옮기기")
+        await expect(sheet.get_by_role("radio", name=re.compile("^과학"))).to_have_count(0)
+        await sheet.get_by_role("radio", name=re.compile("^수학")).click()
+        await sheet.get_by_role("button", name="'수학' 과목으로 옮기기").click()
+        await expect(sheet).to_be_hidden()
+        await poll_db(f"select subject_id from public.sources where id = '{sid}'", math)
+        moved_q = f"from public.questions q join public.notes n on n.id = q.note_id where n.source_id = '{sid}'"
+        assert db(f"select count(*) {moved_q} and q.subject_id <> '{math}'") == "0"
+        assert db(f"select count(*) from public.cards c where c.question_id in (select q.id {moved_q}) and c.subject_id <> '{math}'") == "0"
+        await expect(page.locator(f'main [data-flip="{sid}"]')).to_have_count(0)
+        # 여러 개 골라 새 과목으로
+        await cards.first.get_by_role("button", name=re.compile("메뉴$")).click()
+        await page.get_by_role("menuitem", name="여러 개 고르기").click()
+        await cards.nth(1).click()
+        two = [await cards.nth(i).get_attribute("data-flip") for i in range(2)]
+        bar = page.get_by_role("toolbar", name=re.compile("^고른 자료"))
+        await bar.get_by_role("button", name="옮기기").click()
+        sheet = page.get_by_role("dialog", name="다른 과목으로 옮기기")
+        await expect(sheet.get_by_text("고른 노트 2개를", exact=False)).to_be_visible()
+        await sheet.get_by_role("button", name="새 과목 만들기").click()
+        await sheet.get_by_label("새 과목 이름").fill("생명과학")
+        await sheet.get_by_role("button", name="만들기", exact=True).click()
+        await expect(sheet.get_by_role("radio", name=re.compile("^생명과학"))).to_have_attribute("aria-checked", "true")
+        await shot(page, "97-move", full=False)
+        await sheet.get_by_role("button", name="'생명과학' 과목으로 옮기기").click()
+        await expect(sheet).to_be_hidden()
+        bio = db(f"select id from public.subjects where user_id = '{me_id}' and name = '생명과학'")
+        await poll_db(f"select count(*) from public.sources where id in ('{two[0]}', '{two[1]}') and subject_id = '{bio}'", "2")
+        await expect(page.get_by_role("toolbar", name=re.compile("^고른 자료"))).to_have_count(0)
+        # 남의 과목으로는 옮길 수 없다 (서버)
+        r = await page.request.post(BASE + "/api/sources/move", headers={"origin": BASE}, data={"ids": [two[0]], "subject": other_subject})
+        assert r.status == 404, r.status
+        await ctx.close()
+
+        step("library: merge notes without AI (no energy) — new concept numbers, questions and records follow, originals stay in the 원본 tab")
+        ctx, page = await new_ctx(browser, "student")
+        page.on("dialog", lambda d: asyncio.ensure_future(d.accept()))
+        spent = lambda: db(f"select coalesce(sum(energy), 0) from public.energy_ledger where user_id = '{me_id}'")  # noqa: E731
+        energy_before = spent()
+        await page.goto(BASE + f"/library/{bio}")
+        cards = page.locator("main [data-flip]")
+        await expect(cards).to_have_count(2)
+        ids = [await cards.nth(i).get_attribute("data-flip") for i in range(2)]
+        await cards.first.get_by_role("button", name=re.compile("메뉴$")).click()
+        await page.get_by_role("menuitem", name="여러 개 고르기").click()
+        bar = page.get_by_role("toolbar", name=re.compile("^고른 자료"))
+        await expect(bar.get_by_role("button", name="합치기")).to_be_disabled()
+        await cards.nth(1).click()
+        await bar.get_by_role("button", name="합치기").click()
+        msheet = page.get_by_role("dialog", name="노트 합치기")
+        radios = msheet.get_by_role("radio")
+        await expect(radios).to_have_count(2)
+        await expect(radios.nth(0)).to_have_attribute("aria-checked", "true")
+        await radios.nth(1).click()
+        await expect(radios.nth(1)).to_have_attribute("aria-checked", "true")
+        keep, gone = ids[1], ids[0]
+        keep_note = db(f"select id from public.notes where source_id = '{keep}'")
+        gone_note = db(f"select id from public.notes where source_id = '{gone}'")
+        want_q = int(db(f"select count(*) from public.questions where note_id in ('{keep_note}', '{gone_note}') and status <> 'hidden'"))
+        gone_q = db(f"select id from public.questions where note_id = '{gone_note}' and key_point_id is not null and status <> 'hidden' limit 1")
+        await shot(page, "97-merge-notes", full=False)
+        await msheet.get_by_role("button", name="노트 2개 합치기").click()
+        await page.wait_for_url(re.compile(rf"/notes/{keep}"))
+        await expect(page.get_by_text("노트 2개를 합친 노트예요")).to_be_visible()
+        assert db(f"select count(*) from public.notes where id = '{gone_note}'") == "0"
+        assert db(f"select parent_id from public.sources where id = '{gone}'") == keep
+        assert int(db(f"select count(*) from public.questions where note_id = '{keep_note}' and status <> 'hidden'")) == want_q
+        kp_ids = db(f"select string_agg(k->>'id', ',') from public.notes n, jsonb_array_elements(n.body->'key_points') k where n.id = '{keep_note}'").split(",")
+        assert len(kp_ids) == len(set(kp_ids)), kp_ids
+        if gone_q:
+            assert db(f"select key_point_id from public.questions where id = '{gone_q}'") in kp_ids, "moved question points at a concept of the merged note"
+            assert db(f"select cardinality(pages) from public.questions where id = '{gone_q}'") == "0"
+        assert spent() == energy_before, "merging notes uses no energy"
+        await shot(page, "97-merged-note", full=False)
+        await page.get_by_role("tab", name="원본").click()
+        await expect(page.get_by_text("원본 자료 2개")).to_be_visible()
+        # 자료함에는 남긴 노트 하나만
+        await page.goto(BASE + f"/library/{bio}")
+        await expect(page.locator("main [data-flip]")).to_have_count(1)
+        # 남의 노트와는 합칠 수 없다 (서버)
+        other_src = db(f"select id from public.sources where user_id = '{other_id}' and parent_id is null and status = 'ready' limit 1")
+        if other_src:
+            r = await page.request.post(BASE + "/api/notes/merge", headers={"origin": BASE}, data={"into": keep, "from": [other_src]})
+            assert r.status == 404, r.status
+        await ctx.close()
+
+        step("Pro: 'AI로 다시 정리' on a merged note (also from the menu after closing the tip) makes a new version; the note before stays in the version list")
+        ctx, page = await new_ctx(browser, "student")
+        page.on("dialog", lambda d: asyncio.ensure_future(d.accept()))
+        await page.goto(BASE + f"/notes/{keep}")
+        tip = page.get_by_role("region", name="합친 노트")
+        await expect(tip.get_by_role("button", name=re.compile("^AI로 다시 정리"))).to_contain_text("약")
+        # 안내를 닫아도 메뉴에 남는다
+        await tip.get_by_role("button", name="합친 노트 안내 닫기").click()
+        await expect(tip).to_be_hidden()
+        await poll_db(f"select body->'merged'->>'hide' from public.notes where id = '{keep_note}'", "true")
+        kp_before = int(db(f"select jsonb_array_length(body->'key_points') from public.notes where id = '{keep_note}'"))
+        await page.get_by_role("button", name="노트 메뉴").click()
+        await page.get_by_role("menuitem", name="AI로 다시 정리").click()
+        await expect(page.get_by_text("AI가 노트를 다시 정리하고 있어요", exact=False)).to_be_visible()
+        await poll_db(f"select current_version from public.notes where id = '{keep_note}'", "2", timeout=40)
+        await expect(page.get_by_text("AI로 다시 정리했어요.", exact=False)).to_be_visible(timeout=40000)
+        assert db(f"select string_agg(number || ':' || kind, ',' order by number) from public.note_versions where note_id = '{keep_note}'") == "1:first,2:reorganize"
+        assert db(f"select body ? 'merged' from public.notes where id = '{keep_note}'") == "f"
+        assert int(db(f"select jsonb_array_length(body->'key_points') from public.notes where id = '{keep_note}'")) == min(kp_before - 1, 12)
+        # 문제는 남은 개념만 가리킨다 (합쳐진 개념의 문제는 합친 개념으로)
+        live = db(f"select string_agg(k->>'id', ',') from public.notes n, jsonb_array_elements(n.body->'key_points') k where n.id = '{keep_note}'").split(",")
+        stray = db(f"select count(*) from public.questions where note_id = '{keep_note}' and status <> 'hidden' and key_point_id is not null and not (key_point_id = any(string_to_array('{','.join(live)}', ',')))")
+        assert stray == "0", stray
+        await page.get_by_role("tab", name="원본").click()
+        await expect(page.get_by_text("버전 2 · AI로 다시 정리")).to_be_visible()
+        await expect(page.get_by_text("겹치는 개념을 하나로 다듬었어요")).to_be_visible()
+        await shot(page, "97-reorganized-versions")
+        # 다시 정리한 노트는 더 이상 합친 노트가 아니다 (서버도 거절), 무료 계정은 Pro 안내
+        r = await page.request.post(BASE + f"/api/notes/{keep_note}/reorganize", headers={"origin": BASE}, data={})
+        assert r.status == 400, r.status
+        octx, opage = await new_ctx(browser, "other")
+        r = await opage.request.post(BASE + f"/api/notes/{keep_note}/reorganize", headers={"origin": BASE}, data={})
+        assert r.status in (403, 404), r.status
+        await octx.close()
         await ctx.close()
         db(f"delete from public.subjects where user_id = '{me_id}' and name in ({', '.join(repr(x) for x in extra)})")
 

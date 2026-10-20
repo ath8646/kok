@@ -749,6 +749,34 @@ function fakeMerged(textOf) {
   return { ...n, key_points: kps };
 }
 
+/**
+ * 합친 노트를 AI 로 다시 정리할 때 (<note>): 마지막 개념을 첫 개념에 합치고(id_map 으로 알려 준다) 요약을 하나로 쓴다
+ */
+function fakeReorganized(textOf) {
+  const section = (tag) => (textOf.match(new RegExp(`<${tag}>\\n([\\s\\S]*?)\\n</${tag}>`)) || [])[1] || '';
+  let base = null;
+  try {
+    base = JSON.parse(section('note'));
+  } catch {
+    base = null;
+  }
+  const n = base && Array.isArray(base.key_points) ? base : fakeNote(textOf);
+  const kps = [...n.key_points];
+  const last = kps.length > 1 ? kps.pop() : null;
+  if (last) {
+    kps[0] = { ...kps[0], explanation: `${kps[0].explanation} ${last.explanation}`, pages: [...new Set([...(kps[0].pages ?? []), ...(last.pages ?? [])])] };
+  }
+  const into = (id) => (last && id === last.id ? kps[0].id : id);
+  return {
+    ...n,
+    summary: '여러 노트를 하나로 다시 정리한 요약이에요.',
+    key_points: kps,
+    pitfalls: (n.pitfalls ?? []).map((p) => ({ ...p, key_point_id: into(p.key_point_id) })),
+    examples: (n.examples ?? []).map((p) => ({ ...p, key_point_id: into(p.key_point_id) })),
+    id_map: n.key_points.map((k) => ({ from: k.id, to: into(k.id) })),
+  };
+}
+
 /** 더한 자료(k5)로만 만든 새 문제 */
 function fakeNewQuiz() {
   const base = { choices: [], answer_index: -1, answer_bool: false, answer_text: '', accepted: [], pages: [] };
@@ -1058,6 +1086,9 @@ async function handleClaude(req, res) {
   } else if (props.solutions) {
     task = 'solve';
     out = fakeSolve(textOf);
+  } else if (props.id_map) {
+    task = 'reorganize';
+    out = fakeReorganized(textOf);
   } else if (props.key_points && /Merge the new material into the current note/.test(textOf)) {
     task = 'merge';
     out = fakeMerged(textOf);

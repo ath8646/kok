@@ -66,9 +66,12 @@ export function OriginalTab({
   onAdd: (files: File[], text: string) => void;
 }) {
   const first: Material = { source_id: parent.id, kind: parent.kind, title: parent.title, page_count: parent.page_count };
-  const items = versionItems(versions, current, { first, questionCount: liveQuestionCount, createdAt: parent.created_at, existing });
+  const items = versionItems(versions, current, { first, questionCount: liveQuestionCount, createdAt: parent.created_at, existing, kids: kids.length });
   const listed = versions.find((r) => r.number === viewing)?.materials ?? [];
-  const materials = listed.length ? listed : [first];
+  // 버전 행이 없는 노트: 처음 자료 + 노트를 합쳐서 들어온 자료 (정리를 마친 더한 자료)
+  const materials = listed.length
+    ? listed
+    : [first, ...kids.map((k): Material => ({ source_id: k.id, kind: k.kind, title: k.title, page_count: k.page_count }))];
 
   return (
     <div className="grid gap-4">
@@ -76,7 +79,7 @@ export function OriginalTab({
         <section className="kok-card kok-rise grid gap-1 p-2" aria-label="버전 기록">
           <div className="flex items-baseline justify-between px-2.5 pb-1 pt-2">
             <h2 className="font-display text-lg">버전 기록</h2>
-            <span className="text-xs text-muted">자료를 더할 때마다 버전이 생겨요</span>
+            <span className="text-xs text-muted">자료를 더하거나 다시 정리하면 버전이 생겨요</span>
           </div>
           <ol className="grid gap-1">
             {items.map((it) => {
@@ -96,7 +99,7 @@ export function OriginalTab({
                     <div className="min-w-0 flex-1">
                       <p className="flex flex-wrap items-center gap-1.5 font-semibold">
                         <span>
-                          버전 {it.number} · {it.number === 1 ? '처음 자료' : '더한 자료'}
+                          버전 {it.number} · {it.kind === 'first' ? '처음 자료' : it.kind === 'reorganized' ? 'AI로 다시 정리' : '더한 자료'}
                         </span>
                         {it.current ? <Chip tone="accent">지금 쓰는 버전</Chip> : null}
                         {seeing && !it.current ? <Chip tone="hl">보는 중</Chip> : null}
@@ -105,6 +108,11 @@ export function OriginalTab({
                         <p className="flex min-w-0 items-center gap-1.5 text-sm">
                           <Icon d={KIND_ICON[it.added.kind]} size={15} className="shrink-0 text-muted" />
                           <span className="truncate">{materialLabel(it.added)}</span>
+                        </p>
+                      ) : it.kind === 'reorganized' ? (
+                        <p className="flex min-w-0 items-center gap-1.5 text-sm">
+                          <Icon d={ICONS.sparkle} size={15} className="shrink-0 text-muted" />
+                          <span className="truncate">겹치는 개념을 하나로 다듬었어요</span>
                         </p>
                       ) : null}
                       <p className="text-xs text-muted">
@@ -150,7 +158,7 @@ export function OriginalTab({
         {materials.length > 1 ? (
           <>
             <p className="px-1 text-sm font-semibold text-muted">
-              버전 {viewing}의 원본 자료 {materials.length}개
+              {versions.length ? `버전 ${viewing}의 원본 자료 ${materials.length}개` : `원본 자료 ${materials.length}개`}
             </p>
             {materials.map((m, i) => (
               <MaterialCard

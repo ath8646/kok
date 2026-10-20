@@ -49,8 +49,10 @@ import { subjectVar } from '@/lib/colors';
 import { previewText } from '@/lib/richtext';
 import { daysUntil } from '@/lib/time';
 import { dropView, readView, writeView } from '@/lib/view-cache';
-import { QUICK_MAX, quickSubjects } from '@/lib/subject-order';
-import { SubjectDrawer } from './SubjectDrawer';
+import { QUICK_MAX, byPosition, quickSubjects } from '@/lib/subject-order';
+import { SubjectDrawer, type DrawerManage } from './SubjectDrawer';
+import { SubjectPickSheet } from './SubjectPick';
+import { MergeNotesSheet } from './MergeNotesSheet';
 
 /** manual: AI 없이 직접 만든 노트 */
 type LibSource = SourceRowWithUnit & { summary: string | null; manual?: boolean };
@@ -144,6 +146,10 @@ export function LibraryView() {
   const [editingSubject, setEditingSubject] = useState<SubjectRow | 'new' | null>(null);
   // 과목 서랍 ('모든 과목')
   const [drawer, setDrawer] = useState(false);
+  // 다른 과목으로 옮길 자료, 다른 과목과 합칠 과목 (과목 메뉴에서), 노트 합치기 (여러 개 고른 뒤)
+  const [moving, setMoving] = useState<string[] | null>(null);
+  const [mergingSubject, setMergingSubject] = useState<SubjectRow | null>(null);
+  const [mergingNotes, setMergingNotes] = useState(false);
   const [renaming, setRenaming] = useState<LibSource | null>(null);
   const [saving, setSaving] = useState(false);
   const [version, setVersion] = useState(0);
@@ -302,6 +308,8 @@ export function LibraryView() {
   }, [data]);
   // 과목 서랍 (features.subjectDrawer): 칩 줄에는 고정 + 최근 쓴 과목만, 보관한 과목은 '전체'에서도 뺀다 (찾을 때는 보인다)
   const drawerOn = !!me?.features.subjectDrawer;
+  // 자료 옮기기·과목 합치기·노트 합치기·고정한 과목 순서 (features.merge: schema.sql 을 다시 실행한 뒤)
+  const mergeOn = !!me?.features.merge;
   const archivedIds = useMemo(() => new Set(drawerOn ? subjects.filter((s) => s.archived).map((s) => s.id) : []), [subjects, drawerOn]);
   const chipSubjects = useMemo(() => (drawerOn ? quickSubjects(subjects, QUICK_MAX, selected) : subjects), [subjects, drawerOn, selected]);
   const moreSubjects = drawerOn && subjects.length > chipSubjects.length;
@@ -370,8 +378,11 @@ export function LibraryView() {
   };
 
   /** 과목 위에 고정·보관 (과목 서랍). 화면은 바로 바꾸고, 저장하지 못하면 다시 읽는다 */
-  const setSubjectFlag = async (s: SubjectRow, patch: { pinned?: boolean; archived?: boolean }) => {
+  const setSubjectFlag = async (s: SubjectRow, flags: { pinned?: boolean; archived?: boolean }) => {
     if (!data) return;
+    // 새로 고정한 과목은 고정한 과목들의 맨 뒤에 (내가 정한 차례가 있으면 그 뒤로)
+    const patch: { pinned?: boolean; archived?: boolean; position?: number } = { ...flags };
+    if (flags.pinned === true && !s.pinned) patch.position = Math.max(0, ...data.subjects.map((x) => x.position)) + 1;
     const next = { ...data, subjects: data.subjects.map((x) => (x.id === s.id ? { ...x, ...patch } : x)) };
     setData(next);
     writeView(LIBRARY_VIEW, owner, next);
@@ -389,6 +400,114 @@ export function LibraryView() {
     window.dispatchEvent(new Event(SUBJECTS_CHANGED));
     if (patch.archived === true) toast(`'${s.name}' 과목을 보관했어요. 복습은 그대로 나오고, '모든 과목'에서 다시 꺼낼 수 있어요.`, 'plain', DONE);
     else if (patch.archived === false) toast(`'${s.name}' 과목을 다시 꺼냈어요.`, 'plain', DONE);
+  };
+
+  /** 고정한 과목의 차례 (서랍에서 끌거나 앞으로·뒤로): 화면은 바로, 저장은 한 줄로 세워 마지막 차례만 (모든 과목의 position 을 0, 1, 2 …) */
+  const subjectOrderQueue = useRef<{ running: boolean; next: string[] | null }>({ running: false, next: null });
+  const reorderPinned = (pinnedIds: string[]) => {
+    if (!data) return;
+    const pinnedSet = new Set(pinnedIds);
+    const rest = data.subjects.filter((s) => !pinnedSet.has(s.id)).sort(byPosition);
+    const order = [...pinnedIds, ...rest.map((s) => s.id)];
+    const pos = new Map(order.map((id, i) => [id, i]));
+    const next = { ...data, subjects: data.subjects.map((s) => ({ ...s, position: pos.get(s.id) ?? s.position })) };
+    setData(next);
+    writeView(LIBRARY_VIEW, owner, next);
+    const q = subjectOrderQueue.current;
+    q.next = order;
+    if (q.running) return;
+    q.running = true;
+    void keepWhileSaving(async () => {
+      while (q.next) {
+        const o = q.next;
+        q.next = null;
+        const { error } = await sb().rpc('kok_reorder_subjects', { p_ids: o });
+        if (error) {
+          q.next = null;
+          toast('과목 순서를 저장하지 못했어요. 다시 해 주세요.', 'bad');
+          edits.current.stale = true;
+          break;
+        }
+      }
+      window.dispatchEvent(new Event(SUBJECTS_CHANGED));
+    }).finally(() => {
+      q.running = false;
+    });
+  };
+
+  /** 자료(노트)를 다른 과목으로: 노트·문제·복습 기록이 함께 간다 */
+  const moveSources = async (ids: string[], target: SubjectRow): Promise<boolean> => {
+    try {
+      let moved = 0;
+      for (let i = 0; i < ids.length; i += BULK_MAX) {
+        const r = await api<{ moved: number }>('/api/sources/move', {
+          method: 'POST',
+          body: JSON.stringify({ ids: ids.slice(i, i + BULK_MAX), subject: target.id }),
+        });
+        moved += r.moved;
+      }
+      const set = new Set(ids);
+      setData((cur) => {
+        if (!cur) return cur;
+        const known = cur.subjects.some((s) => s.id === target.id);
+        return {
+          subjects: known ? cur.subjects : [...cur.subjects, target],
+          sources: cur.sources.map((s) => (set.has(s.id) ? { ...s, subject_id: target.id, position: null } : s)),
+        };
+      });
+      dropView(LIBRARY_VIEW);
+      toast(moved ? `노트 ${moved}개를 '${target.name}' 과목으로 옮겼어요.` : `이미 '${target.name}' 과목에 있어요.`, 'plain', DONE);
+      endSelect();
+      window.dispatchEvent(new Event(SUBJECTS_CHANGED));
+      reload();
+      return true;
+    } catch (e) {
+      toast((e as Error).message, 'bad');
+      return false;
+    }
+  };
+
+  /** 과목 합치기: from 의 모든 것을 into 로 옮기고 from 은 없어진다. 끝나면 into 과목을 연다 */
+  const mergeSubject = async (from: SubjectRow, into: SubjectRow): Promise<boolean> => {
+    try {
+      await api('/api/subjects/merge', { method: 'POST', body: JSON.stringify({ from: from.id, into: into.id }) });
+      setData((cur) =>
+        cur
+          ? {
+              subjects: cur.subjects.filter((s) => s.id !== from.id),
+              sources: cur.sources.map((s) => (s.subject_id === from.id ? { ...s, subject_id: into.id } : s)),
+            }
+          : cur,
+      );
+      dropView(LIBRARY_VIEW);
+      setDrawer(false);
+      select(into.id);
+      toast(`'${from.name}' 과목을 '${into.name}' 과목으로 합쳤어요.`, 'plain', DONE);
+      window.dispatchEvent(new Event(SUBJECTS_CHANGED));
+      reload();
+      return true;
+    } catch (e) {
+      toast((e as Error).message, 'bad');
+      return false;
+    }
+  };
+
+  /** 과목 지우기 (그 안의 자료·노트·문제·복습 기록까지) */
+  const deleteSubject = async (s: SubjectRow) => {
+    if (!confirm(`'${s.name}' 과목과 그 안의 자료·노트·문제·복습 기록을 모두 지울까요? 되돌릴 수 없어요.`)) return;
+    try {
+      await api(`/api/subjects/${s.id}`, { method: 'DELETE' });
+      setEditingSubject(null);
+      setDrawer(false);
+      if (selected === s.id) select(null);
+      setData((cur) => (cur ? { subjects: cur.subjects.filter((x) => x.id !== s.id), sources: cur.sources.filter((x) => x.subject_id !== s.id) } : cur));
+      dropView(LIBRARY_VIEW);
+      toast(`'${s.name}' 과목을 지웠어요.`, 'plain', DONE);
+      window.dispatchEvent(new Event(SUBJECTS_CHANGED));
+      reload();
+    } catch (e) {
+      toast((e as Error).message, 'bad');
+    }
   };
 
   /**
@@ -567,6 +686,7 @@ export function LibraryView() {
         { label: '이 과목만 복습', icon: ICONS.retry, onSelect: () => router.push(`/review?subject=${subject.id}`) },
         { label: '문제 모아 보기', icon: ICONS.grid, onSelect: () => router.push(`/questions?subject=${subject.id}`) },
         { label: '과목 고치기', icon: ICONS.edit, onSelect: () => setEditingSubject(subject) },
+        ...(mergeOn && subjects.length > 1 ? [{ label: '다른 과목과 합치기', icon: ICONS.merge, onSelect: () => setMergingSubject(subject) }] : []),
         ...(drawerOn
           ? subject.archived
             ? [{ label: '보관 풀기', icon: ICONS.archive, onSelect: () => setSubjectFlag(subject, { archived: false }) }]
@@ -582,6 +702,20 @@ export function LibraryView() {
         { label: '문제 모아 보기', icon: ICONS.grid, onSelect: () => router.push('/questions') },
       ];
   const allPicked = shown.length > 0 && shown.every((s) => picked.has(s.id));
+  // 서랍의 과목 관리 (고정·보관은 과목 서랍 칸이 있으면, 순서·합치기는 새 함수가 있으면)
+  const drawerManage: DrawerManage = {
+    onPin: (x, on) => setSubjectFlag(x, { pinned: on }),
+    onArchive: (x, on) => setSubjectFlag(x, { archived: on }),
+    onReorder: mergeOn ? reorderPinned : undefined,
+    onEdit: (x) => {
+      setDrawer(false);
+      setEditingSubject(x);
+    },
+    onMerge: mergeOn ? mergeSubject : undefined,
+    onDelete: deleteSubject,
+  };
+  // 옮길 자료가 모두 한 과목에 있으면 그 과목은 고를 수 없다
+  const movingFrom = moving ? [...new Set((data?.sources ?? []).filter((s) => moving.includes(s.id)).map((s) => s.subject_id))] : [];
 
   return (
     <div className="grid gap-1">
@@ -710,7 +844,7 @@ export function LibraryView() {
           onPick={(id) => select(id)}
           counts={counts}
           all={{ label: '전체', count: allCount }}
-          manage={{ onPin: (x, on) => setSubjectFlag(x, { pinned: on }), onArchive: (x, on) => setSubjectFlag(x, { archived: on }) }}
+          manage={drawerManage}
         />
       ) : null}
       {subject?.archived && drawerOn && !selecting ? (
@@ -766,6 +900,7 @@ export function LibraryView() {
                     onReview={() => reviewOne(s)}
                     onSelectMode={() => startSelect(s.id)}
                     onRename={() => setRenaming(s)}
+                    onMove={mergeOn ? () => setMoving([s.id]) : undefined}
                     onDelete={async () => {
                       if (!confirm(`'${s.title || '이 자료'}'와 노트·문제를 지울까요? 되돌릴 수 없어요.`)) return;
                       try {
@@ -807,8 +942,67 @@ export function LibraryView() {
           onStar={bulkStar}
           onReview={bulkReview}
           onDelete={bulkDelete}
+          onMove={mergeOn ? () => setMoving(pickedRows.map((s) => s.id)) : undefined}
+          onMerge={mergeOn ? () => setMergingNotes(true) : undefined}
         />
       ) : null}
+
+      {/* 다른 과목으로 옮기기 (카드 메뉴·여러 개 고르기·과목 합치기) */}
+      <SubjectPickSheet
+        open={!!moving}
+        onClose={() => setMoving(null)}
+        title="다른 과목으로 옮기기"
+        intro={
+          <>
+            {moving && moving.length > 1 ? `고른 노트 ${moving.length}개` : '이 노트'}를 옮길 과목을 골라요. 노트·문제·복습 기록이 함께 옮겨져요.
+          </>
+        }
+        subjects={subjects}
+        exclude={movingFrom.length === 1 ? movingFrom : []}
+        counts={counts}
+        allowNew
+        actionLabel={(name) => (name ? `'${name}' 과목으로 옮기기` : '옮길 과목을 골라 주세요')}
+        onConfirm={(target) => (moving ? moveSources(moving, target) : Promise.resolve(false))}
+      />
+      <SubjectPickSheet
+        open={!!mergingSubject}
+        onClose={() => setMergingSubject(null)}
+        title="다른 과목과 합치기"
+        intro={
+          mergingSubject ? (
+            <>
+              &lsquo;{mergingSubject.name}&rsquo; 과목의 자료 {counts.get(mergingSubject.id) ?? 0}개와 노트·문제·복습 기록을 고른 과목으로 모두 옮기고, &lsquo;
+              {mergingSubject.name}&rsquo; 과목은 없어져요. 고른 과목의 이름과 색은 그대로예요.
+            </>
+          ) : null
+        }
+        subjects={subjects}
+        exclude={mergingSubject ? [mergingSubject.id] : []}
+        counts={counts}
+        actionLabel={(name) => (name ? `'${name}' 과목으로 합치기` : '합칠 과목을 골라 주세요')}
+        onConfirm={async (target) => {
+          const from = mergingSubject;
+          if (!from) return false;
+          if (!confirm(`'${from.name}' 과목의 자료와 복습 기록을 '${target.name}' 과목으로 옮기고 '${from.name}' 과목을 없앨까요? 되돌릴 수 없어요.`)) return false;
+          return mergeSubject(from, target);
+        }}
+      />
+      {/* 노트 합치기 (여러 개 고른 뒤) */}
+      <MergeNotesSheet
+        open={mergingNotes}
+        onClose={() => setMergingNotes(false)}
+        notes={pickedRows}
+        subjects={subjects}
+        onMerged={(keepId, count) => {
+          setMergingNotes(false);
+          endSelect();
+          dropView(LIBRARY_VIEW);
+          window.dispatchEvent(new CustomEvent(SOURCES_CHANGED));
+          toast(`노트 ${count}개를 한 노트로 합쳤어요.`, 'plain', DONE);
+          router.push(`/notes/${keepId}`);
+        }}
+      />
+
 
       {/* 순서 바꾸기 (과목 안에서). 과목이 여럿이면 위의 칩으로 과목을 바꾼다 (뒤의 자료함도 그 과목으로) */}
       <Sheet open={ordering && !!subject} onClose={() => setOrdering(false)} title={subject ? `${subject.name} 순서 바꾸기` : '순서 바꾸기'}>
@@ -880,21 +1074,7 @@ export function LibraryView() {
             />
             {editingSubject !== 'new' ? (
               <div className="border-t border-line pt-4">
-                <Button
-                  variant="ghost"
-                  className="text-bad"
-                  onClick={async () => {
-                    if (!confirm(`'${editingSubject.name}' 과목과 그 안의 자료·노트·문제·복습 기록을 모두 지울까요? 되돌릴 수 없어요.`)) return;
-                    try {
-                      await api(`/api/subjects/${editingSubject.id}`, { method: 'DELETE' });
-                      setEditingSubject(null);
-                      select(null);
-                      window.dispatchEvent(new Event(SUBJECTS_CHANGED));
-                    } catch (e) {
-                      toast((e as Error).message, 'bad');
-                    }
-                  }}
-                >
+                <Button variant="ghost" className="text-bad" onClick={() => deleteSubject(editingSubject)}>
                   과목 지우기
                 </Button>
               </div>
@@ -992,6 +1172,7 @@ function NoteCard({
   onRename,
   onDelete,
   onRetry,
+  onMove,
 }: {
   s: LibSource;
   index: number;
@@ -1012,6 +1193,8 @@ function NoteCard({
   onRename: () => void;
   onDelete: () => void;
   onRetry: () => void;
+  /** 다른 과목으로 옮기기 (없으면 메뉴에 안 보인다) */
+  onMove?: () => void;
 }) {
   const processing = s.status === 'queued' || s.status === 'processing';
   const failed = s.status === 'error';
@@ -1033,6 +1216,7 @@ function NoteCard({
       : []),
     { label: '여러 개 고르기', icon: ICONS.select, onSelect: onSelectMode },
     { label: '이름·단원 바꾸기', icon: ICONS.edit, onSelect: onRename },
+    ...(onMove ? [{ label: '다른 과목으로 옮기기', icon: ICONS.move, onSelect: onMove }] : []),
     { label: '지우기', icon: ICONS.trash, onSelect: onDelete, danger: true },
   ];
   const href = `/notes/${s.id}`;
@@ -1202,7 +1386,10 @@ function useGridFlip(root: RefObject<HTMLElement | null>, orderKey: string) {
   };
 }
 
-/** 여러 개 고르는 동안 아래 띠: 별표 · 복습 켜고 끄기 · 지우기 (폰은 아래 메뉴 자리를 덮고, 넓은 화면은 가운데에 뜬다) */
+/**
+ * 여러 개 고르는 동안 아래 띠: 별표 · 복습 켜고 끄기 · 옮기기 · 합치기 · 지우기
+ * (폰은 아래 메뉴 자리를 덮고, 넓은 화면은 가운데에 뜬다). 합치기는 두 개 이상 골랐을 때
+ */
 function SelectionBar({
   count,
   organize,
@@ -1211,6 +1398,8 @@ function SelectionBar({
   onStar,
   onReview,
   onDelete,
+  onMove,
+  onMerge,
 }: {
   count: number;
   organize: boolean;
@@ -1219,17 +1408,23 @@ function SelectionBar({
   onStar: () => void;
   onReview: () => void;
   onDelete: () => void;
+  /** 다른 과목으로 옮기기 (없으면 안 보인다) */
+  onMove?: () => void;
+  /** 노트 합치기 (없으면 안 보인다) */
+  onMerge?: () => void;
 }) {
   const off = !count || !!busy;
+  const cols = (organize ? 2 : 0) + (onMove ? 1 : 0) + (onMerge ? 1 : 0) + 1;
   return (
     <div className="pointer-events-none fixed inset-x-0 bottom-0 z-50 md:bottom-6 md:left-60 md:flex md:justify-center">
       <div
         role="toolbar"
         aria-label={`고른 자료 ${count}개`}
         className={cx(
-          'kok-selbar pointer-events-auto grid border-t border-line bg-surface px-2 pb-[calc(6px+env(safe-area-inset-bottom))] pt-1.5 md:w-[440px] md:rounded-[24px] md:border md:pb-1.5 md:shadow-[0_12px_36px_var(--shadow-strong)]',
-          organize ? 'grid-cols-3' : 'grid-cols-1',
+          'kok-selbar pointer-events-auto grid border-t border-line bg-surface px-1.5 pb-[calc(6px+env(safe-area-inset-bottom))] pt-1.5 md:rounded-[24px] md:border md:pb-1.5 md:shadow-[0_12px_36px_var(--shadow-strong)]',
+          cols >= 5 ? 'md:w-[520px]' : 'md:w-[440px]',
         )}
+        style={{ gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))` }}
       >
         {organize ? (
           <>
@@ -1243,6 +1438,8 @@ function SelectionBar({
             />
           </>
         ) : null}
+        {onMove ? <BarAction icon={ICONS.move} label="옮기기" disabled={off} busy={false} onClick={onMove} /> : null}
+        {onMerge ? <BarAction icon={ICONS.merge} label="합치기" disabled={off || count < 2} busy={false} onClick={onMerge} /> : null}
         <BarAction icon={ICONS.trash} label="지우기" danger disabled={off} busy={busy === 'delete'} onClick={onDelete} />
       </div>
     </div>

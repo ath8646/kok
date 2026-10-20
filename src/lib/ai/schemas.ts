@@ -42,6 +42,19 @@ export const noteJsonSchema: JsonSchema = obj({
 });
 
 /**
+ * 합친 노트를 AI 로 다시 정리 (Pro): 정리 노트 + 개념 번호 옮김 (예전 번호 → 그 내용이 들어간 번호).
+ * 옮김은 노트 뒤에 쓴다: 개념을 다 정한 뒤에 어디로 갔는지 적을 수 있다
+ */
+export const reorganizeJsonSchema: JsonSchema = obj({
+  ...(noteJsonSchema.properties as Record<string, unknown>),
+  id_map: { type: 'array', items: obj({ from: str, to: str }) },
+});
+
+export const zReorganize = z.object({
+  id_map: z.array(z.object({ from: z.string().catch(''), to: z.string().catch('') })).catch([]),
+});
+
+/**
  * 정리 + 자료 그림 (PDF·사진에서 그림을 찾을 때). 그림은 노트 뒤에 쓴다: 개념을 먼저 정해야 그림을 붙일 개념 이름을 적을 수 있다.
  * corners: 네 모서리 (0~1000, 왼쪽 위·오른쪽 위·오른쪽 아래·왼쪽 아래의 x, y)
  */

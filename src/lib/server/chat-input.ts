@@ -154,7 +154,34 @@ export function chatFolder(userId: string, sourceId: string): string {
  * 많으면(과목 지우기) 보관한 폴더 목록을 끝까지 읽은 뒤 지운다 (읽는 중에 지우면 목록이 밀려 건너뛴다)
  */
 export async function removeChatFolders(admin: SupabaseClient, userId: string, sourceIds: string[]): Promise<void> {
-  await removeSourceFolders(admin, `${userId}/chat`, sourceIds);
+  await removeSourceFolders(admin, `${userId}/chat`, [...new Set(sourceIds)]);
+}
+
+/**
+ * 노트들의 채팅에 보관한 파일이 든 폴더의 자료 번호 (`내id/chat/자료id/…`). 합친 노트의 채팅은 합쳐진 노트의 자료 폴더를 가리킨다
+ * (그 자료 행이 버전을 지우며 없어졌어도 폴더는 남아 있다). 칸이 없는 예전 DB 면 빈 목록
+ */
+export async function chatFolderIdsOfNotes(admin: SupabaseClient, userId: string, noteIds: string[]): Promise<string[]> {
+  const ids = new Set<string>();
+  const prefix = `${userId}/chat/`;
+  for (let i = 0; i < noteIds.length; i += 100) {
+    const { data, error } = await admin
+      .from('chat_messages')
+      .select('attachments')
+      .in('note_id', noteIds.slice(i, i + 100))
+      .not('attachments', 'is', null);
+    if (error) break;
+    for (const row of data ?? []) {
+      const list = Array.isArray(row.attachments) ? (row.attachments as Array<{ path?: unknown }>) : [];
+      for (const a of list) {
+        const path = typeof a?.path === 'string' ? a.path : '';
+        if (!path.startsWith(prefix)) continue;
+        const id = path.slice(prefix.length).split('/')[0];
+        if (/^[0-9a-f-]{36}$/.test(id)) ids.add(id);
+      }
+    }
+  }
+  return [...ids];
 }
 
 export { finishReply, historyLine, readChatSolution } from '@/lib/chat-solution';

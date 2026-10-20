@@ -13,7 +13,28 @@ function row(number: number, materials: Material[] = [first], question_ids: stri
 describe('버전 기록 목록', () => {
   it('버전 행이 없으면 지금 노트가 버전 1이다', () => {
     const items = versionItems([], 1, { first, questionCount: 7, createdAt: '2026-10-01T00:00:00Z', existing: new Set() });
-    expect(items).toEqual([{ number: 1, current: true, added: first, materialCount: 1, questionCount: 7, createdAt: '2026-10-01T00:00:00Z' }]);
+    expect(items).toEqual([{ number: 1, current: true, kind: 'first', added: first, materialCount: 1, questionCount: 7, createdAt: '2026-10-01T00:00:00Z' }]);
+  });
+
+  it('합친 노트는 버전 행이 없어도 합쳐 들어온 자료까지 센다', () => {
+    const items = versionItems([], 1, { first, questionCount: 2, createdAt: null, existing: new Set(), kids: 2 });
+    expect(items[0]).toMatchObject({ kind: 'first', materialCount: 3 });
+  });
+
+  it('AI로 다시 정리한 버전은 더한 자료 없이 그 까닭으로 보인다', () => {
+    const rows: VersionRow[] = [
+      { ...row(1, [first, child]), kind: 'first' },
+      { ...row(2, [first, child]), kind: 'reorganize' },
+      { ...row(3, [first, child, { ...child, source_id: 'c2' }]), kind: 'append' },
+    ];
+    const items = versionItems(rows, 3, { first, questionCount: 1, createdAt: null, existing: new Set() });
+    expect(items.map((i) => i.kind)).toEqual(['first', 'reorganized', 'added']);
+    // 처음 버전은 (합친 자료가 있어도) 처음 자료를, 다시 정리한 버전은 자료 없이
+    expect(items[0].added).toEqual(first);
+    expect(items[1].added).toBeNull();
+    expect(items[2].added?.source_id).toBe('c2');
+    expect(toVersionRow({ id: 'x', number: 2, kind: 'reorganize' }).kind).toBe('reorganize');
+    expect(toVersionRow({ id: 'x', number: 2, kind: 'hack' }).kind).toBeNull();
   });
 
   it('번호 순으로, 버전마다 그때 더한 자료와 아직 있는 문제 수를 보여 준다', () => {

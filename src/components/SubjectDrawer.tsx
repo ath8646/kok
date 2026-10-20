@@ -2,7 +2,7 @@
 // 과목 서랍: 과목이 많을 때 한눈에 찾고 고른다 (자료함·복습 고르기의 '모든 과목').
 // 고정한 과목 → 최근 쓴 과목 → 보관한 과목(접어 둠) 차례이고, 과목이 많으면 이름이나 첫 자음('ㄱㅎ')으로 찾는다.
 // 자료함에서는 과목마다 ⋮ 에서 위에 고정·보관을 바꾼다 (보관 = 목록에서만 뺀다, 복습은 그대로). 차례 규칙은 src/lib/subject-order.ts
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import type { SubjectRow } from '@/lib/types';
 import { subjectVar } from '@/lib/colors';
 import { drawerGroups } from '@/lib/subject-order';
@@ -50,7 +50,23 @@ export function SubjectDrawer({
   const nothing = !groups.pinned.length && !groups.recent.length && !groups.archived.length;
   const pick = (id: string | null) => {
     onPick(id);
+    // 다음에 열 때는 처음 모습으로 (찾던 글·펼친 보관 묶음 없이)
+    setQuery('');
+    setShowArchived(false);
     onClose();
+  };
+  // 고정·보관을 바꾸면 그 과목 칸이 다른 묶음으로 옮겨 가서 다시 그려진다: 키보드 초점을 옮겨 간 칸으로 되돌린다
+  const listRef = useRef<HTMLDivElement>(null);
+  const refocus = useRef<string | null>(null);
+  useEffect(() => {
+    const id = refocus.current;
+    if (!id || !open) return;
+    refocus.current = null;
+    listRef.current?.querySelector<HTMLElement>(`[data-tile="${CSS.escape(id)}"]`)?.focus();
+  }, [subjects, open]);
+  const change = (s: SubjectRow, run: () => void) => {
+    refocus.current = s.id;
+    run();
   };
 
   const tile = (s: SubjectRow) => {
@@ -60,15 +76,29 @@ export function SubjectDrawer({
     const menu: MenuItem[] = manage
       ? [
           s.archived
-            ? { label: '보관 풀기', icon: ICONS.archive, onSelect: () => manage.onArchive(s, false) }
-            : { label: s.pinned ? '고정 풀기' : '위에 고정', icon: ICONS.pin, onSelect: () => manage.onPin(s, !s.pinned) },
-          ...(s.archived ? [] : [{ label: '보관하기', icon: ICONS.archive, onSelect: () => manage.onArchive(s, true) }]),
+            ? { label: '보관 풀기', icon: ICONS.archive, onSelect: () => change(s, () => manage.onArchive(s, false)) }
+            : { label: s.pinned ? '고정 풀기' : '위에 고정', icon: ICONS.pin, onSelect: () => change(s, () => manage.onPin(s, !s.pinned)) },
+          ...(s.archived
+            ? []
+            : [
+                {
+                  label: '보관하기',
+                  icon: ICONS.archive,
+                  onSelect: () =>
+                    change(s, () => {
+                      setShowArchived(true);
+                      manage.onArchive(s, true);
+                    }),
+                },
+              ]),
         ]
       : [];
     return (
-      <li key={s.id} className="relative min-w-0">
+      // 메뉴가 열린 칸은 옆·아래 칸의 ⋮ 보다 위에 (메뉴가 칸보다 길다)
+      <li key={s.id} className="relative min-w-0 has-[[aria-expanded=true]]:z-20">
         <button
           type="button"
+          data-tile={s.id}
           aria-current={on ? 'true' : undefined}
           onClick={() => pick(s.id)}
           className={cx(
@@ -126,7 +156,7 @@ export function SubjectDrawer({
       }}
       title="모든 과목"
     >
-      <div className="grid gap-4">
+      <div ref={listRef} className="grid gap-4">
         {manage ? (
           <p className="-mt-1 text-xs text-muted">
             자주 쓰는 과목은 ⋮에서 &lsquo;위에 고정&rsquo;, 다 끝난 과목은 &lsquo;보관하기&rsquo;를 누르면 목록이 깔끔해져요. 보관해도 복습은 그대로 나와요.

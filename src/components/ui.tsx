@@ -374,14 +374,17 @@ export function Menu({
     const onDown = (e: PointerEvent) => {
       if (wrap.current && !wrap.current.contains(e.target as Node)) setOpen(false);
     };
+    // Esc 는 열린 메뉴만 닫는다: 창의 capture 단계에서 먼저 받아 멈춰서, 시트(Sheet)·자료함 고르기 같은 다른 Esc 가 같이 닫히지 않게
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') setOpen(false);
+      if (e.key !== 'Escape') return;
+      e.stopPropagation();
+      setOpen(false);
     };
     window.addEventListener('pointerdown', onDown);
-    window.addEventListener('keydown', onKey);
+    window.addEventListener('keydown', onKey, true);
     return () => {
       window.removeEventListener('pointerdown', onDown);
-      window.removeEventListener('keydown', onKey);
+      window.removeEventListener('keydown', onKey, true);
     };
   }, [open]);
   return (

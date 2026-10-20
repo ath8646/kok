@@ -542,7 +542,8 @@ export function LibraryView() {
 
   // 여러 개 고르기·순서 바꾸기 (자료가 있을 때만. 순서는 과목 안에서만 정한다)
   // 순서는 과목 안에서 정한다: 자료가 둘 이상인 과목. 전체 보기에서 고르면 그 과목으로 가서 연다
-  const orderable = subjects.filter((x) => (counts.get(x.id) ?? 0) > 1);
+  // 순서 바꾸기 과목: 자료가 둘 이상인 과목 (보관한 과목은 빼고, 보고 있는 과목은 남긴다)
+  const orderable = subjects.filter((x) => (counts.get(x.id) ?? 0) > 1 && (!archivedIds.has(x.id) || x.id === selected));
   const canOrder = organize && !query && (subject ? shown.length > 1 : orderable.length > 0);
   const organizeMenu: MenuItem[] = [
     ...(total ? [{ label: '여러 개 고르기', icon: ICONS.select, onSelect: () => startSelect() }] : []),
@@ -730,6 +731,13 @@ export function LibraryView() {
       ) : shown.length === 0 ? (
         query ? (
           <EmptyState title="찾는 자료가 없어요" body={`'${query}'가 들어간 자료가 없어요.`} />
+        ) : !selected && data.sources.length > 0 ? (
+          // 자료가 모두 보관한 과목에 있다 ('전체'에서는 빼서)
+          <EmptyState
+            title="보관한 과목의 자료만 있어요"
+            body="'모든 과목'에서 보관한 과목을 열거나 다시 꺼낼 수 있어요. 새 자료를 넣어도 좋아요."
+            action={<Button onClick={() => setDrawer(true)}>모든 과목 보기</Button>}
+          />
         ) : (
           <DropHint onAdd={() => quick.openComposer(selected ?? undefined)} subjectName={subject?.name} />
         )

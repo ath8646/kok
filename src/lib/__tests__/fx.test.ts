@@ -68,9 +68,11 @@ function checkFx(t: TokenMap, f: FxMap, fx: ThemeFx, mode: Mode, label: string, 
   // 작은 카드 빛
   const [dt, da] = parts(f['--detail-tint']);
   expectReadable(mix(s, dt, da), want(card, s), `${label} detail`);
-  // 두 색 버튼·고른 칩: 글자 4.5, + 버튼 아이콘 3, 아래 메뉴 고른 칸의 아이콘 3, 공부한 날 체크 3
-  expect(contrast(t['--accent-ink'], f['--btn-2']), `${label} btn-2`).toBeGreaterThanOrEqual(4.5);
-  expect(contrast(t['--fab-ink'], f['--fab-2']), `${label} fab-2`).toBeGreaterThanOrEqual(3);
+  // 두 색 버튼·고른 칩: 글자 4.5, + 버튼 아이콘 3 (그라데이션 가운데도), 아래 메뉴 고른 칸의 아이콘 3, 공부한 날 체크 3
+  for (const u of [0, 0.25, 0.5, 0.75, 1]) {
+    expect(contrast(t['--accent-ink'], mix(t['--accent'], f['--btn-2'], u)), `${label} btn ${u}`).toBeGreaterThanOrEqual(4.5);
+    expect(contrast(t['--fab-ink'], mix(t['--fab'], f['--fab-2'], u)), `${label} fab ${u}`).toBeGreaterThanOrEqual(3);
+  }
   for (const k of ['--chip-on-1', '--chip-on-2'] as const) expect(contrast(f['--chip-on-ink'], f[k]), `${label} ${k}`).toBeGreaterThanOrEqual(4.5);
   for (const k of ['--pill-1', '--pill-2'] as const) expect(contrast(t['--accent'], f[k]), `${label} ${k}`).toBeGreaterThanOrEqual(3);
   if (fx.details) expect(contrast(t['--fab-ink'], f['--bar-2']), `${label} bar-2`).toBeGreaterThanOrEqual(3);
@@ -103,7 +105,7 @@ describe('화면 꾸미기 (themes/fx.ts)', () => {
   });
 
   it('내가 만든 테마 (아무 색 × 빛 색 × 꾸미기)도 같은 약속을 지킨다', () => {
-    for (let i = 0; i < 80; i++)
+    for (let i = 0; i < 400; i++)
       for (const mode of MODES) {
         const base = BASE_TOKENS[mode];
         const p = fitPalette({ bg: randomHex(i), surface: randomHex(i + 500), accent: randomHex(i + 900) }, mode, {

@@ -210,6 +210,17 @@ export function QuickAddProvider({
       return subjectsRef.current;
     }
   }, []);
+  /**
+   * 보관한 과목에 자료를 넣으면 DB(kok_touch_subject)가 보관을 푼다: 여기 목록도 바로 고치고 다른 화면(자료함 등)에도 알린다
+   * (그대로 두면 방금 넣은 과목이 고르는 목록·처음 과목에서 빠진다)
+   */
+  const touchSubject = useCallback((id: string) => {
+    if (!subjectsRef.current.find((s) => s.id === id)?.archived) return;
+    const list = subjectsRef.current.map((s) => (s.id === id ? { ...s, archived: false } : s));
+    subjectsRef.current = list;
+    setSubjects(list);
+    window.dispatchEvent(new Event(SUBJECTS_CHANGED));
+  }, []);
   useEffect(() => {
     let alive = true;
     fetchSubjects()
@@ -447,6 +458,7 @@ export function QuickAddProvider({
         }
         prepared.current.delete(it.key);
         update(it.key, { status: 'done', sourceId });
+        touchSubject(it.subjectId);
         window.dispatchEvent(new CustomEvent(SOURCES_CHANGED, { detail: { id: sourceId } }));
         refreshMe().catch(() => {});
         setTimeout(() => remove(it.key), 2600);
@@ -454,7 +466,7 @@ export function QuickAddProvider({
         update(it.key, { status: 'error', error: (e as Error).message || '넣지 못했어요.' });
       }
     },
-    [update, remove, waitForSlot, waitForAppend, prepare, upload, create, refreshMe],
+    [update, remove, waitForSlot, waitForAppend, prepare, upload, create, refreshMe, touchSubject],
   );
 
   /**
@@ -673,6 +685,7 @@ export function QuickAddProvider({
           body: JSON.stringify({ subjectId, title, ...(review ? {} : { review: false }) }),
         });
         writeLast(meRef.current.userId, subjectId);
+        touchSubject(subjectId);
         window.dispatchEvent(new CustomEvent(SOURCES_CHANGED, { detail: { id: r.id } }));
         closeComposer();
         router.push(`/notes/${r.id}`);
@@ -682,7 +695,7 @@ export function QuickAddProvider({
         return false;
       }
     },
-    [composerSubject, toast, closeComposer, router, review],
+    [composerSubject, toast, closeComposer, router, review, touchSubject],
   );
 
   // ---------------------------------------------------------- 끌어다 놓기, 붙여 넣기
@@ -1143,6 +1156,18 @@ function Composer({
                       placeholder="과목 찾기 (ㄱㅎ처럼도)"
                       value={pickQuery}
                       onChange={(e) => setPickQuery(e.target.value)}
+                      onKeyDown={(e) => {
+                        // 입력창(form) 안이라 엔터가 자료 보내기가 되지 않게: 맞는 첫 과목을 고른다
+                        if (isSubmitKey(e.nativeEvent)) {
+                          e.preventDefault();
+                          const first = pickList[0];
+                          if (!first) return;
+                          onSubject(first.id);
+                          setPicking(false);
+                          setPickQuery('');
+                          area.current?.focus();
+                        }
+                      }}
                     />
                   ) : null}
                   <div className="grid max-h-60 gap-0.5 overflow-y-auto" role="listbox" aria-label="과목">

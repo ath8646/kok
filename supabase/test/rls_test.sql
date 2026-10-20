@@ -1029,6 +1029,10 @@ end $$;
 reset role;
 
 -- 과목 서랍: 고정·보관은 내 과목만 고치고, 자료를 넣으면 최근 쓴 때가 바뀌고 보관이 풀린다
+do $$ begin
+  if has_function_privilege('authenticated', 'public.kok_touch_subject()', 'execute') then raise exception 'students must not execute kok_touch_subject'; end if;
+  if has_function_privilege('anon', 'public.kok_touch_subject()', 'execute') then raise exception 'anon must not execute kok_touch_subject'; end if;
+end $$;
 set role authenticated;
 select set_config('request.jwt.claim.sub', '11111111-1111-1111-1111-111111111111', false);
 do $$

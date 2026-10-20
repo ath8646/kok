@@ -26,7 +26,8 @@ export async function fetchAll<T>(make: (from: number, to: number) => PromiseLik
 const SUBJECT_COLS = 'id, name, color, exam_date, position, created_at';
 /** 과목 서랍 칸 (고정·보관·최근 쓴 때). schema.sql 을 다시 실행하기 전에는 없어서, 처음 읽을 때 알아낸다 */
 const DRAWER_COLS = 'pinned, archived, used_at';
-let drawerCols: boolean | null = null;
+/** 칸이 없다고 알아낸 때 (1분 동안만 믿는다: 그 사이 schema.sql 을 다시 실행했으면 다시 읽어 본다) */
+let drawerColsMissingAt = 0;
 
 export async function fetchSubjects(): Promise<SubjectRow[]> {
   const read = (more: boolean) =>
@@ -35,14 +36,11 @@ export async function fetchSubjects(): Promise<SubjectRow[]> {
       .select(more ? `${SUBJECT_COLS}, ${DRAWER_COLS}` : SUBJECT_COLS)
       .order('position')
       .order('created_at');
-  if (drawerCols !== false) {
+  if (Date.now() - drawerColsMissingAt > 60_000) {
     const { data, error } = await read(true);
-    if (!error) {
-      drawerCols = true;
-      return (data ?? []) as unknown as SubjectRow[];
-    }
+    if (!error) return (data ?? []) as unknown as SubjectRow[];
     if (!missingColumn(error, 'pinned|archived|used_at')) throw error;
-    drawerCols = false;
+    drawerColsMissingAt = Date.now();
   }
   const { data, error } = await read(false);
   if (error) throw error;

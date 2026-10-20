@@ -124,6 +124,7 @@ const TAB_GLOW: Record<Mode, [number, number]> = { light: [0.2, 0.17], dark: [0.
  * - top: 폰 큰 제목 아래 부제(위에서 약 175px)·노트 제목 아래 줄(약 115px), 넓은 화면 부제(약 125px)·왼쪽 메뉴 글자(약 110px~) → 0.2 이하
  * - bottom: 폰은 아래 메뉴 바로 위(아래에서 약 66px), 넓은 화면은 화면 맨 아래 → 0.5 이하
  * - hero: 카드 안 글자는 빛이 시작하는 오른쪽 위 모서리에서 떨어져 있다 → 0.6
+ *   (그래서 빛나는 카드의 오른쪽 위 모서리 가까이에는 카드 바탕 위에 바로 놓이는 색 글자를 두지 않는다)
  * - tab: 아래 메뉴 글자는 빛이 시작하는 아래 모서리 가까이 있다 → 0.85
  */
 export const AURA_TEXT_SHARE = {
@@ -190,6 +191,18 @@ function fitUnder(c: string, ink: string, min: number): string {
 }
 
 /**
+ * 두 색 그라데이션(a → 끝 색)의 끝 색: 그라데이션 어디서든(가운데도) 글자(ink)가 min 이상이게.
+ * 모자라면 끝 색을 조금 더 맞추고, 그래도 안 되면 한 색(a) 그대로
+ */
+function gradientEnd(a: string, b: string, ink: string, min: number): string {
+  for (const target of [min, min + 0.2, min + 0.5, min + 1]) {
+    const end = fitUnder(b, ink, target);
+    if ([0.25, 0.5, 0.75, 1].every((u) => contrast(ink, mix(a, end, u)) >= min)) return end;
+  }
+  return a;
+}
+
+/**
  * 화면 꾸미기 색 칸.
  * t: 테마 색 칸, fx: 꾸미기, preset: 기본 테마면 그 이름(빛 색을 맞춘 짝으로),
  * pageBases: 화면 바탕 위 글자 밑에 올 수 있는 색 (기본은 바탕색 하나, 배경 그림이 있으면 그림이 비친 색들도)
@@ -223,8 +236,8 @@ export function fxTokens(t: TokenMap, fx: ThemeFx, mode: Mode, preset: ThemeColo
   const fab = t['--fab'];
   const fabInk = t['--fab-ink'];
   const colorful = chroma(accent) >= 24;
-  const btn2 = fx.buttons && colorful ? fitUnder(c2, accentInk, 4.5) : accent;
-  const fab2 = fx.buttons && chroma(fab) >= 24 ? fitUnder(c2, fabInk, 3) : fab;
+  const btn2 = fx.buttons && colorful ? gradientEnd(accent, c2, accentInk, 4.5) : accent;
+  const fab2 = fx.buttons && chroma(fab) >= 24 ? gradientEnd(fab, c2, fabInk, 3) : fab;
   const glowColor = colorful ? btn2 : c2;
   // 아래 메뉴의 고른 칸: 아이콘(포인트 색)이 3 이상 보이는 만큼만 물든다
   const pillA = fx.buttons ? floor3(tintCap(surface, accent, [[accent, 3]], 0.16)) : 0;
@@ -264,7 +277,7 @@ export function fxTokens(t: TokenMap, fx: ThemeFx, mode: Mode, preset: ThemeColo
     '--pill-1': fx.buttons ? mix(surface, accent, pillA) : t['--accent-soft'],
     '--pill-2': fx.buttons ? mix(surface, c2, pillB) : t['--accent-soft'],
     // 공부한 날 동그라미에는 체크 아이콘(+ 버튼 아이콘 색)이 올라가서 3 이상
-    '--bar-2': fx.details ? fitUnder(c2, fabInk, 3) : fab,
+    '--bar-2': fx.details ? gradientEnd(fab, c2, fabInk, 3) : fab,
     '--detail-glow': rgba(c2, fx.details ? 0.55 : 0),
     '--detail-tint': rgba(c2, tint),
     '--fx-detail': fx.details ? '1' : '0',

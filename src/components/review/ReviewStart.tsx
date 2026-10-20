@@ -109,141 +109,144 @@ export function ReviewStart({
   const kindList = KIND_ORDER.filter((k) => kinds[k] > 0);
 
   return (
-    <section className="kok-card kok-hero grid gap-5 p-5" aria-label="복습 고르기">
-      {periods && counts ? (
-        <Group label="언제 공부한 문제를 풀까요?" id="rv-period">
-          <div role="radiogroup" aria-labelledby="rv-period" className="flex flex-wrap gap-2">
-            {REVIEW_PERIODS.map((p, i) => (
-              <ChoiceChip
-                key={p}
-                on={choice.period === p}
-                onPick={() => set({ period: p })}
-                onKeyDown={(e) => radioKeys(e, i, REVIEW_PERIODS.length, (n) => set({ period: REVIEW_PERIODS[n] }))}
-                count={counts[p]}
-              >
-                {PERIOD_LABEL[p]}
-              </ChoiceChip>
-            ))}
-          </div>
-        </Group>
-      ) : null}
-
-      {view.subjects.length > 1 ? (
-        <Group label="과목" id="rv-subject" style={{ ['--i' as string]: 1 }}>
-          {/* 과목이 많으면 옆으로 민다. 칩에 없는 과목은 '과목 더 보기'(과목 서랍)에서 */}
-          <div className="no-scrollbar -mx-5 flex gap-2 overflow-x-auto px-5 pb-0.5">
-            <div role="radiogroup" aria-labelledby="rv-subject" className="contents">
-              {[null, ...chips].map((s, i, all) => {
-                const id = s?.id ?? null;
-                return (
-                  <ChoiceChip
-                    key={id ?? 'all'}
-                    on={view.subjectId === id}
-                    onPick={() => set({ subjectId: id })}
-                    onKeyDown={(e) => radioKeys(e, i, all.length, (n) => set({ subjectId: all[n]?.id ?? null }))}
-                    count={id ? (view.subjectCounts.get(id) ?? 0) : view.allCount}
-                    dot={s ? subjectVar(s.color) : undefined}
-                  >
-                    {s ? s.name : '모든 과목'}
-                  </ChoiceChip>
-                );
-              })}
+    <>
+      <section className="kok-card kok-hero grid gap-5 p-5" aria-label="복습 고르기">
+        {periods && counts ? (
+          <Group label="언제 공부한 문제를 풀까요?" id="rv-period">
+            <div role="radiogroup" aria-labelledby="rv-period" className="flex flex-wrap gap-2">
+              {REVIEW_PERIODS.map((p, i) => (
+                <ChoiceChip
+                  key={p}
+                  on={choice.period === p}
+                  onPick={() => set({ period: p })}
+                  onKeyDown={(e) => radioKeys(e, i, REVIEW_PERIODS.length, (n) => set({ period: REVIEW_PERIODS[n] }))}
+                  count={counts[p]}
+                >
+                  {PERIOD_LABEL[p]}
+                </ChoiceChip>
+              ))}
             </div>
-            {more ? (
-              <button
-                type="button"
-                aria-haspopup="dialog"
-                onClick={() => setDrawerOpen(true)}
-                className="press inline-flex h-9 shrink-0 items-center gap-1.5 rounded-full border-2 border-dashed border-line px-3.5 text-sm font-semibold text-muted hover:text-ink"
-              >
-                <Icon d={ICONS.grid} size={15} strokeWidth={2.2} />
-                과목 더 보기 <span className="tabular-nums">{view.subjects.length - chips.length}</span>
-              </button>
-            ) : null}
-          </div>
-          {drawer ? (
-            <SubjectDrawer
-              open={drawerOpen}
-              onClose={() => setDrawerOpen(false)}
-              subjects={view.subjects}
-              selected={view.subjectId}
-              onPick={(id) => set({ subjectId: id })}
-              counts={view.subjectCounts}
-              countLabel={(n) => `${n}문제`}
-              all={{ label: '모든 과목', count: view.allCount }}
-              currentLabel="고름"
-            />
-          ) : null}
-        </Group>
-      ) : null}
+          </Group>
+        ) : null}
 
-      {!pool.length ? (
-        <NothingHere
-          due={periods && choice.period === 'due'}
-          capped={view.dueWaiting > 0}
-          dailyMax={review.dailyMax}
-          subject={!!view.subjectId}
-          style={{ ['--i' as string]: 2 }}
-        />
-      ) : (
-        <>
-          <Group label="얼마나 풀까요?" id="rv-time" style={{ ['--i' as string]: 2 }}>
-            {timed ? (
-              <div role="radiogroup" aria-labelledby="rv-time" className="grid grid-cols-3 gap-2">
-                {REVIEW_MINUTES.map((m, i) => {
-                  const p = plans[i];
-                  const on = choice.minutes === m;
+        {view.subjects.length > 1 ? (
+          <Group label="과목" id="rv-subject" style={{ ['--i' as string]: 1 }}>
+            {/* 과목이 많으면 옆으로 민다. 칩에 없는 과목은 '과목 더 보기'(과목 서랍)에서 */}
+            <div className="no-scrollbar -mx-5 flex gap-2 overflow-x-auto px-5 pb-0.5">
+              <div role="radiogroup" aria-labelledby="rv-subject" className="contents">
+                {[null, ...chips].map((s, i, all) => {
+                  const id = s?.id ?? null;
                   return (
-                    <button
-                      key={m}
-                      type="button"
-                      role="radio"
-                      aria-checked={on}
-                      tabIndex={on ? 0 : -1}
-                      onClick={() => set({ minutes: m })}
-                      onKeyDown={(e) => radioKeys(e, i, REVIEW_MINUTES.length, (n) => set({ minutes: REVIEW_MINUTES[n] }))}
-                      className={cx(
-                        'press grid min-w-0 content-start gap-1.5 rounded-2xl px-3.5 py-3 text-left ring-inset',
-                        on ? 'bg-accent-soft text-accent ring-2 ring-accent' : 'bg-surface-2 text-ink hover:bg-surface-3',
-                      )}
+                    <ChoiceChip
+                      key={id ?? 'all'}
+                      on={view.subjectId === id}
+                      onPick={() => set({ subjectId: id })}
+                      onKeyDown={(e) => radioKeys(e, i, all.length, (n) => set({ subjectId: all[n]?.id ?? null }))}
+                      count={id ? (view.subjectCounts.get(id) ?? 0) : view.allCount}
+                      dot={s ? subjectVar(s.color) : undefined}
                     >
-                      <span className="font-display text-[22px] leading-none tabular-nums">
-                        {m}
-                        <span className="ml-0.5 text-sm">분</span>
-                      </span>
-                      <span className={cx('truncate text-[13px] font-semibold', on ? 'text-accent' : 'text-muted')}>
-                        {p.all ? `전부 ${p.cards.length}문제` : m === REVIEW_MINUTES[0] ? `핵심 ${p.cards.length}문제` : `${p.cards.length}문제`}
-                      </span>
-                    </button>
+                      {s ? s.name : '모든 과목'}
+                    </ChoiceChip>
                   );
                 })}
               </div>
-            ) : (
-              <p className="flex items-center gap-2 rounded-2xl bg-surface-2 px-4 py-3 text-[15px] font-semibold">
-                <Icon d={ICONS.clock} size={18} className="shrink-0 text-muted" />
-                전부 {chosen.cards.length}문제 · {minutesText(chosen.seconds)}이면 다 풀어요
-              </p>
-            )}
-            {/* 어떤 문제를 골랐는지: 틀렸던 문제·중요한 개념이 먼저 들어간다 */}
-            <ul className="flex flex-wrap gap-x-3 gap-y-1 px-0.5 text-[13px] text-muted" aria-label="고른 문제">
-              {kindList.map((k) => (
-                <li key={k} className="inline-flex items-center gap-1.5">
-                  <span className={cx('h-1.5 w-1.5 rounded-full', KIND_DOT[k])} aria-hidden="true" />
-                  {PICK_KIND_LABEL[k]} <span className="font-semibold tabular-nums text-ink">{kinds[k]}</span>
-                </li>
-              ))}
-              {timed && chosen.all && chosen.seconds < choice.minutes * 60 - 60 ? <li>· {minutesText(chosen.seconds)}이면 다 풀어요</li> : null}
-            </ul>
+              {more ? (
+                <button
+                  type="button"
+                  aria-haspopup="dialog"
+                  onClick={() => setDrawerOpen(true)}
+                  className="press inline-flex h-9 shrink-0 items-center gap-1.5 rounded-full border-2 border-dashed border-line px-3.5 text-sm font-semibold text-muted hover:text-ink"
+                >
+                  <Icon d={ICONS.grid} size={15} strokeWidth={2.2} />
+                  과목 더 보기 <span className="tabular-nums">{view.subjects.length - chips.length}</span>
+                </button>
+              ) : null}
+            </div>
           </Group>
-          <div className="kok-fill grid gap-2" style={{ ['--i' as string]: 3 }}>
-            <Button size="lg" className="kok-cta w-full" busy={starting} onClick={() => onStart({ ...chosen, timed })}>
-              {chosen.cards.length}문제 시작
-            </Button>
-            <p className="text-balance text-center text-xs text-muted">시간이 지나도 고른 문제는 끝까지 풀 수 있어요.</p>
-          </div>
-        </>
-      )}
-    </section>
+        ) : null}
+
+        {!pool.length ? (
+          <NothingHere
+            due={periods && choice.period === 'due'}
+            capped={view.dueWaiting > 0}
+            dailyMax={review.dailyMax}
+            subject={!!view.subjectId}
+            style={{ ['--i' as string]: 2 }}
+          />
+        ) : (
+          <>
+            <Group label="얼마나 풀까요?" id="rv-time" style={{ ['--i' as string]: 2 }}>
+              {timed ? (
+                <div role="radiogroup" aria-labelledby="rv-time" className="grid grid-cols-3 gap-2">
+                  {REVIEW_MINUTES.map((m, i) => {
+                    const p = plans[i];
+                    const on = choice.minutes === m;
+                    return (
+                      <button
+                        key={m}
+                        type="button"
+                        role="radio"
+                        aria-checked={on}
+                        tabIndex={on ? 0 : -1}
+                        onClick={() => set({ minutes: m })}
+                        onKeyDown={(e) => radioKeys(e, i, REVIEW_MINUTES.length, (n) => set({ minutes: REVIEW_MINUTES[n] }))}
+                        className={cx(
+                          'press grid min-w-0 content-start gap-1.5 rounded-2xl px-3.5 py-3 text-left ring-inset',
+                          on ? 'bg-accent-soft text-accent ring-2 ring-accent' : 'bg-surface-2 text-ink hover:bg-surface-3',
+                        )}
+                      >
+                        <span className="font-display text-[22px] leading-none tabular-nums">
+                          {m}
+                          <span className="ml-0.5 text-sm">분</span>
+                        </span>
+                        <span className={cx('truncate text-[13px] font-semibold', on ? 'text-accent' : 'text-muted')}>
+                          {p.all ? `전부 ${p.cards.length}문제` : m === REVIEW_MINUTES[0] ? `핵심 ${p.cards.length}문제` : `${p.cards.length}문제`}
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+              ) : (
+                <p className="flex items-center gap-2 rounded-2xl bg-surface-2 px-4 py-3 text-[15px] font-semibold">
+                  <Icon d={ICONS.clock} size={18} className="shrink-0 text-muted" />
+                  전부 {chosen.cards.length}문제 · {minutesText(chosen.seconds)}이면 다 풀어요
+                </p>
+              )}
+              {/* 어떤 문제를 골랐는지: 틀렸던 문제·중요한 개념이 먼저 들어간다 */}
+              <ul className="flex flex-wrap gap-x-3 gap-y-1 px-0.5 text-[13px] text-muted" aria-label="고른 문제">
+                {kindList.map((k) => (
+                  <li key={k} className="inline-flex items-center gap-1.5">
+                    <span className={cx('h-1.5 w-1.5 rounded-full', KIND_DOT[k])} aria-hidden="true" />
+                    {PICK_KIND_LABEL[k]} <span className="font-semibold tabular-nums text-ink">{kinds[k]}</span>
+                  </li>
+                ))}
+                {timed && chosen.all && chosen.seconds < choice.minutes * 60 - 60 ? <li>· {minutesText(chosen.seconds)}이면 다 풀어요</li> : null}
+              </ul>
+            </Group>
+            <div className="kok-fill grid gap-2" style={{ ['--i' as string]: 3 }}>
+              <Button size="lg" className="kok-cta w-full" busy={starting} onClick={() => onStart({ ...chosen, timed })}>
+                {chosen.cards.length}문제 시작
+              </Button>
+              <p className="text-balance text-center text-xs text-muted">시간이 지나도 고른 문제는 끝까지 풀 수 있어요.</p>
+            </div>
+          </>
+        )}
+      </section>
+      {/* 과목 서랍은 카드 밖에 (빛나는 카드가 isolation 이라 그 안에 두면 시트가 아래 메뉴·위 띠 밑에 깔린다) */}
+      {drawer ? (
+        <SubjectDrawer
+          open={drawerOpen}
+          onClose={() => setDrawerOpen(false)}
+          subjects={view.subjects}
+          selected={view.subjectId}
+          onPick={(id) => set({ subjectId: id })}
+          counts={view.subjectCounts}
+          countLabel={(n) => `${n}문제`}
+          all={{ label: '모든 과목', count: view.allCount }}
+          currentLabel="고름"
+        />
+      ) : null}
+    </>
   );
 }
 

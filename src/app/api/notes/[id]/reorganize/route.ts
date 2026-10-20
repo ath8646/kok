@@ -83,7 +83,7 @@ export async function POST(req: NextRequest, ctx: RouteContext<'/api/notes/[id]/
     });
     const ai = zNote.parse(json);
     if (!ai.key_points.length) throw new UserFacingError('ai_bad_output', 'AI가 답을 제대로 만들지 못했어요. 다시 해 주세요.', 502);
-    const { note: next, qmap, finalIds } = settleReorganized(note.note, ai, zReorganize.parse(json).id_map, { maxKeyPoints, reserved });
+    const { note: next, qmap, finalIds } = settleReorganized(note.note, ai, zReorganize.parse(json).id_map, { reserved });
 
     // 보기 설정·추천 그림 같은 다른 칸은 그대로, 합친 노트 표시는 뗀다 (다시 정리했으니)
     const body: Record<string, unknown> = { ...note.raw, ...next };
@@ -93,13 +93,25 @@ export async function POST(req: NextRequest, ctx: RouteContext<'/api/notes/[id]/
     if (figures.length) body.figures = remapFigures(figures, qmap, finalIds);
     if (JSON.stringify(body).length > MAX_BODY_CHARS) throw new UserFacingError('note_too_long', TOO_LONG, 400);
 
+    // 마인드맵은 AI 를 기다린 뒤에 다시 읽어서 개념 번호만 바꾼다 (그동안 다른 곳에서 고친 가지를 덮어쓰지 않게:
+    // 저장하는 사이에 또 바뀌면 DB 함수가 updated_at 을 보고 멈춘다)
+    const { data: mmNow, error: mmErr } = await admin
+      .from('visuals')
+      .select('spec, updated_at')
+      .eq('note_id', note.id)
+      .eq('type', 'mindmap')
+      .maybeSingle();
+    if (mmErr) throw mmErr;
+    const mindmapNow = mmNow ? (zMindmap.safeParse(mmNow.spec).data ?? null) : null;
+    const nextMap = remapMindmap(mindmapNow, qmap, finalIds);
     const { data: version, error } = await admin.rpc('kok_reorganize_note', {
       p_user: acc.userId,
       p_note: note.id,
       p_body: body,
       p_qmap: qmap,
-      p_mindmap: remapMindmap(mindmap, qmap, finalIds),
+      p_mindmap: nextMap,
       p_updated: note.updatedAt,
+      p_mindmap_at: nextMap && mmNow ? String(mmNow.updated_at) : null,
     });
     if (error) throw dbError(error, MESSAGES);
     return Response.json({ ok: true, version: Number(version) });

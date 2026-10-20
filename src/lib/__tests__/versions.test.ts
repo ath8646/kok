@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { materialLabel, removalPlan, toVersionRow, versionItems, type Material, type VersionRow } from '@/lib/versions';
+import { materialLabel, onlyInVersion, removalPlan, toVersionRow, versionItems, type Material, type VersionRow } from '@/lib/versions';
 import { applyNoteAddition } from '@/lib/note-edit';
 import { zNote } from '@/lib/ai/schemas';
 
@@ -13,7 +13,7 @@ function row(number: number, materials: Material[] = [first], question_ids: stri
 describe('버전 기록 목록', () => {
   it('버전 행이 없으면 지금 노트가 버전 1이다', () => {
     const items = versionItems([], 1, { first, questionCount: 7, createdAt: '2026-10-01T00:00:00Z', existing: new Set() });
-    expect(items).toEqual([{ number: 1, current: true, kind: 'first', added: first, materialCount: 1, questionCount: 7, createdAt: '2026-10-01T00:00:00Z' }]);
+    expect(items).toEqual([{ number: 1, current: true, kind: 'first', added: [first], materialCount: 1, questionCount: 7, createdAt: '2026-10-01T00:00:00Z' }]);
   });
 
   it('합친 노트는 버전 행이 없어도 합쳐 들어온 자료까지 센다', () => {
@@ -30,9 +30,9 @@ describe('버전 기록 목록', () => {
     const items = versionItems(rows, 3, { first, questionCount: 1, createdAt: null, existing: new Set() });
     expect(items.map((i) => i.kind)).toEqual(['first', 'reorganized', 'added']);
     // 처음 버전은 (합친 자료가 있어도) 처음 자료를, 다시 정리한 버전은 자료 없이
-    expect(items[0].added).toEqual(first);
-    expect(items[1].added).toBeNull();
-    expect(items[2].added?.source_id).toBe('c2');
+    expect(items[0].added).toEqual([first]);
+    expect(items[1].added).toEqual([]);
+    expect(items[2].added.map((m) => m.source_id)).toEqual(['c2']);
     expect(toVersionRow({ id: 'x', number: 2, kind: 'reorganize' }).kind).toBe('reorganize');
     expect(toVersionRow({ id: 'x', number: 2, kind: 'hack' }).kind).toBeNull();
   });
@@ -41,9 +41,39 @@ describe('버전 기록 목록', () => {
     const rows = [row(2, [first, child], ['a', 'b', 'gone']), row(1, [first], ['a'])];
     const items = versionItems(rows, 1, { first, questionCount: 3, createdAt: null, existing: new Set(['a', 'b']) });
     expect(items.map((i) => i.number)).toEqual([1, 2]);
-    expect(items[0]).toMatchObject({ current: true, added: first, questionCount: 3 });
+    expect(items[0]).toMatchObject({ current: true, added: [first], questionCount: 3 });
     // 지난 버전: 지워진 문제(gone)는 세지 않는다
-    expect(items[1]).toMatchObject({ current: false, added: child, materialCount: 2, questionCount: 2 });
+    expect(items[1]).toMatchObject({ current: false, added: [child], materialCount: 2, questionCount: 2 });
+  });
+
+  it('노트를 합친 버전은 합쳐 들어온 자료들을 보여 준다 (added 표시)', () => {
+    const merged = [
+      { ...child, source_id: 'm1', title: '둘째 노트', added: true },
+      { ...child, source_id: 'm2', title: '셋째 노트', added: true },
+    ];
+    const rows: VersionRow[] = [
+      { ...row(1, [first]), kind: 'first' },
+      { ...row(2, [first, { ...child, added: true }]), kind: 'append' },
+      { ...row(3, [first, child, ...merged]), kind: 'merge' },
+    ];
+    const items = versionItems(rows, 3, { first, questionCount: 4, createdAt: null, existing: new Set() });
+    expect(items.map((i) => i.kind)).toEqual(['first', 'added', 'merged']);
+    expect(items[1].added.map((m) => m.source_id)).toEqual(['c1']);
+    expect(items[2].added.map((m) => m.title)).toEqual(['둘째 노트', '셋째 노트']);
+    expect(items[2].materialCount).toBe(4);
+    expect(toVersionRow({ id: 'x', number: 3, kind: 'merge', materials: [{ source_id: 'm1', added: true }] }).materials[0].added).toBe(true);
+  });
+
+  it('버전을 지우면 같이 지워지는 자료는 그 버전에만 있는 더한 자료다', () => {
+    const rows: VersionRow[] = [
+      row(1, [first]),
+      row(2, [first, child]),
+      row(3, [first, child, { ...child, source_id: 'm1', title: '합친 노트' }]),
+    ];
+    expect(onlyInVersion(rows, 3, 'p').map((m) => m.source_id)).toEqual(['m1']);
+    expect(onlyInVersion(rows, 2, 'p')).toEqual([]);
+    expect(onlyInVersion(rows, 1, 'p')).toEqual([]);
+    expect(onlyInVersion(rows, 9, 'p')).toEqual([]);
   });
 
   it('DB 행의 이상한 값은 버린다', () => {

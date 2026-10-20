@@ -12,6 +12,8 @@ import { Button, Chip, EnergyEstimate, ICONS, Icon, LinkButton, cx } from '../ui
 
 const KIND_ICON = { text: ICONS.pen, pdf: ICONS.file, image: ICONS.image } as const;
 const KIND_LABEL = { text: '글', pdf: 'PDF', image: '사진' } as const;
+/** 버전이 생긴 까닭 */
+const KIND_TITLE = { first: '처음 자료', added: '더한 자료', reorganized: 'AI로 다시 정리', merged: '노트 합치기' } as const;
 
 export type ParentSource = {
   id: string;
@@ -77,9 +79,9 @@ export function OriginalTab({
     <div className="grid gap-4">
       {versions.length ? (
         <section className="kok-card kok-rise grid gap-1 p-2" aria-label="버전 기록">
-          <div className="flex items-baseline justify-between px-2.5 pb-1 pt-2">
+          <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-0.5 px-2.5 pb-1 pt-2">
             <h2 className="font-display text-lg">버전 기록</h2>
-            <span className="text-xs text-muted">자료를 더하거나 다시 정리하면 버전이 생겨요</span>
+            <span className="text-xs text-muted">자료를 더하거나, 합치거나, 다시 정리하면 생겨요</span>
           </div>
           <ol className="grid gap-1">
             {items.map((it) => {
@@ -99,15 +101,18 @@ export function OriginalTab({
                     <div className="min-w-0 flex-1">
                       <p className="flex flex-wrap items-center gap-1.5 font-semibold">
                         <span>
-                          버전 {it.number} · {it.kind === 'first' ? '처음 자료' : it.kind === 'reorganized' ? 'AI로 다시 정리' : '더한 자료'}
+                          버전 {it.number} · {KIND_TITLE[it.kind]}
                         </span>
                         {it.current ? <Chip tone="accent">지금 쓰는 버전</Chip> : null}
                         {seeing && !it.current ? <Chip tone="hl">보는 중</Chip> : null}
                       </p>
-                      {it.added ? (
+                      {it.added.length ? (
                         <p className="flex min-w-0 items-center gap-1.5 text-sm">
-                          <Icon d={KIND_ICON[it.added.kind]} size={15} className="shrink-0 text-muted" />
-                          <span className="truncate">{materialLabel(it.added)}</span>
+                          <Icon d={it.kind === 'merged' ? ICONS.merge : KIND_ICON[it.added[0].kind]} size={15} className="shrink-0 text-muted" />
+                          <span className="truncate">
+                            {materialLabel(it.added[0])}
+                            {it.added.length > 1 ? ` 외 ${it.added.length - 1}개` : ''}
+                          </span>
                         </p>
                       ) : it.kind === 'reorganized' ? (
                         <p className="flex min-w-0 items-center gap-1.5 text-sm">

@@ -9,8 +9,15 @@ import { UserFacingError, errorResponse } from '@/lib/server/errors';
 import { loadOwnedNote, noteForPrompt } from '@/lib/server/notes';
 import { runTaskFull } from '@/lib/server/tasks';
 import { textBlock } from '@/lib/server/claude';
-import { removeFolder } from '@/lib/server/files';
-import { chatAttachmentMetas, chatFileBlocks, chatFolder, historyLine, readChatFiles, zChatAttachments } from '@/lib/server/chat-input';
+import {
+  chatAttachmentMetas,
+  chatFileBlocks,
+  chatFolderIdsOfNotes,
+  historyLine,
+  readChatFiles,
+  removeChatFolders,
+  zChatAttachments,
+} from '@/lib/server/chat-input';
 import { readChatAnswer } from '@/lib/chat-solution';
 import { CHAT_SYSTEM, chatPrompt, wrap } from '@/lib/ai/prompts';
 import { noteChatJsonSchema, toQuestionRow, zChat, zQuizItem } from '@/lib/ai/schemas';
@@ -167,10 +174,12 @@ export async function DELETE(req: NextRequest, ctx: RouteContext<'/api/notes/[id
     assertUuid(id);
     const { admin, acc } = await requireAccount();
     const note = await loadOwnedNote(admin, id, acc.userId);
+    // 합친 노트의 채팅에는 합쳐진 노트의 폴더(chat/그 노트의 자료 번호/)에 보관한 파일도 있다: 기록을 지우기 전에 찾아 둔다
+    const folders = [note.source_id, ...(await chatFolderIdsOfNotes(admin, acc.userId, [note.id]))];
     const { error } = await admin.from('chat_messages').delete().eq('note_id', note.id).eq('user_id', acc.userId);
     if (error) throw error;
     try {
-      await removeFolder(admin, chatFolder(acc.userId, note.source_id));
+      await removeChatFolders(admin, acc.userId, folders);
     } catch (e) {
       console.warn('[kok] chat files not removed', e);
     }

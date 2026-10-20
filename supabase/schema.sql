@@ -448,9 +448,38 @@ drop trigger if exists note_versions_touch on public.note_versions;
 create trigger note_versions_touch before update on public.note_versions
   for each row execute function public.kok_touch_updated_at();
 
--- 버전이 생긴 까닭: first(처음 자료) · append(자료를 더함) · reorganize(합친 노트를 AI 로 다시 정리).
+-- 버전이 생긴 까닭: first(처음 자료) · append(자료를 더함) · reorganize(합친 노트를 AI 로 다시 정리) · merge(다른 노트를 합침).
 -- 예전 버전은 null (번호 1이면 처음 자료, 아니면 더한 자료로 본다). 학생은 읽기만 한다
-alter table public.note_versions add column if not exists kind text check (kind is null or kind in ('first', 'append', 'reorganize'));
+alter table public.note_versions add column if not exists kind text;
+-- 'merge' 가 없는 예전 검사만 바꾼다 (매번 바꾸면 표 전체를 잠그고 다시 검사한다)
+do $$
+begin
+  if not exists (
+    select 1 from pg_constraint
+     where conrelid = 'public.note_versions'::regclass and conname = 'note_versions_kind_check'
+       and pg_get_constraintdef(oid) like '%merge%'
+  ) then
+    alter table public.note_versions drop constraint if exists note_versions_kind_check;
+    alter table public.note_versions add constraint note_versions_kind_check
+      check (kind is null or kind in ('first', 'append', 'reorganize', 'merge'));
+  end if;
+end $$;
+-- 버전마다 그 버전의 문제가 가리키던 개념 번호 {문제 번호: 개념 번호 (null 이면 개념 없음)}.
+-- 'AI로 다시 정리'는 문제의 개념 번호를 바꾸니까, 버전을 바꾸면 그 버전의 번호로 되돌린다. 예전 행은 null (되돌리지 않는다).
+-- 지난 버전을 보며 문제의 개념을 바꾸면 화면이 그 버전 행의 qkeys 를 고친다 (지금 버전의 문제 행은 그대로)
+alter table public.note_versions add column if not exists qkeys jsonb;
+do $$
+begin
+  if not exists (
+    select 1 from pg_constraint
+     where conrelid = 'public.note_versions'::regclass and conname = 'note_versions_qkeys_check'
+       and pg_get_constraintdef(oid) like '%pg_column_size%'
+  ) then
+    alter table public.note_versions drop constraint if exists note_versions_qkeys_check;
+    alter table public.note_versions add constraint note_versions_qkeys_check
+      check (qkeys is null or (jsonb_typeof(qkeys) = 'object' and pg_column_size(qkeys) <= 262144));
+  end if;
+end $$;
 
 -- version_seq 가 생기기 전에 만든 버전 번호도 다시 쓰지 않게 채운다 (모자란 노트만 한 번 바뀐다)
 update public.notes n
@@ -757,6 +786,13 @@ grant update (spec) on public.visuals to authenticated;
 -- 노트 버전: 보기, 지난 버전의 정리·그림·문제 목록 고치기 (만들기·바꾸기·지우기는 서버가 한다)
 grant select on public.note_versions to authenticated;
 grant update (title, body, visuals, question_ids) on public.note_versions to authenticated;
+-- 지난 버전에서 문제의 개념 바꾸기 (지금 버전 행은 RLS 가 막는다). 칸이 없는 예전 DB 면 건너뛴다
+do $$
+begin
+  if exists (select 1 from information_schema.columns where table_schema = 'public' and table_name = 'note_versions' and column_name = 'qkeys') then
+    grant update (qkeys) on public.note_versions to authenticated;
+  end if;
+end $$;
 
 -- 노트 채팅: 보기, 지우기 (쓰기는 서버가 AI 답과 함께 한다)
 grant select, delete on public.chat_messages to authenticated;
@@ -1384,6 +1420,34 @@ $$;
 -- ---------------------------------------------------------------------
 -- 노트 버전 (서버 전용)
 -- ---------------------------------------------------------------------
+-- 지금 버전 문제들이 가리키는 개념 번호 {문제 번호: 개념 번호} (note_versions.qkeys).
+-- 칸 한도보다 크면 null (그 버전은 되돌리지 않는다: 버전 저장이 멈추지 않게)
+create or replace function public.kok_note_qkeys(p_note uuid)
+returns jsonb
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select case when pg_column_size(m) <= 262144 then m end
+    from (
+      select coalesce(jsonb_object_agg(q.id::text, q.key_point_id), '{}'::jsonb) as m
+        from public.questions q
+       where q.note_id = p_note and q.status <> 'hidden'
+    ) x;
+$$;
+
+-- 버전 자료 목록에서 '이 버전에 새로 들어온 자료' 표시(added)를 뗀다 (새 버전으로 옮겨 적을 때)
+create or replace function public.kok_strip_added(p jsonb)
+returns jsonb
+language sql
+immutable
+set search_path = public
+as $$
+  select coalesce(jsonb_agg(case when jsonb_typeof(e) = 'object' then e - 'added' else e end order by i), '[]'::jsonb)
+    from jsonb_array_elements(case when jsonb_typeof(p) = 'array' then p else '[]'::jsonb end) with ordinality as t(e, i);
+$$;
+
 -- 지금 노트(notes·visuals·questions)를 지금 버전 행에 저장한다. 버전 행이 하나도 없으면 버전 1을 만든다
 create or replace function public.kok_note_snapshot(p_note uuid)
 returns void
@@ -1395,6 +1459,7 @@ declare
   n public.notes%rowtype;
   v_visuals jsonb;
   v_qids uuid[];
+  v_qkeys jsonb;
   v_materials jsonb;
   v_first boolean;
 begin
@@ -1406,8 +1471,9 @@ begin
     into v_visuals from public.visuals where note_id = n.id;
   select coalesce(array_agg(id order by created_at, id), '{}')
     into v_qids from public.questions where note_id = n.id and status <> 'hidden';
+  v_qkeys := public.kok_note_qkeys(n.id);
   update public.note_versions
-     set title = n.title, body = n.body, visuals = v_visuals, question_ids = v_qids
+     set title = n.title, body = n.body, visuals = v_visuals, question_ids = v_qids, qkeys = v_qkeys
    where note_id = n.id and number = n.current_version;
   if not found then
     -- 처음 버전을 만들 때 (자료를 처음 더하거나 AI 로 다시 정리할 때): 지금 노트가 버전 1.
@@ -1422,8 +1488,8 @@ begin
     else
       v_materials := '[]'::jsonb;
     end if;
-    insert into public.note_versions (user_id, note_id, number, title, body, visuals, question_ids, materials, kind)
-    values (n.user_id, n.id, n.current_version, n.title, n.body, v_visuals, v_qids, v_materials, case when v_first then 'first' end);
+    insert into public.note_versions (user_id, note_id, number, title, body, visuals, question_ids, qkeys, materials, kind)
+    values (n.user_id, n.id, n.current_version, n.title, n.body, v_visuals, v_qids, v_qkeys, v_materials, case when v_first then 'first' end);
   end if;
 end;
 $$;
@@ -1496,8 +1562,9 @@ begin
   perform public.kok_note_snapshot(n.id);
   select greatest(coalesce(max(number), 0), n.version_seq, n.current_version) + 1 into v_no from public.note_versions where note_id = n.id;
   select materials into v_materials from public.note_versions where note_id = n.id and number = n.current_version;
-  v_materials := coalesce(v_materials, '[]'::jsonb)
-    || jsonb_build_array(jsonb_build_object('source_id', c.id, 'kind', c.kind, 'title', c.title, 'page_count', c.page_count));
+  -- 새 버전의 자료 = 지금 버전의 자료 + 이번에 더한 자료 (added: 버전 기록에 '더한 자료'로 보인다)
+  v_materials := public.kok_strip_added(v_materials)
+    || jsonb_build_array(jsonb_build_object('source_id', c.id, 'kind', c.kind, 'title', c.title, 'page_count', c.page_count, 'added', true));
 
   update public.notes set body = p_note, current_version = v_no, version_seq = v_no where id = n.id;
   delete from public.visuals where note_id = n.id;
@@ -1510,8 +1577,8 @@ begin
     into v_visuals from public.visuals where note_id = n.id;
   select coalesce(array_agg(id order by created_at, id), '{}')
     into v_qids from public.questions where note_id = n.id and status <> 'hidden';
-  insert into public.note_versions (user_id, note_id, number, title, body, visuals, question_ids, materials, kind)
-  values (n.user_id, n.id, v_no, n.title, p_note, v_visuals, v_qids, v_materials, 'append');
+  insert into public.note_versions (user_id, note_id, number, title, body, visuals, question_ids, qkeys, materials, kind)
+  values (n.user_id, n.id, v_no, n.title, p_note, v_visuals, v_qids, public.kok_note_qkeys(n.id), v_materials, 'append');
 
   update public.sources
      set status = 'ready', step = 'done', progress = 100, error = null, locked_until = null,
@@ -1561,6 +1628,13 @@ begin
    where note_id = n.id and status in ('active', 'suspended') and not (id = any(t.question_ids));
   update public.questions set status = case when rested_hidden then 'suspended' else 'active' end, rested_hidden = false
    where note_id = n.id and status = 'hidden' and id = any(t.question_ids);
+  -- 그 버전의 문제가 가리키던 개념 번호로 ('AI로 다시 정리'가 바꾼 번호를 되돌린다. qkeys 가 없는 예전 행은 그대로)
+  if t.qkeys is not null then
+    update public.questions q
+       set key_point_id = t.qkeys->>(q.id::text)
+     where q.note_id = n.id and q.id = any(t.question_ids) and t.qkeys ? (q.id::text)
+       and q.key_point_id is distinct from t.qkeys->>(q.id::text);
+  end if;
   return p_number;
 end;
 $$;
@@ -1689,7 +1763,7 @@ revoke execute on function public.kok_reorder_subjects(uuid[]) from public, anon
 grant execute on function public.kok_reorder_subjects(uuid[]) to authenticated, service_role;
 
 -- 자료 옮기기 (서버 전용): 내 자료(처음 넣은 자료)를 다른 내 과목으로. 더한 자료·노트·문제·복습 카드·푼 기록의 과목도 같이 바꾼다.
--- 옮긴 자료는 새 과목에서 새 자료처럼 맨 앞에 온다 (내가 정한 순서 position 을 비운다).
+-- 옮긴 자료는 새 과목에서 새 자료처럼 맨 앞에 온다 (내가 정한 순서 position 을 비운다). 보관한 과목으로 옮기면 보관을 푼다.
 -- 정리 중인 자료도 옮길 수 있다 (노트는 마무리할 때의 과목에 만들어진다). 옮긴 자료 수를 돌려준다
 create or replace function public.kok_move_sources(p_user uuid, p_ids uuid[], p_subject uuid)
 returns int
@@ -1725,7 +1799,8 @@ begin
   update public.review_logs r set subject_id = p_subject
     from public.questions q
    where q.id = r.question_id and q.note_id = any(v_notes);
-  update public.subjects set used_at = now() where id = p_subject;
+  -- 자료를 넣을 때처럼: 최근 쓴 과목이 되고, 보관한 과목이면 보관을 푼다 (옮긴 노트가 '전체'에서 사라지지 않게)
+  update public.subjects set used_at = now(), archived = false where id = p_subject;
   return cardinality(v_top);
 end;
 $$;
@@ -1782,15 +1857,21 @@ $$;
 
 -- 노트 합치기 (서버 전용, AI 없이): p_from 노트들을 p_into 노트에 합친다. 합친 정리·그림은 서버가 만들어 보낸다 (p_body, p_visuals).
 -- - 합쳐지는 노트의 문제는 p_into 노트로 옮긴다: 개념 번호는 p_maps({노트 번호: {예전 번호: 새 번호}})로 바꾸고 출처 쪽은 비운다
---   (다른 자료의 쪽이라서). 푼 기록·복습 카드는 그대로 (과목만 따라간다). 지난 버전에만 있던 숨긴 문제는 지운다
+--   (다른 자료의 쪽이라서). 푼 기록·복습 카드는 그대로 (과목만 따라간다)
+-- - 합쳐지는 노트는 지금 쓰는 버전만 들어간다 (지난 버전에만 있던 숨긴 문제는 지운다). 자료는 지우지 않는다:
+--   지금 쓰는 버전에 없는 더한 자료(지난 버전을 쓰고 있거나, 다른 갈래의 버전에만 있는 것)가 있으면 'note_old_version <노트 번호>',
+--   더하지 못하고 멈춘 자료가 있으면 'failed_append <노트 번호>' 를 내고 합치지 않는다
 -- - 채팅도 옮긴다 (넣기를 기다리던 제안은 그만둔다: 예전 노트의 개념 번호라서)
--- - 합쳐지는 노트의 자료는 p_into 의 더한 자료가 된다 (원본 탭에 남는다). 지금 내용에 안 쓰이는 더한 자료
---   (지난 버전에만 있던 것, 실패한 것)는 지운다
+-- - 합쳐지는 노트의 자료는 p_into 의 더한 자료가 된다 (원본 탭에 남는다)
+-- - p_into 에 버전이 있으면 합치기 전 노트를 지금 버전 행에 남기고, 합친 노트는 새 버전(kind 'merge')이 된다.
+--   새 버전의 자료 = 지금 버전의 자료 + 합쳐 들어온 자료(added 표시). 버전을 바꾸거나 지워도 합친 자료·문제가 다른 버전과 엉키지 않는다.
+--   버전이 없는 노트는 그대로 고친다 (버전을 처음 만들 때 합쳐 들어온 자료가 버전 1의 자료가 된다)
 -- - 별표·복습은 하나라도 켜져 있으면 켠다 (복습에 나오던 문제가 빠지지 않게)
--- p_updated: 노트마다 읽은 때의 updated_at ({노트 번호: 값}). 그사이 바뀐 노트가 있으면 'stale_note'.
--- 지울 파일 경로(paths)와 지운 자료 번호(sources: 자료 그림·채팅 폴더는 서버가 지운다)를 돌려준다
+-- p_updated: 노트마다 읽은 때의 updated_at ({노트 번호: 값}), p_vis_at: 그림 행마다 읽은 때의 updated_at ({노트 번호: {종류: 값}}).
+-- 그사이 바뀐 것이 있으면 'stale_note'. {merged: 합친 노트 수, version: 새 버전 번호 (버전이 없는 노트면 null)} 를 돌려준다
+drop function if exists public.kok_merge_notes(uuid, uuid, uuid[], jsonb, jsonb, jsonb, jsonb);
 create or replace function public.kok_merge_notes(
-  p_user uuid, p_into uuid, p_from uuid[], p_body jsonb, p_visuals jsonb, p_maps jsonb, p_updated jsonb
+  p_user uuid, p_into uuid, p_from uuid[], p_body jsonb, p_visuals jsonb, p_maps jsonb, p_updated jsonb, p_vis_at jsonb
 )
 returns jsonb
 language plpgsql
@@ -1804,12 +1885,14 @@ declare
   v_all uuid[];
   v_mat jsonb := '[]'::jsonb;
   v_mmat jsonb;
-  v_drop uuid[];
-  v_paths text[] := '{}';
-  v_gone uuid[] := '{}';
+  v_base jsonb;
   v_moved uuid[];
   v_star boolean := false;
   v_review boolean := false;
+  v_versioned boolean;
+  v_no int;
+  v_visuals jsonb;
+  v_qids uuid[];
   v jsonb;
 begin
   if p_from is null or cardinality(p_from) < 1 or cardinality(p_from) > 20 or p_into = any(p_from)
@@ -1817,17 +1900,32 @@ begin
     raise exception 'bad_notes';
   end if;
   v_all := p_from || p_into;
-  -- 모든 노트를 같은 차례로 잠근다 (동시에 다른 차례로 합쳐도 멈추지 않게)
+  -- 모든 노트를 같은 차례로 잠근다 (동시에 다른 차례로 합쳐도 멈추지 않게). 그 다음 그림 행도
   perform 1 from public.notes where id = any(v_all) order by id for update;
   if (select count(*) from public.notes where id = any(v_all) and user_id = p_user) <> cardinality(v_all) then
     raise exception 'note_not_found';
   end if;
-  -- 읽은 뒤에 바뀐 노트가 있으면 합치지 않는다 (고친 것을 덮어쓰지 않게)
+  perform 1 from public.visuals where note_id = any(v_all) order by id for update;
+  -- 읽은 뒤에 바뀐 노트·그림이 있으면 합치지 않는다 (고친 것을 덮어쓰지 않게)
   if exists (
     select 1 from public.notes n
      where n.id = any(v_all)
        and n.updated_at is distinct from nullif(p_updated->>(n.id::text), '')::timestamptz
   ) then
+    raise exception 'stale_note';
+  end if;
+  if p_vis_at is null or jsonb_typeof(p_vis_at) <> 'object'
+     or exists (
+       select 1 from public.visuals x
+        where x.note_id = any(v_all)
+          and x.updated_at is distinct from nullif(p_vis_at->(x.note_id::text)->>x.type, '')::timestamptz
+     )
+     or exists (
+       select 1
+         from jsonb_each(p_vis_at) e(nid, types),
+              jsonb_object_keys(case when jsonb_typeof(e.types) = 'object' then e.types else '{}'::jsonb end) t(type)
+        where not exists (select 1 from public.visuals x where x.note_id::text = e.nid and x.type = t.type)
+     ) then
     raise exception 'stale_note';
   end if;
   -- 정리를 마친 처음 자료의 노트만, 자료를 더하는 중이 아닐 때만
@@ -1844,10 +1942,10 @@ begin
     raise exception 'append_running';
   end if;
 
-  select * into k from public.notes where id = p_into;
+  -- 합쳐지는 노트의 지금 자료: 버전이 있으면 지금 버전의 자료(처음 자료는 늘), 없으면 처음 자료와 정리를 마친 더한 자료.
+  -- 그 밖의 더한 자료(지난 버전에만 있는 것, 멈춘 것)가 있으면 합치지 않는다 (지우지 않게: 화면이 미리 알려 준다)
   foreach v_from in array p_from loop
     select * into m from public.notes where id = v_from;
-    -- 합쳐지는 노트의 지금 자료: 버전이 있으면 지금 버전의 자료(처음 자료는 늘), 없으면 처음 자료와 정리를 마친 더한 자료
     if exists (select 1 from public.note_versions where note_id = m.id) then
       select materials into v_mmat from public.note_versions where note_id = m.id and number = m.current_version;
       v_mmat := coalesce(v_mmat, '[]'::jsonb);
@@ -1862,17 +1960,30 @@ begin
         from public.sources x
        where x.id = m.source_id or (x.parent_id = m.source_id and x.status = 'ready');
     end if;
-    v_mat := v_mat || v_mmat;
+    if exists (select 1 from public.sources x where x.parent_id = m.source_id and x.status = 'error') then
+      raise exception 'failed_append %', m.id;
+    end if;
+    if exists (
+      select 1 from public.sources x
+       where x.parent_id = m.source_id
+         and not exists (select 1 from jsonb_array_elements(v_mmat) e where e->>'source_id' = x.id::text)
+    ) then
+      raise exception 'note_old_version %', m.id;
+    end if;
+    v_mat := v_mat || (select coalesce(jsonb_agg(e || '{"added": true}'::jsonb order by i), '[]'::jsonb)
+                         from jsonb_array_elements(v_mmat) with ordinality as t(e, i));
+  end loop;
 
-    -- 지금 내용에 안 쓰이는 더한 자료 (지난 버전에만 있던 것, 실패한 것)는 지운다
-    select coalesce(array_agg(x.id), '{}') into v_drop
-      from public.sources x
-     where x.parent_id = m.source_id
-       and not exists (select 1 from jsonb_array_elements(v_mmat) e where e->>'source_id' = x.id::text);
-    v_paths := v_paths || coalesce((select array_agg(fp) from public.sources x, unnest(x.file_paths) fp where x.id = any(v_drop)), '{}');
-    v_gone := v_gone || v_drop;
-    delete from public.sources where id = any(v_drop);
+  select * into k from public.notes where id = p_into;
+  v_versioned := exists (select 1 from public.note_versions where note_id = k.id);
+  if v_versioned then
+    -- 합치기 전 노트를 지금 버전 행에 남긴다 (합쳐 들어오는 문제가 섞이기 전에)
+    perform public.kok_note_snapshot(k.id);
+    select materials into v_base from public.note_versions where note_id = k.id and number = k.current_version;
+  end if;
 
+  foreach v_from in array p_from loop
+    select * into m from public.notes where id = v_from;
     -- 지난 버전에만 있던 숨긴 문제는 지운다 (합친 노트에는 지금 버전만 들어간다)
     delete from public.questions where note_id = m.id and status = 'hidden';
     with moved as (
@@ -1908,21 +2019,32 @@ begin
   for v in select * from jsonb_array_elements(coalesce(p_visuals, '[]'::jsonb)) loop
     insert into public.visuals (user_id, note_id, type, spec) values (k.user_id, k.id, v->>'type', v->'spec');
   end loop;
-  -- 버전이 있는 노트: 지금 버전의 자료 목록에 더한다 (버전 기록·버전 지우기가 합친 자료를 알게)
-  update public.note_versions set materials = materials || v_mat where note_id = k.id and number = k.current_version;
+  if v_versioned then
+    select greatest(coalesce(max(number), 0), k.version_seq, k.current_version) + 1 into v_no from public.note_versions where note_id = k.id;
+    update public.notes set current_version = v_no, version_seq = v_no where id = k.id;
+    select coalesce(jsonb_agg(jsonb_build_object('type', type, 'spec', spec) order by type), '[]'::jsonb)
+      into v_visuals from public.visuals where note_id = k.id;
+    select coalesce(array_agg(id order by created_at, id), '{}')
+      into v_qids from public.questions where note_id = k.id and status <> 'hidden';
+    insert into public.note_versions (user_id, note_id, number, title, body, visuals, question_ids, qkeys, materials, kind)
+    values (k.user_id, k.id, v_no, k.title, p_body, v_visuals, v_qids, public.kok_note_qkeys(k.id),
+            public.kok_strip_added(v_base) || v_mat, 'merge');
+  end if;
   update public.sources
      set starred = starred or v_star, in_review = in_review or v_review
    where id = k.source_id;
-  return jsonb_build_object('paths', to_jsonb(v_paths), 'sources', to_jsonb(v_gone), 'merged', cardinality(p_from));
+  return jsonb_build_object('merged', cardinality(p_from), 'version', v_no);
 end;
 $$;
 
 -- 합친 노트를 AI 로 다시 정리한 결과를 새 버전으로 저장한다 (서버 전용). 다시 정리하기 전의 노트는 그 버전 행에 남는다
--- (버전 기록에서 돌아갈 수 있다). 문제의 개념 번호는 p_qmap({예전 번호: 새 번호, '' 는 개념 없음})으로 바꾸고,
--- 마인드맵은 p_mindmap(개념 번호를 바꾼 것, null 이면 그대로)으로. p_updated: 읽은 때의 노트 updated_at
+-- (버전 기록에서 돌아갈 수 있다. 돌아가면 문제의 개념 번호도 그 버전의 번호로 돌아온다: qkeys).
+-- 문제의 개념 번호는 p_qmap({예전 번호: 새 번호, '' 는 개념 없음})으로 바꾸고, 마인드맵은 p_mindmap(개념 번호를 바꾼 것,
+-- null 이면 그대로)으로. p_updated: 읽은 때의 노트 updated_at, p_mindmap_at: p_mindmap 을 만든 마인드맵의 updated_at
 -- (그사이 바뀌었으면 'stale_note'). 새 버전 번호를 돌려준다
+drop function if exists public.kok_reorganize_note(uuid, uuid, jsonb, jsonb, jsonb, timestamptz);
 create or replace function public.kok_reorganize_note(
-  p_user uuid, p_note uuid, p_body jsonb, p_qmap jsonb, p_mindmap jsonb, p_updated timestamptz
+  p_user uuid, p_note uuid, p_body jsonb, p_qmap jsonb, p_mindmap jsonb, p_updated timestamptz, p_mindmap_at timestamptz
 )
 returns int
 language plpgsql
@@ -1935,6 +2057,7 @@ declare
   v_materials jsonb;
   v_visuals jsonb;
   v_qids uuid[];
+  v_mm boolean := p_mindmap is not null and jsonb_typeof(p_mindmap) = 'object';
 begin
   select * into n from public.notes where id = p_note and user_id = p_user for update;
   if not found then
@@ -1946,7 +2069,10 @@ begin
   if exists (select 1 from public.sources where parent_id = n.source_id and status in ('queued', 'processing')) then
     raise exception 'append_running';
   end if;
-  perform 1 from public.visuals where note_id = n.id for update;
+  perform 1 from public.visuals where note_id = n.id order by id for update;
+  if v_mm and (select updated_at from public.visuals where note_id = n.id and type = 'mindmap') is distinct from p_mindmap_at then
+    raise exception 'stale_note';
+  end if;
   perform public.kok_note_snapshot(n.id);
   select greatest(coalesce(max(number), 0), n.version_seq, n.current_version) + 1 into v_no from public.note_versions where note_id = n.id;
   select materials into v_materials from public.note_versions where note_id = n.id and number = n.current_version;
@@ -1955,7 +2081,7 @@ begin
   update public.questions q
      set key_point_id = nullif(p_qmap->>q.key_point_id, '')
    where q.note_id = n.id and q.status <> 'hidden' and q.key_point_id is not null and p_qmap ? q.key_point_id;
-  if p_mindmap is not null and jsonb_typeof(p_mindmap) = 'object' then
+  if v_mm then
     update public.visuals set spec = p_mindmap where note_id = n.id and type = 'mindmap';
   end if;
 
@@ -1963,20 +2089,25 @@ begin
     into v_visuals from public.visuals where note_id = n.id;
   select coalesce(array_agg(id order by created_at, id), '{}')
     into v_qids from public.questions where note_id = n.id and status <> 'hidden';
-  insert into public.note_versions (user_id, note_id, number, title, body, visuals, question_ids, materials, kind)
-  values (n.user_id, n.id, v_no, n.title, p_body, v_visuals, v_qids, coalesce(v_materials, '[]'::jsonb), 'reorganize');
+  insert into public.note_versions (user_id, note_id, number, title, body, visuals, question_ids, qkeys, materials, kind)
+  values (n.user_id, n.id, v_no, n.title, p_body, v_visuals, v_qids, public.kok_note_qkeys(n.id),
+          public.kok_strip_added(v_materials), 'reorganize');
   return v_no;
 end;
 $$;
 
 revoke execute on function public.kok_move_sources(uuid, uuid[], uuid) from public, anon, authenticated;
 revoke execute on function public.kok_merge_subjects(uuid, uuid, uuid) from public, anon, authenticated;
-revoke execute on function public.kok_merge_notes(uuid, uuid, uuid[], jsonb, jsonb, jsonb, jsonb) from public, anon, authenticated;
-revoke execute on function public.kok_reorganize_note(uuid, uuid, jsonb, jsonb, jsonb, timestamptz) from public, anon, authenticated;
+revoke execute on function public.kok_merge_notes(uuid, uuid, uuid[], jsonb, jsonb, jsonb, jsonb, jsonb) from public, anon, authenticated;
+revoke execute on function public.kok_reorganize_note(uuid, uuid, jsonb, jsonb, jsonb, timestamptz, timestamptz) from public, anon, authenticated;
+revoke execute on function public.kok_note_qkeys(uuid) from public, anon, authenticated;
+revoke execute on function public.kok_strip_added(jsonb) from public, anon, authenticated;
 grant execute on function public.kok_move_sources(uuid, uuid[], uuid) to service_role;
 grant execute on function public.kok_merge_subjects(uuid, uuid, uuid) to service_role;
-grant execute on function public.kok_merge_notes(uuid, uuid, uuid[], jsonb, jsonb, jsonb, jsonb) to service_role;
-grant execute on function public.kok_reorganize_note(uuid, uuid, jsonb, jsonb, jsonb, timestamptz) to service_role;
+grant execute on function public.kok_merge_notes(uuid, uuid, uuid[], jsonb, jsonb, jsonb, jsonb, jsonb) to service_role;
+grant execute on function public.kok_reorganize_note(uuid, uuid, jsonb, jsonb, jsonb, timestamptz, timestamptz) to service_role;
+grant execute on function public.kok_note_qkeys(uuid) to service_role;
+grant execute on function public.kok_strip_added(jsonb) to service_role;
 
 revoke execute on function public.kok_add_questions(uuid, jsonb, boolean) from public, anon, authenticated;
 revoke execute on function public.kok_finalize_source(uuid, text, jsonb, jsonb, jsonb, timestamptz) from public, anon, authenticated;

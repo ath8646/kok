@@ -458,7 +458,8 @@ export function Sheet({
   useEffect(() => {
     if (!open) return;
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') closeRef.current();
+      // 안쪽에서 Esc 를 먼저 쓴 경우(끌던 칸 내려놓기 등: preventDefault)는 닫지 않는다
+      if (e.key === 'Escape' && !e.defaultPrevented) closeRef.current();
     };
     window.addEventListener('keydown', onKey);
     ref.current?.focus();

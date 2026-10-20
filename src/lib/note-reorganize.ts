@@ -7,9 +7,12 @@ import { idMaker } from './note-merge';
 /** AI 가 알려 주는 개념 번호 옮김 (예전 번호 → 그 내용이 들어간 번호) */
 export type IdPair = { from: string; to: string };
 
-/** 다시 정리할 때 개념 수의 끝: 9개보다 적게 줄이라고 하지 않고, 많아도 12개 (문제·그림 만들기가 앞의 12개를 본다) */
+/**
+ * 다시 정리할 때 AI 에게 알려 주는 개념 수의 끝: 지금 개념 수 (9개보다 적게 줄이라고는 하지 않는다).
+ * 겹치는 것만 묶게 하고, 서로 다른 개념을 억지로 합치거나 빼게 하지 않는다 (노트 여러 개를 합친 노트는 개념이 많다)
+ */
 export function reorganizeMaxKeyPoints(current: number): number {
-  return Math.min(12, Math.max(9, current));
+  return Math.max(9, current);
 }
 
 const norm = (s: string) => s.replace(/\s+/g, ' ').trim();
@@ -59,7 +62,7 @@ export function settleReorganized(
   current: Note,
   ai: Note,
   idMap: IdPair[],
-  o: { maxKeyPoints: number; reserved?: Iterable<string> },
+  o: { reserved?: Iterable<string> } = {},
 ): { note: Note; qmap: Record<string, string>; finalIds: Set<string> } {
   const currentIds = new Set(current.key_points.map((k) => k.id));
   const reserved = new Set(o.reserved ?? []);
@@ -68,7 +71,8 @@ export function settleReorganized(
   const rename = new Map<string, string>();
   const used = new Set<string>();
   const kps: KeyPoint[] = [];
-  for (const kp of ai.key_points.slice(0, Math.max(1, o.maxKeyPoints))) {
+  // AI 가 준 개념은 모두 둔다 (잘라 내면 그 개념의 내용과 문제의 개념이 사라진다)
+  for (const kp of ai.key_points) {
     const raw = (kp.id || '').trim();
     let id = raw;
     if (!id || used.has(id) || (!currentIds.has(id) && reserved.has(id))) id = next();

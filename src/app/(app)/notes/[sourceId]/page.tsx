@@ -47,7 +47,16 @@ import { readFigures } from '@/lib/source-figures';
 import { zMindmap, zNote, zTable, zTimeline, type Mindmap, type TableSpec, type TimelineSpec } from '@/lib/ai/schemas';
 import type { QuestionRow, SubjectRow } from '@/lib/types';
 import { subjectVar } from '@/lib/colors';
-import { VERSION_LIST_COLS, VERSION_LIST_COLS_KIND, removalPlan, toVersionRow, type ChildSource, type VersionRow } from '@/lib/versions';
+import {
+  VERSION_LIST_COLS,
+  VERSION_LIST_COLS_KIND,
+  materialLabel,
+  onlyInVersion,
+  removalPlan,
+  toVersionRow,
+  type ChildSource,
+  type VersionRow,
+} from '@/lib/versions';
 import { previewText } from '@/lib/richtext';
 import { starredFirst } from '@/lib/note-order';
 import { practiceHref, rememberPracticeFrom } from '@/lib/review-mode';
@@ -57,7 +66,23 @@ type Tab = 'note' | 'visual' | 'questions' | 'original';
 type SourceFull = SourceRowWithUnit & { text_content: string | null; parent_id?: string | null };
 type NoteRow = { id: string; title: string; subject_id: string; body: Record<string, unknown>; updated_at: string; current_version?: number };
 /** 지난 버전: 그 버전 행에 저장된 정리·그림·문제 목록 */
-type OldDoc = { number: number; title: string; body: Record<string, unknown>; visuals: Visuals; questionIds: string[]; updatedAt: string };
+/** qkeys: 그 버전의 문제가 가리키는 개념 번호 {문제: 개념} (없으면 null: 예전 버전·칸이 없는 DB) */
+type OldDoc = {
+  number: number;
+  title: string;
+  body: Record<string, unknown>;
+  visuals: Visuals;
+  questionIds: string[];
+  qkeys: Record<string, string | null> | null;
+  updatedAt: string;
+};
+
+function readQkeys(v: unknown): Record<string, string | null> | null {
+  if (!v || typeof v !== 'object' || Array.isArray(v)) return null;
+  const out: Record<string, string | null> = {};
+  for (const [k, x] of Object.entries(v as Record<string, unknown>)) out[k] = typeof x === 'string' ? x : null;
+  return out;
+}
 /** 저장할 때 '읽은 그대로인지' 확인하는 표 (행 번호와 그때의 updated_at) */
 type RowToken = { id: string; updatedAt: string };
 
@@ -177,13 +202,11 @@ async function fetchKids(parentId: string): Promise<ChildSource[]> {
   return (data ?? []) as unknown as ChildSource[];
 }
 
-async function fetchOldDoc(noteId: string, number: number): Promise<OldDoc | null> {
-  const { data } = await sb()
-    .from('note_versions')
-    .select('number, title, body, visuals, question_ids, updated_at')
-    .eq('note_id', noteId)
-    .eq('number', number)
-    .maybeSingle();
+async function fetchOldDoc(noteId: string, number: number, withKeys: boolean): Promise<OldDoc | null> {
+  // qkeys 칸은 schema.sql 을 다시 실행한 DB 에만 있다 (features.merge)
+  const cols = withKeys ? 'number, title, body, visuals, question_ids, updated_at, qkeys' : 'number, title, body, visuals, question_ids, updated_at';
+  const { data: row } = await sb().from('note_versions').select(cols).eq('note_id', noteId).eq('number', number).maybeSingle();
+  const data = row as unknown as Record<string, unknown> | null;
   if (!data) return null;
   return {
     number: Number(data.number),
@@ -191,6 +214,7 @@ async function fetchOldDoc(noteId: string, number: number): Promise<OldDoc | nul
     body: (data.body ?? {}) as Record<string, unknown>,
     visuals: toVisuals(Array.isArray(data.visuals) ? (data.visuals as Array<{ type: string; spec: unknown }>) : []),
     questionIds: Array.isArray(data.question_ids) ? data.question_ids.map(String) : [],
+    qkeys: withKeys ? readQkeys(data.qkeys) : null,
     updatedAt: String(data.updated_at),
   };
 }
@@ -383,7 +407,7 @@ export default function NotePage() {
     if (!showOld || !noteId || viewing === null) return;
     let alive = true;
     const gen = saveGen.current;
-    fetchOldDoc(noteId, viewing).then((d) => {
+    fetchOldDoc(noteId, viewing, mergeOn).then((d) => {
       if (!alive || !freshSince(gen)) return;
       if (d) {
         oldTokens.current.set(d.number, d.updatedAt);
@@ -397,7 +421,7 @@ export default function NotePage() {
     return () => {
       alive = false;
     };
-  }, [showOld, noteId, viewing, tick, toast, freshSince]);
+  }, [showOld, noteId, viewing, tick, toast, freshSince, mergeOn]);
   const old = showOld && oldDoc && oldDoc.number === viewing ? oldDoc : null;
 
   // + 버튼·끌어다 놓기는 이 노트의 과목에 넣고, 노트 화면에서는 이 노트에 더한다 (Pro)
@@ -437,7 +461,14 @@ export default function NotePage() {
   const liveQuestions = useMemo(() => (questions ?? []).filter((q) => q.status !== 'hidden'), [questions]);
   // 풀 수 있는 문제 (쉬는 문제 빼고)가 있을 때만 '이 노트 문제 풀기'
   const canPractice = useMemo(() => liveQuestions.some((q) => q.status === 'active'), [liveQuestions]);
-  const docQuestions = useMemo(() => (old ? (questions ?? []).filter((q) => old.questionIds.includes(q.id)) : liveQuestions), [old, questions, liveQuestions]);
+  // 지난 버전의 문제는 그 버전의 개념 번호로 보인다 (qkeys: 'AI로 다시 정리'가 지금 버전에서 바꾼 번호가 아니라)
+  const docQuestions = useMemo(() => {
+    if (!old) return liveQuestions;
+    const keys = old.qkeys;
+    return (questions ?? [])
+      .filter((q) => old.questionIds.includes(q.id))
+      .map((q) => (keys && Object.prototype.hasOwnProperty.call(keys, q.id) ? { ...q, key_point_id: keys[q.id] } : q));
+  }, [old, questions, liveQuestions]);
   // 개념마다 기억 상태 (마인드맵 가지 색 점, 가지 자세히): 지금 복습에 나오는 문제의 카드로
   const memory = useMemo(() => keyPointMemory(liveQuestions, cards), [liveQuestions, cards]);
   /** 마인드맵 가지 자세히의 '정리에서 보기': 정리 탭으로 가서 그 개념을 칠해 보여 준다 */
@@ -624,6 +655,20 @@ export default function NotePage() {
     return r;
   };
 
+  /**
+   * 지난 버전에서 문제의 개념 바꾸기: 그 버전 행의 qkeys 에만 적는다 (문제 행의 개념은 지금 버전의 것이라 그대로 둔다).
+   * 그 버전을 쓰면 서버가 qkeys 대로 되돌린다 (kok_switch_version)
+   */
+  const setOldConcept = async (questionId: string, keyPointId: string | null): Promise<boolean> => {
+    if (!note || !old) return false;
+    const number = old.number;
+    const next = { ...(old.qkeys ?? {}), [questionId]: keyPointId };
+    const r = await queued(() => saveOld(number, { qkeys: next }));
+    if (r !== true) return false;
+    setOldDoc((d) => (d && d.number === number ? { ...d, qkeys: next } : d));
+    return true;
+  };
+
   /** 지난 버전의 문제 목록 바꾸기 */
   const setOldQuestionIds = async (ids: string[]): Promise<boolean> => {
     if (!note || !old) return false;
@@ -700,7 +745,15 @@ export default function NotePage() {
   const deleteVersion = async (n: number) => {
     if (!note) return;
     const warnCurrent = n === cur ? '\n지금 쓰는 버전이라, 지우면 남은 버전 중 가장 최근 버전을 쓰게 돼요.' : '';
-    if (!confirm(`버전 ${n}: 이 버전을 지울까요?\n이 버전에만 있던 문제(푼 기록 포함)와 더한 자료도 함께 지워지고, 되돌릴 수 없어요.${warnCurrent}`)) return;
+    // 같이 지워지는 자료를 이름으로 알려 준다 (그 버전에만 있는 더한 자료·합쳐 들어온 노트의 자료)
+    const gone = onlyInVersion(versions, n, sourceId);
+    const goneLine = gone.length
+      ? `\n함께 지워지는 자료: ${gone
+          .slice(0, 3)
+          .map((m) => `'${materialLabel(m)}'`)
+          .join(', ')}${gone.length > 3 ? ` 외 ${gone.length - 3}개` : ''} (그 자료로 만든 문제와 푼 기록도)`
+      : '';
+    if (!confirm(`버전 ${n}: 이 버전을 지울까요?\n이 버전에만 있던 문제(푼 기록 포함)도 함께 지워져요.${goneLine}\n되돌릴 수 없어요.${warnCurrent}`)) return;
     setVerBusy(`del-${n}`);
     try {
       await api(`/api/notes/${note.id}/versions`, { method: 'POST', body: JSON.stringify({ action: 'delete', number: n }) });
@@ -1134,7 +1187,16 @@ export default function NotePage() {
               practice={canPractice ? { href: practiceHref(sourceId), onOpen: openPractice } : undefined}
               onChanged={reload}
               removal={removal}
-              oldVersion={old ? { number: old.number, addQuestion: (id) => setOldQuestionIds([...old.questionIds, id]) } : undefined}
+              oldVersion={
+                old
+                  ? {
+                      number: old.number,
+                      addQuestion: (id) => setOldQuestionIds([...old.questionIds, id]),
+                      // 개념 번호를 버전마다 기억하는 DB 에서만 (아니면 예전처럼 문제 행을 고친다)
+                      setConcept: mergeOn ? setOldConcept : undefined,
+                    }
+                  : undefined
+              }
               figures={docFigures}
             />
           ) : null}

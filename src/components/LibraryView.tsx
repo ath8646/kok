@@ -377,29 +377,81 @@ export function LibraryView() {
     }
   };
 
-  /** 과목 위에 고정·보관 (과목 서랍). 화면은 바로 바꾸고, 저장하지 못하면 다시 읽는다 */
-  const setSubjectFlag = async (s: SubjectRow, flags: { pinned?: boolean; archived?: boolean }) => {
-    if (!data) return;
-    // 새로 고정한 과목은 고정한 과목들의 맨 뒤에 (내가 정한 차례가 있으면 그 뒤로)
-    const patch: { pinned?: boolean; archived?: boolean; position?: number } = { ...flags };
-    if (flags.pinned === true && !s.pinned) patch.position = Math.max(0, ...data.subjects.map((x) => x.position)) + 1;
-    const next = { ...data, subjects: data.subjects.map((x) => (x.id === s.id ? { ...x, ...patch } : x)) };
+  /**
+   * 과목 위에 고정·보관 (과목 서랍, 여러 과목 한꺼번에도). 화면은 바로 바꾸고, 저장하지 못하면 다시 읽는다.
+   * 새로 고정한 과목은 고정한 과목들의 맨 뒤에 (받은 차례대로). 다 저장했으면 true
+   */
+  const setSubjectsFlag = async (list: SubjectRow[], flags: { pinned?: boolean; archived?: boolean }): Promise<boolean> => {
+    if (!data || !list.length) return false;
+    let top = Math.max(0, ...data.subjects.map((x) => x.position));
+    const patches = list.map((s) => {
+      const patch: { pinned?: boolean; archived?: boolean; position?: number } = { ...flags };
+      if (flags.pinned === true && !s.pinned) {
+        top += 1;
+        patch.position = top;
+      }
+      return { id: s.id, patch };
+    });
+    const byId = new Map(patches.map((p) => [p.id, p.patch]));
+    const next = { ...data, subjects: data.subjects.map((x) => ({ ...x, ...(byId.get(x.id) ?? {}) })) };
     setData(next);
     writeView(LIBRARY_VIEW, owner, next);
     let failed = false;
     await keepWhileSaving(async () => {
-      const { error } = await sb().from('subjects').update(patch).eq('id', s.id);
-      if (error) failed = true;
+      // 차례를 새로 받는 과목은 하나씩, 나머지는 한 번에
+      const plain = patches.filter((p) => p.patch.position === undefined).map((p) => p.id);
+      for (let i = 0; i < plain.length; i += BULK_MAX) {
+        const { error } = await sb().from('subjects').update(flags).in('id', plain.slice(i, i + BULK_MAX));
+        if (error) failed = true;
+      }
+      for (const p of patches) {
+        if (p.patch.position === undefined) continue;
+        const { error } = await sb().from('subjects').update(p.patch).eq('id', p.id);
+        if (error) failed = true;
+      }
     });
     if (failed) {
       toast('저장하지 못했어요. 다시 해 주세요.', 'bad');
       reload();
-      return;
+      return false;
     }
     // 다른 화면(자료 넣기 등)의 과목 목록도 새로
     window.dispatchEvent(new Event(SUBJECTS_CHANGED));
-    if (patch.archived === true) toast(`'${s.name}' 과목을 보관했어요. 복습은 그대로 나오고, '모든 과목'에서 다시 꺼낼 수 있어요.`, 'plain', DONE);
-    else if (patch.archived === false) toast(`'${s.name}' 과목을 다시 꺼냈어요.`, 'plain', DONE);
+    return true;
+  };
+
+  /** 과목 하나 위에 고정·보관 (과목 메뉴) */
+  const setSubjectFlag = async (s: SubjectRow, flags: { pinned?: boolean; archived?: boolean }) => {
+    if (!(await setSubjectsFlag([s], flags))) return;
+    if (flags.archived === true) toast(`'${s.name}' 과목을 보관했어요. 복습은 그대로 나오고, '모든 과목'에서 다시 꺼낼 수 있어요.`, 'plain', DONE);
+    else if (flags.archived === false) toast(`'${s.name}' 과목을 다시 꺼냈어요.`, 'plain', DONE);
+  };
+
+  /** 서랍에서 위에 고정·고정 풀기 (보관한 과목을 고정하면 보관도 푼다: 고정한 과목은 칩 줄에 보여야 하니까) */
+  const pinSubjects = async (list: SubjectRow[], on: boolean): Promise<boolean> => {
+    const todo = list.filter((s) => (on ? !s.pinned || s.archived : s.pinned));
+    if (!todo.length) return true;
+    if (!(await setSubjectsFlag(todo, on ? { pinned: true, archived: false } : { pinned: false }))) return false;
+    if (list.length > 1) toast(on ? `과목 ${todo.length}개를 위에 고정했어요.` : `과목 ${todo.length}개의 고정을 풀었어요.`, 'plain', DONE);
+    else if (on && todo[0].archived) toast(`'${todo[0].name}' 과목을 다시 꺼내 위에 고정했어요.`, 'plain', DONE);
+    return true;
+  };
+
+  /** 서랍에서 보관하기·보관 풀기 */
+  const archiveSubjects = async (list: SubjectRow[], on: boolean): Promise<boolean> => {
+    const todo = list.filter((s) => !!s.archived !== on);
+    if (!todo.length) return true;
+    if (!(await setSubjectsFlag(todo, { archived: on }))) return false;
+    if (todo.length === 1) {
+      toast(
+        on ? `'${todo[0].name}' 과목을 보관했어요. 복습은 그대로 나오고, '모든 과목'에서 다시 꺼낼 수 있어요.` : `'${todo[0].name}' 과목을 다시 꺼냈어요.`,
+        'plain',
+        DONE,
+      );
+    } else {
+      toast(on ? `과목 ${todo.length}개를 보관했어요. 복습은 그대로 나와요.` : `과목 ${todo.length}개를 다시 꺼냈어요.`, 'plain', DONE);
+    }
+    return true;
   };
 
   /** 고정한 과목의 차례 (서랍에서 끌거나 앞으로·뒤로): 화면은 바로, 저장은 한 줄로 세워 마지막 차례만 (모든 과목의 position 을 0, 1, 2 …) */
@@ -492,21 +544,44 @@ export function LibraryView() {
     }
   };
 
-  /** 과목 지우기 (그 안의 자료·노트·문제·복습 기록까지) */
-  const deleteSubject = async (s: SubjectRow) => {
-    if (!confirm(`'${s.name}' 과목과 그 안의 자료·노트·문제·복습 기록을 모두 지울까요? 되돌릴 수 없어요.`)) return;
-    try {
-      await api(`/api/subjects/${s.id}`, { method: 'DELETE' });
-      setEditingSubject(null);
-      setDrawer(false);
-      if (selected === s.id) select(null);
-      setData((cur) => (cur ? { subjects: cur.subjects.filter((x) => x.id !== s.id), sources: cur.sources.filter((x) => x.subject_id !== s.id) } : cur));
+  /**
+   * 과목 지우기 (그 안의 자료·노트·문제·복습 기록까지). 하나씩 지우고(서버가 파일까지 지운다) 지운 수를 알린다.
+   * 묻기는 부른 쪽이 한다 (서랍은 확인 화면, 과목 고치기는 confirm). 모두 지웠으면 true
+   */
+  const deleteSubjects = async (list: SubjectRow[], progress?: (done: number) => void): Promise<boolean> => {
+    const gone = new Set<string>();
+    let error: string | null = null;
+    for (const s of list) {
+      try {
+        await api(`/api/subjects/${s.id}`, { method: 'DELETE' });
+        gone.add(s.id);
+        progress?.(gone.size);
+      } catch (e) {
+        error = (e as Error).message;
+        break;
+      }
+    }
+    if (gone.size) {
+      if (selected && gone.has(selected)) select(null);
+      setData((cur) => (cur ? { subjects: cur.subjects.filter((x) => !gone.has(x.id)), sources: cur.sources.filter((x) => !gone.has(x.subject_id)) } : cur));
       dropView(LIBRARY_VIEW);
-      toast(`'${s.name}' 과목을 지웠어요.`, 'plain', DONE);
       window.dispatchEvent(new Event(SUBJECTS_CHANGED));
       reload();
-    } catch (e) {
-      toast((e as Error).message, 'bad');
+    }
+    if (error !== null) {
+      toast(gone.size ? `과목 ${gone.size}개는 지웠지만 나머지는 지우지 못했어요. ${error}` : error, 'bad');
+      return false;
+    }
+    toast(list.length === 1 ? `'${list[0].name}' 과목을 지웠어요.` : `과목 ${list.length}개를 지웠어요.`, 'plain', DONE);
+    return true;
+  };
+
+  /** 과목 고치기 시트의 지우기 (한 번 묻는다) */
+  const deleteSubject = async (s: SubjectRow) => {
+    if (!confirm(`'${s.name}' 과목과 그 안의 자료·노트·문제·복습 기록을 모두 지울까요? 되돌릴 수 없어요.`)) return;
+    if (await deleteSubjects([s])) {
+      setEditingSubject(null);
+      setDrawer(false);
     }
   };
 
@@ -704,15 +779,16 @@ export function LibraryView() {
   const allPicked = shown.length > 0 && shown.every((s) => picked.has(s.id));
   // 서랍의 과목 관리 (고정·보관은 과목 서랍 칸이 있으면, 순서·합치기는 새 함수가 있으면)
   const drawerManage: DrawerManage = {
-    onPin: (x, on) => setSubjectFlag(x, { pinned: on }),
-    onArchive: (x, on) => setSubjectFlag(x, { archived: on }),
+    onPin: pinSubjects,
+    onArchive: archiveSubjects,
     onReorder: mergeOn ? reorderPinned : undefined,
     onEdit: (x) => {
       setDrawer(false);
       setEditingSubject(x);
     },
     onMerge: mergeOn ? mergeSubject : undefined,
-    onDelete: deleteSubject,
+    // 서랍의 확인 화면을 거친 뒤 (서랍은 열린 채로 목록으로 돌아간다)
+    onDelete: deleteSubjects,
   };
   // 옮길 자료가 모두 한 과목에 있으면 그 과목은 고를 수 없다
   const movingFrom = moving ? [...new Set((data?.sources ?? []).filter((s) => moving.includes(s.id)).map((s) => s.subject_id))] : [];

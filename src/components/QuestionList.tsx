@@ -80,6 +80,7 @@ export function QuestionList({
   keyPoints,
   onChanged,
   removal,
+  conceptEdit,
   emptyText = '문제가 없어요.',
 }: {
   questions: QuestionRow[];
@@ -87,6 +88,11 @@ export function QuestionList({
   keyPoints?: Array<{ id: string; title: string }>;
   onChanged: () => void;
   removal?: (q: QuestionRow) => QuestionRemoval;
+  /**
+   * 지난 버전을 보고 있을 때: 문제의 개념 바꾸기는 문제 행 대신 이것으로 (그 버전의 개념 기록만 고친다).
+   * 문제 행의 개념은 지금 버전의 것이라 그대로 둔다
+   */
+  conceptEdit?: (questionId: string, keyPointId: string | null) => Promise<boolean>;
   emptyText?: string;
 }) {
   const toast = useToast();
@@ -227,7 +233,18 @@ export function QuestionList({
               setSaving(true);
               // 정답·보기가 바뀌면 예전 그림 풀이는 지운다 (Pro 는 다시 만들 수 있다)
               const reset = figuresOn && !!(editing.steps || editing.figure) && clearsSolution(editing, d);
-              await update(editing.id, { ...d, edited: true, ...(reset ? { figure: null, steps: null } : {}) }, '고쳤어요. AI가 다시 만들어도 그대로 남아요.');
+              if (conceptEdit) {
+                // 지난 버전: 개념은 그 버전 기록에만, 나머지는 문제 행에 (문제 글·정답은 버전끼리 같은 문제다)
+                const { key_point_id: kp, ...rest } = d;
+                if ((kp ?? null) !== (editing.key_point_id ?? null) && !(await conceptEdit(editing.id, kp ?? null))) {
+                  toast('저장하지 못했어요.', 'bad');
+                  setSaving(false);
+                  return;
+                }
+                await update(editing.id, { ...rest, edited: true, ...(reset ? { figure: null, steps: null } : {}) }, '고쳤어요. AI가 다시 만들어도 그대로 남아요.');
+              } else {
+                await update(editing.id, { ...d, edited: true, ...(reset ? { figure: null, steps: null } : {}) }, '고쳤어요. AI가 다시 만들어도 그대로 남아요.');
+              }
               setSaving(false);
               setEditing(null);
             }}

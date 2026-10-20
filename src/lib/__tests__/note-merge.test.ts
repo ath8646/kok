@@ -151,6 +151,19 @@ describe('mergeNotes', () => {
     expect(mergeNotes(part('a', { manual: true }), [part('b', {})]).body.manual).toBeUndefined();
     expect(mergeNotes(part('a', {}), [part('b', { summary_edited: true })]).body.summary_edited).toBe(true);
   });
+
+  it('does not reuse a concept number that something in the kept note still points at', () => {
+    // 남길 노트에서 개념 k2·k3 을 지웠지만 자주 틀리는 것(k2)·예시(k3)·자료 그림(k4)은 아직 그 번호를 가리킨다
+    const kept = part('a', {
+      key_points: [kp('k1', '하나')],
+      pitfalls: [{ text: '옛 함정', key_point_id: 'k2' }],
+      examples: [{ text: '옛 예시', key_point_id: 'k3' }],
+      figures: [fig('f1', SRC_A, 'k4')],
+    });
+    const r = mergeNotes(kept, [part('b', { key_points: [kp('k1', '둘')] })]);
+    expect(zNote.parse(r.body).key_points.map((k) => k.id)).toEqual(['k1', 'k5']);
+    expect(r.maps.b).toEqual({ k1: 'k5' });
+  });
 });
 
 describe('settleReorganized', () => {
@@ -182,7 +195,7 @@ describe('settleReorganized', () => {
         { from: 'k4', to: 'k1' },
         { from: 'k2', to: 'k2' },
       ],
-      { maxKeyPoints: 9, reserved: ['k7'] },
+      { reserved: ['k7'] },
     );
     expect(r.note.title).toBe('광합성과 호흡');
     // k7 은 예전 문제가 쓰는 번호라 새 번호를 받는다
@@ -198,15 +211,16 @@ describe('settleReorganized', () => {
 
   it('stars the combined concept when a starred concept went into it', () => {
     const ai = zNote.parse({ key_points: [kp('k2', '빛과 엽록체')] });
-    const r = settleReorganized(current, ai, [{ from: 'k1', to: 'k2' }], { maxKeyPoints: 9 });
+    const r = settleReorganized(current, ai, [{ from: 'k1', to: 'k2' }]);
     expect(r.qmap.k1).toBe('k2');
     expect(r.note.key_points[0].starred).toBe(true);
   });
 
-  it('gives a second key point with the same id a new id, and caps the count', () => {
+  it('gives a second key point with the same id a new id, and keeps every concept the AI wrote', () => {
     const ai = zNote.parse({ key_points: [kp('k1', 'a'), kp('k1', 'b'), kp('', 'c'), kp('k2', 'd')] });
-    const r = settleReorganized(current, ai, [], { maxKeyPoints: 3 });
-    expect(r.note.key_points.map((k) => k.id)).toEqual(['k1', 'k6', 'k7']);
+    const r = settleReorganized(current, ai, []);
+    expect(r.note.key_points.map((k) => k.id)).toEqual(['k1', 'k6', 'k7', 'k2']);
+    expect(r.note.key_points.map((k) => k.title)).toEqual(['a', 'b', 'c', 'd']);
   });
 
   it('remaps mind map concepts only when something changed', () => {
@@ -217,9 +231,9 @@ describe('settleReorganized', () => {
     expect(remapKeyPoint('k9', {}, finalIds)).toBe('');
   });
 
-  it('asks for at least 9 and at most 12 concepts', () => {
+  it('never asks to squeeze a merged note below its own number of concepts', () => {
     expect(reorganizeMaxKeyPoints(4)).toBe(9);
     expect(reorganizeMaxKeyPoints(11)).toBe(11);
-    expect(reorganizeMaxKeyPoints(20)).toBe(12);
+    expect(reorganizeMaxKeyPoints(30)).toBe(30);
   });
 });

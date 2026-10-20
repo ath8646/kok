@@ -136,13 +136,15 @@ export function mergeNotes(main: MergePart, others: MergePart[], o: { reserved?:
   const parts = others.map((p) => ({ part: p, note: zNote.parse(p.body ?? {}) }));
   const mainMap = main.mindmap;
 
-  // 새 개념 번호: 남길 노트의 개념·문제·마인드맵이 쓰는 번호는 건너뛴다
+  // 새 개념 번호: 남길 노트의 개념·문제·마인드맵·자주 틀리는 것·예시·자료 그림이 쓰는 번호는 건너뛴다
+  // (지운 개념을 아직 가리키는 것이 새로 들어온 개념에 붙지 않게)
+  const baseFigures = readFigures(main.body);
   const takenKp = new Set<string>([...base.key_points.map((k) => k.id), ...(o.reserved ?? [])]);
   for (const n of mainMap?.nodes ?? []) if (n.key_point_id) takenKp.add(n.key_point_id);
+  for (const x of [...base.pitfalls, ...base.examples, ...baseFigures]) if (x.key_point_id) takenKp.add(x.key_point_id);
   const nextKp = idMaker('k', takenKp);
   // 새 마인드맵 노드 번호, 새 그림 번호
   const nextNode = idMaker('n', [...(mainMap?.nodes ?? []).map((n) => n.id), '__root__']);
-  const baseFigures = readFigures(main.body);
   const nextFig = idMaker('f', baseFigures.map((f) => f.id));
 
   const maps: Record<string, Record<string, string>> = {};

@@ -1,11 +1,11 @@
 // 노트 버전 (화면): 버전 기록 목록, 지난 버전 보기·고치기에 쓰는 모양과 계산
 import type { SourceListRow } from './types';
 
-/** 버전에 들어간 자료 (note_versions.materials 의 한 칸) */
-export type Material = { source_id: string; kind: 'text' | 'pdf' | 'image'; title: string; page_count: number | null };
+/** 버전에 들어간 자료 (note_versions.materials 의 한 칸). added: 이 버전에 새로 들어온 자료 (더한 자료·합쳐 들어온 노트의 자료) */
+export type Material = { source_id: string; kind: 'text' | 'pdf' | 'image'; title: string; page_count: number | null; added?: boolean };
 
-/** 버전이 생긴 까닭 (note_versions.kind): 처음 자료, 자료를 더함, 합친 노트를 AI 로 다시 정리. 예전 행은 null */
-export type VersionKind = 'first' | 'append' | 'reorganize';
+/** 버전이 생긴 까닭 (note_versions.kind): 처음 자료, 자료를 더함, 합친 노트를 AI 로 다시 정리, 다른 노트를 합침. 예전 행은 null */
+export type VersionKind = 'first' | 'append' | 'reorganize' | 'merge';
 
 /** note_versions 행 (목록용: 정리·그림 본문은 빼고) */
 export type VersionRow = {
@@ -29,10 +29,10 @@ export type ChildSource = SourceListRow & { text_content: string | null; unit: s
 export type VersionItem = {
   number: number;
   current: boolean;
-  /** 버전이 생긴 까닭: 처음 자료 · 자료를 더함 · AI 로 다시 정리 */
-  kind: 'first' | 'added' | 'reorganized';
-  /** 이 버전을 만든 자료 (버전 1은 처음 자료, 더한 버전은 그때 더한 자료, 다시 정리한 버전은 없음) */
-  added: Material | null;
+  /** 버전이 생긴 까닭: 처음 자료 · 자료를 더함 · AI 로 다시 정리 · 노트를 합침 */
+  kind: 'first' | 'added' | 'reorganized' | 'merged';
+  /** 이 버전을 만든 자료 (버전 1은 처음 자료, 더한 버전은 그때 더한 자료, 합친 버전은 합쳐 들어온 자료들, 다시 정리한 버전은 없음) */
+  added: Material[];
   /** 이 버전에 들어 있는 자료 수 */
   materialCount: number;
   questionCount: number;
@@ -48,6 +48,7 @@ function asMaterials(v: unknown): Material[] {
       kind: m.kind === 'pdf' || m.kind === 'image' ? m.kind : 'text',
       title: typeof m.title === 'string' ? m.title : '',
       page_count: typeof m.page_count === 'number' ? m.page_count : null,
+      ...(m.added === true ? { added: true } : {}),
     }));
 }
 
@@ -61,15 +62,26 @@ export function toVersionRow(r: Record<string, unknown>): VersionRow {
     question_ids: Array.isArray(r.question_ids) ? r.question_ids.map(String) : [],
     created_at: String(r.created_at ?? ''),
     updated_at: String(r.updated_at ?? ''),
-    kind: r.kind === 'first' || r.kind === 'append' || r.kind === 'reorganize' ? r.kind : null,
+    kind: r.kind === 'first' || r.kind === 'append' || r.kind === 'reorganize' || r.kind === 'merge' ? r.kind : null,
   };
 }
 
 /** 버전이 생긴 까닭 (예전 행은 번호로: 1이면 처음 자료, 아니면 더한 자료) */
 function kindOf(r: VersionRow): VersionItem['kind'] {
   if (r.kind === 'reorganize') return 'reorganized';
+  if (r.kind === 'merge') return 'merged';
   if (r.kind === 'first' || (!r.kind && r.number === 1)) return 'first';
   return 'added';
+}
+
+/** 이 버전을 만든 자료: added 표시가 있으면 그것 (예전 행에는 없어서, 더한 버전은 마지막 자료) */
+function addedOf(r: VersionRow, kind: VersionItem['kind'], first: Material): Material[] {
+  if (kind === 'reorganized') return [];
+  if (kind === 'first') return [r.materials[0] ?? first];
+  const marked = r.materials.filter((m) => m.added);
+  if (marked.length) return marked;
+  const last = r.materials[r.materials.length - 1];
+  return kind === 'added' && last ? [last] : [];
 }
 
 /**
@@ -88,7 +100,7 @@ export function versionItems(
         number: 1,
         current: true,
         kind: 'first',
-        added: live.first,
+        added: [live.first],
         materialCount: 1 + (live.kids ?? 0),
         questionCount: live.questionCount,
         createdAt: live.createdAt,
@@ -103,7 +115,7 @@ export function versionItems(
         number: r.number,
         current: r.number === current,
         kind,
-        added: kind === 'reorganized' ? null : kind === 'first' ? (r.materials[0] ?? live.first) : (r.materials[r.materials.length - 1] ?? null),
+        added: addedOf(r, kind, live.first),
         materialCount: Math.max(1, r.materials.length),
         questionCount: r.number === current ? live.questionCount : r.question_ids.filter((id) => live.existing.has(id)).length,
         createdAt: r.created_at || null,
@@ -123,6 +135,17 @@ export function removalPlan(questionId: string, rows: VersionRow[], current: num
   const elsewhere = rows.some((r) => r.number !== viewing && r.number !== current && r.question_ids.includes(questionId));
   if (viewing === current) return elsewhere ? 'hide' : 'delete';
   return elsewhere || inCurrent ? 'unlist' : 'delete';
+}
+
+/**
+ * 버전을 지우면 같이 지워지는 자료: 그 버전에만 있는 자료 (처음 넣은 자료는 노트와 함께 남는다).
+ * kok_delete_version 과 같은 규칙 (다른 버전의 자료 목록에 없는 더한 자료)
+ */
+export function onlyInVersion(rows: VersionRow[], number: number, parentId: string): Material[] {
+  const row = rows.find((r) => r.number === number);
+  if (!row) return [];
+  const elsewhere = new Set(rows.filter((r) => r.number !== number).flatMap((r) => r.materials.map((m) => m.source_id)));
+  return row.materials.filter((m) => m.source_id !== parentId && !elsewhere.has(m.source_id));
 }
 
 /** 자료 이름 (없으면 종류로) */

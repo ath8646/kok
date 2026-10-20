@@ -132,6 +132,19 @@ describe('globals.css 의 기본 색 = 기본 테마(KOK) + 기본 별표 빛', 
     }
   });
 
+  it('가지·과목 색(--b1~8)은 글자로도 쓰니 모든 기본 테마의 바탕·카드·회색 칸과 연한 제 색 위에서 4.5 이상', () => {
+    for (const mode of MODES)
+      for (let i = 1; i <= 8; i++) {
+        const b = both[mode][`--b${i}`];
+        expect(b, `${mode} --b${i}`).toMatch(/^#[0-9a-f]{6}$/);
+        for (const c of THEME_COLORS) {
+          const t = presetTokens(c, mode);
+          for (const bg of [t['--bg'], t['--surface'], t['--surface-2'], mix(t['--surface'], b, 0.15)])
+            expect(contrast(b, bg), `${mode} --b${i} on ${c} ${bg}`).toBeGreaterThanOrEqual(4.5);
+        }
+      }
+  });
+
   it('초록·빨강·주황 글자가 glow.ts 의 SEMANTIC_TEXT 와 같다', () => {
     for (const mode of MODES) expect([both[mode]['--ok'], both[mode]['--bad'], both[mode]['--warn']]).toEqual([...SEMANTIC_TEXT[mode]]);
   });
@@ -177,7 +190,11 @@ describe('별표 빛', () => {
             const label = `${c} ${mode} ${tone} ${strength}`;
             for (const k of GLOW_TOKENS) expect(g[k], `${label} ${k}`).toMatch(/^(#[0-9a-f]{6}|rgba\(\d{1,3}, \d{1,3}, \d{1,3}, (0|1|0?\.\d{1,3})\))$/);
             checkGlowText(t, g, mode, label);
-            expect(contrast(g['--glow-star-edge'], t['--surface']), `${label} edge`).toBeGreaterThanOrEqual(3);
+            // 별은 빛이 가장 진한 자리에 앉는다: 맨 카드와 물든 자리 모두에서 별 테두리 3 이상
+            const [c1, a1] = rgbaParts(g['--glow-1']);
+            const [c2, a2] = rgbaParts(g['--glow-2']);
+            for (const bg of [t['--surface'], mix(t['--surface'], c1, a1), mix(t['--surface'], c2, a2)])
+              expect(contrast(g['--glow-star-edge'], bg), `${label} edge on ${bg}`).toBeGreaterThanOrEqual(3);
             for (const stop of [g['--glow-star-1'], g['--glow-star-2']])
               expect(contrast(g['--glow-on'], stop), `${label} on ${stop}`).toBeGreaterThanOrEqual(4.5);
           }

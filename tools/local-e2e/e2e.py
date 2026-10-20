@@ -557,6 +557,19 @@ async def main():
         await expect(cards.first).to_contain_text("광합성의 재료")
         await expect(cards.nth(1)).to_contain_text("광합성의 결과물")
         await expect(cards.nth(2)).to_contain_text("광합성 장소")
+        # 키보드로 별표를 빼면 카드가 제자리로 옮겨 가도 초점은 그 별에 남는다 (다시 별표해 되돌린다)
+        kp_star = page.get_by_role("button", name="광합성의 재료 별표", exact=True)
+        await page.get_by_role("button", name="광합성의 재료 고치기", exact=True).focus()
+        await page.keyboard.press("Tab")
+        await expect(kp_star).to_be_focused()
+        await page.keyboard.press("Enter")
+        await expect(kp_star).to_have_attribute("aria-pressed", "false")
+        await expect(cards.first).to_contain_text("광합성의 결과물")
+        await expect(kp_star).to_be_focused()
+        await page.keyboard.press("Enter")
+        await expect(kp_star).to_have_attribute("aria-pressed", "true")
+        await expect(cards.first).to_contain_text("광합성의 재료")
+        await expect(kp_star).to_be_focused()
         # 고치던 내용이 있으면 다른 칸을 열기 전에 한 번 묻는다 (아니요 → 그대로), 닫으면 연 버튼으로 초점이 돌아온다
         await page.get_by_role("button", name="요약 고치기").click()
         await page.get_by_label("요약", exact=True).fill("고치던 요약")
@@ -2453,12 +2466,16 @@ async def main():
         await page.evaluate("window.scrollTo(0, 0)")
         await page.wait_for_timeout(400)
         await shot(page, "92-library-star-glow", full=False)
-        # 다시 누르면 별표를 빼고 제자리로
-        await star_btn.click()
+        # 키보드로 다시 누르면 별표를 빼고 제자리로 (카드가 옮겨 가도 초점은 그 카드의 별 버튼에 남는다)
+        await card(second).get_by_role("link").focus()
+        await page.keyboard.press("Tab")
+        await expect(star_btn).to_be_focused()
+        await page.keyboard.press("Enter")
         await expect(star_btn).to_have_attribute("aria-pressed", "false")
         await expect(card(second).locator("a.kok-glow.is-starred")).to_have_count(0)
         await poll_db(f"select starred from public.sources where id = '{second}'", "f")
         await expect(cards.first).to_have_attribute("data-flip", oldest)
+        await expect(star_btn).to_be_focused()
 
         # 꾹 누르기(마우스 0.45초)로 고르기 시작 → 눌러서 더 고르기 → 스페이스로 고르고 풀기
         order = [await cards.nth(i).get_attribute("data-flip") for i in range(await cards.count())]

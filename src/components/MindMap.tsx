@@ -55,7 +55,7 @@ function readPalette(): Palette {
     ok: v('--ok', '#047c2d'),
     warn: v('--warn', '#9c5901'),
     bad: v('--bad', '#d80309'),
-    branches: [1, 2, 3, 4, 5, 6, 7, 8].map((i) => v(`--b${i}`, '#007aff')),
+    branches: [1, 2, 3, 4, 5, 6, 7, 8].map((i) => v(`--b${i}`, '#0361cd')),
   };
 }
 

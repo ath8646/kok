@@ -48,15 +48,15 @@
   --shadow: rgba(20, 20, 30, 0.06);
   --shadow-strong: rgba(20, 20, 30, 0.14);
   --scrim: rgba(12, 12, 16, 0.38);
-  /* 가지·과목 색 (흰 카드·회색 바탕에서 3 이상) */
-  --b1: #007aff;
-  --b2: #cd7707;
-  --b3: #07a23e;
+  /* 가지·과목 색: 글자로도 쓴다(가지 카드의 '자세히 보기', 다시 그린 그림의 글). 모든 기본 테마의 카드·바탕·회색 칸에서 4.5 이상 */
+  --b1: #0361cd;
+  --b2: #985700;
+  --b3: #03772b;
   --b4: #5856d6;
-  --b5: #ff2d55;
-  --b6: #af52de;
-  --b7: #089ab0;
-  --b8: #a2845e;
+  --b5: #c50539;
+  --b6: #9536c2;
+  --b7: #067182;
+  --b8: #7f623d;
   --paper-line: rgba(60, 60, 67, 0.09);
   --paper-dot: rgba(60, 60, 67, 0.2);
   /* 별표 빛 (기본: 골드, 세기 60). Pro 테마는 themes/glow.ts 가 만든 값으로 덮는다 */
@@ -67,7 +67,7 @@
   --glow-halo: rgba(255, 159, 10, 0.24);
   --glow-star-1: #ffd60a;
   --glow-star-2: #ff9f0a;
-  --glow-star-edge: #d48100;
+  --glow-star-edge: #c97a00;
   --glow-on: #111111;
   --ease-out: cubic-bezier(0.23, 1, 0.32, 1);
   --ease-in-out: cubic-bezier(0.77, 0, 0.175, 1);
@@ -103,14 +103,14 @@
     --shadow: rgba(0, 0, 0, 0);
     --shadow-strong: rgba(0, 0, 0, 0.6);
     --scrim: rgba(0, 0, 0, 0.6);
-    --b1: #0a84ff;
+    --b1: #3e95ff;
     --b2: #ff9f0a;
     --b3: #30d158;
-    --b4: #5e5ce6;
-    --b5: #ff375f;
-    --b6: #bf5af2;
+    --b4: #838afe;
+    --b5: #ff566e;
+    --b6: #cb68ff;
     --b7: #40c8e0;
-    --b8: #ac8e68;
+    --b8: #ae9069;
     --paper-line: rgba(235, 235, 245, 0.07);
     --paper-dot: rgba(235, 235, 245, 0.16);
     --glow-1: rgba(255, 214, 10, 0.056);
@@ -151,14 +151,14 @@
   --shadow: rgba(0, 0, 0, 0);
   --shadow-strong: rgba(0, 0, 0, 0.6);
   --scrim: rgba(0, 0, 0, 0.6);
-  --b1: #0a84ff;
+  --b1: #3e95ff;
   --b2: #ff9f0a;
   --b3: #30d158;
-  --b4: #5e5ce6;
-  --b5: #ff375f;
-  --b6: #bf5af2;
+  --b4: #838afe;
+  --b5: #ff566e;
+  --b6: #cb68ff;
   --b7: #40c8e0;
-  --b8: #ac8e68;
+  --b8: #ae9069;
   --paper-line: rgba(235, 235, 245, 0.07);
   --paper-dot: rgba(235, 235, 245, 0.16);
   --glow-1: rgba(255, 214, 10, 0.056);

@@ -2,7 +2,7 @@
 // - 카드 안에 번지는 빛(--glow-1·--glow-2)은 그 위 글자(본문·흐린 글자·포인트·초록·빨강·주황 글자)가 읽기 좋게(명암비)
 //   진하기를 스스로 줄인다. 그래서 밝은 화면은 연한 색이 넓게, 어두운 화면은 아주 옅게 물든다.
 // - 테두리(--glow-ring-*)와 카드 밖으로 번지는 빛(--glow-halo)은 글자 밑에 오지 않아서 고른 세기 그대로다.
-// - 별(--glow-star-*)은 두 색 그라데이션, 테두리(--glow-star-edge)는 카드 위에서 3 이상, 별표한 개념 번호 글자(--glow-on)는 두 색 위에서 4.5 이상.
+// - 별(--glow-star-*)은 두 색 그라데이션, 테두리(--glow-star-edge)는 카드와 물든 자리 위에서 3 이상, 별표한 개념 번호 글자(--glow-on)는 두 색 위에서 4.5 이상.
 // 값은 모두 검사한 #rrggbb 와 rgba(...) 라서 테마 CSS(css.ts)에 그대로 넣는다.
 import { DEFAULT_GLOW, GLOW_TONES, type Glow, type GlowTone } from '../settings';
 import { contrast, ensureContrast, fromHsl, mix, onColor, toHsl, toRgb, type Mode, type TokenMap } from './colors';
@@ -136,7 +136,9 @@ export function glowTokens(t: TokenMap, glow: Glow, mode: Mode): GlowMap {
   a1 = Math.floor(a1 * 1000) / 1000;
   a2 = Math.floor(a2 * 1000) / 1000;
   const ring = k > 0 ? 0.3 + 0.7 * k : 0;
-  const edge = mode === 'light' ? ensureContrast(c2, [surface], 3, 'light') : ensureContrast(c1, [surface], 3, 'dark');
+  // 별은 빛이 가장 진한 오른쪽 위에 앉는다: 맨 카드와 물든 자리 모두에서 별 테두리가 3 이상
+  const under = [surface, mix(surface, c1, a1), mix(surface, c2, a2)];
+  const edge = mode === 'light' ? ensureContrast(c2, under, 3, 'light') : ensureContrast(c1, under, 3, 'dark');
   const ink = onColor(c2);
   return {
     '--glow-1': rgba(c1, a1),

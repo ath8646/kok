@@ -1,7 +1,7 @@
 'use client';
 // 별표 버튼: 켜면 별이 튀어 오르고 작은 빛이 퍼진다 (transform·opacity 만, 300ms 안. 움직임 줄이기면 바로 바뀐다).
 // 채운 별은 별표 빛 두 색(--glow-star-1 → --glow-star-2) 그라데이션이다 (테마에서 색을 고른다).
-import { useId, useState, type CSSProperties } from 'react';
+import { useId, useLayoutEffect, useRef, useState, type CSSProperties, type RefObject } from 'react';
 import { cx } from '@/components/ui';
 
 const STAR = 'M12 3.3l2.65 5.5 6.05.85-4.4 4.2 1.08 6L12 17l-5.38 2.85 1.08-6-4.4-4.2 6.05-.85z';
@@ -30,6 +30,7 @@ export function StarButton({
   label,
   className,
   small = false,
+  starFor,
 }: {
   on: boolean;
   onToggle: () => void;
@@ -37,6 +38,8 @@ export function StarButton({
   className?: string;
   /** 자료함 카드 모서리처럼 좁은 곳 (32px 버튼, 18px 별) */
   small?: boolean;
+  /** 이 별이 붙은 카드 번호: 카드 순서가 바뀐 뒤 키보드 초점을 이 버튼으로 되돌릴 때 찾는다 (useStarRefocus) */
+  starFor?: string;
 }) {
   // 켤 때마다 늘어나는 수: 별과 빛을 새로 그려 움직임을 처음부터 다시 한다
   const [burst, setBurst] = useState(0);
@@ -46,6 +49,7 @@ export function StarButton({
       type="button"
       aria-pressed={on}
       aria-label={label}
+      data-star-for={starFor}
       title={on ? '별표 빼기' : '별표하기'}
       // 자리(absolute 등)는 className 으로. 없으면 relative (빛이 버튼 안에서 퍼지게)
       className={cx('press grid shrink-0 place-items-center rounded-full hover:bg-surface-2', small ? 'h-8 w-8' : 'h-10 w-10', className ?? 'relative')}
@@ -68,4 +72,28 @@ export function StarButton({
       ) : null}
     </button>
   );
+}
+
+/**
+ * 별표를 뺀 카드는 아래 제자리로 옮겨 가는데, 그 카드를 DOM 에서 옮기면 그 안의 별 버튼이 키보드 초점을 잃는다.
+ * 키보드로 누른 경우(focus-visible)만 기억해 두었다가, 카드가 옮겨진 뒤 초점이 사라졌으면 그 카드의 별 버튼으로 되돌린다.
+ * remember(카드 번호) 를 순서를 바꾸기 전에 부르고, 순서가 바뀐 화면을 그린 뒤 이 훅이 되돌린다 (busy 동안은 기다린다).
+ */
+export function useStarRefocus(root: RefObject<HTMLElement | null>, busy: boolean): (id: string) => void {
+  const pending = useRef<string | null>(null);
+  useLayoutEffect(() => {
+    const id = pending.current;
+    if (!id || busy) return;
+    pending.current = null;
+    const el = root.current;
+    const card = el?.querySelector(`[data-flip="${CSS.escape(id)}"]`);
+    // 초점이 남아 있으면 둔다 (별표하면 다른 카드가 옮겨져서 초점이 그대로다. 그사이 다른 곳으로 옮겼어도 그대로)
+    const now = document.activeElement;
+    if (now && now !== document.body) return;
+    card?.querySelector<HTMLElement>(`[data-star-for="${CSS.escape(id)}"]`)?.focus();
+  });
+  return (id: string) => {
+    const a = document.activeElement;
+    pending.current = a instanceof HTMLElement && a.matches(':focus-visible') && a.closest('[data-flip]')?.getAttribute('data-flip') === id ? id : null;
+  };
 }

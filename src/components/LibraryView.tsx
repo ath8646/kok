@@ -9,7 +9,7 @@ import { useMe, EnergyPill } from './AppShell';
 import { SOURCES_CHANGED, SUBJECTS_CHANGED, useQuickAdd } from './QuickAdd';
 import { stepLabel, useActiveSources } from './ProcessingList';
 import { SubjectForm } from './SubjectForm';
-import { StarButton, StarGlyph } from './note/StarButton';
+import { StarButton, StarGlyph, useStarRefocus } from './note/StarButton';
 import { SortList } from './note/SortList';
 import { useLongPress } from './useLongPress';
 import { prefersReducedMotion } from './useReducedMotion';
@@ -315,6 +315,8 @@ export function LibraryView() {
   }, [data, selected, query, live, organize, hold]);
   const gridRef = useRef<HTMLDivElement>(null);
   const flip = useGridFlip(gridRef, shown.map((s) => s.id).join('|'));
+  // 키보드로 별표를 빼면 카드가 제자리로 옮겨 간 뒤 그 카드의 별 버튼으로 초점을 되돌린다
+  const rememberStar = useStarRefocus(gridRef, hold !== null);
 
   // 과목을 고르고 단원이 있으면 단원별로 묶는다
   const groups = useMemo(() => {
@@ -392,8 +394,10 @@ export function LibraryView() {
     toast(done);
     return true;
   };
-  const starOne = (s: LibSource) =>
-    patchSources([s.id], { starred: !s.starred }, s.starred ? '별표를 뺐어요.' : '별표했어요. 맨 위에 보여요.', s.starred ? 80 : 220);
+  const starOne = (s: LibSource) => {
+    rememberStar(s.id);
+    return patchSources([s.id], { starred: !s.starred }, s.starred ? '별표를 뺐어요.' : '별표했어요. 맨 위에 보여요.', s.starred ? 80 : 220);
+  };
   const reviewOne = (s: LibSource) =>
     patchSources([s.id], { in_review: s.in_review === false }, s.in_review === false ? '다시 복습에 넣었어요.' : '복습에서 뺐어요.');
 
@@ -1071,7 +1075,7 @@ function NoteCard({
       ) : (
         // 오른쪽 위: 별표(한 번 누르면 별이 튀고 카드가 맨 위로) + 메뉴
         <div className="absolute right-1.5 top-1.5 z-10 flex items-center">
-          {organize ? <StarButton small on={!!s.starred} label={`${label} 별표`} onToggle={onStar} /> : null}
+          {organize ? <StarButton small starFor={s.id} on={!!s.starred} label={`${label} 별표`} onToggle={onStar} /> : null}
           <Menu label={`${s.title || '자료'} 메뉴`} items={items} small />
         </div>
       )}

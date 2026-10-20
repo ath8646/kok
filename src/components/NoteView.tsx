@@ -10,7 +10,7 @@ import { previewText } from '@/lib/richtext';
 import { starredFirst } from '@/lib/note-order';
 import { RichText, Tex } from './RichText';
 import { Button, Chip, Icon, ICONS, cx, useToast } from './ui';
-import { StarButton, StarGlyph } from './note/StarButton';
+import { StarButton, StarGlyph, useStarRefocus } from './note/StarButton';
 import { SortList } from './note/SortList';
 import { FormulaEditor, KeyPointEditor, SummaryEditor, TermEditor, type KeyPointDraft } from './note/NoteEditors';
 import { prefersReducedMotion } from './useReducedMotion';
@@ -314,9 +314,12 @@ export function NoteView({
     return out;
   }, [note.key_points, hold]);
   const listRef = useRef<HTMLDivElement>(null);
+  // 키보드로 별표를 빼면 카드가 제자리로 옮겨 간 뒤 그 카드의 별 버튼으로 초점을 되돌린다
+  const rememberStar = useStarRefocus(listRef, hold !== null);
   const onLeadAway = useCallback((up: boolean) => toast(up ? '별표한 개념은 맨 위에 모여요.' : '별표를 빼서 원래 자리로 옮겼어요.'), [toast]);
   const flip = useFlip(listRef, ordered.map((k) => k.id).join('|'), onLeadAway);
   const toggleStar = (kp: KeyPoint) => {
+    rememberStar(kp.id);
     const on = !kp.starred;
     const key_points = note.key_points.map((x) => (x.id === kp.id ? { ...x, starred: on || undefined } : x));
     const now = ordered.map((k) => k.id);
@@ -605,7 +608,7 @@ export function NoteView({
                     </div>
                   )}
                   {isEditing ? null : editable ? (
-                    <StarButton className="absolute right-2 top-2" on={!!kp.starred} label={`${name} 별표`} onToggle={() => toggleStar(kp)} />
+                    <StarButton className="absolute right-2 top-2" starFor={kp.id} on={!!kp.starred} label={`${name} 별표`} onToggle={() => toggleStar(kp)} />
                   ) : kp.starred ? (
                     <span className="absolute right-3.5 top-3.5" title="별표한 개념">
                       <StarGlyph on size={20} />

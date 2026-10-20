@@ -290,7 +290,7 @@ export function SaveProblemSheet({ solution, onClose, onSaved }: { solution: Cha
                     }}
                     className={cx(
                       'press inline-flex h-8 items-center gap-1 rounded-full px-3 text-[13px] font-semibold ring-1 ring-inset',
-                      unit === u ? 'bg-ink text-surface ring-ink' : 'bg-surface text-ink ring-line hover:ring-accent',
+                      unit === u ? 'kok-chip-on ring-transparent' : 'bg-surface text-ink ring-line hover:ring-accent',
                     )}
                   >
                     {u === NEW ? (

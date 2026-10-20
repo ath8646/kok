@@ -1,7 +1,7 @@
 'use client';
 // KOK 공통 화면 조각 (버튼, 카드, 시트, 큰 제목, 메뉴, 알림 등)
 import Link from 'next/link';
-import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from 'react';
+import { createContext, useCallback, useContext, useEffect, useId, useRef, useState, type ReactNode } from 'react';
 import { ICONS } from '@/lib/icons';
 
 export function cx(...parts: Array<string | false | null | undefined>): string {
@@ -634,20 +634,41 @@ export function Toggle({
   checked,
   onChange,
   label,
+  hint,
   id,
   disabled = false,
 }: {
   checked: boolean;
   onChange: (v: boolean) => void;
   label: string;
+  /** 이름 아래 작은 설명 (스위치의 설명으로 읽힌다) */
+  hint?: string;
   id?: string;
   disabled?: boolean;
 }) {
+  const hintId = useId();
   return (
     <label className={cx('flex items-center justify-between gap-4 py-1', disabled ? 'cursor-not-allowed opacity-50' : 'cursor-pointer')} htmlFor={id}>
-      <span className="text-[15px]">{label}</span>
-      <span className="relative inline-flex">
-        <input id={id} type="checkbox" className="peer sr-only" checked={checked} disabled={disabled} onChange={(e) => onChange(e.target.checked)} />
+      <span className="grid min-w-0 gap-0.5">
+        <span className="text-[15px]">{label}</span>
+        {hint ? (
+          <span id={hintId} className="text-xs text-muted">
+            {hint}
+          </span>
+        ) : null}
+      </span>
+      <span className="relative inline-flex shrink-0">
+        <input
+          id={id}
+          type="checkbox"
+          className="peer sr-only"
+          checked={checked}
+          disabled={disabled}
+          // 설명이 있으면 이름은 짧게(이름만), 설명은 따로 읽힌다
+          aria-label={hint ? label : undefined}
+          aria-describedby={hint ? hintId : undefined}
+          onChange={(e) => onChange(e.target.checked)}
+        />
         <span className="h-7 w-12 rounded-full bg-surface-3 transition-colors peer-checked:bg-fab peer-focus-visible:outline peer-focus-visible:outline-3 peer-focus-visible:outline-accent" />
         <span className="absolute left-1 top-1 h-5 w-5 rounded-full bg-white shadow transition-transform duration-200 peer-checked:translate-x-5" />
       </span>

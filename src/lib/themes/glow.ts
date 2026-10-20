@@ -53,14 +53,14 @@ const TINT_MAX: Record<Mode, number> = { light: 0.5, dark: 0.4 };
 /** 카드 밖으로 번지는 빛의 진하기 (세기 100 일 때) */
 const HALO_MAX: Record<Mode, number> = { light: 0.4, dark: 0.55 };
 
-function rgba(hex: string, a: number): string {
+export function rgba(hex: string, a: number): string {
   const [r, g, b] = toRgb(hex);
   const v = Math.round(Math.min(1, Math.max(0, a)) * 1000) / 1000;
   return `rgba(${r}, ${g}, ${b}, ${v <= 0 ? '0' : v >= 1 ? '1' : String(v)})`;
 }
 
 /** 색이 얼마나 뚜렷한지 (0 ~ 255): 무채색이면 0 */
-function chroma(hex: string): number {
+export function chroma(hex: string): number {
   const c = toRgb(hex);
   return Math.max(...c) - Math.min(...c);
 }
@@ -86,21 +86,24 @@ export function glowPair(tone: GlowTone, t: TokenMap): [string, string] {
   return [p[0], p[1]];
 }
 
-/** 카드 위 글자들: 빛 위에서도 이만큼은 읽혀야 한다 (원래 카드에서 이미 모자라면 그보다 나빠지지만 않게) */
-function cardTexts(t: TokenMap, mode: Mode): Array<[string, number]> {
+/**
+ * 바탕(base: 카드면 surface, 화면이면 bg) 위 글자들: 빛 위에서도 이만큼은 읽혀야 한다
+ * (원래 바탕에서 이미 모자라면 그보다 나빠지지만 않게)
+ */
+export function textsOn(t: TokenMap, mode: Mode, base: string = t['--surface']): Array<[string, number]> {
   const want: Array<[string, number]> = [
     [t['--ink'], 7],
     [t['--muted'], 4.5],
     [t['--accent'], 4.5],
     ...SEMANTIC_TEXT[mode].map((c): [string, number] => [c, 4.5]),
   ];
-  return want.map(([c, min]) => [c, Math.min(min, contrast(c, t['--surface']))]);
+  return want.map(([c, min]) => [c, Math.min(min, contrast(c, base))]);
 }
 
-const readable = (bg: string, texts: Array<[string, number]>) => texts.every(([c, min]) => contrast(c, bg) >= min - 1e-9);
+export const readable = (bg: string, texts: Array<[string, number]>) => texts.every(([c, min]) => contrast(c, bg) >= min - 1e-9);
 
-/** 카드 바탕(surface)에 c 를 a 만큼 덮었을 때 글자가 다 읽히는 가장 큰 a */
-function tintCap(surface: string, c: string, texts: Array<[string, number]>, max: number): number {
+/** 바탕(surface)에 c 를 a 만큼 덮었을 때 글자가 다 읽히는 가장 큰 a */
+export function tintCap(surface: string, c: string, texts: Array<[string, number]>, max: number): number {
   if (readable(mix(surface, c, max), texts)) return max;
   let lo = 0;
   let hi = max;
@@ -113,7 +116,7 @@ function tintCap(surface: string, c: string, texts: Array<[string, number]>, max
 }
 
 /** 두 빛 사이(그라데이션 가운데)의 색까지 읽히는지 (밝은 화면에서는 섞인 색이 두 끝보다 어두울 수 있다) */
-function blendOk(surface: string, c1: string, a1: number, c2: string, a2: number, texts: Array<[string, number]>): boolean {
+export function blendOk(surface: string, c1: string, a1: number, c2: string, a2: number, texts: Array<[string, number]>): boolean {
   const p = mix(surface, c1, a1);
   const q = mix(surface, c2, a2);
   return [0, 0.25, 0.5, 0.75, 1].every((u) => readable(mix(p, q, u), texts));
@@ -125,7 +128,7 @@ export function glowTokens(t: TokenMap, glow: Glow, mode: Mode): GlowMap {
   const k = Number.isFinite(glow.strength) ? Math.min(1, Math.max(0, glow.strength / 100)) : DEFAULT_GLOW.strength / 100;
   const [c1, c2] = glowPair(tone, t);
   const surface = t['--surface'];
-  const texts = cardTexts(t, mode);
+  const texts = textsOn(t, mode);
   let a1 = tintCap(surface, c1, texts, TINT_MAX[mode]) * k;
   let a2 = tintCap(surface, c2, texts, TINT_MAX[mode]) * k;
   for (let i = 0; i < 20 && !blendOk(surface, c1, a1, c2, a2, texts); i++) {

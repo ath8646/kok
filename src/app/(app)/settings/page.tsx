@@ -128,7 +128,14 @@ export default function SettingsPage() {
         title="설정"
         subtitle={`${me.nickname ?? '나'} · ${planLabel(me.planInfo, false)}`}
         actions={
-          <span className="mr-2 inline-flex items-center gap-1 text-xs font-semibold text-muted" aria-live="polite">
+          // 위 띠 글자는 화면 위 빛 위에 놓이지 않게 알약 안에 (화면 바탕 위 글자는 본문·흐린 글자만: fx.ts)
+          <span
+            className={cx(
+              'mr-2 inline-flex items-center gap-1 rounded-full text-xs font-semibold text-muted',
+              saved !== 'idle' && 'bg-surface px-2.5 py-1 shadow-[0_1px_2px_var(--shadow)]',
+            )}
+            aria-live="polite"
+          >
             {saved === 'saving' ? (
               '저장 중…'
             ) : saved === 'saved' ? (

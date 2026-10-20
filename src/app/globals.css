@@ -69,6 +69,41 @@
   --glow-star-2: #ff9f0a;
   --glow-star-edge: #c97a00;
   --glow-on: #111111;
+  /* 화면 꾸미기 (기본: 위 빛·핵심 카드·두 색 버튼·아래 빛 켬). 테마마다 themes/fx.ts 가 만든 값으로 덮는다 */
+  --aura-1: rgba(99, 90, 234, 0.18);
+  --aura-2: rgba(163, 91, 246, 0.148);
+  --aura-3: rgba(163, 91, 246, 0.083);
+  --aura-4: rgba(99, 90, 234, 0.072);
+  --hero-1: rgba(163, 91, 246, 0.13);
+  --hero-2: rgba(99, 90, 234, 0.07);
+  --hero-ring-1: rgba(163, 91, 246, 0.75);
+  --hero-ring-2: rgba(99, 90, 234, 0.563);
+  --hero-halo: rgba(163, 91, 246, 0.55);
+  --btn-2: #9848f5;
+  --btn-glow: rgba(152, 72, 245, 0.75);
+  --fab-2: #a35bf6;
+  --fab-glow: rgba(163, 91, 246, 0.55);
+  --chip-on-1: #6057e7;
+  --chip-on-2: #9848f5;
+  --chip-on-ink: #ffffff;
+  --chip-on-glow: rgba(152, 72, 245, 0.6);
+  --pill-1: #e6e4fb;
+  --pill-2: #eddefd;
+  --bar-2: #635aea;
+  --detail-glow: rgba(163, 91, 246, 0);
+  --detail-tint: rgba(163, 91, 246, 0);
+  --fx-detail: 0;
+  --tab-bg: rgba(255, 255, 255, 0.92);
+  --tab-line: #e3e3e8;
+  --tab-edge-1: rgba(99, 90, 234, 0.5);
+  --tab-edge-2: rgba(163, 91, 246, 0.5);
+  --tab-glow-1: rgba(163, 91, 246, 0.123);
+  --tab-glow-2: rgba(99, 90, 234, 0.105);
+  --tab-float: 0;
+  --tab-ring-1: rgba(163, 91, 246, 0);
+  --tab-ring-2: rgba(99, 90, 234, 0);
+  --tab-ring-3: rgba(227, 227, 232, 0);
+  --tab-shadow: rgba(163, 91, 246, 0);
   --ease-out: cubic-bezier(0.23, 1, 0.32, 1);
   --ease-in-out: cubic-bezier(0.77, 0, 0.175, 1);
   --ease-drawer: cubic-bezier(0.32, 0.72, 0, 1);
@@ -122,6 +157,40 @@
     --glow-star-2: #ff9f0a;
     --glow-star-edge: #ffd60a;
     --glow-on: #111111;
+    --aura-1: rgba(104, 97, 241, 0.26);
+    --aura-2: rgba(176, 124, 255, 0.2);
+    --aura-3: rgba(176, 124, 255, 0.18);
+    --aura-4: rgba(104, 97, 241, 0.15);
+    --hero-1: rgba(176, 124, 255, 0.16);
+    --hero-2: rgba(104, 97, 241, 0.09);
+    --hero-ring-1: rgba(176, 124, 255, 0.75);
+    --hero-ring-2: rgba(104, 97, 241, 0.563);
+    --hero-halo: rgba(176, 124, 255, 0.6);
+    --btn-2: #b07cff;
+    --btn-glow: rgba(176, 124, 255, 0.6);
+    --fab-2: #ae78ff;
+    --fab-glow: rgba(176, 124, 255, 0.55);
+    --chip-on-1: #888aff;
+    --chip-on-2: #b07cff;
+    --chip-on-ink: #111111;
+    --chip-on-glow: rgba(176, 124, 255, 0.6);
+    --pill-1: #2d2e42;
+    --pill-2: #403354;
+    --bar-2: #6861f1;
+    --detail-glow: rgba(176, 124, 255, 0);
+    --detail-tint: rgba(176, 124, 255, 0);
+    --fx-detail: 0;
+    --tab-bg: rgba(28, 28, 30, 0.92);
+    --tab-line: #38383a;
+    --tab-edge-1: rgba(104, 97, 241, 0.5);
+    --tab-edge-2: rgba(176, 124, 255, 0.5);
+    --tab-glow-1: rgba(176, 124, 255, 0.189);
+    --tab-glow-2: rgba(104, 97, 241, 0.158);
+    --tab-float: 0;
+    --tab-ring-1: rgba(176, 124, 255, 0);
+    --tab-ring-2: rgba(104, 97, 241, 0);
+    --tab-ring-3: rgba(56, 56, 58, 0);
+    --tab-shadow: rgba(176, 124, 255, 0);
     color-scheme: dark;
   }
 }
@@ -170,6 +239,40 @@
   --glow-star-2: #ff9f0a;
   --glow-star-edge: #ffd60a;
   --glow-on: #111111;
+  --aura-1: rgba(104, 97, 241, 0.26);
+  --aura-2: rgba(176, 124, 255, 0.2);
+  --aura-3: rgba(176, 124, 255, 0.18);
+  --aura-4: rgba(104, 97, 241, 0.15);
+  --hero-1: rgba(176, 124, 255, 0.16);
+  --hero-2: rgba(104, 97, 241, 0.09);
+  --hero-ring-1: rgba(176, 124, 255, 0.75);
+  --hero-ring-2: rgba(104, 97, 241, 0.563);
+  --hero-halo: rgba(176, 124, 255, 0.6);
+  --btn-2: #b07cff;
+  --btn-glow: rgba(176, 124, 255, 0.6);
+  --fab-2: #ae78ff;
+  --fab-glow: rgba(176, 124, 255, 0.55);
+  --chip-on-1: #888aff;
+  --chip-on-2: #b07cff;
+  --chip-on-ink: #111111;
+  --chip-on-glow: rgba(176, 124, 255, 0.6);
+  --pill-1: #2d2e42;
+  --pill-2: #403354;
+  --bar-2: #6861f1;
+  --detail-glow: rgba(176, 124, 255, 0);
+  --detail-tint: rgba(176, 124, 255, 0);
+  --fx-detail: 0;
+  --tab-bg: rgba(28, 28, 30, 0.92);
+  --tab-line: #38383a;
+  --tab-edge-1: rgba(104, 97, 241, 0.5);
+  --tab-edge-2: rgba(176, 124, 255, 0.5);
+  --tab-glow-1: rgba(176, 124, 255, 0.189);
+  --tab-glow-2: rgba(104, 97, 241, 0.158);
+  --tab-float: 0;
+  --tab-ring-1: rgba(176, 124, 255, 0);
+  --tab-ring-2: rgba(104, 97, 241, 0);
+  --tab-ring-3: rgba(56, 56, 58, 0);
+  --tab-shadow: rgba(176, 124, 255, 0);
   color-scheme: dark;
 }
 
@@ -185,7 +288,8 @@
   content: '';
   position: fixed;
   inset: 0;
-  z-index: -1;
+  /* 화면 위·아래 빛(.kok-aura, -1)이 그림을 덮은 바탕 위에 오게 */
+  z-index: -2;
   pointer-events: none;
 }
 :root[data-bg] body::before {
@@ -365,6 +469,18 @@ body {
 /* ------------------------------------------------------------ 카드
    components 층에 두어서 rounded-*, shadow-*, ring-*, bg-* 유틸리티로 덮어쓸 수 있다 */
 @layer components {
+  /* 큰 시작 버튼 (홈 'N분 KOK 시작', 복습 'N문제 시작'): 버튼 빛 색(--btn-glow, 두 색 버튼이면 끝 색)으로 살짝 번지는 그림자.
+     누르면 그림자도 같이 내려앉는다 */
+  .kok-cta {
+    box-shadow:
+      0 12px 24px -14px var(--btn-glow),
+      0 3px 8px -3px color-mix(in srgb, var(--accent) 40%, transparent);
+  }
+  .kok-cta:active:not(:disabled) {
+    box-shadow:
+      0 6px 14px -10px var(--btn-glow),
+      0 2px 4px -2px color-mix(in srgb, var(--accent) 35%, transparent);
+  }
   .kok-card {
     border-radius: 22px;
     background: var(--surface);
@@ -477,6 +593,165 @@ body {
 /* 끝 화면의 큰 아이콘: 살짝 커지며 나타난다 (가끔 보는 화면이라 조금 눈에 띄게) */
 .kok-badge {
   animation: kok-pop-in 280ms var(--ease-out) 60ms backwards;
+}
+
+/* ------------------------------------------------------------ 화면 꾸미기 (테마마다: src/lib/themes/fx.ts)
+   A 화면 위 빛·D1 아래 빛(.kok-aura), B 핵심 카드(.kok-hero), C 두 색 버튼·고른 칩(.kok-chip-on)·아래 메뉴 고른 칸·+ 버튼,
+   D3 작은 카드 빛 포인트(--fx-detail 0·1), 아래 메뉴(.kok-tabbar: 비치는 정도·떠 있기 --tab-float 0·1).
+   끈 꾸미기는 색의 진하기가 0 이거나 끝 색이 시작 색과 같아서 규칙은 늘 같다.
+   빛의 모양(가운데·크기·진하기 단계)을 바꾸면 fx.ts 의 AURA_TEXT_SHARE(글자 자리의 진하기 비율)도 다시 잰다. */
+
+/* A·D1: 화면 끝 바깥에서 가장 진하고 큰 제목 아래 부제가 오기 전에 거의 사라진다 (AppShell, 집중 모드에서는 없다).
+   바탕 그림(body::before·after, -2) 위, 글자 아래 */
+.kok-aura {
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  background:
+    radial-gradient(85vw 270px at 12% -70px, var(--aura-1), color-mix(in srgb, var(--aura-1) 55%, transparent) 38%, color-mix(in srgb, var(--aura-1) 18%, transparent) 70%, transparent),
+    radial-gradient(75vw 270px at 94% -50px, var(--aura-2), color-mix(in srgb, var(--aura-2) 55%, transparent) 38%, color-mix(in srgb, var(--aura-2) 18%, transparent) 70%, transparent),
+    radial-gradient(85vw 300px at 0% calc(100% + 70px), var(--aura-3), color-mix(in srgb, var(--aura-3) 55%, transparent) 38%, color-mix(in srgb, var(--aura-3) 18%, transparent) 70%, transparent),
+    radial-gradient(75vw 300px at 100% calc(100% + 70px), var(--aura-4), color-mix(in srgb, var(--aura-4) 55%, transparent) 38%, color-mix(in srgb, var(--aura-4) 18%, transparent) 70%, transparent);
+}
+@media (min-width: 768px) {
+  /* 넓은 화면: 큰 제목 머리가 낮고(부제가 위에서 약 125px) 아래 메뉴가 없어서, 위는 낮게·아래는 화면 밖으로 더 내린다 */
+  .kok-aura {
+    background:
+      radial-gradient(min(85vw, 620px) 240px at 12% -70px, var(--aura-1), color-mix(in srgb, var(--aura-1) 55%, transparent) 38%, color-mix(in srgb, var(--aura-1) 18%, transparent) 70%, transparent),
+      radial-gradient(min(75vw, 560px) 240px at 94% -50px, var(--aura-2), color-mix(in srgb, var(--aura-2) 55%, transparent) 38%, color-mix(in srgb, var(--aura-2) 18%, transparent) 70%, transparent),
+      radial-gradient(min(85vw, 620px) 300px at 0% calc(100% + 150px), var(--aura-3), color-mix(in srgb, var(--aura-3) 55%, transparent) 38%, color-mix(in srgb, var(--aura-3) 18%, transparent) 70%, transparent),
+      radial-gradient(min(75vw, 560px) 300px at 100% calc(100% + 150px), var(--aura-4), color-mix(in srgb, var(--aura-4) 55%, transparent) 38%, color-mix(in srgb, var(--aura-4) 18%, transparent) 70%, transparent);
+  }
+}
+
+@layer components {
+  /* B: 화면마다 가장 중요한 카드 (홈 '오늘의 KOK', 복습 시작). 오른쪽 위에서 번지는 빛 + 빛 테두리 + 카드 밖 빛 */
+  .kok-hero {
+    position: relative;
+    isolation: isolate;
+    box-shadow:
+      0 1px 2px var(--shadow),
+      0 14px 34px -22px var(--hero-halo);
+  }
+  .kok-hero::before,
+  .kok-hero::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+    pointer-events: none;
+  }
+  .kok-hero::before {
+    z-index: -1;
+    background: radial-gradient(120% 110% at 100% 0%, var(--hero-1), var(--hero-2) 45%, transparent 80%);
+  }
+  .kok-hero::after {
+    padding: 1.5px;
+    background: linear-gradient(215deg, var(--hero-ring-1), var(--hero-ring-2) 45%, transparent 85%);
+    -webkit-mask:
+      linear-gradient(#000 0 0) content-box,
+      linear-gradient(#000 0 0);
+    -webkit-mask-composite: xor;
+    mask:
+      linear-gradient(#000 0 0) content-box,
+      linear-gradient(#000 0 0);
+    mask-composite: exclude;
+  }
+
+  /* C: 포인트 색 버튼(누르는 것: 링크·버튼)은 두 색 그라데이션 (끄면 끝 색이 시작 색과 같다) */
+  :is(a, button).bg-accent {
+    background-image: linear-gradient(135deg, var(--accent), var(--btn-2));
+  }
+  /* 고른 칩 (자료함 과목·복습 기간 …): 두 색 + 빛 그림자. 두 색 버튼을 끄면 예전처럼 검정(밝을 때)·흰색(어두울 때) */
+  .kok-chip-on {
+    background-color: var(--chip-on-1);
+    background-image: linear-gradient(135deg, var(--chip-on-1), var(--chip-on-2));
+    color: var(--chip-on-ink);
+    box-shadow: 0 8px 18px -10px var(--chip-on-glow);
+  }
+
+  /* D3: 작은 카드 빛 포인트 (끄면 그라데이션 끝 색 = 시작 색, 그림자·물든 곳 0) */
+  .kok-bar {
+    background-image: linear-gradient(90deg, var(--fab), var(--bar-2));
+    box-shadow: 0 0 calc(var(--fx-detail) * 10px) var(--detail-glow);
+  }
+  .kok-dot-on {
+    background-image: linear-gradient(135deg, var(--fab), var(--bar-2));
+    box-shadow: 0 0 calc(var(--fx-detail) * 8px) var(--detail-glow);
+  }
+  .kok-well {
+    box-shadow:
+      inset 0 0 0 calc(var(--fx-detail) * 1px) color-mix(in srgb, currentColor 22%, transparent),
+      0 calc(var(--fx-detail) * 6px) calc(var(--fx-detail) * 14px) calc(var(--fx-detail) * -8px) currentColor;
+  }
+  .kok-card.kok-detail-card {
+    background-image: radial-gradient(120% 80% at 100% 0%, var(--detail-tint), transparent 62%);
+  }
+}
+
+/* 아래 메뉴 (폰): 비치는 정도(--tab-bg), D1 이면 위 끝 빛 줄과 아래 모서리에서 올라오는 빛(메뉴 글자가 읽히는 만큼).
+   떠 있으면(--tab-float 1) 양옆·아래를 띄우고 둥글게 + 빛 테두리·빛 그림자 */
+.kok-tabbar {
+  left: calc(var(--tab-float) * 14px);
+  right: calc(var(--tab-float) * 14px);
+  bottom: calc(var(--tab-float) * (10px + env(safe-area-inset-bottom)));
+  padding-bottom: calc((1 - var(--tab-float)) * env(safe-area-inset-bottom));
+  border-radius: calc(var(--tab-float) * 26px);
+  background-color: var(--tab-bg);
+  background-image:
+    radial-gradient(60% 150% at 0% 100%, var(--tab-glow-1), transparent),
+    radial-gradient(55% 150% at 100% 100%, var(--tab-glow-2), transparent);
+  box-shadow:
+    0 -1px 0 var(--tab-line),
+    0 16px 36px -16px var(--tab-shadow);
+  -webkit-backdrop-filter: saturate(1.6) blur(20px);
+  backdrop-filter: saturate(1.6) blur(20px);
+}
+.kok-tabbar::before,
+.kok-tabbar::after {
+  content: '';
+  position: absolute;
+  pointer-events: none;
+}
+.kok-tabbar::before {
+  left: 0;
+  right: 0;
+  top: 0;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, var(--tab-edge-1) 30%, var(--tab-edge-2) 70%, transparent);
+}
+.kok-tabbar::after {
+  inset: 0;
+  border-radius: inherit;
+  padding: 1.2px;
+  background: linear-gradient(200deg, var(--tab-ring-1), var(--tab-ring-2) 50%, var(--tab-ring-3));
+  -webkit-mask:
+    linear-gradient(#000 0 0) content-box,
+    linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask:
+    linear-gradient(#000 0 0) content-box,
+    linear-gradient(#000 0 0);
+  mask-composite: exclude;
+}
+/* 아래 메뉴의 고른 칸: 두 색 (끄면 연한 포인트 색 하나) */
+.kok-tab-pill.is-on {
+  background-color: var(--pill-1);
+  background-image: linear-gradient(135deg, var(--pill-1), var(--pill-2));
+}
+/* + 버튼: 두 색 + 빛 그림자. 아래 메뉴가 떠 있으면 그만큼 위로 */
+.kok-fab {
+  background-image: linear-gradient(140deg, var(--fab), var(--fab-2));
+}
+@media (max-width: 767px) {
+  /* 자료함 고르기 띠는 아래 메뉴 자리를 덮는다: 메뉴가 떠 있으면 띠도 같은 자리에 떠 있게 */
+  .kok-selbar {
+    margin: 0 calc(var(--tab-float) * 14px) calc(var(--tab-float) * (10px + env(safe-area-inset-bottom)));
+    padding-bottom: calc(6px + (1 - var(--tab-float)) * env(safe-area-inset-bottom));
+    border-radius: calc(var(--tab-float) * 26px);
+    border-width: 1px calc(var(--tab-float) * 1px) calc(var(--tab-float) * 1px);
+  }
 }
 
 /* ------------------------------------------------------------ 채점 (복습·오답 다시 풀기·노트 문제 풀기 모두 QuestionCard)
@@ -650,7 +925,7 @@ body {
   body:has(.kok-fab) .kok-toasts {
     align-items: flex-start;
     padding-right: 92px;
-    bottom: calc(87px + env(safe-area-inset-bottom));
+    bottom: calc(87px + var(--tab-float) * 10px + env(safe-area-inset-bottom));
   }
 }
 
@@ -668,7 +943,7 @@ body {
 /* ------------------------------------------------------------ + 버튼과 빠른 추가 창 */
 .kok-fab {
   box-shadow:
-    0 6px 16px color-mix(in srgb, var(--fab) 35%, transparent),
+    0 10px 26px -8px var(--fab-glow),
     0 2px 4px var(--shadow-strong);
   transition:
     transform 180ms var(--ease-out),

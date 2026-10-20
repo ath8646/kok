@@ -4,8 +4,9 @@
 // 다음에 열 때 기본 색이 잠깐 보이지 않게 브라우저에도 적어 두고, layout 의 작은 글(THEME_BOOT)이 그리기 전에 먼저 붙인다.
 import { DEFAULT_GLOW, THEME_COLORS, type Glow, type ThemeColor, type ThemeFont, type ThemeMode, type ThemePaper, type UserSettings } from './settings';
 import type { Mode } from './themes/colors';
-import { specLook } from './themes/backdrop';
+import { backdropColors, imageInks, specLook } from './themes/backdrop';
 import { themeCss, type ModeLook } from './themes/css';
+import { DEFAULT_FX, fxTokens } from './themes/fx';
 import { glowTokens, isDefaultGlow } from './themes/glow';
 import { BASE_TOKENS, presetTokens } from './themes/presets';
 import { readSpec, type ThemeSpec } from './themes/spec';
@@ -103,17 +104,38 @@ export function knownCustomTheme(id: string): { name: string; spec: ThemeSpec | 
 
 const DEFAULT_DIM = 0.6;
 
+/** 기본 테마 한 모드의 모습 (꾸미기는 기본값, 빛 색은 테마마다 맞춘 짝) */
+function presetLook(color: ThemeColor, mode: Mode): ModeLook {
+  const tokens = presetTokens(color, mode);
+  return { tokens, image: null, dim: DEFAULT_DIM, fx: fxTokens(tokens, DEFAULT_FX, mode, color) };
+}
+
+/**
+ * 내가 만든 테마 한 모드의 모습 (테마 고치기 미리보기도 같은 계산).
+ * 그림이 있으면 글자가 잘 보이게 덮는 정도와 글자 색을 맞추고(themes/backdrop.ts), 꾸미기는 그 테마의 것이며
+ * 화면 위·아래 빛은 그림이 비친 색 위에서도 글자가 읽히는 만큼만
+ */
+export function specLookFx(spec: ThemeSpec, mode: Mode): ModeLook {
+  const look = specLook(spec, mode);
+  const seen = look.image ? backdropColors(imageInks(look.image), spec[mode].bg, look.dim) : [];
+  return { ...look, fx: fxTokens(look.tokens, spec.fx, mode, null, seen) };
+}
+
+/** 기본 테마 한 모드의 모습 (밖에서도: 새 테마를 기본 테마에서 시작할 때 미리보기) */
+export function presetLookFx(color: ThemeColor, mode: Mode): ModeLook {
+  return presetLook(color, mode);
+}
+
 /** 한 모드에 보일 모습 (없는 테마·이상한 테마는 기본 테마로) */
 export function lookFor(ref: string, mode: Mode): ModeLook {
   const id = customId(ref);
   if (id) {
     const spec = known.get(id)?.spec;
-    // 그림이 있으면 글자가 잘 보이게 덮는 정도와 글자 색을 맞춘다 (themes/backdrop.ts)
-    if (spec) return specLook(spec, mode);
-    return { tokens: presetTokens('default', mode), image: null, dim: DEFAULT_DIM };
+    if (spec) return specLookFx(spec, mode);
+    return presetLook('default', mode);
   }
   const color = ref.slice('preset:'.length) as ThemeColor;
-  return { tokens: presetTokens(THEME_COLORS.includes(color) ? color : 'default', mode), image: null, dim: DEFAULT_DIM };
+  return presetLook(THEME_COLORS.includes(color) ? color : 'default', mode);
 }
 
 export type ResolvedTheme = { mode: ThemeMode; light: ModeLook; dark: ModeLook; font: ThemeFont; paper: ThemePaper; plain: boolean };

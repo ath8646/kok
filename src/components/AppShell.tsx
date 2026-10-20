@@ -205,6 +205,8 @@ export function AppShell({ children }: { children: ReactNode }) {
   return (
     <Ctx.Provider value={{ me, refresh, focus, setFocus }}>
       <QuickAddProvider me={me} refreshMe={refresh} enabled={quickAdd}>
+        {/* 화면 위·아래 은은한 빛 (테마의 화면 꾸미기, globals.css .kok-aura). 집중 모드·첫 화면에서는 없다 */}
+        {!bare ? <div className="kok-aura" aria-hidden="true" /> : null}
         <div className={bare ? '' : 'md:flex'}>
           {!bare ? (
             <nav className="sticky top-0 hidden h-dvh w-60 shrink-0 flex-col gap-1 px-4 pb-6 pt-7 md:flex" aria-label="주 메뉴">
@@ -264,10 +266,7 @@ export function AppShell({ children }: { children: ReactNode }) {
           </div>
 
           {!bare ? (
-            <nav
-              className="fixed inset-x-0 bottom-0 z-40 grid grid-cols-5 bg-[color-mix(in_srgb,var(--surface)_92%,transparent)] px-1 pb-[env(safe-area-inset-bottom)] pt-1 shadow-[0_-1px_0_var(--line)] backdrop-blur-xl md:hidden"
-              aria-label="주 메뉴"
-            >
+            <nav className="kok-tabbar fixed z-40 grid grid-cols-5 px-1 pt-1 md:hidden" aria-label="주 메뉴">
               {TABS.map((t) => {
                 const on = under(pathname, t.href);
                 return (
@@ -277,7 +276,7 @@ export function AppShell({ children }: { children: ReactNode }) {
                     aria-current={on ? 'page' : undefined}
                     className={cx('flex flex-col items-center gap-0.5 pb-1.5 pt-1 text-[11px] font-semibold', on ? 'text-ink' : 'text-muted')}
                   >
-                    <span className={cx('kok-tab-pill grid h-8 w-14 place-items-center rounded-full', on ? 'bg-accent-soft text-accent' : '')}>
+                    <span className={cx('kok-tab-pill grid h-8 w-14 place-items-center rounded-full', on && 'is-on text-accent')}>
                       <Icon d={t.icon} size={21} />
                     </span>
                     {t.label}

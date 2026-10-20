@@ -133,7 +133,7 @@ export default function WelcomePage() {
               onClick={() => setSubject(s)}
               className={cx(
                 'press rounded-full px-3.5 py-1.5 text-sm font-semibold',
-                subject === s ? 'bg-ink text-surface' : 'bg-surface-2 text-ink hover:bg-surface-3',
+                subject === s ? 'kok-chip-on' : 'bg-surface-2 text-ink hover:bg-surface-3',
               )}
             >
               {s}

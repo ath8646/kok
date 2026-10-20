@@ -362,7 +362,7 @@ export function LibraryView() {
    * 자료 칸을 한꺼번에 바꾼다: 화면은 바로 바꾸고(카드가 새 자리로 미끄러진다), 저장하지 못하면 다시 읽는다.
    * holdMs: 그동안은 카드 자리를 그대로 두고(별이 튀고 빛이 번지는 것을 본 뒤) 새 자리로 미끄러진다
    */
-  const patchSources = async (ids: string[], patch: { starred?: boolean; in_review?: boolean }, done: string, holdMs = 0): Promise<boolean> => {
+  const patchSources = async (ids: string[], patch: { starred?: boolean; in_review?: boolean }, done: string | null, holdMs = 0): Promise<boolean> => {
     if (!ids.length || !data) return false;
     if (holdMs > 0) {
       setHold(shown.map((s) => s.id));
@@ -391,12 +391,13 @@ export function LibraryView() {
       reload();
       return false;
     }
-    toast(done);
+    if (done) toast(done);
     return true;
   };
   const starOne = (s: LibSource) => {
     rememberStar(s.id);
-    return patchSources([s.id], { starred: !s.starred }, s.starred ? '별표를 뺐어요.' : '별표했어요. 맨 위에 보여요.', s.starred ? 80 : 220);
+    // 별표는 카드의 별과 빛으로 보여서 알림을 띄우지 않는다 (저장하지 못했을 때만 알린다)
+    return patchSources([s.id], { starred: !s.starred }, null, s.starred ? 80 : 220);
   };
   const reviewOne = (s: LibSource) =>
     patchSources([s.id], { in_review: s.in_review === false }, s.in_review === false ? '다시 복습에 넣었어요.' : '복습에서 뺐어요.');
@@ -404,7 +405,7 @@ export function LibraryView() {
   const bulkStar = async () => {
     const ids = pickedRows.map((s) => s.id);
     setBulkBusy('star');
-    const ok = await patchSources(ids, { starred: labels.star }, labels.star ? `${ids.length}개에 별표했어요.` : `${ids.length}개의 별표를 뺐어요.`);
+    const ok = await patchSources(ids, { starred: labels.star }, null);
     setBulkBusy(null);
     if (ok) endSelect();
   };
@@ -562,7 +563,8 @@ export function LibraryView() {
             <>
               <button
                 type="button"
-                className="press rounded-full px-3 py-2 text-sm font-semibold text-accent hover:bg-accent-soft"
+                // 위 띠 글자는 화면 위 빛 위에 놓이지 않게 알약 안에 (화면 바탕 위 글자는 본문·흐린 글자만: fx.ts)
+                className="press rounded-full bg-accent-soft px-3 py-2 text-sm font-semibold text-accent hover:brightness-95"
                 onClick={() => setPicked(allPicked ? new Set() : new Set(shown.map((s) => s.id)))}
               >
                 {allPicked ? '모두 풀기' : '모두 고르기'}
@@ -737,7 +739,7 @@ export function LibraryView() {
                     onClick={() => select(x.id)}
                     className={cx(
                       'press inline-flex h-9 shrink-0 items-center gap-1.5 rounded-full px-3.5 text-sm font-semibold transition-colors duration-200',
-                      x.id === subject.id ? 'bg-ink text-surface' : 'bg-surface-2 text-ink hover:bg-surface-3',
+                      x.id === subject.id ? 'kok-chip-on' : 'bg-surface-2 text-ink hover:bg-surface-3',
                     )}
                   >
                     <span className="h-2.5 w-2.5 shrink-0 rounded-full" style={{ background: subjectVar(x.color) }} aria-hidden="true" />
@@ -867,20 +869,21 @@ function FolderChip({
       onClick={onClick}
       className={cx(
         'press inline-flex h-10 shrink-0 items-center gap-2 rounded-full px-4 text-sm font-semibold transition-colors duration-200',
-        on ? 'bg-ink text-surface' : 'bg-surface text-ink shadow-[0_1px_2px_var(--shadow)] hover:bg-surface-2',
+        // 고른 칩은 테마의 두 색 (화면 꾸미기 C, globals.css .kok-chip-on)
+        on ? 'kok-chip-on' : 'bg-surface text-ink shadow-[0_1px_2px_var(--shadow)] hover:bg-surface-2',
         mode === 'fill' && 'kok-fill',
       )}
     >
       {color ? <span className="h-2.5 w-2.5 rounded-full" style={{ background: color }} aria-hidden="true" /> : null}
       <span className="max-w-[9rem] truncate">{label}</span>
       {typeof count === 'number' ? (
-        <span key="n" className={cx('tabular-nums', on ? 'opacity-70' : 'text-muted', loading === false && 'kok-swap')}>
+        <span key="n" className={cx('tabular-nums', !on && 'text-muted', loading === false && 'kok-swap')}>
           {count}
         </span>
       ) : loading ? (
         <span className="inline-block h-2 w-3 rounded-full bg-current opacity-20" aria-hidden="true" />
       ) : null}
-      {badge ? <span className={cx('rounded-full px-1.5 text-[11px] font-bold', on ? 'bg-surface/20' : 'bg-bad-soft text-bad')}>{badge}</span> : null}
+      {badge ? <span className={cx('rounded-full px-1.5 text-[11px] font-bold', on ? 'ring-1 ring-inset ring-current' : 'bg-bad-soft text-bad')}>{badge}</span> : null}
     </button>
   );
 }
@@ -1342,7 +1345,7 @@ function RenameForm({ s, units, onDone }: { s: LibSource; units: string[]; onDon
                 onClick={() => setUnit(u)}
                 className={cx(
                   'press rounded-full px-3 py-1 text-sm font-semibold',
-                  u === unit.trim() ? 'bg-ink text-surface' : 'bg-surface-2 text-ink hover:bg-surface-3',
+                  u === unit.trim() ? 'kok-chip-on' : 'bg-surface-2 text-ink hover:bg-surface-3',
                 )}
               >
                 {u}

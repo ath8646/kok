@@ -3,6 +3,7 @@
 import { z } from 'zod';
 import { THEME_FONTS, THEME_PAPERS } from '../settings';
 import { fitPalette, normalizeHex, type Mode, type Palette } from './colors';
+import { DEFAULT_FX, zThemeFx } from './fx';
 import { BASE_TOKENS } from './presets';
 import { sanitizePatternSvg } from './pattern';
 
@@ -57,6 +58,8 @@ export const zThemeSpec = z.object({
   /** 이 테마를 고르면 같이 바꿀 글꼴·종이 (AI 가 고른 것, 없으면 그대로) */
   font: z.enum(THEME_FONTS).nullable().default(null),
   paper: z.enum(THEME_PAPERS).nullable().default(null),
+  /** 화면 꾸미기 (themes/fx.ts). 예전 테마에는 없어서 기본값 (A·B·C·D1 켬) */
+  fx: zThemeFx.catch({ ...DEFAULT_FX }),
 });
 export type ThemeSpec = z.infer<typeof zThemeSpec>;
 

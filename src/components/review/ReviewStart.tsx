@@ -100,7 +100,7 @@ export function ReviewStart({
   const kindList = KIND_ORDER.filter((k) => kinds[k] > 0);
 
   return (
-    <section className="kok-card grid gap-5 p-5" aria-label="복습 고르기">
+    <section className="kok-card kok-hero grid gap-5 p-5" aria-label="복습 고르기">
       {periods && counts ? (
         <Group label="언제 공부한 문제를 풀까요?" id="rv-period">
           <div role="radiogroup" aria-labelledby="rv-period" className="flex flex-wrap gap-2">
@@ -201,7 +201,7 @@ export function ReviewStart({
             </ul>
           </Group>
           <div className="kok-fill grid gap-2" style={{ ['--i' as string]: 3 }}>
-            <Button size="lg" className="w-full" busy={starting} onClick={() => onStart({ ...chosen, timed })}>
+            <Button size="lg" className="kok-cta w-full" busy={starting} onClick={() => onStart({ ...chosen, timed })}>
               {chosen.cards.length}문제 시작
             </Button>
             <p className="text-balance text-center text-xs text-muted">시간이 지나도 고른 문제는 끝까지 풀 수 있어요.</p>
@@ -249,12 +249,12 @@ function ChoiceChip({
       onKeyDown={onKeyDown}
       className={cx(
         'press inline-flex h-9 shrink-0 items-center gap-1.5 rounded-full px-3.5 text-sm font-semibold',
-        on ? 'bg-ink text-surface' : 'bg-surface-2 text-ink hover:bg-surface-3',
+        on ? 'kok-chip-on' : 'bg-surface-2 text-ink hover:bg-surface-3',
       )}
     >
       {dot ? <span className="h-2.5 w-2.5 shrink-0 rounded-full" style={{ background: dot }} aria-hidden="true" /> : null}
       <span className="max-w-[8rem] truncate">{children}</span>
-      <span className={cx('tabular-nums', on ? 'opacity-70' : count ? 'text-muted' : 'text-muted/60')}>{count}</span>
+      <span className={cx('tabular-nums', on ? '' : count ? 'text-muted' : 'text-muted/60')}>{count}</span>
     </button>
   );
 }

@@ -197,6 +197,48 @@ async def wait_ready(page, timeout=60):
     return False
 
 
+# 화면 바탕(카드 밖) 위에 바로 놓인 글자 중 본문(--ink)·흐린 글자(--muted) 색이 아닌 것.
+# 화면 위·아래 빛(themes/fx.ts)은 이 두 색이 읽히는 만큼만 진해서, 포인트·초록·빨강 글자는 알약·카드 안에 둔다
+ON_BG_JS = r"""
+() => {
+  const probe = (v) => { const e = document.createElement('span'); e.style.color = `var(${v})`; document.body.appendChild(e); const c = getComputedStyle(e).color; e.remove(); return c; };
+  const ok = new Set([probe('--ink'), probe('--muted')]);
+  const alphaOf = (c) => {
+    if (!c || c === 'transparent') return 0;
+    let m = c.match(/^rgba?\(([^)]+)\)$/);
+    if (m) { const p = m[1].split(/[ ,/]+/).filter(Boolean); return p.length >= 4 ? parseFloat(p[3]) : 1; }
+    m = c.match(/\/\s*([\d.]+)\s*\)$/);
+    return m ? parseFloat(m[1]) : 1;
+  };
+  const out = [];
+  const seen = new Set();
+  const w = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+  while (w.nextNode()) {
+    const n = w.currentNode;
+    if (!n.textContent.trim()) continue;
+    const el = n.parentElement;
+    if (!el || seen.has(el) || el.closest('[role=dialog], .kok-toasts, svg')) continue;
+    seen.add(el);
+    const cs = getComputedStyle(el);
+    if (cs.visibility === 'hidden') continue;
+    let o = el, hidden = false;
+    while (o) { if (parseFloat(getComputedStyle(o).opacity) < 0.05) { hidden = true; break; } o = o.parentElement; }
+    if (hidden) continue;
+    const r = document.createRange(); r.selectNodeContents(n);
+    if (![...r.getClientRects()].some((x) => x.width >= 2 && x.height >= 2)) continue;
+    let a = el, backed = false;
+    while (a && a !== document.body) {
+      const s = getComputedStyle(a);
+      if (alphaOf(s.backgroundColor) >= 0.5 || (s.backgroundImage && s.backgroundImage !== 'none')) { backed = true; break; }
+      a = a.parentElement;
+    }
+    if (!backed && !ok.has(cs.color)) out.push(`${n.textContent.trim().slice(0, 30)} (${cs.color})`);
+  }
+  return out;
+}
+"""
+
+
 async def css_var(page, name):
     return (await page.evaluate("(n) => getComputedStyle(document.documentElement).getPropertyValue(n).trim()", name)).lower()
 
@@ -1048,6 +1090,24 @@ async def main():
         await page.get_by_role("listbox", name="과목").get_by_role("option", name="과학").click()
         await expect(subject_pick).to_have_text("과학")
         await expect(page.get_by_text("광합성이 일어나는 세포 소기관은?").first).to_be_visible()
+
+        step("screen glow: text right on the page background is only body or muted text (phone + desktop)")
+        await page.goto(BASE + "/library")
+        await page.wait_for_timeout(800)
+        glow_note = await page.evaluate("(() => { const a = document.querySelector('a[href^=\"/notes/\"]'); return a ? a.getAttribute('href') : null; })()")
+        assert glow_note, "a note card in the library"
+        for width in (390, 1280):
+            gctx, gpage = await new_ctx(browser, "student", width=width)
+            for path in ["/home", "/library", "/review", "/wrong", "/questions", "/settings", glow_note, glow_note + "?tab=visual", glow_note + "?tab=questions"]:
+                await gpage.goto(BASE + path)
+                await gpage.wait_for_timeout(1200)
+                bad = await gpage.evaluate(ON_BG_JS)
+                assert not bad, f"{width} {path}: coloured text on the page background {bad}"
+            # 화면 빛은 하나 (집중 모드·첫 화면 밖), 아래 메뉴는 꾸미기 메뉴
+            await expect(gpage.locator(".kok-aura")).to_have_count(1)
+            if width == 390:
+                await expect(gpage.locator("nav.kok-tabbar")).to_be_visible()
+            await gctx.close()
 
         step("drop a PDF anywhere → organized automatically")
         import subprocess
@@ -2179,7 +2239,11 @@ async def main():
         await page.goto(BASE + "/settings#theme")
         brightness = page.get_by_role("radiogroup", name="화면 밝기")
         maker = page.get_by_role("dialog", name="AI로 테마 만들기")
-        await page.get_by_role("button", name=re.compile("AI로 만들기")).click()
+        chooser = page.get_by_role("dialog", name="새 테마 만들기")
+        # 테마 칸의 마지막 '+' → 새 테마 고르는 창 → AI로 만들기
+        await page.get_by_role("button", name="새 테마 만들기").click()
+        await chooser.get_by_role("button", name=re.compile("^AI로 만들기")).click()
+        await expect(chooser).to_be_hidden()
         await maker.locator("#theme-prompt").fill("비 오는 날 카페")
         await maker.get_by_role("button", name=re.compile("^만들기")).click()
         await expect(page.get_by_text(re.compile("테마를 만들어 썼어요"))).to_be_visible(timeout=30000)
@@ -2229,7 +2293,8 @@ async def main():
         await page.goto(BASE + "/settings#theme")
         urllib.request.urlopen("http://localhost:54321/__cf?mode=quota")
         try:
-            await page.get_by_role("button", name=re.compile("AI로 만들기")).click()
+            await page.get_by_role("button", name="새 테마 만들기").click()
+            await chooser.get_by_role("button", name=re.compile("^AI로 만들기")).click()
             await maker.locator("#theme-prompt").fill("밤하늘 별빛")
             await maker.get_by_role("button", name=re.compile("^만들기")).click()
             await expect(page.get_by_text(re.compile("무늬를 대신 넣었어요"))).to_be_visible(timeout=30000)
@@ -2250,7 +2315,10 @@ async def main():
 
         step("themes (Pro): edit a theme — name, pattern, photo — then delete it")
         editor = page.get_by_role("dialog", name="테마 고치기")
-        await page.get_by_role("button", name="고치기", exact=True).last.click()
+        # 고른 내 테마 칸의 연필 (방금 만든 무늬 테마를 쓰는 중). 연필은 고른 칸에만 하나
+        pencil = page.get_by_role("button", name=re.compile("' 테마 고치기$"))
+        await expect(pencil).to_have_count(1)
+        await pencil.click()
         await expect(editor).to_be_visible()
         await editor.locator("#theme-name").fill("물결 테마")
         await editor.get_by_role("radiogroup", name="배경 그림").get_by_role("radio", name="무늬").click()
@@ -2262,7 +2330,7 @@ async def main():
         assert wave_svg.startswith("<svg"), wave_svg[:80]
         want = ('url("data:image/svg+xml,' + urllib.parse.quote(wave_svg, safe="-_.!~*'()") + '")').lower()
         await wait_js(page, f"getComputedStyle(document.documentElement).getPropertyValue('--theme-image').trim().toLowerCase() === {json.dumps(want)}")
-        await page.get_by_role("button", name="고치기", exact=True).last.click()
+        await page.get_by_role("button", name="'물결 테마' 테마 고치기").click()
         await expect(editor).to_be_visible()
         await editor.get_by_role("radiogroup", name="배경 그림").get_by_role("radio", name="사진").click()
         await editor.get_by_label("배경 사진 고르기").set_input_files(files=[{"name": "bg.png", "mimeType": "image/png", "buffer": make_png()}])
@@ -2279,7 +2347,7 @@ async def main():
         await page.wait_for_timeout(1200)
         await shot(page, "51-library-photo", full=False)
         await page.goto(BASE + "/settings#theme")
-        await page.get_by_role("button", name="고치기", exact=True).last.click()
+        await page.get_by_role("button", name="'물결 테마' 테마 고치기").click()
         await expect(editor).to_be_visible()
         page.once("dialog", lambda d: asyncio.ensure_future(d.accept()))
         await editor.get_by_role("button", name="지우기").click()
@@ -2288,6 +2356,56 @@ async def main():
         await wait_css(page, "--accent", "#6057e7")
         await wait_saved({"light": "preset:default", "dark": "preset:default"})
         assert sql(f"select count(*) from public.user_themes where user_id = '{student_id}' and name = '물결 테마'") == "0"
+
+        step("themes (Pro): a new theme from a preset with its own decorations (floating menu, small-card sparkle, glass)")
+        await page.goto(BASE + "/settings#theme")
+        grid = page.get_by_role("radiogroup", name="테마", exact=True)
+        # 기본 테마는 고칠 수 없다 (연필 없음)
+        await grid.get_by_role("radio", name="블루", exact=True).click()
+        await expect(page.get_by_role("button", name=re.compile("' 테마 고치기$"))).to_have_count(0)
+        await page.get_by_role("button", name="새 테마 만들기").click()
+        await chooser.get_by_role("button", name="민트에서 시작하기").click()
+        fx_editor = page.get_by_role("dialog", name="새 테마 · 민트에서 시작")
+        await expect(fx_editor).to_be_visible()
+        await fx_editor.locator("#theme-name").fill("떠 있는 민트")
+        # 처음에는 A·B·C·D1 만 켜져 있다
+        for label, on in (("화면 위에 은은한 빛", True), ("중요한 카드가 빛나요", True), ("버튼을 두 가지 색으로", True), ("화면 아래에도 은은한 빛", True), ("작은 카드에도 반짝이는 포인트", False), ("아래 메뉴를 띄우기", False)):
+            if on:
+                await expect(fx_editor.get_by_label(label, exact=True)).to_be_checked()
+            else:
+                await expect(fx_editor.get_by_label(label, exact=True)).not_to_be_checked()
+        for label in ("아래 메뉴를 띄우기", "작은 카드에도 반짝이는 포인트", "화면 위에 은은한 빛"):
+            await fx_editor.get_by_text(label, exact=True).click()
+        await fx_editor.get_by_role("slider", name="아래 메뉴가 비치는 정도").fill("40")
+        await fx_editor.get_by_role("radiogroup", name="꾸미기 빛 색").get_by_role("radio", name="오로라").click()
+        await shot(page, "52-theme-fx-editor", full=False)
+        await fx_editor.get_by_role("button", name="저장하고 쓰기").click()
+        await expect(fx_editor).to_be_hidden()
+        mint = sql(f"select id from public.user_themes where user_id = '{student_id}' and name = '떠 있는 민트'")
+        fx_saved = json.loads(sql(f"select spec->'fx' from public.user_themes where id = '{mint}'"))
+        assert fx_saved == {"top": False, "hero": True, "buttons": True, "bottom": True, "details": True, "floatTab": True, "tabSeeThrough": 40, "aura": "aurora"}, fx_saved
+        await wait_saved({"light": f"custom:{mint}", "dark": f"custom:{mint}"})
+        await wait_css(page, "--tab-float", "1")
+        await wait_css(page, "--fx-detail", "1")
+        assert (await css_var(page, "--aura-1")).endswith(", 0)"), await css_var(page, "--aura-1")
+        assert (await css_var(page, "--tab-bg")).endswith(", 0.6)"), await css_var(page, "--tab-bg")
+        await expect(page.get_by_role("button", name="'떠 있는 민트' 테마 고치기")).to_be_visible()
+        await page.goto(BASE + "/home")
+        await page.wait_for_timeout(1000)
+        tabbar = await page.locator("nav.kok-tabbar").bounding_box()
+        assert tabbar and tabbar["x"] >= 10 and 860 - (tabbar["y"] + tabbar["height"]) >= 8, tabbar  # 양옆·아래가 떠 있다
+        fab_box = await page.locator(".kok-fab").bounding_box()
+        assert fab_box and fab_box["y"] + fab_box["height"] <= tabbar["y"] - 8, (fab_box, tabbar)  # + 버튼은 메뉴 위에
+        await shot(page, "52-home-floating-menu", full=False)
+        # 지우면 기본 모양으로 (메뉴도 다시 아래에 붙는다)
+        await page.goto(BASE + "/settings#theme")
+        await page.get_by_role("button", name="'떠 있는 민트' 테마 고치기").click()
+        await expect(editor).to_be_visible()
+        page.once("dialog", lambda d: asyncio.ensure_future(d.accept()))
+        await editor.get_by_role("button", name="지우기").click()
+        await expect(editor).to_be_hidden()
+        await wait_saved({"light": "preset:default", "dark": "preset:default"})
+        await wait_css(page, "--tab-float", "0")
 
         step("themes (Pro): unused pictures are cleaned up after a day")
         sql(f"update public.theme_images set created_at = now() - interval '2 days' where user_id = '{student_id}'")
@@ -2440,8 +2558,9 @@ async def main():
         assert await cards.first.get_attribute("data-flip") != oldest
         await card(oldest).get_by_role("button", name=re.compile(" 메뉴$")).click()
         await page.get_by_role("menuitem", name="별표", exact=True).click()
-        await expect(page.get_by_text("별표했어요. 맨 위에 보여요.")).to_be_visible()
         await expect(cards.first).to_have_attribute("data-flip", oldest)
+        # 별표는 별과 빛으로 보여서 아래 알림을 띄우지 않는다
+        await expect(page.locator(".kok-toast", has_text="별표")).to_have_count(0)
         await expect(card(oldest).get_by_role("link")).to_have_accessible_name(re.compile(r"\(별표\)$"))
         await poll_db(f"select starred from public.sources where id = '{oldest}'", "t")
         # 다시 들어와도 맨 위 (저장된 별표)
@@ -2458,7 +2577,7 @@ async def main():
         await expect(star_btn).to_have_attribute("aria-pressed", "true")
         assert page.url.endswith("/library"), page.url
         await expect(card(second).locator("a.kok-glow.is-starred")).to_have_count(1)
-        await expect(page.get_by_text("별표했어요. 맨 위에 보여요.")).to_be_visible()
+        await expect(page.locator(".kok-toast", has_text="별표")).to_have_count(0)
         # 별표한 자료끼리는 내가 정한 순서·새 자료 먼저: 둘 다 맨 위 두 자리
         await expect(cards.nth(0)).to_have_attribute("data-flip", re.compile(f"^({oldest}|{second})$"))
         await expect(cards.nth(1)).to_have_attribute("data-flip", re.compile(f"^({oldest}|{second})$"))
@@ -2501,8 +2620,8 @@ async def main():
         await no_hscroll(page, "library selecting")
         # 하나라도 별표가 없으면 '별표'
         await bar.get_by_role("button", name="별표", exact=True).click()
-        await expect(page.get_by_text("2개에 별표했어요.")).to_be_visible()
         await expect(bar).to_have_count(0)
+        await expect(page.locator(".kok-toast", has_text="별표")).to_have_count(0)
         await poll_db(f"select count(*) from public.sources where id in ('{a_id}', '{b_id}') and starred", "2")
         await expect(page.get_by_role("button", name="자료 넣기", exact=True)).to_be_visible()
         # 별표한 둘을 고르면 '별표 빼기'

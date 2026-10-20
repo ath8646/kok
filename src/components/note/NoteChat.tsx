@@ -344,7 +344,7 @@ export function NoteChat({
         ref={fab}
         type="button"
         className={cx(
-          'kok-fab fixed bottom-[calc(80px+env(safe-area-inset-bottom))] right-4 grid h-[58px] w-[58px] place-items-center rounded-full bg-fab text-fab-ink md:bottom-8 md:right-8',
+          'kok-fab fixed bottom-[calc(80px+var(--tab-float)*10px+env(safe-area-inset-bottom))] right-4 grid h-[58px] w-[58px] place-items-center rounded-full bg-fab text-fab-ink md:bottom-8 md:right-8',
           open ? 'z-[56]' : 'z-40',
         )}
         aria-label={open ? '채팅 닫기' : '노트에게 물어보기'}

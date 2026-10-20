@@ -126,7 +126,8 @@ export default function HomePage() {
         : '자료를 넣으면 AI가 정리하고 문제를 만들어요';
 
   const recentLink = (
-    <Link href="/library" className="press rounded-full px-3 py-1 text-sm font-semibold text-accent hover:bg-accent-soft">
+    // 화면 바탕 위 글자는 본문·흐린 글자만(화면 빛 위에서 읽히게, fx.ts): 포인트 글자는 연한 알약 안에
+    <Link href="/library" className="press rounded-full bg-accent-soft px-3 py-1 text-sm font-semibold text-accent hover:brightness-95">
       자료함 →
     </Link>
   );
@@ -167,8 +168,8 @@ export default function HomePage() {
       {!plan && !err ? (
         <TodaySkeleton />
       ) : hasCards ? (
-        // 자리 표시와 같은 크기의 카드는 그 자리에 두고, 안의 글만 번지며 나타난다
-        <section className="kok-card grid gap-4 p-5">
+        // 자리 표시와 같은 크기의 카드는 그 자리에 두고, 안의 글만 번지며 나타난다. 화면의 핵심 카드라 테마 빛이 번진다(kok-hero)
+        <section className="kok-card kok-hero grid gap-4 p-5">
           <div className="kok-fill flex items-center gap-4" style={{ ['--i' as string]: 0 }}>
             <ProgressRing value={dayTotal ? (doneToday / dayTotal) * 100 : 100} size={76} stroke={7} label="오늘 복습 진행">
               {today.length ? (
@@ -187,7 +188,7 @@ export default function HomePage() {
             </div>
           </div>
           {today.length ? (
-            <LinkButton href="/review" size="lg" className="kok-fill w-full">
+            <LinkButton href="/review" size="lg" className="kok-fill kok-cta w-full">
               {settings.minutes}분 KOK 시작
             </LinkButton>
           ) : (
@@ -235,7 +236,7 @@ export default function HomePage() {
                 <span
                   className={cx(
                     'grid h-[18px] w-[18px] place-items-center rounded-full text-[11px] font-bold transition-colors duration-200',
-                    d.studied ? 'bg-fab text-fab-ink' : d.future ? 'bg-surface-2 text-muted/60' : 'bg-surface-2 text-muted',
+                    d.studied ? 'kok-dot-on bg-fab text-fab-ink' : d.future ? 'bg-surface-2 text-muted/60' : 'bg-surface-2 text-muted',
                     d.today && !d.studied && 'ring-2 ring-fab ring-inset',
                   )}
                   aria-label={`${d.label}요일 ${d.studied ? '공부함' : d.future ? '' : '쉼'}`}
@@ -256,7 +257,7 @@ export default function HomePage() {
           {!me.energy.unlimited && me.energy.limit ? (
             <span className="h-1.5 overflow-hidden rounded-full bg-surface-2" aria-hidden="true">
               <span
-                className="block h-full rounded-full bg-fab transition-[width] duration-500"
+                className="kok-bar block h-full rounded-full bg-fab transition-[width] duration-500"
                 style={{ width: `${Math.max(0, Math.min(100, ((me.energy.remaining ?? 0) / me.energy.limit) * 100))}%` }}
               />
             </span>
@@ -319,7 +320,7 @@ export default function HomePage() {
                 <Link
                   key={s.id}
                   href={`/notes/${s.id}`}
-                  className="kok-card kok-card-hover press flex h-[150px] w-[150px] shrink-0 snap-start flex-col overflow-hidden p-3.5 md:w-auto"
+                  className="kok-card kok-detail-card kok-card-hover press flex h-[150px] w-[150px] shrink-0 snap-start flex-col overflow-hidden p-3.5 md:w-auto"
                   style={{ ['--i' as string]: i }}
                 >
                   <p className={cx('kok-fill line-clamp-3 min-h-0 flex-1 text-xs leading-relaxed text-muted', busy && 'kok-shimmer rounded-lg')}>
@@ -348,7 +349,7 @@ export default function HomePage() {
       <SectionTitle>바로 가기</SectionTitle>
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
         <button type="button" onClick={() => quick.openComposer()} className="kok-card kok-card-hover press grid gap-2 p-4 text-left">
-          <span className="grid h-10 w-10 place-items-center rounded-2xl bg-accent-soft text-accent">
+          <span className="kok-well grid h-10 w-10 place-items-center rounded-2xl bg-accent-soft text-accent">
             <Icon d={ICONS.plus} size={22} strokeWidth={2.2} />
           </span>
           <span>
@@ -357,7 +358,7 @@ export default function HomePage() {
           </span>
         </button>
         <Link href="/wrong" className="kok-card kok-card-hover press grid gap-2 p-4">
-          <span className="grid h-10 w-10 place-items-center rounded-2xl bg-bad-soft text-bad">
+          <span className="kok-well grid h-10 w-10 place-items-center rounded-2xl bg-bad-soft text-bad">
             <Icon d="M6 3h12a1 1 0 0 1 1 1v17l-7-4-7 4V4a1 1 0 0 1 1-1zM9.5 8.5l5 5M14.5 8.5l-5 5" size={21} />
           </span>
           <span>
@@ -366,7 +367,7 @@ export default function HomePage() {
           </span>
         </Link>
         <Link href="/questions" className="kok-card kok-card-hover press hidden gap-2 p-4 sm:grid">
-          <span className="grid h-10 w-10 place-items-center rounded-2xl bg-ok-soft text-ok">
+          <span className="kok-well grid h-10 w-10 place-items-center rounded-2xl bg-ok-soft text-ok">
             <Icon d={ICONS.grid} size={20} />
           </span>
           <span>

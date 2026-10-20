@@ -9,7 +9,7 @@ import type { KeyPoint, Note } from '@/lib/ai/schemas';
 import { previewText } from '@/lib/richtext';
 import { starredFirst } from '@/lib/note-order';
 import { RichText, Tex } from './RichText';
-import { Button, Chip, Icon, ICONS, cx, useToast } from './ui';
+import { Button, Chip, Icon, ICONS, cx } from './ui';
 import { StarButton, StarGlyph, useStarRefocus } from './note/StarButton';
 import { SortList } from './note/SortList';
 import { FormulaEditor, KeyPointEditor, SummaryEditor, TermEditor, type KeyPointDraft } from './note/NoteEditors';
@@ -67,13 +67,9 @@ function newKeyPointId(note: Note, reserved?: ReadonlySet<string>): string {
  * 순서가 바뀌면 카드가 원래 자리에서 새 자리로 미끄러진다 (FLIP: 바뀌기 전 자리를 재고, 바뀐 뒤 거꾸로 옮겼다가 풀어 준다).
  * 움직이는 카드(lead)는 다른 카드 위로 살짝 떠서 지나간다. 움직임 줄이기면 바로 바뀐다
  */
-function useFlip(root: RefObject<HTMLElement | null>, orderKey: string, onLeadAway: (up: boolean) => void) {
+function useFlip(root: RefObject<HTMLElement | null>, orderKey: string) {
   const before = useRef<Map<string, number> | null>(null);
   const lead = useRef<string | null>(null);
-  const away = useRef(onLeadAway);
-  useEffect(() => {
-    away.current = onLeadAway;
-  }, [onLeadAway]);
   const capture = (leadId: string | null) => {
     const el = root.current;
     if (!el) return;
@@ -94,8 +90,6 @@ function useFlip(root: RefObject<HTMLElement | null>, orderKey: string, onLeadAw
       const dy = top - rect.top;
       if (Math.abs(dy) < 1) continue;
       const isLead = id === lead.current;
-      // 움직인 카드가 화면 밖으로 갔으면 알려 준다
-      if (isLead && (rect.bottom < 90 || rect.top > window.innerHeight - 40)) away.current(dy > 0);
       if (reduce) continue;
       if (isLead) n.style.zIndex = '2';
       const anim = n.animate(
@@ -224,7 +218,6 @@ export function NoteView({
   /** 자료 그림을 빼면 (고칠 수 있을 때만) */
   onFiguresChange?: (next: SourceFigure[]) => void;
 }) {
-  const toast = useToast();
   const [editing, setEditing] = useState<string | null>(null);
   const [sorting, setSorting] = useState<Sorting>(null);
   // 고칠 수 없게 되면(자료를 더하기 시작함 등) 열려 있던 고치기 칸과 순서 바꾸기를 닫는다
@@ -316,8 +309,7 @@ export function NoteView({
   const listRef = useRef<HTMLDivElement>(null);
   // 키보드로 별표를 빼면 카드가 제자리로 옮겨 간 뒤 그 카드의 별 버튼으로 초점을 되돌린다
   const rememberStar = useStarRefocus(listRef, hold !== null);
-  const onLeadAway = useCallback((up: boolean) => toast(up ? '별표한 개념은 맨 위에 모여요.' : '별표를 빼서 원래 자리로 옮겼어요.'), [toast]);
-  const flip = useFlip(listRef, ordered.map((k) => k.id).join('|'), onLeadAway);
+  const flip = useFlip(listRef, ordered.map((k) => k.id).join('|'));
   const toggleStar = (kp: KeyPoint) => {
     rememberStar(kp.id);
     const on = !kp.starred;

@@ -282,12 +282,19 @@
    글자로 쓰는 포인트 색(--accent)은 흰 바탕·회색 바탕·연한 포인트 바탕 모두에서 명암비 4.5 이상,
    버튼 글자(--accent-ink)도 4.5 이상, + 버튼 아이콘(--fab-ink)은 3 이상이 되게 맞춘다. */
 
-/* 배경 그림 (Pro 테마): 화면 뒤에 그림을 깔고, 그 위를 바탕색으로 덮어(--theme-dim) 글자가 잘 보이게 한다 */
+/* 배경 그림 (Pro 테마): 화면 뒤에 그림을 깔고, 그 위를 바탕색으로 덮어(--theme-dim) 글자가 잘 보이게 한다.
+   폰은 스크롤하면 주소창·도구 막대가 숨었다 나타나며 화면 높이가 바뀐다. 화면 전체(inset 0)로 두면 그때마다 칸이 커졌다
+   작아져서 그림이 다시 늘고(cover) 가운데가 옮겨져, 스크롤할 때 배경이 움직여 보인다. 그래서 높이를 막대가 숨었을 때의
+   가장 큰 화면 높이(lvh)로 고정하고 위에 붙인다 (lvh 를 모르는 예전 브라우저는 min-height 의 vh: 폰에서는 같은 값) */
 :root[data-bg] body::before,
 :root[data-bg] body::after {
   content: '';
   position: fixed;
-  inset: 0;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 100lvh;
+  min-height: 100vh;
   /* 화면 위·아래 빛(.kok-aura, -1)이 그림을 덮은 바탕 위에 오게 */
   z-index: -2;
   pointer-events: none;
@@ -602,26 +609,61 @@ body {
    빛의 모양(가운데·크기·진하기 단계)을 바꾸면 fx.ts 의 AURA_TEXT_SHARE(글자 자리의 진하기 비율)도 다시 잰다. */
 
 /* A·D1: 화면 끝 바깥에서 가장 진하고 큰 제목 아래 부제가 오기 전에 거의 사라진다 (AppShell, 집중 모드에서는 없다).
-   바탕 그림(body::before·after, -2) 위, 글자 아래 */
+   바탕 그림(body::before·after, -2) 위, 글자 아래.
+   폰은 스크롤하면 주소창·도구 막대가 숨었다 나타나며 화면 높이가 바뀐다. 화면 전체(inset 0) 한 장이면 그때마다 칸 크기가
+   바뀌어 빛이 튀므로, 높이가 정해진 두 장으로 나눈다: 위 빛(::after)은 화면 위에, 아래 빛(::before)은 아래 메뉴처럼 화면
+   아래에 붙는다. .kok-aura 는 쌓는 차례(-1)만 정하는 빈 칸. 빛의 자리·크기·차례(위 빛이 위)는 한 장일 때와 같다 */
 .kok-aura {
   position: fixed;
-  inset: 0;
+  top: 0;
+  left: 0;
+  width: 0;
+  height: 0;
   z-index: -1;
   pointer-events: none;
+}
+.kok-aura::before,
+.kok-aura::after {
+  content: '';
+  position: fixed;
+  left: 0;
+  right: 0;
+  /* 빛이 닿는 곳(위 220px·아래 230px)보다 넉넉히 */
+  height: 440px;
+  pointer-events: none;
+}
+.kok-aura::before {
+  bottom: 0;
   background:
-    radial-gradient(85vw 270px at 12% -70px, var(--aura-1), color-mix(in srgb, var(--aura-1) 55%, transparent) 38%, color-mix(in srgb, var(--aura-1) 18%, transparent) 70%, transparent),
-    radial-gradient(75vw 270px at 94% -50px, var(--aura-2), color-mix(in srgb, var(--aura-2) 55%, transparent) 38%, color-mix(in srgb, var(--aura-2) 18%, transparent) 70%, transparent),
     radial-gradient(85vw 300px at 0% calc(100% + 70px), var(--aura-3), color-mix(in srgb, var(--aura-3) 55%, transparent) 38%, color-mix(in srgb, var(--aura-3) 18%, transparent) 70%, transparent),
     radial-gradient(75vw 300px at 100% calc(100% + 70px), var(--aura-4), color-mix(in srgb, var(--aura-4) 55%, transparent) 38%, color-mix(in srgb, var(--aura-4) 18%, transparent) 70%, transparent);
 }
+.kok-aura::after {
+  top: 0;
+  background:
+    radial-gradient(85vw 270px at 12% -70px, var(--aura-1), color-mix(in srgb, var(--aura-1) 55%, transparent) 38%, color-mix(in srgb, var(--aura-1) 18%, transparent) 70%, transparent),
+    radial-gradient(75vw 270px at 94% -50px, var(--aura-2), color-mix(in srgb, var(--aura-2) 55%, transparent) 38%, color-mix(in srgb, var(--aura-2) 18%, transparent) 70%, transparent);
+}
 @media (min-width: 768px) {
   /* 넓은 화면: 큰 제목 머리가 낮고(부제가 위에서 약 125px) 아래 메뉴가 없어서, 위는 낮게·아래는 화면 밖으로 더 내린다 */
-  .kok-aura {
+  .kok-aura::before {
     background:
-      radial-gradient(min(85vw, 620px) 240px at 12% -70px, var(--aura-1), color-mix(in srgb, var(--aura-1) 55%, transparent) 38%, color-mix(in srgb, var(--aura-1) 18%, transparent) 70%, transparent),
-      radial-gradient(min(75vw, 560px) 240px at 94% -50px, var(--aura-2), color-mix(in srgb, var(--aura-2) 55%, transparent) 38%, color-mix(in srgb, var(--aura-2) 18%, transparent) 70%, transparent),
       radial-gradient(min(85vw, 620px) 300px at 0% calc(100% + 150px), var(--aura-3), color-mix(in srgb, var(--aura-3) 55%, transparent) 38%, color-mix(in srgb, var(--aura-3) 18%, transparent) 70%, transparent),
       radial-gradient(min(75vw, 560px) 300px at 100% calc(100% + 150px), var(--aura-4), color-mix(in srgb, var(--aura-4) 55%, transparent) 38%, color-mix(in srgb, var(--aura-4) 18%, transparent) 70%, transparent);
+  }
+  .kok-aura::after {
+    background:
+      radial-gradient(min(85vw, 620px) 240px at 12% -70px, var(--aura-1), color-mix(in srgb, var(--aura-1) 55%, transparent) 38%, color-mix(in srgb, var(--aura-1) 18%, transparent) 70%, transparent),
+      radial-gradient(min(75vw, 560px) 240px at 94% -50px, var(--aura-2), color-mix(in srgb, var(--aura-2) 55%, transparent) 38%, color-mix(in srgb, var(--aura-2) 18%, transparent) 70%, transparent);
+  }
+}
+/* 폰·태블릿: 배경 칸을 따로 그려 두어(합성 층) 스크롤하는 동안 다시 그리거나 글과 같이 밀리지 않게 */
+@media (pointer: coarse) {
+  :root[data-bg] body::before,
+  :root[data-bg] body::after,
+  .kok-aura::before,
+  .kok-aura::after {
+    will-change: transform;
   }
 }
 

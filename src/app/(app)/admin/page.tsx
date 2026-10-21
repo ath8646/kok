@@ -86,6 +86,7 @@ export default function AdminPage() {
   const [site, setSite] = useState<{ contactEmail: string; operatorName: string } | null>(null);
   const [testModel, setTestModel] = useState<'fast' | 'careful' | 'adminTest'>('fast');
   const [testResult, setTestResult] = useState<string | null>(null);
+  const [schemaResult, setSchemaResult] = useState<SchemaTest | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [q, setQ] = useState('');
   const [plansKey, setPlansKey] = useState(0);
@@ -203,9 +204,31 @@ export default function AdminPage() {
           >
             키 시험
           </Button>
+          <Button
+            size="sm"
+            variant="secondary"
+            busy={busy === 'schemas'}
+            onClick={async () => {
+              setBusy('schemas');
+              setSchemaResult(null);
+              try {
+                setSchemaResult(await api<SchemaTest>('/api/admin/test-schemas', { method: 'POST', body: JSON.stringify({ model: models[testModel] }) }));
+              } catch (e) {
+                toast((e as Error).message, 'bad');
+              } finally {
+                setBusy(null);
+              }
+            }}
+          >
+            AI 답 모양 시험
+          </Button>
         </div>
         {testResult ? <p className="text-sm">{testResult}</p> : null}
-        <p className="text-xs text-muted">키를 바꾸려면 Vercel 환경변수 ANTHROPIC_API_KEY 를 바꾸고 다시 배포해요.</p>
+        {schemaResult ? <SchemaTestList result={schemaResult} /> : null}
+        <p className="text-xs text-muted">
+          키를 바꾸려면 Vercel 환경변수 ANTHROPIC_API_KEY 를 바꾸고 다시 배포해요. &lsquo;AI 답 모양 시험&rsquo;은 앱이 쓰는 모든 답 모양을 Claude 가 받는지
+          짧게 물어봐요(아주 적은 비용).
+        </p>
       </Card>
 
       <SectionTitle>숫자</SectionTitle>
@@ -502,6 +525,32 @@ export default function AdminPage() {
           저장
         </Button>
       </Card>
+    </div>
+  );
+}
+
+type SchemaTest = { model: string; results: Array<{ name: string; props: number; ok: boolean | null; message: string; ms: number }> };
+
+/** 'AI 답 모양 시험' 결과: 받지 않은 모양을 먼저 */
+function SchemaTestList({ result }: { result: SchemaTest }) {
+  const failed = result.results.filter((r) => r.ok === false).length;
+  const unknown = result.results.filter((r) => r.ok === null).length;
+  const rows = [...result.results].sort((a, b) => Number(a.ok === true) - Number(b.ok === true));
+  return (
+    <div className="grid gap-1.5">
+      <p className="text-sm font-semibold">
+        {failed ? `${failed}개는 Claude 가 받지 않아요` : unknown ? `${unknown}개는 확인하지 못했어요 (다시 해 보세요)` : '모두 받아요'} · {result.model}
+      </p>
+      <ul className="grid gap-1">
+        {rows.map((r) => (
+          <li key={r.name} className="rounded-xl bg-surface-2 px-3 py-2 text-xs">
+            <span className={cx('font-semibold', r.ok === false ? 'text-bad' : r.ok === null ? 'text-warn' : 'text-ok')}>
+              {r.ok === false ? '안 받음' : r.ok === null ? '모름' : '받음'}
+            </span>{' '}
+            {r.name} · 칸 {r.props} · {(r.ms / 1000).toFixed(1)}초{r.message ? <span className="mt-0.5 block break-all text-muted">{r.message}</span> : null}
+          </li>
+        ))}
+      </ul>
     </div>
   );
 }

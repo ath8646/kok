@@ -234,16 +234,36 @@ export const zSolve = z.object({
 });
 
 // ---------------------------------------------------------------- 채팅 (노트 채팅·홈 AI 채팅)
-const quizItemSchema = (quizJsonSchema.properties as Record<string, { items: JsonSchema }>).questions.items;
+// Claude structured outputs 는 스키마의 속성이 모두 합쳐 약 40개를 넘으면 "compiled grammar is too large" 로 거절한다
+// (schemas.test.ts 가 SCHEMA_PROPS_MAX 로 지킨다). 그래서 채팅은 문제 칸을 짧게(chatQuestionSchema) 쓰고,
+// 그림은 한 호출에 넣지 않고 풀이가 나온 뒤 따로 부른다 (chatFigureJsonSchema)
 
-/** 채팅에서 푼 문제: 읽은 문제, 단계 풀이 (figures: Pro 는 그림도), 노트에 넣을 문제 모양, 과목·단원 짐작 */
+/**
+ * 채팅이 만드는 문제 (노트에 넣을 문제·넣자고 하는 문제): 문제 단계의 칸(quizItemProps)을 줄인 모양.
+ * answer 는 글 하나: 객관식은 정답 보기의 글 그대로, OX 는 "O"·"X", 빈칸·단답은 답 글 (readChatQuestion 이 문제 칸으로 바꾼다)
+ */
+export const chatQuestionSchema: JsonSchema = obj({
+  type: quizItemProps.type,
+  prompt: str,
+  choices: strArr,
+  answer: str,
+  accepted: strArr,
+  explanation: str,
+  key_point_id: str,
+  difficulty: quizItemProps.difficulty,
+});
+
+/**
+ * 채팅에서 푼 문제: 읽은 문제, 글로 된 단계 풀이, 노트에 넣을 문제 모양, 과목·단원 짐작.
+ * figures(Pro): 그림이 도움이 되는지(needs_figure) — true 일 때만 두 번째 호출로 그림을 받는다 (chatFigureJsonSchema)
+ */
 export function chatSolutionSchema(figures: boolean): JsonSchema {
   return obj({
     include: { type: 'boolean' },
     problem: str,
-    steps: figures ? stepsJsonSchema : textStepsJsonSchema,
-    ...(figures ? { figure: figureJsonSchema } : {}),
-    question: quizItemSchema,
+    steps: textStepsJsonSchema,
+    ...(figures ? { needs_figure: { type: 'boolean' } } : {}),
+    question: chatQuestionSchema,
     subject: str,
     unit: str,
   });
@@ -251,7 +271,7 @@ export function chatSolutionSchema(figures: boolean): JsonSchema {
 
 const proposalSchema = obj({
   kind: { type: 'string', enum: ['none', 'questions', 'note'] },
-  questions: (quizJsonSchema.properties as Record<string, unknown>).questions,
+  questions: { type: 'array', items: chatQuestionSchema },
   note_addition: obj({ key_point_id: str, title: str, text: str }),
 });
 
@@ -274,13 +294,97 @@ export function homeChatJsonSchema(figures: boolean): JsonSchema {
   return obj({ solution: chatSolutionSchema(figures), reply: str });
 }
 
+/**
+ * 채팅 풀이의 그림 (Pro, 풀이가 나온 뒤 두 번째 호출): 문제 그림과, 단계마다 그 단계에서 처음 나타나는(add)·강조할(focus) 그림 요소.
+ * index 는 <steps> 의 단계 번호 (0부터)
+ */
+export const chatFigureJsonSchema: JsonSchema = obj({
+  figure: figureJsonSchema,
+  steps: { type: 'array', items: obj({ index: int, add: strArr, focus: strArr }) },
+});
+
+export const zChatFigure = z.object({
+  figure: z.unknown().optional(),
+  steps: z.array(z.object({ index: z.number().int().catch(-1), add: z.array(z.string()).catch([]), focus: z.array(z.string()).catch([]) })).catch([]),
+});
+
+/** 채팅이 만든 문제(chatQuestionSchema 모양) → 문제 단계의 모양. 답을 읽을 수 없으면 null */
+export const zChatQuestion = z.object({
+  type: z
+    .string()
+    .transform((v) => v.toLowerCase())
+    .pipe(z.enum(['mcq', 'ox', 'cloze', 'short'])),
+  prompt: z.string(),
+  choices: z.array(z.string()).catch([]),
+  answer: z.string().catch(''),
+  accepted: z.array(z.string()).catch([]),
+  explanation: z.string().catch(''),
+  key_point_id: z.string().catch(''),
+  difficulty: z
+    .string()
+    .transform((v) => v.toLowerCase())
+    .pipe(z.enum(['easy', 'medium', 'hard']))
+    .catch('medium'),
+});
+
+/** 객관식 정답 글 → 보기 번호 (0부터): 보기의 글과 같으면 그 보기, 아니면 번호('3', '③', '3번')로. 모르면 -1 */
+export function chatChoiceIndex(answer: string, choices: string[]): number {
+  const norm = (s: string) => s.replace(/\s+/g, ' ').trim().toLowerCase();
+  const a = norm(answer);
+  if (!a) return -1;
+  const same = choices.findIndex((c) => norm(c) === a);
+  if (same >= 0) return same;
+  // 보기 글 앞에 번호가 붙어 있을 때 ('③ 5 cm' 와 '5 cm')
+  const bare = (s: string) => norm(s).replace(/^[①②③④⑤⑥⑦⑧⑨⑩]\s*|^\(?\d{1,2}[.)]\s*/, '');
+  const loose = choices.findIndex((c) => bare(c) === bare(answer) && bare(c));
+  if (loose >= 0) return loose;
+  const circled = '①②③④⑤⑥⑦⑧⑨⑩'.indexOf(a[0] ?? '');
+  if (circled >= 0 && a.length <= 2) return circled < choices.length ? circled : -1;
+  const m = /^(\d{1,2})\s*(번|\.|\))?$/.exec(a);
+  if (m) {
+    const n = Number(m[1]);
+    return n >= 1 && n <= choices.length ? n - 1 : -1;
+  }
+  return -1;
+}
+
+export function readChatQuestion(raw: unknown): QuizItem | null {
+  const r = zChatQuestion.safeParse(raw);
+  if (!r.success) return null;
+  const q = r.data;
+  const answer = q.answer.trim();
+  const base = {
+    prompt: q.prompt,
+    choices: q.choices,
+    accepted: q.accepted,
+    explanation: q.explanation,
+    key_point_id: q.key_point_id,
+    difficulty: q.difficulty,
+    pages: [],
+  };
+  if (q.type === 'mcq') {
+    const i = chatChoiceIndex(answer, q.choices);
+    if (i < 0) return null;
+    return { ...base, type: 'mcq', answer_index: i, answer_bool: false, answer_text: '' };
+  }
+  if (q.type === 'ox') {
+    const a = answer.toLowerCase();
+    const ox = /^(o|○|true|맞|참|yes)/.test(a) ? true : /^(x|×|false|틀|거짓|no)/.test(a) ? false : null;
+    if (ox === null) return null;
+    return { ...base, type: 'ox', choices: [], answer_index: -1, answer_bool: ox, answer_text: '' };
+  }
+  return { ...base, type: q.type, choices: [], answer_index: -1, answer_bool: false, answer_text: answer };
+}
+
 /** 받은 풀이 (검사는 readChatSolution 이 한다) */
 export const zChatSolutionRaw = z.object({
   include: z.boolean().catch(false),
   problem: z.string().catch(''),
-  // 무료는 그림 칸이 없다 (zod 4 는 z.unknown() 칸도 빠지면 오류라 optional)
+  // zod 4 는 z.unknown() 칸도 빠지면 오류라 optional (그림은 두 번째 호출에서 따로 받는다)
   steps: z.unknown().optional(),
   figure: z.unknown().optional(),
+  /** Pro: 그림이 도움이 되는지 (두 번째 호출로 그림을 받을지) */
+  needs_figure: z.boolean().catch(false).optional(),
   question: z.unknown().optional(),
   subject: z.string().catch(''),
   unit: z.string().catch(''),

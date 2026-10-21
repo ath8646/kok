@@ -11,11 +11,14 @@ import { chatFileBlocks, readChatFiles, zChatAttachments } from '@/lib/server/ch
 import { readChatAnswer } from '@/lib/chat-solution';
 import { HOME_CHAT_SYSTEM, homeChatPrompt, wrap } from '@/lib/ai/prompts';
 import { homeChatJsonSchema, zHomeChat } from '@/lib/ai/schemas';
+import { drawChatFigure } from '@/lib/server/chat-figure';
 import type { HomeChatReply } from '@/lib/chat';
 import { THINK_OUT } from '@/lib/ai/models';
 
-// AI 답(최대 100초, 먼저 생각하고 답한다)
+// AI 답(최대 100초, 먼저 생각하고 답한다) + Pro 그림(남은 시간 안에서)
 export const maxDuration = 120;
+/** 라우트 제한 시간 안에서 AI 를 기다릴 수 있는 시간 */
+const AI_BUDGET_MS = 112_000;
 
 const Body = z.object({
   message: z.string().trim().max(4000, '한 번에 4,000자까지 물어볼 수 있어요.').catch(''),
@@ -46,6 +49,7 @@ export async function POST(req: NextRequest) {
     const { admin, acc } = await requireAccount();
     const parsed = Body.safeParse(await readJson(req, 4_600_000));
     if (!parsed.success) throw new UserFacingError('bad_body', parsed.error.issues[0]?.message ?? '보낸 내용이 올바르지 않아요.', 400);
+    const started = Date.now();
     const { tier } = parsed.data;
     if (!parsed.data.message && !parsed.data.attachments.length) throw new UserFacingError('bad_body', '물어볼 내용을 적어 주세요.', 400);
     const app = await getAppSettings(admin);
@@ -76,9 +80,24 @@ export async function POST(req: NextRequest) {
     });
     const out = zHomeChat.parse(res.json);
     // 풀이를 읽고 마지막 단계·넣을 문제의 정답·답 글이 같은 답을 말하게 맞춘다 (꾸밈 기호도 걷어 낸다)
-    const { solution, reply, check } = readChatAnswer(out.reply, out.solution, { figures });
+    const read = readChatAnswer(out.reply, out.solution, { figures: false });
+    const { reply, check } = read;
     if (check !== 'none') console.warn(`[kok] ask: steps and question disagreed (${check})`);
-    const body: HomeChatReply = { reply, solution, energy: Math.round(res.energy * 1000) / 1000, model: res.model };
+    // Pro: 그림이 도움이 되는 문제면 두 번째 호출로 그림을 받아 붙인다 (못 그려도 풀이는 그대로)
+    let solution = read.solution;
+    let energy = res.energy;
+    if (figures && solution && out.solution?.needs_figure) {
+      const fig = await drawChatFigure(admin, acc, app, {
+        tier,
+        solution,
+        leftMs: AI_BUDGET_MS - (Date.now() - started),
+        files: attached.blocks,
+        filesTokens: attached.tokens,
+      });
+      solution = fig.solution;
+      energy += fig.energy;
+    }
+    const body: HomeChatReply = { reply, solution, energy: Math.round(energy * 1000) / 1000, model: res.model };
     return Response.json({ ok: true, ...body });
   } catch (e) {
     return errorResponse(e);

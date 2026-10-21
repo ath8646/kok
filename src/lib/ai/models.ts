@@ -123,6 +123,9 @@ export function estimateSmallTask(model: ModelId, usdPerEnergy: number, inputTok
  */
 export const THINK_OUT = { chat: 1200, chatSolve: 3500, solveOne: 6000 } as const;
 
+/** 채팅 풀이의 그림(Pro, 풀이 뒤 두 번째 호출)의 예상 답 길이: 그림 설계도 + 단계마다 add·focus */
+export const CHAT_FIGURE_OUT = 2500;
+
 /**
  * Pro 그림 풀이(문제 그림·단계 풀이)의 예상 에너지: 문제 몇 개씩 한두 번 (먼저 생각하고 답해서 답이 길다).
  * 노트 만들기 예상에 더한다 (model: 문제 모델)

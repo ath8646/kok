@@ -3400,6 +3400,12 @@ async def main():
         await figure_steps(browser)
         await browser.close()
 
+    # 실제 Claude 처럼 가짜 서버도 속성이 42개를 넘는 답 모양은 거절한다: 시험 내내 한 번도 없어야 하고, 채팅 풀이 그림은 두 번째 호출로 받았다
+    fake = json.loads(urllib.request.urlopen("http://localhost:54321/__stats").read())
+    assert not fake.get("grammarRejected"), ("schema too large for Claude", fake.get("maxSchemaProps"))
+    assert fake["tasks"].get("chat_figure", 0) >= 2, fake["tasks"]
+    print("largest schema:", fake.get("maxSchemaProps"), "props")
+
     print("\nSTEPS OK:", len(STEPS))
     if ERRORS:
         print("\nERRORS:")

@@ -791,48 +791,84 @@ function fakeNewQuiz() {
 }
 
 /** 노트 채팅: '문제' 를 말하면 문제를, '노트에' 를 말하면 노트에 넣자고 한다 */
-const emptyQuestion = { type: 'short', prompt: '', choices: [], answer_index: -1, answer_bool: false, answer_text: '', accepted: [], explanation: '', key_point_id: '', difficulty: 'medium', pages: [] };
+/** 채팅 문제 모양 (chatQuestionSchema: 답은 글 하나) */
+const emptyQuestion = { type: 'short', prompt: '', choices: [], answer: '', accepted: [], explanation: '', key_point_id: '', difficulty: 'medium' };
+/** 문제 단계의 문제 → 채팅 문제 모양 */
+const toChatQuestion = (q) => ({
+  type: q.type,
+  prompt: q.prompt,
+  choices: q.choices,
+  answer: q.type === 'mcq' ? q.choices[q.answer_index] : q.type === 'ox' ? (q.answer_bool ? 'O' : 'X') : q.answer_text,
+  accepted: q.accepted,
+  explanation: q.explanation,
+  key_point_id: q.key_point_id,
+  difficulty: q.difficulty,
+});
 const it = (p) => ({ refs: [], x: 0, y: 0, w: 0, h: 0, r: 0, expr: '', from: 0, to: 0, label: '', style: 'given', marks: 0, ...p });
 const noFigure = { include: false, view: { x_min: 0, x_max: 0, y_min: 0, y_max: 0 }, axes: false, grid: false, items: [] };
 
-/** 채팅에서 푼 문제 (사진·'풀어' 가 있으면): 직각삼각형 빗변. Pro 스키마(그림 칸이 있음)면 그림도 */
+/** 채팅에서 푼 문제 (사진·'풀어' 가 있으면): 직각삼각형 빗변. 첫 호출은 글 단계만, Pro 스키마면 그림이 도움이 된다고 표시 */
 function fakeChatSolution(solveProps, wantSolve) {
-  const figures = !!solveProps?.properties?.figure;
-  if (!wantSolve) return { include: false, problem: '', steps: [], ...(figures ? { figure: noFigure } : {}), question: emptyQuestion, subject: '', unit: '' };
-  const steps = [
-    { text: '직각을 낀 두 변이 $3$ cm, $4$ cm 이에요. 빗변은 직각의 맞은편 $\\overline{BC}$ 예요.', add: [], focus: ['AB', 'AC', 'right'] },
-    { text: '피타고라스 정리: $\\overline{BC}^2 = 3^2 + 4^2 = 25$', add: [], focus: ['BC'] },
-    { text: '그래서 $\\overline{BC} = 5$ cm 예요.', add: ['ans'], focus: ['BC', 'ans'] },
-  ];
+  const pro = !!solveProps?.properties?.needs_figure;
+  const flag = pro ? { needs_figure: wantSolve } : {};
+  if (!wantSolve) return { include: false, problem: '', steps: [], ...flag, question: emptyQuestion, subject: '', unit: '' };
   return {
     include: true,
     problem: '직각삼각형 ABC 에서 ∠A = 90°, AB = 4 cm, AC = 3 cm 일 때 빗변 BC 의 길이를 구하시오.',
-    steps: figures ? steps : steps.map(({ text }) => ({ text })),
-    ...(figures
-      ? {
-          figure: {
-            include: true,
-            view: { x_min: -1, x_max: 5, y_min: -1, y_max: 4 },
-            axes: false,
-            grid: false,
-            items: [
-              it({ id: 'A', type: 'point', x: 0, y: 0, label: 'A' }),
-              it({ id: 'B', type: 'point', x: 4, y: 0, label: 'B' }),
-              it({ id: 'C', type: 'point', x: 0, y: 3, label: 'C' }),
-              it({ id: 'AB', type: 'segment', refs: ['A', 'B'], label: '4 cm' }),
-              it({ id: 'AC', type: 'segment', refs: ['A', 'C'], label: '3 cm' }),
-              it({ id: 'right', type: 'angle', refs: ['B', 'A', 'C'], label: '90°' }),
-              it({ id: 'BC', type: 'segment', refs: ['B', 'C'], label: '?', style: 'answer' }),
-              it({ id: 'ans', type: 'text', x: 2.9, y: 2.2, label: '5 cm', style: 'answer' }),
-            ],
-          },
-        }
-      : {}),
-    question: { ...emptyQuestion, type: 'short', prompt: '∠A = 90° 인 직각삼각형 ABC 에서 AB = 4 cm, AC = 3 cm 일 때 BC 의 길이는? (cm)', answer_text: '5', accepted: ['5cm', '5 cm'], explanation: '피타고라스 정리로 $3^2+4^2=25$ 이니 빗변은 5 cm 예요.', difficulty: 'easy' },
+    steps: CHAT_STEPS.map((text) => ({ text })),
+    ...flag,
+    question: { ...emptyQuestion, type: 'short', prompt: '∠A = 90° 인 직각삼각형 ABC 에서 AB = 4 cm, AC = 3 cm 일 때 BC 의 길이는? (cm)', answer: '5', accepted: ['5cm', '5 cm'], explanation: '피타고라스 정리로 $3^2+4^2=25$ 이니 빗변은 5 cm 예요.', difficulty: 'easy' },
     subject: '수학',
     unit: '피타고라스 정리',
   };
 }
+
+const CHAT_STEPS = [
+  '직각을 낀 두 변이 $3$ cm, $4$ cm 이에요. 빗변은 직각의 맞은편 $\\overline{BC}$ 예요.',
+  '피타고라스 정리: $\\overline{BC}^2 = 3^2 + 4^2 = 25$',
+  '그래서 $\\overline{BC} = 5$ cm 예요.',
+];
+
+/** 채팅 풀이의 그림 (Pro, 두 번째 호출): 문제 그림과 단계마다 add·focus */
+function fakeChatFigure(textOf) {
+  const listed = JSON.parse((textOf.match(/<steps>\n([\s\S]*?)\n<\/steps>/) || [])[1] || '[]');
+  const plan = [
+    { add: [], focus: ['AB', 'AC', 'right'] },
+    { add: [], focus: ['BC'] },
+    { add: ['ans'], focus: ['BC', 'ans'] },
+  ];
+  return {
+    figure: {
+      include: true,
+      view: { x_min: -1, x_max: 5, y_min: -1, y_max: 4 },
+      axes: false,
+      grid: false,
+      items: [
+        it({ id: 'A', type: 'point', x: 0, y: 0, label: 'A' }),
+        it({ id: 'B', type: 'point', x: 4, y: 0, label: 'B' }),
+        it({ id: 'C', type: 'point', x: 0, y: 3, label: 'C' }),
+        it({ id: 'AB', type: 'segment', refs: ['A', 'B'], label: '4 cm' }),
+        it({ id: 'AC', type: 'segment', refs: ['A', 'C'], label: '3 cm' }),
+        it({ id: 'right', type: 'angle', refs: ['B', 'A', 'C'], label: '90°' }),
+        it({ id: 'BC', type: 'segment', refs: ['B', 'C'], label: '?', style: 'answer' }),
+        it({ id: 'ans', type: 'text', x: 2.9, y: 2.2, label: '5 cm', style: 'answer' }),
+      ],
+    },
+    steps: listed.map((st, i) => ({ index: st.index ?? i, ...(plan[i] ?? { add: [], focus: [] }) })),
+  };
+}
+
+/** 실제 Claude 처럼: 답 모양의 속성이 모두 합쳐 42개를 넘으면 문법이 너무 크다고 거절한다 */
+function schemaProps(sc) {
+  if (!sc || typeof sc !== 'object') return 0;
+  if (Array.isArray(sc)) return sc.reduce((a, x) => a + schemaProps(x), 0);
+  let n = 0;
+  if (sc.properties) for (const v of Object.values(sc.properties)) n += 1 + schemaProps(v);
+  if (sc.items) n += schemaProps(sc.items);
+  for (const k of ['anyOf', 'oneOf', 'allOf']) if (Array.isArray(sc[k])) n += schemaProps(sc[k]);
+  return n;
+}
+const GRAMMAR_PROPS_MAX = 42;
 
 function fakeChat(textOf, props = {}, images = 0) {
   const q = (textOf.match(/<question>\n([\s\S]*?)\n<\/question>/) || [])[1] || '';
@@ -854,7 +890,7 @@ function fakeChat(textOf, props = {}, images = 0) {
     return {
       reply: '노트로 문제 2개를 만들었어요. 넣을지 골라 주세요.',
       outside_note: false,
-      proposal: { ...none, kind: 'questions', questions: fakeQuiz().questions.slice(0, 2) },
+      proposal: { ...none, kind: 'questions', questions: fakeQuiz().questions.slice(0, 2).map(toChatQuestion) },
       ...solution,
     };
   }
@@ -1075,6 +1111,14 @@ async function handleClaude(req, res) {
       }
     }
   }
+  stats.maxSchemaProps = Math.max(stats.maxSchemaProps || 0, schemaProps(schema));
+  if (schemaProps(schema) > GRAMMAR_PROPS_MAX) {
+    stats.grammarRejected = (stats.grammarRejected || 0) + 1;
+    return send(res, 400, {
+      type: 'error',
+      error: { type: 'invalid_request_error', message: 'The compiled grammar is too large, which would cause performance issues. Simplify your tool schemas or reduce the number of strict tools.' },
+    });
+  }
   let out;
   let task;
   const images = Array.isArray(content) ? content.filter((c) => c?.type === 'image').length : 0;
@@ -1082,6 +1126,9 @@ async function handleClaude(req, res) {
   if (/^The attached picture is a figure cut out of a study material/.test(textOf.trim()) && images === 1) {
     task = 'redraw';
     out = fakeArt(props);
+  } else if (props.figure && props.steps && !props.reply) {
+    task = 'chat_figure';
+    out = fakeChatFigure(textOf);
   } else if (props.reply) {
     task = props.outside_note ? 'chat' : 'ask';
     out = fakeChat(textOf, props, images);

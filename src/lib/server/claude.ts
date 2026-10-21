@@ -75,7 +75,7 @@ export type JsonResult = { json: unknown; usage: Usage; model: string };
 
 /**
  * JSON 답을 한 번 받는다. think 면 모델 기본값(adaptive 생각)으로 먼저 생각하고 답하고, 아니면 생각을 끈다(thinkingFor).
- * 먼저 생각하게 한 호출이 답을 못 만들면(답이 비었거나 요청이 거절됨) 생각을 끄고 한 번 더 부른다:
+ * 먼저 생각하게 한 호출이 답을 못 만들면(답이 비었거나 읽을 수 없으면) 생각을 끄고 한 번 더 부른다 (요청 자체의 오류 4xx 는 다시 불러도 같아서 그대로 알린다):
  * Haiku 5.5 는 가끔 답을 생각 안에만 쓰고 글 없이 턴을 끝낸다(문서의 알려진 동작). 첫 호출의 사용량은 더해서 돌려준다
  */
 export async function callJson(req: JsonCall): Promise<JsonResult> {
@@ -88,7 +88,7 @@ export async function callJson(req: JsonCall): Promise<JsonResult> {
   } catch (e) {
     // 두 번째 호출도 같은 시간 안에 (라우트 제한 시간을 넘지 않게): 남은 시간이 너무 짧으면 그대로 알린다
     const left = budget - (Date.now() - started);
-    const again = req.think && off && left > 15_000 && e instanceof AiCallError && (e.kind === 'fatal' || (e.kind === 'bad_output' && !e.truncated));
+    const again = req.think && off && left > 15_000 && e instanceof AiCallError && e.kind === 'bad_output' && !e.truncated;
     if (!again) throw e;
     const prior = usageOf(e);
     console.warn('[kok] ai: thinking call failed, retrying without thinking', req.model, e.message);
@@ -213,6 +213,37 @@ export async function testKey(model: string): Promise<{ ok: true; model: string 
     if (e instanceof UserFacingError) return { ok: false, message: e.message };
     if (e instanceof Anthropic.APIError) return { ok: false, message: `${e.status ?? ''} ${String(e.message).slice(0, 160)}` };
     return { ok: false, message: '연결하지 못했어요.' };
+  }
+}
+
+/**
+ * 관리자: 답 모양(JSON 스키마) 하나를 실제 API 가 받는지 아주 짧은 요청으로 시험한다 (문법 한도 400 을 미리 찾는다).
+ * 받은 스키마는 API 가 24시간 기억해 두므로 실제 첫 사용도 빨라진다
+ */
+export async function testSchema(model: string, schema: Record<string, unknown>): Promise<{ ok: boolean | null; message: string }> {
+  try {
+    const anthropic = getClient();
+    const thinking = thinkingFor(model);
+    await anthropic.messages.create(
+      {
+        model,
+        max_tokens: 64,
+        messages: [{ role: 'user', content: 'Write a short example that fits the schema.' }],
+        output_config: { format: { type: 'json_schema', schema } },
+        ...(thinking ? { thinking } : {}),
+      },
+      { timeout: 50_000, maxRetries: 0 },
+    );
+    return { ok: true, message: '' };
+  } catch (e) {
+    if (e instanceof UserFacingError) return { ok: null, message: e.message };
+    if (e instanceof Anthropic.APIError) {
+      const status = e.status ?? 0;
+      const msg = `${status} ${String(e.message ?? '').slice(0, 300)}`;
+      // 400 은 스키마를 받지 않은 것, 그 밖(바쁨·연결)은 알 수 없음
+      return { ok: status === 400 ? false : null, message: msg };
+    }
+    return { ok: null, message: '연결하지 못했어요.' };
   }
 }
 

@@ -1,5 +1,5 @@
 // 채팅에서 AI 가 풀어 준 문제 읽기 (서버·시험 공통, 화면 코드는 쓰지 않는다)
-import { toQuestionRow, zQuizItem, type ChatSolutionRaw } from '@/lib/ai/schemas';
+import { readChatQuestion, toQuestionRow, zChatFigure, type ChatSolutionRaw } from '@/lib/ai/schemas';
 import { CIRCLED, type ChatAttachmentMeta, type ChatQuestion, type ChatSolution } from '@/lib/chat';
 import {
   claimedIndex,
@@ -20,6 +20,7 @@ const clip = (s: unknown, n: number) => (typeof s === 'string' ? s.trim().slice(
 
 /**
  * AI 가 준 풀이 → 저장·화면에 쓸 풀이 (풀지 않았거나 단계가 없으면 null).
+ * 첫 호출의 풀이는 글로 된 단계뿐이다 (그림은 Pro 에서 두 번째 호출로: withChatFigure).
  * figures: 그림도 남기는지 (Pro). 노트에 넣을 문제는 쓸 수 있는 유형·모양일 때만 (아니면 null)
  */
 export function readChatSolution(raw: ChatSolutionRaw | undefined, opts: { figures: boolean }): ChatSolution | null {
@@ -27,8 +28,8 @@ export function readChatSolution(raw: ChatSolutionRaw | undefined, opts: { figur
   const sol = readSolution(raw, { figures: opts.figures });
   if (!sol) return null;
   let question: ChatQuestion | null = null;
-  const item = zQuizItem.safeParse(raw.question);
-  const row = item.success ? toQuestionRow(item.data) : null;
+  const item = readChatQuestion(raw.question);
+  const row = item ? toQuestionRow(item) : null;
   if (row) question = { ...row, pages: [] };
   return {
     problem: clip(raw.problem, 2000),
@@ -38,6 +39,20 @@ export function readChatSolution(raw: ChatSolutionRaw | undefined, opts: { figur
     subject: clip(raw.subject, 20),
     unit: clip(raw.unit, 20),
   };
+}
+
+/**
+ * 두 번째 호출이 준 그림(chatFigureJsonSchema)을 풀이에 붙인다: 단계 글은 그대로, 단계마다 add·focus 를 번호(index)로 맞춘다.
+ * 그림이 없거나(include false) 그릴 것이 없으면 풀이를 그대로 돌려준다
+ */
+export function withChatFigure(sol: ChatSolution, raw: unknown): ChatSolution {
+  const parsed = zChatFigure.safeParse(raw);
+  if (!parsed.success) return sol;
+  const byIndex = new Map(parsed.data.steps.map((s) => [s.index, s]));
+  const steps = sol.steps.map((s, i) => ({ text: s.text, add: byIndex.get(i)?.add ?? [], focus: byIndex.get(i)?.focus ?? [] }));
+  const read = readSolution({ steps, figure: parsed.data.figure }, { figures: true });
+  if (!read || !read.figure || read.steps.length !== sol.steps.length) return sol;
+  return { ...sol, steps: read.steps, figure: read.figure };
 }
 
 /** 답 글에서 '정답은 ②번'·'답은 3번'처럼 정답이라고 한 보기 번호 (1부터). '답은 1이에요' 같은 값은 보지 않는다 */

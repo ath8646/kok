@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { homeChatJsonSchema, noteChatJsonSchema, zChat, zHomeChat, zSolve } from '@/lib/ai/schemas';
-import { ANSWER_UNSURE, claimedChoice, finishReply, historyLine, readChatAnswer, readChatSolution } from '@/lib/chat-solution';
+import { chatChoiceIndex, homeChatJsonSchema, noteChatJsonSchema, readChatQuestion, zChat, zHomeChat, zSolve } from '@/lib/ai/schemas';
+import { ANSWER_UNSURE, claimedChoice, finishReply, historyLine, readChatAnswer, readChatSolution, withChatFigure } from '@/lib/chat-solution';
 import { solutionAnswer, type ChatSolution } from '@/lib/chat';
 import { claimIn, compareText, copulaFor, finalClaim, mentionsAnswer } from '@/lib/figure/solution';
 import { chatKindOf } from '@/lib/chat-files';
@@ -9,14 +9,11 @@ const question = {
   type: 'short',
   prompt: '빗변의 길이는? (cm)',
   choices: [],
-  answer_index: -1,
-  answer_bool: false,
-  answer_text: '5',
+  answer: '5',
   accepted: ['5cm'],
   explanation: '피타고라스 정리로 5 cm 예요.',
   key_point_id: '',
   difficulty: 'easy',
-  pages: [],
 };
 const fig = {
   include: true,
@@ -42,21 +39,49 @@ describe('채팅 풀이 받기', () => {
     expect(sol.question).toMatchObject({ type: 'short', answer: '5', accepted: ['5cm'] });
     expect(sol.subject).toBe('수학');
   });
-  it('Pro 는 그림도, 무료로 받으면 그림을 버린다', () => {
-    const raw = { include: true, problem: '문제', steps: [{ text: '변 AB', add: [], focus: ['AB'] }], figure: fig, question, subject: '', unit: '' };
-    const pro = readChatSolution(zHomeChat.parse({ reply: '', solution: raw }).solution, { figures: true })!;
-    expect(pro.figure?.items).toHaveLength(3);
-    expect(pro.steps[0].focus).toEqual(['AB']);
-    const free = readChatSolution(zHomeChat.parse({ reply: '', solution: raw }).solution, { figures: false })!;
-    expect(free.figure).toBeNull();
-    expect(free.steps[0].focus).toEqual([]);
+  it('Pro 그림은 두 번째 호출로: 단계 번호에 맞춰 add·focus 를 붙이고, 그릴 것이 없으면 풀이 그대로', () => {
+    const raw = { include: true, problem: '문제', steps: [{ text: '변 AB' }, { text: '답 4' }], needs_figure: true, question, subject: '', unit: '' };
+    const out = zHomeChat.parse({ reply: '', solution: raw });
+    expect(out.solution?.needs_figure).toBe(true);
+    const sol = readChatSolution(out.solution, { figures: false })!;
+    expect(sol.figure).toBeNull();
+    const drawn = withChatFigure(sol, {
+      figure: fig,
+      steps: [
+        { index: 1, add: ['AB'], focus: ['AB'] },
+        { index: 7, add: ['A'], focus: [] },
+      ],
+    });
+    expect(drawn.figure?.items).toHaveLength(3);
+    expect(drawn.steps.map((s) => s.text)).toEqual(['변 AB', '답 4']);
+    expect(drawn.steps[0]).toMatchObject({ add: [], focus: [] });
+    expect(drawn.steps[1]).toMatchObject({ add: ['AB'], focus: ['AB'] });
+    expect(withChatFigure(sol, { figure: { ...fig, include: false }, steps: [] })).toBe(sol);
+    expect(withChatFigure(sol, 'broken')).toBe(sol);
+  });
+  it('채팅 문제는 답을 글 하나로 받는다: 객관식은 보기 글·번호, O/X, 단답', () => {
+    const choices = ['3 cm', '4 cm', '5 cm', '6 cm'];
+    expect(chatChoiceIndex('5 cm', choices)).toBe(2);
+    expect(chatChoiceIndex('③ 5 cm', choices)).toBe(2);
+    expect(chatChoiceIndex('③', choices)).toBe(2);
+    expect(chatChoiceIndex('3번', choices)).toBe(2);
+    expect(chatChoiceIndex('7 cm', choices)).toBe(-1);
+    // 보기가 수이면 글이 같은 보기가 먼저다
+    expect(chatChoiceIndex('4', ['3', '4', '5', '6'])).toBe(1);
+    const mcq = readChatQuestion({ ...question, type: 'mcq', choices, answer: '5 cm' });
+    expect(mcq).toMatchObject({ type: 'mcq', answer_index: 2 });
+    expect(readChatQuestion({ ...question, type: 'mcq', choices, answer: '없는 답' })).toBeNull();
+    expect(readChatQuestion({ ...question, type: 'ox', answer: 'X' })).toMatchObject({ type: 'ox', answer_bool: false });
+    expect(readChatQuestion({ ...question, type: 'ox', answer: '모름' })).toBeNull();
+    expect(readChatQuestion(question)).toMatchObject({ type: 'short', answer_text: '5', accepted: ['5cm'] });
+    expect(readChatQuestion({ prompt: 'x' })).toBeNull();
   });
   it('풀지 않았거나 단계가 없으면 없음, 문제 모양이 이상하면 넣을 문제만 없음', () => {
     expect(readChatSolution(zHomeChat.parse({ reply: 'x', solution: { include: false } }).solution, { figures: true })).toBeNull();
     expect(readChatSolution(zHomeChat.parse({ reply: 'x', solution: { include: true, steps: [] } }).solution, { figures: true })).toBeNull();
     expect(readChatSolution(zHomeChat.parse({ reply: 'x' }).solution, { figures: true })).toBeNull();
     const sol = readChatSolution(
-      zHomeChat.parse({ reply: '', solution: { include: true, steps: [{ text: '풀이' }], question: { ...question, answer_text: '' } } }).solution,
+      zHomeChat.parse({ reply: '', solution: { include: true, steps: [{ text: '풀이' }], question: { ...question, answer: '' } } }).solution,
       {
         figures: false,
       },
@@ -74,8 +99,12 @@ describe('채팅 풀이 받기', () => {
     const props = (s: Record<string, unknown>) => Object.keys((s as { properties: Record<string, unknown> }).properties);
     expect(props(noteChatJsonSchema({ solve: false, figures: false }))).not.toContain('solution');
     expect(props(noteChatJsonSchema({ solve: true, figures: true }))).toContain('solution');
-    const sol = (homeChatJsonSchema(false) as { properties: { solution: { properties: Record<string, unknown> } } }).properties.solution;
-    expect(Object.keys(sol.properties)).not.toContain('figure');
+    const sol = (s: Record<string, unknown>) =>
+      Object.keys((s as { properties: { solution: { properties: Record<string, unknown> } } }).properties.solution.properties);
+    // 그림 설계도는 첫 호출에 넣지 않는다 (답 모양이 크면 Claude 가 거절한다): Pro 는 그림이 도움이 되는지만
+    expect(sol(homeChatJsonSchema(true))).toContain('needs_figure');
+    expect(sol(homeChatJsonSchema(true))).not.toContain('figure');
+    expect(sol(homeChatJsonSchema(false))).not.toContain('needs_figure');
   });
   it('노트 그림 풀이 답: 빈 칸이 있어도 받는다', () => {
     expect(zSolve.parse({ solutions: [{ index: 2, steps: [{ text: 'a' }] }] }).solutions[0].index).toBe(2);
@@ -205,6 +234,7 @@ const limitSteps = (last: string) => [
   { text: '$n \\to \\infty$일 때 $(5/6)^n$, $(1/6)^n$, $(1/2)^n$, $(2/3)^n$, $(1/3)^n$은 모두 0으로 가요.' },
   { text: last },
 ];
+const LIMIT_CHOICES = ['0', '$\\frac{1}{6}$', '$\\frac{1}{3}$', '1', '발산'];
 const limitRaw = (o: { last: string; answer: number; explanation?: string; problem?: string }) => ({
   include: true,
   problem: o.problem ?? LIMIT_PROBLEM,
@@ -212,15 +242,12 @@ const limitRaw = (o: { last: string; answer: number; explanation?: string; probl
   question: {
     type: 'mcq',
     prompt: '극한값은?',
-    choices: ['0', '$\\frac{1}{6}$', '$\\frac{1}{3}$', '1', '발산'],
-    answer_index: o.answer,
-    answer_bool: false,
-    answer_text: '',
+    choices: LIMIT_CHOICES,
+    answer: LIMIT_CHOICES[o.answer],
     accepted: [],
     explanation: o.explanation ?? '분자와 분모를 $6^n$으로 나누면 남는 항의 비가 1이에요.',
     key_point_id: '',
     difficulty: 'medium',
-    pages: [],
   },
   subject: '수학',
   unit: '수열의 극한',
@@ -324,11 +351,11 @@ describe('마지막 단계·넣을 문제·답 글이 같은 답을 말한다', 
 
 describe('O/X·단답 답 글 맞추기', () => {
   const steps = [{ text: '식을 세워요.' }, { text: '따라서 정답은 5 cm예요.' }];
-  const short = (answer_text: string, accepted: string[] = []) => ({
+  const short = (answer: string, accepted: string[] = []) => ({
     include: true,
     problem: '빗변의 길이는?',
     steps,
-    question: { ...question, answer_text, accepted },
+    question: { ...question, answer, accepted },
     subject: '수학',
     unit: '피타고라스',
   });
@@ -338,7 +365,7 @@ describe('O/X·단답 답 글 맞추기', () => {
       include: true,
       problem: '광합성은 엽록체에서 일어난다. (O/X)',
       steps: [{ text: '광합성은 엽록체에서 일어나요.' }, { text: '따라서 정답은 O예요.' }],
-      question: { ...question, type: 'ox', answer_bool: true, answer_text: '' },
+      question: { ...question, type: 'ox', answer: 'O' },
       subject: '과학',
       unit: '광합성',
     };

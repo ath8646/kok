@@ -323,12 +323,30 @@ export type ChatOptions = {
   /** 노트에 내용을 넣자고 할 수 있는지 */
   allowNote: boolean;
   types: Array<'mcq' | 'ox' | 'cloze' | 'short'>;
-  /** 문제 풀이 칸(solution)이 있는지, 그림도 그리는지 (Pro) */
+  /** 문제 풀이 칸(solution)이 있는지, 그림이 도움이 되는지도 표시하는지 (Pro: 그림은 풀이 뒤에 따로 chatFigurePrompt) */
   solve?: { figures: boolean };
 };
 
-/** 채팅에서 문제를 풀어 줄 때의 규칙 (노트 채팅·홈 AI 채팅) */
-export function chatSolveRules(o: { figures: boolean; note: boolean }): string {
+/**
+ * 채팅이 만드는 문제의 모양 (chatQuestionSchema): 문제로 넣자고 할 때·푼 문제를 넣을 문제로 만들 때 같이 쓴다.
+ * types: 쓸 수 있는 유형, note: 개념 번호를 노트에서 고르는지
+ */
+export function chatQuestionRules(o: { types?: readonly string[]; note: boolean }): string {
+  return (
+    (o.types ? `Questions use only these types: ${o.types.join(', ')}. ` : '') +
+    `answer is one text: for mcq, ${o.types ? 'exactly 4 choices' : "the problem's own choices (3 to 6, without their numbers)"} and answer is the correct choice written exactly as in choices; for ox, answer is "O" or "X"; ` +
+    'for cloze, prompt is a sentence with "____" and answer is the missing words; for short, answer is a short answer such as a number, word or name. ' +
+    'choices is [] except for mcq. accepted: other correct forms of the answer (short and cloze), otherwise []. explanation: 2 to 3 sentences. ' +
+    (o.note ? 'key_point_id: the matching key point in <note>, or "". ' : 'key_point_id: "". ') +
+    'difficulty as you judge it.'
+  );
+}
+
+/**
+ * 채팅에서 문제를 풀어 줄 때의 규칙 (노트 채팅·홈 AI 채팅). 넣을 문제의 유형은 문제 모양대로 (학생의 문제 유형 설정과 상관없이).
+ * figures(Pro): 그림이 도움이 되는지만 표시하고, 그림은 풀이가 나온 뒤 따로 부른다 (chatFigurePrompt)
+ */
+export function chatSolveRules(o: { note: boolean; figures: boolean }): string {
   return [
     '- If the student sends a problem to solve (typed, or in an attached photo or file), solve it and set solution.include to true. Write solution first and reply last: work the problem out in the steps, and only then state the answer in reply.',
     '  - solution.problem: the problem as you read it, in plain text with its choices, so the student can check that you read it right. If part of a photo is unclear, say in reply what you could not read.',
@@ -336,28 +354,34 @@ export function chatSolveRules(o: { figures: boolean; note: boolean }): string {
     '  - If the photo or file also shows an answer or a solution (an answer key, a note, an earlier reply), do not copy it and do not trust it: solve the problem yourself, then say in reply whether that answer is right.',
     '  - reply: one or two sentences with exactly the same final answer as your last step and solution.question (the same choice number and value); the steps hold the details. If your steps reached an answer you did not expect, recheck them and go with the checked steps. Never let the reply and the steps disagree.',
     '  - solution.steps: 2 to 6 steps. Each step is one small idea in 1 or 2 short Korean sentences (해요체), with math as $...$. The last step states the final answer plainly, like "정답은 ③ 5 cm예요." (multiple choice: the choice number and its value; O/X: "정답은 O예요.").',
-    o.figures
-      ? [
-          '  - In each step, add lists the ids of figure items that first appear in that step (helper lines, results, the answer), and focus lists the ids of figure items to highlight in that step. Use [] when there is no figure.',
-          "  - Figure items that are in no step's add are shown with the problem from the start, so they must not give the answer away.",
-        ].join('\n')
-      : '',
     '  - Check your work: redo each calculation, and make sure the steps reach the answer.',
     o.figures
-      ? '  - solution.figure: include is true only if a picture makes the problem or the solution clearer (geometry, graphs, forces, circuits, processes, cycles, cause and effect). Otherwise false, with view all 0, axes and grid false, and items [].'
+      ? '  - solution.needs_figure: true only if a picture would make the problem or the solution clearer (geometry, graphs, forces, circuits, processes, cycles, cause and effect); the picture is drawn separately. Otherwise false.'
       : '',
-    '  - solution.question: the same problem as a review question the student can save. Use type "mcq" with its choices and answer_index if it has choices; otherwise "short" with answer_text (a short answer such as a number, word or name) and other correct forms in accepted. explanation: 2 to 3 sentences. ' +
-      (o.note ? 'key_point_id: the matching key point in <note>, or "". ' : 'key_point_id: "". ') +
-      'difficulty as you judge it, pages [].',
+    '  - solution.question: the same problem as a review question the student can save: mcq if the problem has choices, ox if it asks true or false, otherwise short. ' +
+      chatQuestionRules({ note: o.note }),
     '  - solution.subject: the school subject in Korean, like "수학", "과학", "영어", "국어" or "사회". solution.unit: the unit or topic in Korean, like "이차함수" or "광합성". Each at most 20 characters.',
     '- Otherwise set solution.include to false, solution.problem, subject and unit to "", solution.steps to []' +
-      (o.figures ? ', solution.figure.include to false with empty fields' : '') +
-      ', and fill solution.question with empty values (type "short", every text "", lists [], answer_index -1, answer_bool false, difficulty "medium").',
+      (o.figures ? ', solution.needs_figure to false' : '') +
+      ', and fill solution.question with empty values (type "short", every text "", lists [], difficulty "medium").',
     SOLVE_METHOD,
-    o.figures ? FIGURE_RULES : '',
   ]
     .filter(Boolean)
     .join('\n');
+}
+
+/**
+ * 채팅 풀이의 그림 (Pro, 두 번째 호출): 이미 쓴 단계 풀이(<steps>, 0부터 번호)에 맞는 문제 그림과, 단계마다 add·focus.
+ * 어느 단계의 add 에도 없는 요소는 문제와 같이 보이니 답을 드러내면 안 된다
+ */
+export function chatFigurePrompt(): string {
+  return [
+    'A student asked about the problem in <problem>, and the step-by-step solution in <steps> is already written (a JSON list; index is the step number from 0). Design a figure for it: the app draws the figure and reveals it step by step. If the photo or file the student sent comes first, follow the picture in it (its shape, labels and given values).',
+    '- figure.include: true only if a picture makes the problem or the solution clearer (geometry, graphs, forces, circuits, processes, cycles, cause and effect). Otherwise false, with view all 0, axes and grid false, items [], and steps [].',
+    '- steps: one item for each step in <steps>, with the same index. add lists the ids of figure items that first appear in that step (helper lines, results, the answer); focus lists the ids of figure items to highlight in that step. Do not rewrite the step texts.',
+    "- Every figure item that is in no step's add is shown with the problem before the student answers, so it must not give the answer away. Put anything that shows the answer into the add of the step that explains it.",
+    FIGURE_RULES,
+  ].join('\n');
 }
 
 export function chatPrompt(o: ChatOptions): string {
@@ -367,7 +391,7 @@ export function chatPrompt(o: ChatOptions): string {
     o.allowQuestions
       ? [
           '- If the student asks you to turn something into questions (for example "문제로 만들어줘"), do not add them yourself: set proposal.kind to "questions" and put 1 to 5 questions in proposal.questions.',
-          `  Questions use only these types: ${o.types.join(', ')}. mcq has exactly 4 choices and answer_index (0-3); ox has answer_bool; cloze is a sentence with "____" and answer_text; short has answer_text. Fill unused answer fields with answer_index -1, answer_bool false, answer_text "", choices []. Each has key_point_id from <note> ("" if none fits), an explanation of 2 to 3 sentences, difficulty, and pages [].`,
+          `  ${chatQuestionRules({ types: o.types, note: true })}`,
           '  In reply, say briefly what the questions cover and ask whether to add them.',
         ].join('\n')
       : '- If the student asks you to add questions, say in reply that adding questions from chat is turned off and can be turned on in 설정 > AI 채팅.',
@@ -380,7 +404,7 @@ export function chatPrompt(o: ChatOptions): string {
       : '- If the student asks you to add something to the note, say in reply that adding to the note from chat is turned off and can be turned on in 설정 > AI 채팅.',
     '- Otherwise set proposal.kind to "none", proposal.questions to [], and every proposal.note_addition field to "".',
     '- Never say that something was already added: the student decides with the buttons under your reply.',
-    o.solve ? chatSolveRules({ figures: o.solve.figures, note: true }) : '',
+    o.solve ? chatSolveRules({ note: true, figures: o.solve.figures }) : '',
   ]
     .filter(Boolean)
     .join('\n');
@@ -403,7 +427,7 @@ export function homeChatPrompt(o: { figures: boolean }): string {
     "Answer the student's message in <question>. <history> holds the conversation so far, oldest first. Files the student attached to this message come right before <question>, each after a line that names it.",
     '- reply: your answer, usually at most 8 sentences unless the student asks for more.',
     '- When you explain a concept, a short example helps.',
-    chatSolveRules({ figures: o.figures, note: false }),
+    chatSolveRules({ note: false, figures: o.figures }),
   ].join('\n');
 }
 

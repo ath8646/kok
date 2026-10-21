@@ -20,12 +20,15 @@ import {
 } from '@/lib/server/chat-input';
 import { readChatAnswer } from '@/lib/chat-solution';
 import { CHAT_SYSTEM, chatPrompt, wrap } from '@/lib/ai/prompts';
-import { noteChatJsonSchema, toQuestionRow, zChat, zQuizItem } from '@/lib/ai/schemas';
+import { noteChatJsonSchema, readChatQuestion, toQuestionRow, zChat } from '@/lib/ai/schemas';
+import { drawChatFigure } from '@/lib/server/chat-figure';
 import { FILE_ONLY_CONTENT, type ChatAttachmentMeta, type ChatProposal, type ChatSolution } from '@/lib/chat';
 import { THINK_OUT } from '@/lib/ai/models';
 
-// AI 답(최대 100초, 먼저 생각하고 답한다) + 저장
+// AI 답(최대 100초, 먼저 생각하고 답한다) + Pro 그림(남은 시간 안에서) + 저장
 export const maxDuration = 120;
+/** 라우트 제한 시간 안에서 AI 를 기다릴 수 있는 시간 (저장할 여유를 남긴다) */
+const AI_BUDGET_MS = 110_000;
 
 const Body = z.object({
   message: z.string().trim().max(2000, '한 번에 2,000자까지 물어볼 수 있어요.').catch(''),
@@ -48,6 +51,7 @@ export async function POST(req: NextRequest, ctx: RouteContext<'/api/notes/[id]/
     // 사진·PDF 를 base64 로 받는다 (Vercel 요청 한도 4.5MB 안)
     const parsed = Body.safeParse(await readJson(req, 4_600_000));
     if (!parsed.success) throw new UserFacingError('bad_body', parsed.error.issues[0]?.message ?? '보낸 내용이 올바르지 않아요.', 400);
+    const started = Date.now();
     const { tier } = parsed.data;
     if (!parsed.data.message && !parsed.data.attachments.length) throw new UserFacingError('bad_body', '물어볼 내용을 적어 주세요.', 400);
     const features = await getFeatures(admin);
@@ -89,6 +93,7 @@ export async function POST(req: NextRequest, ctx: RouteContext<'/api/notes/[id]/
         textBlock(wrap('question', message)),
         textBlock(chatPrompt({ ...allow, types: s.quiz.types, solve: solve ? { figures } : undefined })),
       ],
+      // 답 모양이 크면 Claude 가 거절한다(속성 약 42개): 그림은 풀이 뒤에 따로 받는다 (drawChatFigure)
       schema: noteChatJsonSchema({ solve, figures }),
       maxTokens: 16_000,
       outTokens: files.length ? THINK_OUT.chatSolve : THINK_OUT.chat,
@@ -99,16 +104,32 @@ export async function POST(req: NextRequest, ctx: RouteContext<'/api/notes/[id]/
     });
     const out = zChat.parse(res.json);
     // 풀이를 읽고 마지막 단계·넣을 문제의 정답·답 글이 같은 답을 말하게 맞춘다 (화면은 굵은 글씨 같은 꾸밈 기호를 쓰지 않아서 걷어 낸다)
-    const { solution, reply, check } = readChatAnswer(out.reply, solve ? out.solution : undefined, { figures });
+    const read = readChatAnswer(out.reply, solve ? out.solution : undefined, { figures: false });
+    const { reply, check } = read;
     if (check !== 'none') console.warn(`[kok] chat: steps and question disagreed (${check})`);
+    // Pro: 그림이 도움이 되는 문제면 두 번째 호출로 그림을 받아 붙인다 (못 그려도 풀이는 그대로)
+    let solution = read.solution;
+    let energy = res.energy;
+    if (figures && solution && out.solution?.needs_figure) {
+      const fig = await drawChatFigure(admin, acc, app, {
+        tier,
+        solution,
+        leftMs: AI_BUDGET_MS - (Date.now() - started),
+        sourceId: note.source_id,
+        files: attached.blocks,
+        filesTokens: attached.tokens,
+      });
+      solution = fig.solution;
+      energy += fig.energy;
+    }
 
     // 넣자고 한 것: 설정에서 켠 것만, 쓸 수 있는 것만 남긴다
     let proposal: ChatProposal = { kind: 'none', outside: out.outside_note };
     if (out.proposal.kind === 'questions' && allow.allowQuestions) {
       const qs = out.proposal.questions
-        .map((q) => zQuizItem.safeParse(q))
-        .filter((r) => r.success)
-        .map((r) => toQuestionRow(r.data))
+        .map((q) => readChatQuestion(q))
+        .filter((q) => !!q)
+        .map((q) => toQuestionRow(q))
         .filter((r): r is NonNullable<typeof r> => !!r)
         .filter((r) => s.quiz.types.includes(r.type))
         .slice(0, 5);
@@ -150,7 +171,7 @@ export async function POST(req: NextRequest, ctx: RouteContext<'/api/notes/[id]/
           role: 'assistant',
           content: reply,
           model: res.model,
-          energy: Math.round(res.energy * 1000) / 1000,
+          energy: Math.round(energy * 1000) / 1000,
           proposal,
           created_at: new Date(now + 1).toISOString(),
           ...extra(null, solution),

@@ -14,6 +14,11 @@ export function contentTokens(content: ContentPart[]): number {
   return Math.ceil(1500 + chars * 0.9);
 }
 
+/** 관리자에게는 AI 가 답을 못 만든 까닭(API 응답)도 보여 준다: 모델 이름·키 같은 운영 설정 문제를 바로 알 수 있게. 학생에게는 짧은 안내만 */
+export function adminDetail(acc: Pick<Account, 'isAdmin'>, e: AiCallError): string {
+  return acc.isAdmin ? ` [${e.message.slice(0, 220)}]` : '';
+}
+
 export async function runTask(
   admin: SupabaseClient,
   acc: Account,
@@ -79,7 +84,7 @@ export async function runTaskFull(
       if (e.truncated && t.tooLong) throw new UserFacingError('ai_too_long', t.tooLong, 400);
       if (e.kind === 'refusal') throw new UserFacingError('ai_refusal', '이 내용은 KOK에서 다룰 수 없어요.', 422);
       if (e.kind === 'retryable') throw new UserFacingError('ai_busy', 'AI 서버가 바빠요. 잠시 뒤에 다시 해 주세요.', 503);
-      throw new UserFacingError('ai_bad_output', 'AI가 답을 제대로 만들지 못했어요. 다시 해 주세요.', 502);
+      throw new UserFacingError('ai_bad_output', `AI가 답을 제대로 만들지 못했어요. 다시 해 주세요.${adminDetail(acc, e)}`, 502);
     }
     throw e;
   }

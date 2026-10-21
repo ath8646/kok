@@ -1554,6 +1554,20 @@ async def main():
         await expect(chat.get_by_text(re.compile("노트에 따르면 광합성은")).first).to_be_visible(timeout=15000)
         assert "**" not in await chat.inner_text(), "markdown marks are removed from replies"
         await expect(chat.get_by_text(re.compile(r"^에너지 [\d.]+$")).first).to_be_visible()
+        # 먼저 생각하게 한 호출이 글 없이 끝나면(Haiku 5.5 가 가끔 그런다) 서버가 생각을 끄고 한 번 더 불러 답을 만든다. 에너지는 두 번을 합쳐 받는다
+        stats0 = json.loads(urllib.request.urlopen("http://localhost:54321/__stats").read())
+        energy0 = float(psql(f"select coalesce(sum(energy), 0) from public.chat_messages m join public.notes n on n.id = m.note_id where n.source_id = '{note_sid}'"))
+        urllib.request.urlopen("http://localhost:54321/__fail?task=chat&mode=no_text")
+        try:
+            await box.fill("광합성은 어디서 일어나는지 한 번 더")
+            await box.press("Enter")
+            await expect(chat.get_by_text(re.compile("노트에 따르면 광합성은")).nth(1)).to_be_visible(timeout=15000)
+        finally:
+            urllib.request.urlopen("http://localhost:54321/__fail?task=")
+        stats1 = json.loads(urllib.request.urlopen("http://localhost:54321/__stats").read())
+        assert stats1["noText"] == stats0["noText"] + 1 and stats1["messages"] == stats0["messages"] + 2, (stats0, stats1)
+        energy1 = float(psql(f"select coalesce(sum(energy), 0) from public.chat_messages m join public.notes n on n.id = m.note_id where n.source_id = '{note_sid}'"))
+        assert energy1 - energy0 > (energy0 - 0) * 1.3, ("retry charges both calls", energy0, energy1)
         n_before = live_q()
         await box.fill("이 노트로 문제 만들어 줘")
         await box.press("Enter")

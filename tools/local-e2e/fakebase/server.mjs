@@ -33,8 +33,10 @@ pg.types.setTypeParser(1184, (v) => {
   return m ? `${m[1]}T${m[2]}${m[3]}:${m[4] ?? '00'}` : v;
 });
 
-const stats = { messages: 0, tasks: {}, maxDocBytes: 0, docs: 0 };
+const stats = { messages: 0, tasks: {}, maxDocBytes: 0, docs: 0, noText: 0 };
 let failTask = process.env.FAKE_FAIL_TASK || '';
+/** __fail 의 mode: '' = 529 로 거절, 'no_text' = 생각만 하고 글 없이 끝난 답 (생각을 끈 요청에는 정상 답: 서버가 생각을 끄고 다시 부르는지 본다) */
+let failMode = '';
 
 function b64urlJson(s) {
   return JSON.parse(Buffer.from(s, 'base64url').toString('utf8'));
@@ -1145,7 +1147,21 @@ async function handleClaude(req, res) {
   }
   stats.tasks[task] = (stats.tasks[task] || 0) + 1;
   if (failTask && failTask === task) {
-    return send(res, 529, { type: 'error', error: { type: 'overloaded_error', message: 'Overloaded' } });
+    if (failMode !== 'no_text') return send(res, 529, { type: 'error', error: { type: 'overloaded_error', message: 'Overloaded' } });
+    // 실제 Haiku 5.5 가 가끔 하는 일: 답을 생각 안에만 쓰고 글 없이 턴을 끝낸다. 생각을 끈(thinking 칸이 있는) 요청에는 정상 답
+    if (!body.thinking) {
+      stats.noText++;
+      return send(res, 200, {
+        id: `msg_${crypto.randomUUID()}`,
+        type: 'message',
+        role: 'assistant',
+        model: body.model,
+        content: [{ type: 'thinking', thinking: '', signature: 'fake-signature' }],
+        stop_reason: 'end_turn',
+        stop_sequence: null,
+        usage: { input_tokens: 4200, output_tokens: 700, cache_creation_input_tokens: 0, cache_read_input_tokens: 0 },
+      });
+    }
   }
   await new Promise((r) => setTimeout(r, Number(process.env.FAKE_AI_DELAY || 300)));
   return send(res, 200, {
@@ -1171,7 +1187,8 @@ const server = http.createServer(async (req, res) => {
     if (url.pathname === '/__stats') return send(res, 200, stats);
     if (url.pathname === '/__fail') {
       failTask = url.searchParams.get('task') || '';
-      return send(res, 200, { failTask });
+      failMode = url.searchParams.get('mode') || '';
+      return send(res, 200, { failTask, failMode });
     }
     if (url.pathname.startsWith('/rest/v1/')) return await handleRest(req, res, url, auth);
     if (url.pathname.startsWith('/storage/v1/')) return await handleStorage(req, res, url, auth);

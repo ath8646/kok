@@ -58,6 +58,7 @@ import { questionsForSolve, readSolution, stepsReachAnswer } from '@/lib/figure/
 import { getAccount, getAppSettings, getFeatures, charge, refundSource, type Account, type AppSettings } from './account';
 import { AiCallError, callJson, imageBlock, pdfBlock, textBlock, usageOf, type ContentPart } from './claude';
 import { UserFacingError } from './errors';
+import { adminDetail } from './tasks';
 import { removePaths } from './files';
 import { noteForPrompt } from './notes';
 import { cutFigures, type FigureSource } from './figure-image';
@@ -892,13 +893,14 @@ async function release(admin: SupabaseClient, id: string, patch: Partial<SourceR
   if (error) throw error;
 }
 
-function friendly(e: unknown): string {
+/** 학생에게 보일 까닭. 관리자에게는 AI 응답의 까닭도 같이 (adminDetail) */
+function friendly(e: unknown, acc: Pick<Account, 'isAdmin'>): string {
   if (e instanceof UserFacingError) return e.message;
   if (e instanceof PdfError) return e.message;
   if (e instanceof AiCallError) {
     if (e.kind === 'refusal') return e.message;
     if (e.kind === 'retryable') return 'AI 서버가 바빠서 끝내지 못했어요. "다시 하기"를 눌러 주세요.';
-    return 'AI가 정리하다가 문제가 생겼어요. "다시 하기"를 눌러 주세요.';
+    return `AI가 정리하다가 문제가 생겼어요. "다시 하기"를 눌러 주세요.${adminDetail(acc, e)}`;
   }
   return '정리하다가 문제가 생겼어요. "다시 하기"를 눌러 주세요.';
 }
@@ -973,7 +975,7 @@ export async function runOneStep(sourceId: string): Promise<StepOutcome> {
     const attempts = Number((src.draft as { attempts?: number }).attempts ?? 0) + 1;
     console.error('[kok] step failed', src.id, src.step, e);
     if (isFinal(e) || attempts >= MAX_ATTEMPTS) {
-      await release(admin, src.id, { status: 'error', error: friendly(e), draft: { ...src.draft, attempts: 0 } });
+      await release(admin, src.id, { status: 'error', error: friendly(e, acc), draft: { ...src.draft, attempts: 0 } });
       try {
         await refundSource(admin, src.user_id, src.id);
       } catch (re) {

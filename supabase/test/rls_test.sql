@@ -95,6 +95,16 @@ do $$ begin
   exception when insufficient_privilege then null;
   end;
   begin
+    insert into public.note_courses (user_id, note_id, level, plan) values (auth.uid(), gen_random_uuid(), 'middle', '{}'::jsonb);
+    raise exception 'course insert should be denied';
+  exception when insufficient_privilege then null;
+  end;
+  begin
+    insert into public.note_pdfs (user_id, note_id, name, path) values (auth.uid(), gen_random_uuid(), 'x', 'x/pdf/x/x.pdf');
+    raise exception 'pdf insert should be denied';
+  exception when insufficient_privilege then null;
+  end;
+  begin
     perform public.kok_switch_version(gen_random_uuid(), auth.uid(), 1);
     raise exception 'switch version should be denied';
   exception when insufficient_privilege then null;
@@ -714,6 +724,10 @@ end $$;
 reset role;
 insert into public.chat_messages (user_id, note_id, role, content)
   values ('11111111-1111-1111-1111-111111111111', current_setting('kok.v_note')::uuid, 'user', '전력량이 뭐야?');
+insert into public.note_courses (user_id, note_id, level, plan)
+  values ('11111111-1111-1111-1111-111111111111', current_setting('kok.v_note')::uuid, 'middle', '{"title":"학습","units":[]}'::jsonb);
+insert into public.note_pdfs (user_id, note_id, name, path)
+  values ('11111111-1111-1111-1111-111111111111', current_setting('kok.v_note')::uuid, '정리 1', '11111111-1111-1111-1111-111111111111/pdf/x/1.pdf');
 
 -- ---------- 그림 풀이: 문제 그림·단계는 서버 함수가 넣고, 칸 한도보다 크면 빼고 넣는다 (노트 저장이 멈추지 않게) ----------
 do $$
@@ -840,6 +854,39 @@ do $$ begin
     raise exception 'chat attachments update should be denied';
   exception when insufficient_privilege then null;
   end;
+  -- 단계별 학습: 내 것은 보이고 진도만 고친다 (학습 내용·수준·지우기는 서버)
+  if (select count(*) from public.note_courses) <> 1 then raise exception 'A sees own course'; end if;
+  update public.note_courses set progress = '{"lessons":{"0-0":{"stars":3}}}'::jsonb;
+  if (select progress->'lessons'->'0-0'->>'stars' from public.note_courses) <> '3' then raise exception 'A can save course progress'; end if;
+  begin
+    update public.note_courses set plan = '{}'::jsonb;
+    raise exception 'course plan update should be denied';
+  exception when insufficient_privilege then null;
+  end;
+  begin
+    update public.note_courses set level = 'expert';
+    raise exception 'course level update should be denied';
+  exception when insufficient_privilege then null;
+  end;
+  begin
+    delete from public.note_courses;
+    raise exception 'course delete should be denied';
+  exception when insufficient_privilege then null;
+  end;
+  -- PDF 요약: 내 것은 보이고 이름만 고친다
+  if (select count(*) from public.note_pdfs) <> 1 then raise exception 'A sees own pdf'; end if;
+  update public.note_pdfs set name = '기권과 날씨';
+  if (select name from public.note_pdfs) <> '기권과 날씨' then raise exception 'A can rename own pdf'; end if;
+  begin
+    update public.note_pdfs set path = 'other/pdf/x/1.pdf';
+    raise exception 'pdf path update should be denied';
+  exception when insufficient_privilege then null;
+  end;
+  begin
+    delete from public.note_pdfs;
+    raise exception 'pdf delete should be denied';
+  exception when insufficient_privilege then null;
+  end;
 end $$;
 -- 학생이 직접 넣는 문제(AI 채팅에서 푼 문제)의 그림 풀이: 보통 크기는 들어가고, 칸 한도보다 크면 거절된다
 do $$
@@ -871,12 +918,18 @@ select set_config('request.jwt.claim.sub', '22222222-2222-2222-2222-222222222222
 do $$ begin
   if (select count(*) from public.note_versions) <> 0 then raise exception 'B must not see A versions'; end if;
   if (select count(*) from public.chat_messages) <> 0 then raise exception 'B must not see A chat'; end if;
+  if (select count(*) from public.note_courses) <> 0 then raise exception 'B must not see A course'; end if;
+  if (select count(*) from public.note_pdfs) <> 0 then raise exception 'B must not see A pdf'; end if;
+  update public.note_courses set progress = '{"hack":true}'::jsonb;
+  update public.note_pdfs set name = 'hack';
   delete from public.chat_messages;
   update public.note_versions set body = '{}'::jsonb;
 end $$;
 select set_config('request.jwt.claim.sub', '11111111-1111-1111-1111-111111111111', false);
 do $$ begin
   if (select count(*) from public.chat_messages) <> 1 then raise exception 'B must not delete A chat'; end if;
+  if (select progress->>'hack' from public.note_courses) is not null then raise exception 'B must not edit A course'; end if;
+  if (select name from public.note_pdfs) <> '기권과 날씨' then raise exception 'B must not rename A pdf'; end if;
   if (select body->>'summary' from public.note_versions where note_id = current_setting('kok.v_note')::uuid and number = 1) <> '고친 버전' then raise exception 'B must not edit A version'; end if;
   delete from public.chat_messages;
   if (select count(*) from public.chat_messages) <> 0 then raise exception 'A can clear own chat'; end if;

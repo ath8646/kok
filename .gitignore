@@ -17,6 +17,9 @@
 /.next/
 /out/
 
+# pdf.js 일꾼 (tools/pdfjs/copy-worker.mjs 가 설치·빌드 때 복사)
+/public/pdfjs/
+
 # production
 /build
 

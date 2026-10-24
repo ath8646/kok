@@ -11,6 +11,7 @@ import { stepLabel, useActiveSources } from './ProcessingList';
 import { SubjectForm } from './SubjectForm';
 import { StarButton, StarGlyph, useStarRefocus } from './note/StarButton';
 import { SortList } from './note/SortList';
+import { BarAction, SelectionBar, useMultiSelect } from './SelectionBar';
 import { useLongPress } from './useLongPress';
 import { prefersReducedMotion } from './useReducedMotion';
 import {
@@ -23,7 +24,6 @@ import {
   Menu,
   ProgressRing,
   Sheet,
-  Spinner,
   api,
   cx,
   inputClass,
@@ -156,43 +156,10 @@ export function LibraryView() {
   const reload = useCallback(() => setVersion((v) => v + 1), []);
   const searchRef = useRef<HTMLInputElement>(null);
 
-  // ---------------------------------------------------------- 여러 개 고르기 (카드를 꾹 누르거나 메뉴에서)
-  const [selecting, setSelecting] = useState(false);
-  const [picked, setPicked] = useState<Set<string>>(() => new Set());
+  // ---------------------------------------------------------- 여러 개 고르기 (카드를 꾹 누르거나 메뉴에서: SelectionBar.tsx)
+  const { selecting, picked, setPicked, startSelect, endSelect, togglePick } = useMultiSelect();
   const [bulkBusy, setBulkBusy] = useState<'star' | 'review' | 'delete' | null>(null);
   const [ordering, setOrdering] = useState(false);
-  const startSelect = useCallback((id?: string) => {
-    setSelecting(true);
-    setPicked(new Set(id ? [id] : []));
-  }, []);
-  const endSelect = useCallback(() => {
-    setSelecting(false);
-    setPicked(new Set());
-  }, []);
-  const togglePick = useCallback(
-    (id: string) =>
-      setPicked((cur) => {
-        const next = new Set(cur);
-        if (next.has(id)) next.delete(id);
-        else next.add(id);
-        return next;
-      }),
-    [],
-  );
-  // 고르는 동안 + 버튼은 숨기고(아래 띠가 그 자리를 쓴다), Esc 로 끝낸다
-  const setFabHidden = quick.setFabHidden;
-  useEffect(() => {
-    if (!selecting) return;
-    setFabHidden(true);
-    const onKey = (e: globalThis.KeyboardEvent) => {
-      if (e.key === 'Escape') endSelect();
-    };
-    window.addEventListener('keydown', onKey);
-    return () => {
-      window.removeEventListener('keydown', onKey);
-      setFabHidden(false);
-    };
-  }, [selecting, setFabHidden, endSelect]);
 
   // 화면에서 바로 고친 것(별표·복습·순서)이 읽는 사이에 생겼으면, 읽은 목록은 옛것이라 버리고 저장이 끝난 뒤 다시 읽는다
   const edits = useRef({ seq: 0, saving: 0, stale: false });
@@ -672,6 +639,8 @@ export function LibraryView() {
     }
   };
 
+  const bulkOff = !pickedRows.length || !!bulkBusy;
+
   /** 순서 바꾸기: 화면은 바로, 저장은 서버 함수가 한 번에 (내 자료만). 빨리 여러 번 옮기면 한 줄로 세워 마지막 순서만 저장한다 */
   const orderQueue = useRef<{ running: boolean; next: string[] | null }>({ running: false, next: null });
   const saveOrder = (order: string[]) => {
@@ -1010,17 +979,23 @@ export function LibraryView() {
 
       {/* 여러 개 고르기: 아래 띠 (폰은 아래 메뉴 자리, 넓은 화면은 가운데 떠 있는 띠) */}
       {selecting ? (
-        <SelectionBar
-          count={pickedRows.length}
-          organize={organize}
-          labels={labels}
-          busy={bulkBusy}
-          onStar={bulkStar}
-          onReview={bulkReview}
-          onDelete={bulkDelete}
-          onMove={mergeOn ? () => setMoving(pickedRows.map((s) => s.id)) : undefined}
-          onMerge={mergeOn ? () => setMergingNotes(true) : undefined}
-        />
+        <SelectionBar count={pickedRows.length}>
+          {organize ? (
+            <BarAction icon={ICONS.star} label={labels.star ? '별표' : '별표 빼기'} disabled={bulkOff} busy={bulkBusy === 'star'} onClick={bulkStar} />
+          ) : null}
+          {organize ? (
+            <BarAction
+              icon={labels.review ? ICONS.review : ICONS.reviewOff}
+              label={labels.review ? '복습 켜기' : '복습 끄기'}
+              disabled={bulkOff}
+              busy={bulkBusy === 'review'}
+              onClick={bulkReview}
+            />
+          ) : null}
+          {mergeOn ? <BarAction icon={ICONS.move} label="옮기기" disabled={bulkOff} onClick={() => setMoving(pickedRows.map((s) => s.id))} /> : null}
+          {mergeOn ? <BarAction icon={ICONS.merge} label="합치기" disabled={bulkOff || pickedRows.length < 2} onClick={() => setMergingNotes(true)} /> : null}
+          <BarAction icon={ICONS.trash} label="지우기" danger disabled={bulkOff} busy={bulkBusy === 'delete'} onClick={bulkDelete} />
+        </SelectionBar>
       ) : null}
 
       {/* 다른 과목으로 옮기기 (카드 메뉴·여러 개 고르기·과목 합치기) */}
@@ -1460,97 +1435,6 @@ function useGridFlip(root: RefObject<HTMLElement | null>, orderKey: string) {
     const el = root.current;
     if (el) before.current = new Map(Array.from(el.querySelectorAll<HTMLElement>('[data-flip]'), (n) => [n.dataset.flip ?? '', n.getBoundingClientRect()]));
   };
-}
-
-/**
- * 여러 개 고르는 동안 아래 띠: 별표 · 복습 켜고 끄기 · 옮기기 · 합치기 · 지우기
- * (폰은 아래 메뉴 자리를 덮고, 넓은 화면은 가운데에 뜬다). 합치기는 두 개 이상 골랐을 때
- */
-function SelectionBar({
-  count,
-  organize,
-  labels,
-  busy,
-  onStar,
-  onReview,
-  onDelete,
-  onMove,
-  onMerge,
-}: {
-  count: number;
-  organize: boolean;
-  labels: { star: boolean; review: boolean };
-  busy: 'star' | 'review' | 'delete' | null;
-  onStar: () => void;
-  onReview: () => void;
-  onDelete: () => void;
-  /** 다른 과목으로 옮기기 (없으면 안 보인다) */
-  onMove?: () => void;
-  /** 노트 합치기 (없으면 안 보인다) */
-  onMerge?: () => void;
-}) {
-  const off = !count || !!busy;
-  const cols = (organize ? 2 : 0) + (onMove ? 1 : 0) + (onMerge ? 1 : 0) + 1;
-  return (
-    <div className="pointer-events-none fixed inset-x-0 bottom-0 z-50 md:bottom-6 md:left-60 md:flex md:justify-center">
-      <div
-        role="toolbar"
-        aria-label={`고른 자료 ${count}개`}
-        className={cx(
-          'kok-selbar pointer-events-auto grid border-t border-line bg-surface px-1.5 pb-[calc(6px+env(safe-area-inset-bottom))] pt-1.5 md:rounded-[24px] md:border md:pb-1.5 md:shadow-[0_12px_36px_var(--shadow-strong)]',
-          cols >= 5 ? 'md:w-[520px]' : 'md:w-[440px]',
-        )}
-        style={{ gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))` }}
-      >
-        {organize ? (
-          <>
-            <BarAction icon={ICONS.star} label={labels.star ? '별표' : '별표 빼기'} disabled={off} busy={busy === 'star'} onClick={onStar} />
-            <BarAction
-              icon={labels.review ? ICONS.review : ICONS.reviewOff}
-              label={labels.review ? '복습 켜기' : '복습 끄기'}
-              disabled={off}
-              busy={busy === 'review'}
-              onClick={onReview}
-            />
-          </>
-        ) : null}
-        {onMove ? <BarAction icon={ICONS.move} label="옮기기" disabled={off} busy={false} onClick={onMove} /> : null}
-        {onMerge ? <BarAction icon={ICONS.merge} label="합치기" disabled={off || count < 2} busy={false} onClick={onMerge} /> : null}
-        <BarAction icon={ICONS.trash} label="지우기" danger disabled={off} busy={busy === 'delete'} onClick={onDelete} />
-      </div>
-    </div>
-  );
-}
-
-function BarAction({
-  icon,
-  label,
-  onClick,
-  disabled,
-  busy,
-  danger,
-}: {
-  icon: string;
-  label: string;
-  onClick: () => void;
-  disabled: boolean;
-  busy: boolean;
-  danger?: boolean;
-}) {
-  return (
-    <button
-      type="button"
-      disabled={disabled}
-      onClick={onClick}
-      className={cx(
-        'press flex flex-col items-center gap-0.5 rounded-2xl py-1.5 text-[12px] font-semibold transition-opacity hover:bg-surface-2 disabled:opacity-40',
-        danger ? 'text-bad' : 'text-ink',
-      )}
-    >
-      <span className="grid h-6 place-items-center">{busy ? <Spinner /> : <Icon d={icon} size={22} />}</span>
-      {label}
-    </button>
-  );
 }
 
 /** 순서 바꾸기: 단원마다, 별표한 자료와 다른 자료를 따로 끌어서 옮긴다 (자료함에 보이는 차례 그대로) */

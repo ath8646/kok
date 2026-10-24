@@ -733,6 +733,52 @@ drop trigger if exists sources_touch_subject on public.sources;
 create trigger sources_touch_subject after insert on public.sources
   for each row execute function public.kok_touch_subject();
 
+-- ---------------------------------------------------------------------
+-- 단계별 학습 (Pro): 노트 하나에 AI 가 만든 학습 길 하나. 만들기·지우기는 서버만 (/api/notes/[id]/course),
+-- 학생은 읽기와 진도(progress)만 고친다. level: elementary(초등) · middle(중등) · high(고등) · college(대학) · expert(전문)
+-- plan: { title, intro, units: [{ title, lessons: [{ title, goal, key_point_ids, cards: [{heading, text, tip}], checks: [...] }] }] }
+-- progress: { lessons: { "유닛번호-레슨번호": { stars, at } }, recaps: { "유닛번호": { stars, at } }, final: { stars, at } }
+-- ---------------------------------------------------------------------
+create table if not exists public.note_courses (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references auth.users(id) on delete cascade,
+  note_id uuid not null references public.notes(id) on delete cascade,
+  level text not null check (level in ('elementary', 'middle', 'high', 'college', 'expert')),
+  plan jsonb not null check (pg_column_size(plan) <= 262144),
+  progress jsonb not null default '{}'::jsonb check (pg_column_size(progress) <= 32768),
+  model text,
+  energy numeric(10, 3) not null default 0,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  unique (note_id)
+);
+create index if not exists note_courses_user_idx on public.note_courses (user_id);
+drop trigger if exists note_courses_touch on public.note_courses;
+create trigger note_courses_touch before update on public.note_courses
+  for each row execute function public.kok_touch_updated_at();
+
+-- ---------------------------------------------------------------------
+-- PDF 요약 정리: 노트의 정리를 KOK 스타일 PDF 로 만들어 저장소(내id/pdf/자료id/<id>.pdf)에 둔 것. 만들 때마다 한 개씩 쌓인다 (AI 없음).
+-- 만들기·지우기는 서버만 (/api/notes/[id]/pdf), 학생은 읽기와 이름(name)만 고친다. version: 만들 때의 노트 버전 (없으면 null)
+-- ---------------------------------------------------------------------
+create table if not exists public.note_pdfs (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references auth.users(id) on delete cascade,
+  note_id uuid not null references public.notes(id) on delete cascade,
+  name text not null check (char_length(name) between 1 and 60),
+  path text not null,
+  bytes int not null default 0,
+  pages int not null default 0,
+  version int,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+create index if not exists note_pdfs_note_idx on public.note_pdfs (note_id, created_at desc);
+create index if not exists note_pdfs_user_idx on public.note_pdfs (user_id);
+drop trigger if exists note_pdfs_touch on public.note_pdfs;
+create trigger note_pdfs_touch before update on public.note_pdfs
+  for each row execute function public.kok_touch_updated_at();
+
 -- =====================================================================
 -- 권한(GRANT): 로그인 안 한 사람(anon)은 아무것도 못 하고,
 -- 로그인한 사람(authenticated)은 아래에 적은 것만 할 수 있다.
@@ -744,7 +790,8 @@ revoke all on
   public.questions, public.cards, public.review_logs, public.energy_ledger,
   public.coupons, public.coupon_redemptions, public.reports, public.app_settings, public.rate_hits,
   public.upload_tickets, public.account_tombstones, public.custom_plans,
-  public.note_versions, public.chat_messages, public.user_themes, public.theme_images, public.app_counters
+  public.note_versions, public.chat_messages, public.user_themes, public.theme_images, public.app_counters,
+  public.note_courses, public.note_pdfs
 from anon, authenticated;
 
 grant all on
@@ -752,7 +799,8 @@ grant all on
   public.questions, public.cards, public.review_logs, public.energy_ledger,
   public.coupons, public.coupon_redemptions, public.reports, public.app_settings, public.rate_hits,
   public.upload_tickets, public.account_tombstones, public.custom_plans,
-  public.note_versions, public.chat_messages, public.user_themes, public.theme_images, public.app_counters
+  public.note_versions, public.chat_messages, public.user_themes, public.theme_images, public.app_counters,
+  public.note_courses, public.note_pdfs
 to service_role;
 grant usage, select on all sequences in schema public to service_role;
 
@@ -797,6 +845,14 @@ end $$;
 -- 노트 채팅: 보기, 지우기 (쓰기는 서버가 AI 답과 함께 한다)
 grant select, delete on public.chat_messages to authenticated;
 
+-- 단계별 학습: 보기, 진도만 고치기 (만들기·지우기는 서버)
+grant select on public.note_courses to authenticated;
+grant update (progress) on public.note_courses to authenticated;
+
+-- PDF 요약 정리: 보기, 이름만 고치기 (만들기·지우기는 서버)
+grant select on public.note_pdfs to authenticated;
+grant update (name) on public.note_pdfs to authenticated;
+
 -- 푼 기록: 보기, 쓰기
 grant select, insert on public.review_logs to authenticated;
 grant usage, select on sequence public.review_logs_id_seq to authenticated;
@@ -839,6 +895,8 @@ alter table public.chat_messages enable row level security;
 alter table public.user_themes enable row level security;
 alter table public.theme_images enable row level security;
 alter table public.app_counters enable row level security;
+alter table public.note_courses enable row level security;
+alter table public.note_pdfs enable row level security;
 
 -- profiles
 drop policy if exists "profiles: read own" on public.profiles;
@@ -902,6 +960,22 @@ create policy "chat: read own" on public.chat_messages
 drop policy if exists "chat: delete own" on public.chat_messages;
 create policy "chat: delete own" on public.chat_messages
   for delete to authenticated using (user_id = (select auth.uid()));
+
+-- note_courses: 내 것만 보기·진도 고치기
+drop policy if exists "note_courses: read own" on public.note_courses;
+create policy "note_courses: read own" on public.note_courses
+  for select to authenticated using (user_id = (select auth.uid()));
+drop policy if exists "note_courses: update own" on public.note_courses;
+create policy "note_courses: update own" on public.note_courses
+  for update to authenticated using (user_id = (select auth.uid())) with check (user_id = (select auth.uid()));
+
+-- note_pdfs: 내 것만 보기·이름 고치기
+drop policy if exists "note_pdfs: read own" on public.note_pdfs;
+create policy "note_pdfs: read own" on public.note_pdfs
+  for select to authenticated using (user_id = (select auth.uid()));
+drop policy if exists "note_pdfs: update own" on public.note_pdfs;
+create policy "note_pdfs: update own" on public.note_pdfs
+  for update to authenticated using (user_id = (select auth.uid())) with check (user_id = (select auth.uid()));
 
 -- questions
 drop policy if exists "user_themes: read own" on public.user_themes;

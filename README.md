@@ -118,14 +118,14 @@ Vercel → Settings → Environment Variables 에만 넣어요. 이 저장소는
 
 ## 처음 설치
 
-1. Supabase SQL Editor 에 `supabase/schema.sql` 전체를 붙여 넣고 실행해요. 여러 번 실행해도 안전해요. **코드를 새로 올릴 때마다 한 번 더 실행해요.** 새 표·칸이 생기기 전에는 새 기능(노트 채팅, 자료 더하기와 버전, 내 테마, 그림 풀이, 채팅 파일, 자료함 정리, 자료 그림, 과목 서랍, 노트·과목 합치기와 옮기기)이 꺼진 채로 예전처럼 동작해요.
+1. Supabase SQL Editor 에 `supabase/schema.sql` 전체를 붙여 넣고 실행해요. 여러 번 실행해도 안전해요. **코드를 새로 올릴 때마다 한 번 더 실행해요.** 새 표·칸이 생기기 전에는 새 기능(노트 채팅, 자료 더하기와 버전, 내 테마, 그림 풀이, 채팅 파일, 자료함 정리, 자료 그림, 과목 서랍, 노트·과목 합치기와 옮기기, 단계별 학습, PDF 요약 정리)이 꺼진 채로 예전처럼 동작해요.
 2. Vercel 에 이 저장소를 가져오고 위 환경변수를 넣어 배포해요.
 3. Supabase → Authentication → URL Configuration 에 사이트 주소(Site URL)와 `https://<사이트>/**`(Redirect URLs)를 넣어요.
 
 ## 개발
 
 ```bash
-npm install
+npm install            # 설치 뒤 pdf.js 일꾼을 public/pdfjs/ 로 복사해요 (앱 안 PDF 보기)
 npm run dev            # http://localhost:3000 (환경변수는 .env.local 에)
 npm test               # 단위 시험 (vitest)
 npm run lint

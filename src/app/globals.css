@@ -1495,6 +1495,99 @@ body {
   animation: kok-step-prev 220ms var(--ease-out) backwards;
 }
 
+/* ------------------------------------------------------------ 단계별 학습 (Pro)
+   길 위의 칸: 아래에 진한 그림자를 둔 동그란 단추 (누르면 눌려 들어간다: transform 만).
+   지금 할 칸은 둥근 빛이 천천히 퍼지고(::after scale·opacity), 위 말풍선은 살짝 떠다닌다. 움직임 줄이기면 모두 멈춘다 */
+.kok-path-node {
+  position: relative;
+  box-shadow: 0 6px 0 color-mix(in srgb, var(--accent) 72%, black);
+  transition:
+    transform 120ms var(--ease-out),
+    box-shadow 120ms var(--ease-out);
+}
+.kok-path-node.is-locked {
+  box-shadow: 0 6px 0 color-mix(in srgb, var(--surface-3) 80%, black 12%);
+}
+.kok-path-node:active:not([aria-disabled]) {
+  transform: translateY(5px);
+  box-shadow: 0 1px 0 color-mix(in srgb, var(--accent) 72%, black);
+}
+.kok-path-node:focus-visible {
+  outline: 3px solid var(--accent);
+  outline-offset: 4px;
+}
+@keyframes kok-path-pulse {
+  from {
+    opacity: 0.55;
+    transform: scale(1);
+  }
+  to {
+    opacity: 0;
+    transform: scale(1.45);
+  }
+}
+.kok-path-node.is-current::after {
+  content: '';
+  position: absolute;
+  inset: -6px;
+  border-radius: inherit;
+  border: 3px solid var(--accent);
+  animation: kok-path-pulse 1.6s var(--ease-out) infinite;
+  pointer-events: none;
+}
+@keyframes kok-bob {
+  from {
+    transform: translateY(0);
+  }
+  to {
+    transform: translateY(-5px);
+  }
+}
+.kok-bubble {
+  animation: kok-bob 900ms ease-in-out infinite alternate;
+}
+.kok-bubble::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  bottom: -6px;
+  width: 10px;
+  height: 10px;
+  margin-left: -5px;
+  background: var(--surface);
+  border-right: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+  transform: rotate(45deg);
+}
+/* 레슨 끝 별: 하나씩 톡톡 (별마다 --i) */
+@keyframes kok-star-in {
+  from {
+    opacity: 0;
+    transform: scale(0.3) rotate(-20deg);
+  }
+  60% {
+    opacity: 1;
+    transform: scale(1.2) rotate(4deg);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1) rotate(0);
+  }
+}
+.kok-star-in {
+  animation: kok-star-in 380ms var(--ease-out) calc(var(--i, 0) * 160ms) backwards;
+}
+/* 레슨 플레이어: 전체 화면 창이 아래에서 올라오고, 카드는 옆에서 살짝 들어온다 */
+@keyframes kok-player-in {
+  from {
+    opacity: 0;
+    transform: translateY(24px);
+  }
+}
+.kok-player {
+  animation: kok-player-in 240ms var(--ease-out) backwards;
+}
+
 /* 움직임 줄이기: 옮겨 다니는 움직임은 빼고 바로 보여 준다 */
 @media (prefers-reduced-motion: reduce) {
   *,

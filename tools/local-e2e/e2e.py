@@ -678,8 +678,9 @@ async def main():
         await expect(kp2.locator(".kok-li")).to_have_count(2)
         await expect(kp2.locator(".kok-red", has_text="엽록소")).to_be_visible()
         await expect(kp2.get_by_text("참고", exact=True)).to_be_visible()
-        assert db(f"select count(*) from public.notes n, jsonb_array_elements(n.body->'pitfalls') p where n.source_id = '{sid}' and p->>'key_point_id' = 'k2'") == "0"
-        assert db(f"select count(*) from public.notes n, jsonb_array_elements(n.body->'examples') p where n.source_id = '{sid}' and p->>'key_point_id' = 'k2'") == "1"
+        # (저장은 화면이 먼저 바뀌고 잠시 뒤에 끝난다)
+        await poll_db(f"select count(*) from public.notes n, jsonb_array_elements(n.body->'pitfalls') p where n.source_id = '{sid}' and p->>'key_point_id' = 'k2'", "0")
+        await poll_db(f"select count(*) from public.notes n, jsonb_array_elements(n.body->'examples') p where n.source_id = '{sid}' and p->>'key_point_id' = 'k2'", "1")
         # 공식 더하기: 기호 버튼과 미리보기
         await page.get_by_role("button", name="공식 추가").click()
         fe = page.locator(".kok-card", has=page.get_by_role("toolbar", name="공식 기호"))
@@ -2014,6 +2015,171 @@ async def main():
         await dlg.get_by_role("radiogroup", name="OX 정답").get_by_role("radio", name="X (틀리다)" if was_o else "O (맞다)").click()
         await dlg.get_by_role("button", name="저장", exact=True).click()
         await poll_db(f"select (steps is null)::text || (figure is null)::text from public.questions where id = '{own_qid}'", "truetrue")
+
+        # ---------------- 단계별 학습 (Pro) · PDF 요약 정리 · 오답노트 여러 개 빼기
+        step("course (Pro): pick a level, a lesson path is made from the note, finish a lesson, the progress is saved")
+        psql(f"delete from public.rate_hits where user_id = '{student_id}'")
+        fig_nid = psql(f"select id from public.notes where source_id = '{fig_sid}'")
+        await page.goto(BASE + f"/notes/{fig_sid}?tab=course")
+        assert await wait_ready(page), "course tab did not open"
+        await expect(page.get_by_role("tab", name="학습")).to_have_attribute("aria-selected", "true")
+        await expect(page.get_by_role("heading", name="단계별로 배워 봐요")).to_be_visible()
+        await page.get_by_role("radio", name="초등학생").click()
+        await shot(page, "101-course-create", full=False)
+        n_course_ledger = int(psql(f"select count(*) from public.energy_ledger where user_id = '{student_id}' and task = 'course'"))
+        await page.get_by_role("button", name="단계별 학습 만들기").click()
+        await expect(page.get_by_role("button", name=re.compile("첫 레슨 시작"))).to_be_visible(timeout=60000)
+        assert psql(f"select level || ' ' || (progress = '{{}}'::jsonb)::text from public.note_courses where note_id = '{fig_nid}'") == "elementary true"
+        assert int(psql(f"select count(*) from public.energy_ledger where user_id = '{student_id}' and task = 'course'")) == n_course_ledger + 1
+        # 가짜 AI 는 레슨 4개(개념마다 하나)를 두 단계로: 답을 읽을 수 없는 문제·노트에 없는 개념 번호는 빠진다
+        plan_check = psql(f"select jsonb_array_length(plan->'units') || ' ' || jsonb_array_length(plan->'units'->0->'lessons'->0->'checks') || ' ' || jsonb_array_length(plan->'units'->0->'lessons'->0->'key_point_ids') from public.note_courses where note_id = '{fig_nid}'")
+        assert plan_check == "2 2 1", plan_check
+        await expect(page.get_by_text("0 / 7 끝냄")).to_be_visible()
+        await shot(page, "101-course-path")
+        await no_hscroll(page, "course path")
+        # 잠긴 칸은 열리지 않는다
+        # (aria-disabled 라 Playwright 는 눌리지 않는다고 보지만, 눌리면 왜 잠겼는지 알려 준다. 아래 메뉴에 가리지 않게 JS 로 누른다)
+        await page.get_by_role("button", name=re.compile("잠김 · 앞 레슨을 먼저 끝내요")).first.evaluate("el => el.click()")
+        await expect(page.get_by_text("앞 레슨을 먼저 끝내면 열려요.")).to_be_visible()
+        # 첫 레슨: 카드 3장 → 확인 문제 2개 (객관식 1번·OX O 가 정답) → 별 3개
+        await page.get_by_role("button", name=re.compile("첫 레슨 시작")).click()
+        lesson = page.get_by_role("dialog", name=re.compile("^레슨 1"))
+        await expect(lesson.get_by_text("개념", exact=True)).to_be_visible()
+        for _ in range(3):
+            await lesson.get_by_role("button", name="다음").click()
+        await expect(lesson.get_by_text("확인 문제", exact=True)).to_be_visible()
+        await lesson.locator("button", has_text="빛을 모아 양분을 만든다").click()
+        await expect(lesson.get_by_text("맞았어요!")).to_be_visible()
+        await shot(page, "102-course-check", full=False)
+        await lesson.get_by_role("button", name="계속").click()
+        await lesson.get_by_role("button", name="O 맞다").click()
+        await lesson.get_by_role("button", name="계속").click()
+        await expect(lesson.get_by_text("레슨 끝!")).to_be_visible()
+        await expect(lesson.get_by_role("img", name="별 3개")).to_be_visible()
+        await shot(page, "102-course-result", full=False)
+        await lesson.get_by_role("button", name="완료").click()
+        await expect(page.get_by_role("button", name=re.compile("이어서 하기"))).to_be_visible()
+        await expect(page.get_by_text("1 / 7 끝냄")).to_be_visible()
+        await poll_db(f"select progress->'lessons'->'0-0'->>'stars' from public.note_courses where note_id = '{fig_nid}'", "3")
+        # 끝낸 레슨은 다시 열 수 있고(별은 더 높은 것만 남는다), 다음 레슨이 '지금 할 것'
+        await expect(page.get_by_role("button", name=re.compile("^레슨 1.*끝냄 · 별 3개"))).to_be_visible()
+        await expect(page.get_by_role("button", name=re.compile("^레슨 2.*지금 할 것"))).to_be_visible()
+        # 수준을 바꿔 다시 만들면 진도는 처음부터, 지우면 표에서 사라진다
+        r = await page.request.post(BASE + f"/api/notes/{fig_nid}/course", headers={"origin": BASE}, data={"level": "expert"})
+        assert r.ok, await r.text()
+        assert psql(f"select level || ' ' || (progress = '{{}}'::jsonb)::text || ' ' || count(*) from public.note_courses where note_id = '{fig_nid}' group by level, progress") == "expert true 1"
+        r = await page.request.post(BASE + f"/api/notes/{fig_nid}/course", headers={"origin": BASE}, data={"level": "phd"})
+        assert r.status == 400, (r.status, await r.text())
+        r = await page.request.delete(BASE + f"/api/notes/{fig_nid}/course", headers={"origin": BASE})
+        assert r.ok, await r.text()
+        assert psql(f"select count(*) from public.note_courses where note_id = '{fig_nid}'") == "0"
+
+        step("course: a free account sees what Pro gets, and the API refuses")
+        octx, opage = await new_ctx(browser, "other")
+        await opage.goto(BASE + f"/notes/{sid}?tab=course")
+        assert await wait_ready(opage), "other's course tab did not open"
+        await expect(opage.get_by_role("heading", name="단계별 학습은 Pro에서")).to_be_visible()
+        await expect(opage.get_by_role("region", name="예시 길")).to_be_visible()
+        await shot(opage, "103-course-free")
+        await no_hscroll(opage, "course free")
+        r = await opage.request.post(BASE + f"/api/notes/{fig_nid}/course", headers={"origin": BASE}, data={"level": "middle"})
+        assert r.status == 403 and (await r.json())["error"] == "pro_only", (r.status, await r.text())
+        await octx.close()
+
+        step("pdf summary: made without AI, listed in the visual tab, opened in the app, renamed, deleted with its file")
+        n_ledger = int(psql(f"select count(*) from public.energy_ledger where user_id = '{student_id}'"))
+        await page.goto(BASE + f"/notes/{fig_sid}?tab=visual")
+        assert await wait_ready(page), "visual tab did not open"
+        pdf_sec = page.get_by_role("region", name="PDF 요약 정리")
+        await pdf_sec.get_by_role("button", name="만들기").click()
+        make = page.get_by_role("dialog", name="PDF 요약 정리 만들기")
+        await make.get_by_role("radio", name="밝은 종이").click()
+        await make.get_by_label("이름").fill("그림 풀이 요약")
+        await make.get_by_role("button", name="만들기").click()
+        await expect(page.get_by_text("PDF 요약 정리를 만들었어요.")).to_be_visible(timeout=30000)
+        row = pdf_sec.get_by_role("button", name="그림 풀이 요약 보기")
+        await expect(row).to_be_visible()
+        pdf_row = psql(f"select id || '|' || path || '|' || pages || '|' || bytes from public.note_pdfs where note_id = '{fig_nid}'")
+        pdf_id, pdf_path, pdf_pages, pdf_bytes = pdf_row.split("|")
+        assert pdf_path == f"{student_id}/pdf/{fig_sid}/{pdf_id}.pdf" and int(pdf_pages) >= 1 and int(pdf_bytes) > 10000, pdf_row
+        assert (pathlib.Path(__file__).parent / "fakebase" / "files" / "sources" / pdf_path).exists(), "pdf file not stored"
+        assert int(psql(f"select count(*) from public.energy_ledger where user_id = '{student_id}'")) == n_ledger, "a pdf uses no energy"
+        await shot(page, "104-pdf-list", full=False)
+        # 앱 안에서 보기 (pdf.js 가 첫 쪽을 그린다)
+        await row.click()
+        viewer = page.get_by_role("dialog", name="PDF 보기: 그림 풀이 요약")
+        await expect(viewer.get_by_text(re.compile("^[0-9]+쪽$"))).to_be_visible(timeout=20000)
+        first_page = viewer.locator("canvas").first
+        await expect(first_page).to_be_visible()
+        drawn = await page.wait_for_function(
+            """() => { const c = document.querySelector('[role=dialog] canvas'); if (!c || !c.width) return false; const d = c.getContext('2d').getImageData(0, 0, 40, 40).data; let s = 0; for (let i = 0; i < d.length; i += 4) s += d[i] + d[i + 1] + d[i + 2]; return s > 0; }""",
+            timeout=20000,
+        )
+        assert drawn, "pdf page was not drawn"
+        await shot(page, "104-pdf-view", full=False)
+        await viewer.get_by_role("button", name="PDF 닫기").click()
+        # 이름 바꾸기 (학생이 name 칸만 직접 고친다)
+        await pdf_sec.get_by_role("button", name="그림 풀이 요약 메뉴").click()
+        await page.get_by_role("menuitem", name="이름 바꾸기").click()
+        ren = page.get_by_role("dialog", name="PDF 이름 바꾸기")
+        await ren.get_by_label("새 이름").fill("광합성 정리 v1")
+        await ren.get_by_role("button", name="바꾸기").click()
+        await expect(page.get_by_text("이름을 바꿨어요.")).to_be_visible()
+        assert psql(f"select name from public.note_pdfs where id = '{pdf_id}'") == "광합성 정리 v1"
+        # 하나 더 만들면 둘 (각각 따로), 꾹 눌러 여러 개 고르기 → 지우기 확인 → 파일도 지운다
+        r = await page.request.post(BASE + f"/api/notes/{fig_nid}/pdf", headers={"origin": BASE}, data={"theme": "dark"})
+        assert r.ok, await r.text()
+        assert psql(f"select count(*) from public.note_pdfs where note_id = '{fig_nid}'") == "2"
+        await page.reload()
+        assert await wait_ready(page)
+        pdf_sec = page.get_by_role("region", name="PDF 요약 정리")
+        await expect(pdf_sec.get_by_role("listitem")).to_have_count(2)
+        await pdf_sec.get_by_role("button", name="광합성 정리 v1 메뉴").click()
+        await page.get_by_role("menuitem", name="여러 개 고르기").click()
+        await expect(pdf_sec.get_by_role("checkbox")).to_have_count(2)
+        await pdf_sec.get_by_role("button", name="모두 고르기").click()
+        await expect(page.get_by_role("toolbar", name="고른 PDF 2개")).to_be_visible()
+        await shot(page, "105-pdf-select", full=False)
+        await page.get_by_role("toolbar", name="고른 PDF 2개").get_by_role("button", name="2개 지우기").click()
+        confirm = page.get_by_role("dialog", name="PDF 지우기")
+        await confirm.get_by_role("button", name="지우기").click()
+        await expect(page.get_by_text("PDF 2개를 지웠어요.")).to_be_visible()
+        assert psql(f"select count(*) from public.note_pdfs where note_id = '{fig_nid}'") == "0"
+        assert not (pathlib.Path(__file__).parent / "fakebase" / "files" / "sources" / pdf_path).exists(), "pdf file should be removed"
+        # 빈 노트로는 만들지 않는다
+        r = await page.request.post(BASE + f"/api/notes/{fig_nid}/pdf", headers={"origin": BASE}, data={"name": "x" * 80})
+        assert r.status == 400, (r.status, await r.text())
+
+        step("wrong note: long-press to pick several, remove them together, remove all")
+        # 이 노트의 문제 셋을 틀린 문제로
+        psql(f"update public.cards c set in_wrong_note = true, wrong_count = 2 from public.questions q where q.id = c.question_id and q.note_id = '{fig_nid}' and q.status = 'active'")
+        n_wrong = int(psql(f"select count(*) from public.cards where user_id = '{student_id}' and in_wrong_note"))
+        assert n_wrong >= 3, n_wrong
+        await page.goto(BASE + "/wrong")
+        await expect(page.get_by_text(f"틀린 문제 {n_wrong}개 · 3번 연속 맞히면 졸업해요")).to_be_visible()
+        wrong_cards = page.locator("main .kok-card", has=page.get_by_role("button", name="다 외웠어요 · 빼기"))
+        await expect(wrong_cards).to_have_count(n_wrong)
+        # 꾹 누르면 고르기 (카드 둘)
+        await wrong_cards.first.hover()
+        await page.mouse.down()
+        await page.wait_for_timeout(650)
+        await page.mouse.up()
+        await expect(page.get_by_role("heading", name="1개 선택")).to_be_visible()
+        await page.get_by_role("checkbox").nth(1).click()
+        await expect(page.get_by_role("heading", name="2개 선택")).to_be_visible()
+        await shot(page, "106-wrong-select", full=False)
+        await page.get_by_role("toolbar", name="고른 문제 2개").get_by_role("button", name="2개 다 외웠어요 · 빼기").click()
+        await expect(page.get_by_text("2개를 다 외운 문제로 뺐어요.")).to_be_visible()
+        await poll_db(f"select count(*) from public.cards where user_id = '{student_id}' and in_wrong_note", str(n_wrong - 2))
+        await expect(page.get_by_role("heading", name="1개 선택")).to_have_count(0)
+        # 모두 빼기: 확인 뒤 비운다
+        await page.get_by_role("button", name="오답노트 메뉴").click()
+        await page.get_by_role("menuitem", name="모두 빼기").click()
+        empty = page.get_by_role("dialog", name="오답노트 비우기")
+        await expect(empty.get_by_text(f"틀린 문제 {n_wrong - 2}개를 모두 다 외운 문제로 뺄까요?")).to_be_visible()
+        await empty.get_by_role("button", name="모두 빼기").click()
+        await expect(page.get_by_text("오답노트가 비어 있어요")).to_be_visible()
+        assert psql(f"select count(*) from public.cards where user_id = '{student_id}' and in_wrong_note") == "0"
 
         step("note chat (Pro): a photo of a problem → steps with a figure → this note's question")
         psql(f"delete from public.rate_hits where user_id = '{student_id}'")

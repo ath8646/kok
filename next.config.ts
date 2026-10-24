@@ -39,7 +39,11 @@ const nextConfig: NextConfig = {
   poweredByHeader: false,
   // 네이티브 그림 라이브러리와 pdf.js 는 묶지 않고 node_modules 에서 그대로 읽는다
   serverExternalPackages: ['pdfjs-dist', '@napi-rs/canvas'],
-  outputFileTracingIncludes: Object.fromEntries(PIPELINE_ROUTES.map((route) => [route, PDFJS_RUNTIME_FILES])),
+  outputFileTracingIncludes: {
+    ...Object.fromEntries(PIPELINE_ROUTES.map((route) => [route, PDFJS_RUNTIME_FILES])),
+    // PDF 요약 정리: 한글 글꼴 파일을 함수에 같이 싣는다 (src/lib/server/note-pdf.ts 가 파일로 읽는다)
+    '/api/notes/\\[id\\]/pdf': ['./src/lib/server/pdf-fonts/**/*'],
+  },
   outputFileTracingExcludes: Object.fromEntries(PIPELINE_ROUTES.map((route) => [route, PDFJS_UNUSED_FILES])),
   turbopack: {
     rules: {

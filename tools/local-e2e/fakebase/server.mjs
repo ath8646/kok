@@ -920,6 +920,45 @@ function fakeChat(textOf, props = {}, images = 0) {
 }
 
 /** 노트 문제 그림 풀이: 받은 문제 앞에서부터 max 개 (객관식은 과정 상자 그림, OX 는 그래프, 나머지는 글 단계) */
+/** 단계별 학습 (Pro): 프롬프트의 수준 줄을 읽어 제목에 넣고, 노트의 개념 번호로 레슨을 만든다 */
+function fakeCourse(textOf) {
+  const level = (textOf.match(/Level: ([a-z ]+) \(/) || [])[1] || 'middle school';
+  const noteJson = (textOf.match(/<note>\n([\s\S]*?)\n<\/note>/) || [])[1] || '{}';
+  let ids = [];
+  try {
+    ids = (JSON.parse(noteJson).key_points || []).map((k) => k.id).filter(Boolean);
+  } catch {
+    ids = [];
+  }
+  if (!ids.length) ids = ['k1', 'k2'];
+  const check = (i) =>
+    i % 3 === 0
+      ? { type: 'mcq', prompt: `개념 ${i + 1}에 맞는 설명은?`, choices: ['빛을 모아 양분을 만든다', '물을 밖으로 버린다', '뿌리를 굵게 한다', '꽃을 피운다'], answer: '빛을 모아 양분을 만든다', accepted: [], explanation: '잎은 빛을 받아 양분을 만들어요.' }
+      : i % 3 === 1
+        ? { type: 'ox', prompt: `개념 ${i + 1}: 광합성은 잎에서 일어난다.`, choices: [], answer: 'O', accepted: [], explanation: '맞아요. 잎의 엽록체에서 일어나요.' }
+        : { type: 'cloze', prompt: '잎에서 공기가 드나드는 작은 구멍을 ____이라고 해요.', choices: [], answer: '기공', accepted: ['stoma'], explanation: '기공은 잎 뒷면에 많아요.' };
+  const lessons = ids.slice(0, 4).map((id, i) => ({
+    title: `레슨 ${i + 1}: ${id}`,
+    goal: `${id} 개념을 설명할 수 있어요`,
+    key_point_ids: [id, 'zzz-not-a-key-point'],
+    cards: [
+      { kind: 'concept', heading: '뜻', text: `${id} 개념의 뜻을 ${level} 수준으로 쉽게 풀어 써요.`, tip: '' },
+      { kind: 'example', heading: '예시', text: '생활 속 예시 하나.', tip: '이렇게 외워요: 잎 = 공장' },
+      { kind: 'tip', heading: '', text: '헷갈리기 쉬운 점.', tip: '' },
+    ],
+    checks: [check(i), check(i + 1), { type: 'mcq', prompt: '답을 읽을 수 없는 문제', choices: ['가', '나'], answer: '다', accepted: [], explanation: '' }],
+  }));
+  const half = Math.ceil(lessons.length / 2);
+  return {
+    title: `${level} 학습 길`,
+    intro: '이 길을 끝내면 핵심 개념을 설명할 수 있어요.',
+    units: [
+      { title: '기본 개념', summary: '뜻과 까닭을 배웠어요', lessons: lessons.slice(0, half) },
+      { title: '적용하기', summary: '예시와 비교로 다졌어요', lessons: lessons.slice(half) },
+    ].filter((u) => u.lessons.length),
+  };
+}
+
 function fakeSolve(textOf) {
   const listed = JSON.parse((textOf.match(/<questions>\n([\s\S]*?)\n<\/questions>/) || [])[1] || '[]');
   const max = Number((textOf.match(/Pick at most (\d+) questions/) || [])[1] || 1);
@@ -1141,6 +1180,9 @@ async function handleClaude(req, res) {
   } else if (props.reply) {
     task = props.outside_note ? 'chat' : 'ask';
     out = fakeChat(textOf, props, images);
+  } else if (props.units) {
+    task = 'course';
+    out = fakeCourse(textOf);
   } else if (props.solutions) {
     task = 'solve';
     out = fakeSolve(textOf);

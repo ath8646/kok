@@ -42,6 +42,10 @@ export type MeResponse = {
     subjectDrawer: boolean;
     /** 자료함 정리 2: 고정한 과목 순서, 자료 옮기기, 과목 합치기, 노트 합치기·AI로 다시 정리 (note_versions.kind, kok_reorder_subjects …) */
     merge: boolean;
+    /** 단계별 학습 (note_courses) */
+    courses: boolean;
+    /** PDF 요약 정리 (note_pdfs) */
+    pdfs: boolean;
   };
   consented: boolean;
   settings: UserSettings;

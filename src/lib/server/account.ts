@@ -150,6 +150,10 @@ export type Features = {
    * qkeys 는 합치기 함수가 지금 모양(그림 행 확인·버전마다 개념 번호)이 된 때 생겼다: 그 전 함수로는 부르지 않는다
    */
   merge: boolean;
+  /** 단계별 학습 (note_courses, Pro) */
+  courses: boolean;
+  /** PDF 요약 정리 (note_pdfs) */
+  pdfs: boolean;
 };
 
 /** schema.sql 을 다시 실행하기 전의 DB 에는 함수가 없다 (PostgREST 가 함수를 못 찾음) */
@@ -166,7 +170,7 @@ let featuresCache: { at: number; value: Features } | null = null;
  */
 export async function getFeatures(admin: SupabaseClient): Promise<Features> {
   if (featuresCache && Date.now() - featuresCache.at < 60_000) return featuresCache.value;
-  const [v, p, r, c, f, t, ti, ac, qf, pf, cf, og, sf, sd, vk, rs] = await Promise.all([
+  const [v, p, r, c, f, t, ti, ac, qf, pf, cf, og, sf, sd, vk, rs, nc, np] = await Promise.all([
     admin.from('note_versions').select('id').limit(1),
     admin.from('sources').select('parent_id').limit(1),
     admin.from('questions').select('rested_hidden').limit(1),
@@ -184,6 +188,8 @@ export async function getFeatures(admin: SupabaseClient): Promise<Features> {
     admin.from('note_versions').select('kind, qkeys').limit(1),
     // 빈 목록이라 아무것도 바꾸지 않는다 (서버 키로는 auth.uid() 가 없어서 고칠 과목도 없다): 함수가 있는지만 본다
     admin.rpc('kok_reorder_subjects', { p_ids: [] }),
+    admin.from('note_courses').select('id').limit(1),
+    admin.from('note_pdfs').select('id').limit(1),
   ]);
   const value: Features = {
     versions: !v.error && !p.error,
@@ -197,6 +203,8 @@ export async function getFeatures(admin: SupabaseClient): Promise<Features> {
     sourceFigures: !sf.error,
     subjectDrawer: !sd.error,
     merge: !sd.error && !vk.error && !rs.error,
+    courses: !nc.error,
+    pdfs: !np.error,
   };
   featuresCache = { at: Date.now(), value };
   return value;

@@ -1,15 +1,39 @@
 'use client';
-// 오답노트: 약점 개념 5개, 틀린 문제 다시 풀기, 다 외운 문제 빼기
+// 오답노트: 약점 개념 5개, 틀린 문제 다시 풀기, 다 외운 문제 빼기 (하나씩 · 꾹 눌러 여러 개 · 모두)
 import Link from 'next/link';
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useMe } from '@/components/AppShell';
 import { QuestionPreview } from '@/components/QuestionList';
-import { Button, Card, Chip, EmptyState, ICONS, Icon, LargeHeader, LinkButton, SectionTitle, buttonClass, cx, useToast, DONE } from '@/components/ui';
+import { BarAction, SelectionBar, pickKeyHandler, useMultiSelect } from '@/components/SelectionBar';
+import { useLongPress } from '@/components/useLongPress';
+import {
+  Button,
+  Card,
+  Chip,
+  EmptyState,
+  ICONS,
+  Icon,
+  IconButton,
+  LargeHeader,
+  LinkButton,
+  Menu,
+  SectionTitle,
+  Sheet,
+  buttonClass,
+  cx,
+  useToast,
+  DONE,
+  type MenuItem,
+} from '@/components/ui';
 import { fetchPlanData, fetchQuestionsByIds, sb } from '@/lib/data';
 import { weakConcepts, type WeakConcept } from '@/lib/review-plan';
 import type { QuestionRow } from '@/lib/types';
 
 type NoteInfo = { id: string; source_id: string; title: string };
+type Item = { q: QuestionRow; lapses: number };
+
+/** 한 번에 고치는 카드 수 (주소 길이 안에) */
+const BULK_MAX = 100;
 
 /** sourceFigures: 자료 그림 문제의 그림도 읽는다 (DB 에 칸이 있을 때만) */
 async function fetchWrong(sourceFigures: boolean) {
@@ -18,10 +42,6 @@ async function fetchWrong(sourceFigures: boolean) {
   // 자료함에서 복습을 끈 노트의 문제는 빼고 (몇 개 뺐는지는 알려 준다)
   const wrong = plan.cards.filter((c) => c.in_wrong_note && c.in_review);
   const hidden = plan.cards.filter((c) => c.in_wrong_note && !c.in_review).length;
-  const weak = weakConcepts(
-    wrong.map((c) => ({ question_id: c.question_id, note_id: c.note_id, key_point_id: c.key_point_id, lapses: c.wrong_count ?? 0 })),
-    5,
-  );
   const qs = await fetchQuestionsByIds(
     wrong.map((c) => c.question_id),
     { sourceFigures },
@@ -36,8 +56,20 @@ async function fetchWrong(sourceFigures: boolean) {
       .in('id', noteIds.slice(i, i + 100));
     for (const n of data ?? []) notes.set(n.id, n as NoteInfo);
   }
-  const items = qs.map((q) => ({ q, lapses: lapses.get(q.id) ?? 0 })).sort((a, b) => b.lapses - a.lapses);
-  return { weak, titles, notes, items, hidden };
+  const items: Item[] = qs.map((q) => ({ q, lapses: lapses.get(q.id) ?? 0 })).sort((a, b) => b.lapses - a.lapses);
+  return { titles, notes, items, hidden };
+}
+
+/** 오답노트에서 뺀다 (카드는 남고 다시 틀리면 다시 들어온다). 뺀 수 */
+async function removeFromWrong(ids: string[]): Promise<number> {
+  let done = 0;
+  for (let i = 0; i < ids.length; i += BULK_MAX) {
+    const part = ids.slice(i, i + BULK_MAX);
+    const { error } = await sb().from('cards').update({ in_wrong_note: false }).in('question_id', part);
+    if (error) throw error;
+    done += part.length;
+  }
+  return done;
 }
 
 export default function WrongPage() {
@@ -45,23 +77,25 @@ export default function WrongPage() {
   const { me } = useMe();
   const sourceFiguresOn = !!me?.features.sourceFigures;
   const [loading, setLoading] = useState(true);
-  const [weak, setWeak] = useState<WeakConcept[]>([]);
   const [titles, setTitles] = useState<Map<string, Map<string, { title: string }>>>(new Map());
   const [notes, setNotes] = useState<Map<string, NoteInfo>>(new Map());
-  const [items, setItems] = useState<Array<{ q: QuestionRow; lapses: number }>>([]);
+  const [items, setItems] = useState<Item[]>([]);
   /** 복습을 끈 노트라서 뺀 틀린 문제 수 */
   const [hidden, setHidden] = useState(0);
   const [open, setOpen] = useState<string | null>(null);
   // 못 읽었을 때는 '비어 있어요' 대신 다시 불러오기를 보여 준다
   const [failed, setFailed] = useState(false);
   const [attempt, setAttempt] = useState(0);
+  // 여러 개 고르기 (카드를 꾹 누르거나 메뉴에서) · 모두 빼기 확인
+  const { selecting, picked, setPicked, startSelect, endSelect, togglePick } = useMultiSelect();
+  const [busy, setBusy] = useState<'some' | 'all' | null>(null);
+  const [confirmAll, setConfirmAll] = useState(false);
 
   useEffect(() => {
     let alive = true;
     fetchWrong(sourceFiguresOn)
       .then((r) => {
         if (!alive) return;
-        setWeak(r.weak);
         setTitles(r.titles);
         setNotes(r.notes);
         setItems(r.items);
@@ -85,12 +119,77 @@ export default function WrongPage() {
     setAttempt((a) => a + 1);
   };
 
+  // 약점 개념은 남은 틀린 문제로 센다 (빼면 같이 줄어든다)
+  const weak: WeakConcept[] = useMemo(
+    () =>
+      weakConcepts(
+        items.map(({ q, lapses }) => ({ question_id: q.id, note_id: q.note_id, key_point_id: q.key_point_id, lapses })),
+        5,
+      ),
+    [items],
+  );
+
+  /** 뺀 문제는 목록에서 지운다 */
+  const dropItems = (ids: Set<string>) => {
+    setItems((xs) => xs.filter((x) => !ids.has(x.q.id)));
+    if (open && ids.has(open)) setOpen(null);
+  };
+
+  const removeOne = async (q: QuestionRow) => {
+    try {
+      await removeFromWrong([q.id]);
+      dropItems(new Set([q.id]));
+      toast('다 외운 문제로 뺐어요.', 'ok', DONE);
+    } catch {
+      toast('빼지 못했어요.', 'bad');
+    }
+  };
+  const removePicked = async () => {
+    const ids = items.map((x) => x.q.id).filter((id) => picked.has(id));
+    if (!ids.length) return;
+    setBusy('some');
+    try {
+      const n = await removeFromWrong(ids);
+      dropItems(new Set(ids));
+      endSelect();
+      toast(`${n}개를 다 외운 문제로 뺐어요.`, 'ok', DONE);
+    } catch {
+      toast('빼지 못했어요. 다시 해 주세요.', 'bad');
+    } finally {
+      setBusy(null);
+    }
+  };
+  const removeAll = async () => {
+    const ids = items.map((x) => x.q.id);
+    setBusy('all');
+    try {
+      const n = await removeFromWrong(ids);
+      dropItems(new Set(ids));
+      setConfirmAll(false);
+      endSelect();
+      toast(`틀린 문제 ${n}개를 모두 뺐어요.`, 'ok', DONE);
+    } catch {
+      toast('빼지 못했어요. 다시 해 주세요.', 'bad');
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const pickedCount = items.filter((x) => picked.has(x.q.id)).length;
+  const allPicked = items.length > 0 && pickedCount === items.length;
+  const headerMenu: MenuItem[] = [
+    { label: '여러 개 고르기', icon: ICONS.select, onSelect: () => startSelect() },
+    { label: '모두 빼기', icon: ICONS.trash, onSelect: () => setConfirmAll(true), danger: true },
+  ];
+
   const subtitleText = failed ? '불러오지 못했어요' : items.length ? `틀린 문제 ${items.length}개 · 3번 연속 맞히면 졸업해요` : '틀린 문제가 모이는 곳이에요';
   const subtitle = loading ? (
     // 읽는 동안에도 부제 줄 높이를 지켜서, 다 읽었을 때 제목이 위로 튀지 않게 한다
     <span className="kok-skel inline-block h-6 align-top" aria-hidden="true">
       <span className="kok-bone mt-[7px] h-2.5 w-52 max-w-full" />
     </span>
+  ) : selecting ? (
+    <span className="kok-swap">문제를 눌러 고르고, 아래에서 한꺼번에 빼요</span>
   ) : (
     <span key={subtitleText} className="kok-swap">
       {subtitleText}
@@ -100,15 +199,41 @@ export default function WrongPage() {
   const itemsFrom = weak.length ? weak.length + 2 : 1;
 
   return (
-    <div className="grid gap-3">
+    <div className={cx('grid gap-3', selecting && 'pb-20')}>
       <LargeHeader
-        title="오답노트"
+        title={
+          selecting ? (
+            <span key={pickedCount ? 'n' : 'none'} className="kok-swap">
+              {pickedCount ? `${pickedCount}개 선택` : '문제 고르기'}
+            </span>
+          ) : (
+            '오답노트'
+          )
+        }
+        compactTitle={selecting ? (pickedCount ? `${pickedCount}개 선택` : '문제 고르기') : undefined}
         subtitle={subtitle}
         actions={
-          items.length ? (
-            <LinkButton href="/review?mode=wrong" size="sm" className="kok-fill mr-1">
-              전부 다시 풀기
-            </LinkButton>
+          selecting ? (
+            <>
+              <button
+                type="button"
+                // 위 띠 글자는 화면 위 빛 위에 놓이지 않게 알약 안에 (화면 바탕 위 글자는 본문·흐린 글자만: fx.ts)
+                className="press rounded-full bg-accent-soft px-3 py-2 text-sm font-semibold text-accent hover:brightness-95"
+                onClick={() => setPicked(allPicked ? new Set() : new Set(items.map((x) => x.q.id)))}
+              >
+                {allPicked ? '모두 풀기' : '모두 고르기'}
+              </button>
+              <IconButton label="고르기 끝내기" onClick={endSelect}>
+                <Icon d={ICONS.close} />
+              </IconButton>
+            </>
+          ) : items.length ? (
+            <>
+              <LinkButton href="/review?mode=wrong" size="sm" className="kok-fill">
+                전부 다시 풀기
+              </LinkButton>
+              <Menu label="오답노트 메뉴" items={headerMenu} />
+            </>
           ) : null
         }
       />
@@ -138,7 +263,7 @@ export default function WrongPage() {
       ) : (
         // 자리 표시와 같은 모양의 카드는 그 자리에 두고, 안의 글만 위에서부터 차례로 번지며 나타난다
         <>
-          {weak.length ? (
+          {weak.length && !selecting ? (
             <>
               <SectionTitle>
                 <span className="kok-fill block">약점 개념 {weak.length}개</span>
@@ -179,49 +304,150 @@ export default function WrongPage() {
           ) : null}
 
           <SectionTitle>
-            <span className="kok-fill block" style={{ ['--i' as string]: itemsFrom - 1 }}>
+            <span className="kok-fill block" style={{ ['--i' as string]: selecting ? 0 : itemsFrom - 1 }}>
               틀린 문제 {items.length}개
             </span>
           </SectionTitle>
+          {!selecting ? <p className="-mt-2 px-1 text-xs text-muted">카드를 꾹 누르면 여러 개를 한꺼번에 뺄 수 있어요.</p> : null}
           <div className="grid gap-2">
             {items.map(({ q, lapses }, i) => (
-              <Card key={q.id} className="grid gap-2" style={{ ['--i' as string]: itemsFrom + i }}>
-                <button
-                  type="button"
-                  className="kok-fill flex items-start gap-2 text-left"
-                  onClick={() => setOpen(open === q.id ? null : q.id)}
-                  aria-expanded={open === q.id}
-                >
-                  <span className="line-clamp-2 min-w-0 flex-1 font-semibold">{q.prompt}</span>
-                  <Chip tone="bad">{lapses}번 틀림</Chip>
-                </button>
-                {open === q.id ? (
-                  // 펼친 답은 바로 (늦추지 않고) 살짝 번지며 나타난다
-                  <div className="kok-fill" style={{ ['--i' as string]: 0 }}>
-                    <QuestionPreview q={q} />
-                  </div>
-                ) : null}
-                <div className="kok-fill flex justify-end">
-                  <Button
-                    size="sm"
-                    variant="ghost"
-                    onClick={async () => {
-                      const { error } = await sb().from('cards').update({ in_wrong_note: false }).eq('question_id', q.id);
-                      if (error) toast('빼지 못했어요.', 'bad');
-                      else {
-                        setItems((xs) => xs.filter((x) => x.q.id !== q.id));
-                        toast('다 외운 문제로 뺐어요.', 'ok', DONE);
-                      }
-                    }}
-                  >
-                    다 외웠어요 · 빼기
-                  </Button>
-                </div>
-              </Card>
+              <WrongCard
+                key={q.id}
+                q={q}
+                lapses={lapses}
+                index={selecting ? 0 : itemsFrom + i}
+                expanded={!selecting && open === q.id}
+                onToggleOpen={() => setOpen(open === q.id ? null : q.id)}
+                selecting={selecting}
+                picked={picked.has(q.id)}
+                onPick={() => togglePick(q.id)}
+                onLongPress={() => (selecting ? togglePick(q.id) : startSelect(q.id))}
+                onRemove={() => removeOne(q)}
+              />
             ))}
           </div>
         </>
       )}
+
+      {/* 여러 개 고르기: 아래 띠 (폰은 아래 메뉴 자리, 넓은 화면은 가운데 떠 있는 띠) */}
+      {selecting ? (
+        <SelectionBar count={pickedCount} noun="문제">
+          <BarAction
+            icon={ICONS.check}
+            label={pickedCount ? `${pickedCount}개 다 외웠어요 · 빼기` : '뺄 문제를 골라 주세요'}
+            prominent
+            disabled={!pickedCount || !!busy}
+            busy={busy === 'some'}
+            onClick={removePicked}
+          />
+        </SelectionBar>
+      ) : null}
+
+      {/* 모두 빼기: 한 번 확인한다 (카드는 남아서 다시 틀리면 다시 들어온다) */}
+      <Sheet
+        open={confirmAll}
+        onClose={() => !busy && setConfirmAll(false)}
+        title="오답노트 비우기"
+        footer={
+          <div className="grid grid-cols-2 gap-2">
+            <Button variant="secondary" size="lg" onClick={() => setConfirmAll(false)} disabled={!!busy}>
+              그대로 두기
+            </Button>
+            <Button variant="danger" size="lg" busy={busy === 'all'} onClick={removeAll}>
+              모두 빼기
+            </Button>
+          </div>
+        }
+      >
+        <p className="text-[15px] leading-relaxed">
+          틀린 문제 <b>{items.length}개</b>를 모두 다 외운 문제로 뺄까요?
+        </p>
+        <p className="mt-2 text-sm text-muted">문제와 복습 카드는 그대로 있어요. 다시 틀리면 오답노트에 다시 들어와요.</p>
+      </Sheet>
+    </div>
+  );
+}
+
+/** 틀린 문제 카드: 누르면 답을 펼치고, 꾹 누르면 여러 개 고르기 (고르는 동안은 카드 어디를 눌러도 고르기만) */
+function WrongCard({
+  q,
+  lapses,
+  index,
+  expanded,
+  onToggleOpen,
+  selecting,
+  picked,
+  onPick,
+  onLongPress,
+  onRemove,
+}: {
+  q: QuestionRow;
+  lapses: number;
+  index: number;
+  expanded: boolean;
+  onToggleOpen: () => void;
+  selecting: boolean;
+  picked: boolean;
+  onPick: () => void;
+  onLongPress: () => void;
+  onRemove: () => void | Promise<void>;
+}) {
+  const press = useLongPress(onLongPress, true);
+  const selectProps = selecting ? { role: 'checkbox' as const, 'aria-checked': picked, tabIndex: 0, onKeyDown: pickKeyHandler(onPick) } : {};
+  return (
+    <div
+      className="kok-no-callout relative"
+      style={{ ['--i' as string]: index }}
+      {...press}
+      onClickCapture={(e) => {
+        press.onClickCapture(e);
+        if (e.defaultPrevented) return;
+        // 고르는 중에는 카드 안 어디를 눌러도 고르기만 한다
+        if (selecting) {
+          e.preventDefault();
+          e.stopPropagation();
+          onPick();
+        }
+      }}
+    >
+      <Card className={cx('grid gap-2', selecting && 'kok-card-hover cursor-pointer', selecting && picked && 'ring-2 ring-accent ring-offset-2 ring-offset-bg')} {...selectProps}>
+        <div className="kok-fill flex items-start gap-2">
+          {selecting ? (
+            <span
+              aria-hidden="true"
+              className={cx(
+                'mt-0.5 grid h-6 w-6 shrink-0 place-items-center rounded-full border-2 transition-colors',
+                picked ? 'border-accent bg-accent text-accent-ink' : 'border-line bg-surface',
+              )}
+            >
+              {picked ? <Icon d={ICONS.check} size={14} strokeWidth={3} /> : null}
+            </span>
+          ) : null}
+          <button
+            type="button"
+            className="flex min-w-0 flex-1 items-start gap-2 text-left"
+            onClick={onToggleOpen}
+            aria-expanded={expanded}
+            tabIndex={selecting ? -1 : undefined}
+          >
+            <span className="line-clamp-2 min-w-0 flex-1 font-semibold">{q.prompt}</span>
+            <Chip tone="bad">{lapses}번 틀림</Chip>
+          </button>
+        </div>
+        {expanded ? (
+          // 펼친 답은 바로 (늦추지 않고) 살짝 번지며 나타난다
+          <div className="kok-fill" style={{ ['--i' as string]: 0 }}>
+            <QuestionPreview q={q} />
+          </div>
+        ) : null}
+        {!selecting ? (
+          <div className="kok-fill flex justify-end">
+            <Button size="sm" variant="ghost" onClick={onRemove}>
+              다 외웠어요 · 빼기
+            </Button>
+          </div>
+        ) : null}
+      </Card>
     </div>
   );
 }

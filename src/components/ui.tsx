@@ -71,7 +71,8 @@ export function IconButton({ label, children, className, ...rest }: React.Button
       type="button"
       aria-label={label}
       title={label}
-      className={cx('press grid h-10 w-10 shrink-0 place-items-center rounded-full text-ink hover:bg-surface-2', className)}
+      // 손가락이 닿는 크기 (44px): 머리 띠의 검색·메뉴·닫기
+      className={cx('press grid h-11 w-11 shrink-0 place-items-center rounded-full text-ink hover:bg-surface-2', className)}
       {...rest}
     >
       {children}
@@ -263,7 +264,7 @@ function BackLink({ back }: { back: { href: string; label: string } }) {
       href={back.href}
       aria-label={back.label}
       title={back.label}
-      className="press grid h-10 w-10 shrink-0 place-items-center rounded-full hover:bg-surface-2"
+      className="press grid h-11 w-11 shrink-0 place-items-center rounded-full hover:bg-surface-2"
     >
       <Icon d={ICONS.back} />
     </Link>

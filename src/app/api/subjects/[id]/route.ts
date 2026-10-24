@@ -2,7 +2,7 @@
 import type { NextRequest } from 'next/server';
 import { assertSameOrigin, assertUuid, requireAccount } from '@/lib/server/auth';
 import { UserFacingError, errorResponse } from '@/lib/server/errors';
-import { removeFigureFolders, removeFolder } from '@/lib/server/files';
+import { removeFigureFolders, removeFolder, removePdfFolders } from '@/lib/server/files';
 import { chatFolderIdsOfNotes, removeChatFolders } from '@/lib/server/chat-input';
 
 export const maxDuration = 120;
@@ -27,6 +27,7 @@ export async function DELETE(req: NextRequest, ctx: RouteContext<'/api/subjects/
     );
     await removeChatFolders(admin, acc.userId, [...ids, ...chatIds]);
     await removeFigureFolders(admin, acc.userId, ids);
+    await removePdfFolders(admin, acc.userId, ids);
     const { error } = await admin.from('subjects').delete().eq('id', id).eq('user_id', acc.userId);
     if (error) throw error;
     return Response.json({ ok: true });

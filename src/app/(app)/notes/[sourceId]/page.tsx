@@ -9,6 +9,8 @@ import { useMe } from '@/components/AppShell';
 import { SOURCES_CHANGED, SUBJECTS_CHANGED, useQuickAdd } from '@/components/QuickAdd';
 import { NoteView, type NoteBody } from '@/components/NoteView';
 import { ProcessingView } from '@/components/note/ProcessingView';
+import { CoursePanel } from '@/components/course/CoursePanel';
+import { NotePdfs } from '@/components/note/NotePdfs';
 import { OriginalPanel } from '@/components/note/OriginalPanel';
 import { OriginalTab } from '@/components/note/OriginalTab';
 import { AppendStatus } from '@/components/note/AppendStatus';
@@ -62,7 +64,7 @@ import { starredFirst } from '@/lib/note-order';
 import { practiceHref, rememberPracticeFrom } from '@/lib/review-mode';
 import { prefersReducedMotion } from '@/components/useReducedMotion';
 
-type Tab = 'note' | 'visual' | 'questions' | 'original';
+type Tab = 'note' | 'visual' | 'questions' | 'course' | 'original';
 type SourceFull = SourceRowWithUnit & { text_content: string | null; parent_id?: string | null };
 type NoteRow = { id: string; title: string; subject_id: string; body: Record<string, unknown>; updated_at: string; current_version?: number };
 /** 지난 버전: 그 버전 행에 저장된 정리·그림·문제 목록 */
@@ -86,10 +88,12 @@ function readQkeys(v: unknown): Record<string, string | null> | null {
 /** 저장할 때 '읽은 그대로인지' 확인하는 표 (행 번호와 그때의 updated_at) */
 type RowToken = { id: string; updatedAt: string };
 
+/** 탭 차례. '학습'(단계별 학습, Pro)은 DB 에 표가 있을 때만 보인다 (features.courses) */
 const TABS: Array<{ id: Tab; label: string }> = [
   { id: 'note', label: '정리' },
   { id: 'visual', label: '그림' },
   { id: 'questions', label: '문제' },
+  { id: 'course', label: '학습' },
   { id: 'original', label: '원본' },
 ];
 
@@ -249,6 +253,8 @@ export default function NotePage() {
   const chatOn = !!me?.features.chat;
   // 노트 옮기기·합친 노트 다시 정리·버전 까닭 (schema.sql 을 다시 실행한 뒤)
   const mergeOn = !!me?.features.merge;
+  const coursesOn = !!me?.features.courses;
+  const pdfsOn = !!me?.features.pdfs;
   const canAppend = !!me?.canAppend;
   const [bundle, setBundle] = useState<Bundle | null | undefined>(undefined);
   const [tick, setTick] = useState(0);
@@ -257,7 +263,7 @@ export default function NotePage() {
   const subbarStuck = useStuck(subbarEl);
   const [tab, setTab] = useState<Tab>(() => {
     const t = opened.tab;
-    return t === 'note' || t === 'visual' || t === 'questions' || t === 'original' ? t : 'note';
+    return t === 'note' || t === 'visual' || t === 'questions' || t === 'course' || t === 'original' ? t : 'note';
   });
   // 보는 탭은 주소에 적어 둔다 (문제 풀기에서 뒤로 오거나 새로 고쳐도 그 탭이 열리게)
   useEffect(() => {
@@ -968,8 +974,8 @@ export default function NotePage() {
         }
       />
       <div ref={subbarRef} className={cx(STICKY_BELOW_TOPBAR, 'kok-subbar z-20 -mx-4 -mt-4 px-4 pb-2.5 pt-1 md:-mx-6 md:px-6', subbarStuck && 'is-stuck')}>
-        <div className="grid grid-cols-4 gap-1 rounded-full bg-surface-2 p-1" role="tablist" aria-label="노트 보기">
-          {TABS.map((t) => (
+        <div className={cx('grid gap-1 rounded-full bg-surface-2 p-1', coursesOn ? 'grid-cols-5' : 'grid-cols-4')} role="tablist" aria-label="노트 보기">
+          {TABS.filter((t) => t.id !== 'course' || coursesOn).map((t) => (
             <button
               key={t.id}
               type="button"
@@ -977,7 +983,7 @@ export default function NotePage() {
               aria-selected={tab === t.id}
               onClick={() => setTab(t.id)}
               className={cx(
-                'press rounded-full py-2 text-sm font-bold',
+                'press min-h-[40px] rounded-full py-2 text-sm font-bold',
                 tab === t.id ? 'bg-raised text-ink shadow-[0_1px_3px_var(--shadow-strong)]' : 'text-muted hover:text-ink',
               )}
             >
@@ -1185,6 +1191,7 @@ export default function NotePage() {
               editLocked={editLocked}
             />
           ) : null}
+          {tab === 'visual' && pdfsOn ? <NotePdfs noteId={note.id} noteTitle={title} canCreate={!old && !appendRunning && !reorg} /> : null}
 
           {tab === 'questions' ? (
             <QuestionsPanel
@@ -1209,6 +1216,10 @@ export default function NotePage() {
               }
               figures={docFigures}
             />
+          ) : null}
+
+          {tab === 'course' && coursesOn ? (
+            <CoursePanel me={me} noteId={note.id} noteTitle={title} noteChars={noteChars} canCreate={!old && !appendRunning && !reorg} />
           ) : null}
 
           {tab === 'original' ? (

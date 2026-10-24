@@ -99,6 +99,16 @@ export async function removeFigureFolders(admin: SupabaseClient, userId: string,
   await removeSourceFolders(admin, `${userId}/figs`, sourceIds);
 }
 
+/** 자료(노트)를 지울 때 그 노트로 만든 PDF 요약 정리도 지운다 (`내id/pdf/자료id`) */
+export async function removePdfFolders(admin: SupabaseClient, userId: string, sourceIds: string[]): Promise<void> {
+  await removeSourceFolders(admin, `${userId}/pdf`, sourceIds);
+}
+
+/** PDF 요약 정리 파일 경로 */
+export function pdfPath(userId: string, sourceId: string, id: string): string {
+  return `${userId}/pdf/${sourceId}/${id}.pdf`;
+}
+
 export async function removePaths(admin: SupabaseClient, paths: string[]): Promise<void> {
   if (!paths.length) return;
   for (let i = 0; i < paths.length; i += 100) {

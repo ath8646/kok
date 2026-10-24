@@ -419,6 +419,79 @@ export const zHomeChat = z.object({
   solution: zChatSolutionRaw.optional().catch(undefined),
 });
 
+// ---------------------------------------------------------------- 단계별 학습 (Pro)
+/**
+ * 노트 하나를 단계(unit) → 레슨(lesson) → 카드·확인 문제로 나눈 학습 길. 수준(level)에 맞춰 쓴다.
+ * 확인 문제는 채팅 문제 모양(chatQuestionSchema 에서 key_point_id·difficulty 를 뺀 것): answer 는 글 하나 (readChatQuestion 이 문제 칸으로 바꾼다)
+ */
+const courseCheckSchema: JsonSchema = obj({
+  type: quizItemProps.type,
+  prompt: str,
+  choices: strArr,
+  answer: str,
+  accepted: strArr,
+  explanation: str,
+});
+export const courseJsonSchema: JsonSchema = obj({
+  title: str,
+  intro: str,
+  units: {
+    type: 'array',
+    items: obj({
+      title: str,
+      summary: str,
+      lessons: {
+        type: 'array',
+        items: obj({
+          title: str,
+          goal: str,
+          key_point_ids: strArr,
+          cards: { type: 'array', items: obj({ kind: { type: 'string', enum: ['concept', 'example', 'compare', 'tip'] }, heading: str, text: str, tip: str }) },
+          checks: { type: 'array', items: courseCheckSchema },
+        }),
+      },
+    }),
+  },
+});
+
+export const zCourseAi = z.object({
+  title: z.string().catch(''),
+  intro: z.string().catch(''),
+  units: z
+    .array(
+      z.object({
+        title: z.string().catch(''),
+        summary: z.string().catch(''),
+        lessons: z
+          .array(
+            z.object({
+              title: z.string().catch(''),
+              goal: z.string().catch(''),
+              key_point_ids: z.array(z.string()).catch([]),
+              cards: z
+                .array(
+                  z.object({
+                    kind: z
+                      .string()
+                      .transform((v) => v.toLowerCase())
+                      .pipe(z.enum(['concept', 'example', 'compare', 'tip']))
+                      .catch('concept'),
+                    heading: z.string().catch(''),
+                    text: z.string().catch(''),
+                    tip: z.string().catch(''),
+                  }),
+                )
+                .catch([]),
+              checks: z.array(z.unknown()).catch([]),
+            }),
+          )
+          .catch([]),
+      }),
+    )
+    .catch([]),
+});
+export type CourseAi = z.infer<typeof zCourseAi>;
+
 // ---------------------------------------------------------------- 테마 (Pro)
 const palette = obj({ bg: str, surface: str, accent: str });
 export const themeJsonSchema: JsonSchema = obj({

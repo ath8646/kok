@@ -54,6 +54,7 @@ const TASK_NAME: Record<string, string> = {
   solve: '그림 풀이',
   redraw: '자료 그림 다시 그리기',
   reorganize: '합친 노트 다시 정리',
+  course: '단계별 학습 만들기',
   theme: '테마 만들기',
   refund: '돌려받음',
 };

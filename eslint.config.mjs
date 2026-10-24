@@ -14,6 +14,8 @@ const eslintConfig = defineConfig([
     'next-env.d.ts',
     // 로컬 끝-끝 시험 도구 (앱 코드가 아님)
     'tools/**',
+    // pdf.js 일꾼 (설치·빌드 때 복사한 파일)
+    'public/pdfjs/**',
     // Claude 작업 폴더 (worktree 등)
     '.claude/**',
   ]),

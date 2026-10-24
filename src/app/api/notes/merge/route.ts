@@ -8,6 +8,7 @@ import { UserFacingError, errorResponse } from '@/lib/server/errors';
 import { assertMergeReady, dbError } from '@/lib/server/organize';
 import { zMindmap, zTable, zTimeline } from '@/lib/ai/schemas';
 import { MERGE_MAX_NOTES, mergeNotes, type MergePart } from '@/lib/note-merge';
+import { removePdfFolders } from '@/lib/server/files';
 
 export const maxDuration = 60;
 
@@ -108,6 +109,8 @@ export async function POST(req: NextRequest) {
       throw blockedNote(error.message ?? '', titleOf) ?? dbError(error, MESSAGES);
     }
     const r = (data ?? {}) as { merged?: unknown; version?: unknown };
+    // 합쳐 들어간 노트로 만든 PDF 요약은 노트와 함께 사라진다 (행은 cascade, 파일은 여기서)
+    await removePdfFolders(admin, acc.userId, from);
     return Response.json({
       ok: true,
       sourceId: into,

@@ -234,6 +234,42 @@ export function fixPrompt(): string {
   ].join('\n');
 }
 
+// ---------------------------------------------------------------- 단계별 학습 (Pro)
+export type CourseLevelKey = 'elementary' | 'middle' | 'high' | 'college' | 'expert';
+
+/** 수준마다 말투·깊이·확인 문제 */
+const COURSE_LEVELS: Record<CourseLevelKey, string> = {
+  elementary:
+    'Level: elementary school (초등학생). Use short, simple sentences and everyday words a 10-year-old knows. Explain every term with a familiar comparison or example from daily life. One idea per card. Checks are mostly ox and simple mcq about the main idea.',
+  middle:
+    'Level: middle school (중학생). Write like a friendly textbook: define each term when it first appears, show cause and effect, and connect new ideas to ones already covered. Checks mix mcq, ox and cloze on definitions and relationships.',
+  high: 'Level: high school (고등학생). Be exam-oriented: precise terms, the distinctions and exceptions tests ask about, typical traps, and how the idea is applied in a problem. Checks include application mcq and cloze questions worded like exam items.',
+  college:
+    'Level: university (대학생). Explain principles and the reasoning behind them, keep terms in their original language where the material does, and compare concepts critically. Checks include short-answer questions that ask for a term or a reason.',
+  expert:
+    'Level: professional (전문). Assume the reader knows the basics: go deep into mechanisms, edge cases, limitations and practical implications, with precise definitions. Checks test subtle distinctions and applications.',
+};
+
+/**
+ * 노트 하나를 단계별 학습 길로: 단계(unit) → 레슨(lesson, 카드 몇 장 + 확인 문제) → 단계마다 복습, 끝에 총정리는 앱이 레슨 문제에서 뽑는다.
+ * <note> 정리, <questions> 기존 문제(참고), <figures> 자료 그림 설명, (있으면) 원본 자료를 함께 받는다
+ */
+export function coursePrompt(level: CourseLevelKey): string {
+  return [
+    'Design a step-by-step learning path (like a language-app lesson path) for the study note in <note>, so the student can learn it in small steps.',
+    'Use the note as the ground truth. The attached original material (if any), <questions> and <figures> are extra context for examples and wording: never add facts the note or material does not support.',
+    COURSE_LEVELS[level],
+    '- title: a short name for the whole path, at most 24 characters. intro: one or two sentences that tell the student what they will be able to do at the end.',
+    '- units: 2 to 5 stages in learning order, from the basics to application. Each unit has a title (at most 16 characters), a summary (one sentence: what this stage covered) and 2 to 4 lessons.',
+    '- Each lesson covers one or two key points of the note. key_point_ids holds their ids copied from <note>. Order lessons so each one builds on the previous.',
+    '- lesson.title: at most 20 characters. lesson.goal: one sentence starting with what the student will be able to do ("~을 설명할 수 있어요", "~을 구별할 수 있어요").',
+    '- cards: 3 to 6 cards that teach the lesson one idea at a time, in order. kind is "concept" (the idea itself), "example" (a worked example or everyday case), "compare" (how it differs from something it is confused with) or "tip" (a memory trick or pitfall). heading: at most 20 characters. text: 1 to 3 short sentences fit for the level (at most 220 characters). tip: an optional one-line memory hook or warning (at most 60 characters), or "".',
+    '- checks: 2 to 4 questions that confirm the lesson, each answerable from the cards of that lesson. type is "mcq" (exactly 4 choices, answer is the correct choice copied exactly), "ox" (answer is "O" or "X"), "cloze" (the sentence has "____" and answer is the missing word) or "short" (answer is a term, name or number; put other correct spellings in accepted). explanation: one or two sentences. Do not copy questions from <questions>; write new ones that fit the level.',
+    '- Write everything in Korean in a warm, encouraging tone (해요체), keeping terms, formulas ($...$) and foreign-language examples in their original form. No markup other than $...$.',
+    '- Cover every key point of the note at least once across the lessons. Do not invent key_point_ids.',
+  ].join('\n');
+}
+
 // ---------------------------------------------------------------- 그림 풀이 (Pro): 문제 그림과 단계 풀이
 /** 문제를 잘 푸는 법 (노트 문제 풀이·채팅 풀이에 같이 쓴다) */
 export const SOLVE_METHOD = [

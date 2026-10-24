@@ -1,6 +1,6 @@
 'use client';
 // 단계별 학습의 길: 단계(unit)마다 머리 카드 → 레슨 칸들이 지그재그로 → 단계 복습(트로피) → 맨 끝 총정리.
-// 끝낸 칸 다음 하나만 '지금 할 것'(시작 말풍선), 그 뒤는 잠긴다. 끝낸 칸은 별 1~3개 (언제든 다시 할 수 있다).
+// 끝낸 칸 다음 하나만 '지금 할 것'(시작 말풍선), 그 뒤는 회색(아직 차례가 아님: 눌러서 건너뛸 수 있다, 한 번 묻는다). 끝낸 칸은 별 1~3개 (언제든 다시 할 수 있다).
 // 칸은 72px(엄지가 닿는 큰 단추), 색은 테마 포인트 색. 움직임은 transform·opacity 만 (globals.css '단계별 학습')
 import { type CourseNode, type CoursePlan } from '@/lib/course';
 import { ICONS, Icon, cx } from '../ui';
@@ -18,8 +18,8 @@ export function CoursePath({
   plan: CoursePlan;
   nodes: CourseNode[];
   onOpen: (node: CourseNode) => void;
-  /** 잠긴 칸을 눌렀을 때 (앞 레슨을 먼저 하라고 알려 준다) */
-  onLocked: () => void;
+  /** 아직 차례가 아닌 칸을 눌렀을 때 (건너뛸지 묻는다) */
+  onLocked: (node: CourseNode) => void;
 }) {
   // 단계마다 칸을 묶는다 (총정리는 마지막 묶음 뒤에)
   const byUnit = plan.units.map((_, ui) => nodes.filter((n) => (n.kind === 'lesson' || n.kind === 'recap') && n.unit === ui));
@@ -85,13 +85,13 @@ function UnitHeader({ index, title, summary, done, total, active }: { index: num
 }
 
 /** 길 위의 칸 하나: 동그란 큰 단추 + (끝냈으면) 별 + 이름. 지금 할 것에는 '시작' 말풍선 */
-function PathNode({ node, onOpen, onLocked }: { node: CourseNode; onOpen: (n: CourseNode) => void; onLocked: () => void }) {
+function PathNode({ node, onOpen, onLocked }: { node: CourseNode; onOpen: (n: CourseNode) => void; onLocked: (n: CourseNode) => void }) {
   const locked = node.state === 'locked';
   const current = node.state === 'current';
   const big = node.kind !== 'lesson';
-  const icon = node.kind === 'final' ? ICONS.trophy : node.kind === 'recap' ? ICONS.target : node.state === 'done' ? ICONS.check : locked ? ICONS.lock : ICONS.star;
+  const icon = node.kind === 'final' ? ICONS.trophy : node.kind === 'recap' ? ICONS.target : node.state === 'done' ? ICONS.check : ICONS.star;
   const label = node.kind === 'final' ? '총정리' : node.title;
-  const stateText = node.state === 'done' ? `끝냄 · 별 ${node.stars}개` : current ? '지금 할 것' : '잠김 · 앞 레슨을 먼저 끝내요';
+  const stateText = node.state === 'done' ? `끝냄 · 별 ${node.stars}개` : current ? '지금 할 것' : '아직 차례가 아니에요 · 눌러서 건너뛰기';
   return (
     // 지금 할 칸은 위에 말풍선 자리를 둔다 (앞 칸의 이름과 겹치지 않게)
     <div className={cx('relative grid justify-items-center gap-2', current && 'mt-12')}>
@@ -106,8 +106,7 @@ function PathNode({ node, onOpen, onLocked }: { node: CourseNode; onOpen: (n: Co
       <button
         type="button"
         aria-label={`${label}, ${stateText}`}
-        aria-disabled={locked || undefined}
-        onClick={() => (locked ? onLocked() : onOpen(node))}
+        onClick={() => (locked ? onLocked(node) : onOpen(node))}
         className={cx(
           'kok-path-node grid place-items-center rounded-full',
           big ? 'h-[84px] w-[84px]' : 'h-[72px] w-[72px]',

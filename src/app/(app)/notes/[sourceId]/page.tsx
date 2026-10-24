@@ -88,12 +88,12 @@ function readQkeys(v: unknown): Record<string, string | null> | null {
 /** 저장할 때 '읽은 그대로인지' 확인하는 표 (행 번호와 그때의 updated_at) */
 type RowToken = { id: string; updatedAt: string };
 
-/** 탭 차례. '학습'(단계별 학습, Pro)은 DB 에 표가 있을 때만 보인다 (features.courses) */
+/** 탭 차례. '레슨'(단계별 학습, Pro)은 DB 에 표가 있을 때만 보인다 (features.courses) */
 const TABS: Array<{ id: Tab; label: string }> = [
   { id: 'note', label: '정리' },
   { id: 'visual', label: '그림' },
   { id: 'questions', label: '문제' },
-  { id: 'course', label: '학습' },
+  { id: 'course', label: '레슨' },
   { id: 'original', label: '원본' },
 ];
 

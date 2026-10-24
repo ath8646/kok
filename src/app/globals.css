@@ -1508,9 +1508,12 @@ body {
 .kok-path-node.is-locked {
   box-shadow: 0 6px 0 color-mix(in srgb, var(--surface-3) 80%, black 12%);
 }
-.kok-path-node:active:not([aria-disabled]) {
+.kok-path-node:active {
   transform: translateY(5px);
   box-shadow: 0 1px 0 color-mix(in srgb, var(--accent) 72%, black);
+}
+.kok-path-node.is-locked:active {
+  box-shadow: 0 1px 0 color-mix(in srgb, var(--surface-3) 80%, black 12%);
 }
 .kok-path-node:focus-visible {
   outline: 3px solid var(--accent);

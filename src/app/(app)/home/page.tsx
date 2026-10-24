@@ -193,7 +193,8 @@ export default function HomePage() {
             </div>
           </div>
           {today.length ? (
-            <LinkButton href="/review" size="lg" className="kok-fill kok-cta w-full">
+            // 고르는 화면 없이 지난번 시간(기본 5분)만큼의 오늘 복습 문제로 바로 시작한다 (?start=1)
+            <LinkButton href="/review?start=1" size="lg" className="kok-fill kok-cta w-full">
               {settings.minutes}분 KOK 시작
             </LinkButton>
           ) : (

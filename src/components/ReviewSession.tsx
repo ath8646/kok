@@ -13,7 +13,7 @@ import { ReviewStart, StartSkeleton, type StartChoice, type StartPick } from '@/
 import { Button, Card, EmptyState, ICONS, Icon, LargeHeader, LinkButton, Sheet, api, cx, useToast } from '@/components/ui';
 import { fetchPlanData, fetchQuestionsByIds, fetchRecentPace, fetchStudyDays, sb, type PlanData } from '@/lib/data';
 import { autoGrade, autoRating, type Rating } from '@/lib/grading';
-import { paceFrom, periodCounts, periodPool, pickToday, streakInfo, type ReviewPeriod } from '@/lib/review-plan';
+import { REVIEW_MINUTES, paceFrom, periodCounts, periodPool, pickToday, plansForTimes, streakInfo, type ReviewPeriod } from '@/lib/review-plan';
 import { practiceFrom, type ReviewMode } from '@/lib/review-mode';
 import { reviewCard, type StoredCard } from '@/lib/srs';
 import { ACCEPTED_MAX_CHARS, zMindmap, type Mindmap } from '@/lib/ai/schemas';
@@ -102,6 +102,22 @@ function firstChoice(m: ReviewMode, p: PlanData, r: ReviewSettings): StartChoice
   return { period, subjectId, minutes: r.minutes };
 }
 
+/**
+ * 홈의 'N분 KOK 시작'이 고를 문제: 고르는 화면(ReviewStart)과 같은 계산 — 고른 기간·과목의 문제에서 N분 분량
+ * (다 들어가면 모두). 풀 문제가 없으면 null (고르는 화면으로)
+ */
+function quickPick(m: ReviewMode, p: PlanData, c: StartChoice, pace: number, r: ReviewSettings): StartPick | null {
+  const live = modeCards(m, p);
+  const inSubject = c.subjectId ? live.filter((x) => x.subject_id === c.subjectId) : live;
+  const now = new Date();
+  const pool = periodPool(inSubject, p.planSubjects, c.period, { dailyMax: r.dailyMax, doneToday: p.doneToday, interleave: r.interleave, now });
+  if (!pool.length) return null;
+  const plans = plansForTimes(pool, p.planSubjects, REVIEW_MINUTES, { now, pace, interleave: r.interleave });
+  const timed = !plans[0].all;
+  const chosen = timed ? plans[REVIEW_MINUTES.indexOf(c.minutes)] : plans[0];
+  return chosen.cards.length ? { ...chosen, timed } : null;
+}
+
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 /**
@@ -186,9 +202,12 @@ async function load(m: ReviewMode, r: ReviewSettings, latest: Map<string, CardRo
 export function ReviewSession({
   mode,
   fromNote = false,
+  autoStart = false,
 }: {
   mode: ReviewMode;
   /** 노트 화면에서 왔는지 (노트 문제 풀기 주소의 ?from=note): 돌아갈 때 뒤로 가기 */ fromNote?: boolean;
+  /** 홈의 'N분 KOK 시작': 고르는 화면 없이 지난번에 고른 시간(기본 5분)만큼의 오늘 복습 문제로 바로 시작한다 (풀 문제가 없으면 고르는 화면) */
+  autoStart?: boolean;
 }) {
   const { me, setFocus, refresh } = useMe();
   const router = useRouter();
@@ -251,6 +270,11 @@ export function ReviewSession({
     if (phase === 'run' && idx > 0 && window.scrollY > 0) window.scrollTo({ top: 0, behavior: 'instant' });
   }, [idx, phase]);
 
+  /** 바로 시작(autoStart)은 처음 읽을 때 한 번만 ('조금 더 하기'로 다시 읽으면 고르는 화면) */
+  const autoStarted = useRef(false);
+  /** 바로 시작할 문제 (읽기가 끝나면 효과가 start 를 부른다) */
+  const [auto, setAuto] = useState<{ pick: StartPick; plan: PlanData; choice: StartChoice } | null>(null);
+
   const applyLoaded = useCallback(
     (r: Loaded) => {
       setPlan(r.plan);
@@ -272,11 +296,21 @@ export function ReviewSession({
         }
       } else if (reviewSettings) {
         // 처음 읽을 때만 정한다 ('조금 더 하기'로 다시 읽어도 고른 것은 그대로)
-        setChoice((c) => c ?? firstChoice(mode, r.plan, reviewSettings));
+        const first = firstChoice(mode, r.plan, reviewSettings);
+        setChoice((c) => c ?? first);
+        // 홈의 'N분 KOK 시작': 고르는 화면과 같은 계산으로 N분 분량을 뽑아 바로 시작한다 (풀 문제가 없으면 고르는 화면)
+        if (autoStart && !autoStarted.current && choosesPeriod(mode)) {
+          autoStarted.current = true;
+          const pick = quickPick(mode, r.plan, first, r.pace, reviewSettings);
+          if (pick) {
+            setAuto({ pick, plan: r.plan, choice: first });
+            return;
+          }
+        }
       }
       setPhase('start');
     },
-    [practice, mode, reviewSettings],
+    [practice, mode, reviewSettings, autoStart],
   );
 
   const loadFailed = useCallback(() => {
@@ -355,6 +389,76 @@ export function ReviewSession({
     },
     [practice, setFocus, toast, refresh, plan, choice, reviewSettings, mode],
   );
+
+  /** 지난번에 고른 시간·기간을 기억한다 (다음에 그대로 고른 채 연다) */
+  const remember = useCallback(
+    (c: StartChoice, timed: boolean) => {
+      if (!me) return;
+      const r = me.settings.review;
+      const next = { ...r, ...(timed ? { minutes: c.minutes } : {}), ...(choosesPeriod(mode) ? { period: c.period } : {}) };
+      if (next.minutes === r.minutes && next.period === r.period) return;
+      void sb()
+        .from('profiles')
+        .update({ settings: { ...me.settings, review: next } })
+        .eq('id', me.userId)
+        .then(
+          () => {},
+          () => {},
+        );
+    },
+    [me, mode],
+  );
+
+  /** 시작: 고른 문제를 읽고 집중 모드로. ctx: 아직 상태에 들어가기 전의 계획·고른 것 (바로 시작할 때) */
+  const start = useCallback(
+    async (pick: StartPick, ctx?: { plan: PlanData; choice: StartChoice }) => {
+      const p = ctx?.plan ?? plan;
+      const c = ctx?.choice ?? choice;
+      if (!p || !c || starting) return;
+      setStarting(true);
+      try {
+        const items = await buildItems(
+          pick.cards.map((x) => x.question_id),
+          p,
+          qcols,
+        );
+        if (!items.length) {
+          toast('문제를 불러오지 못했어요. 다시 해 주세요.', 'bad');
+          setPhase('start');
+          return;
+        }
+        setQueue(items);
+        setIdx(0);
+        setResults([]);
+        setStopped(false);
+        answered.current = 0;
+        // 목표 시간: 고른 시간 (기간의 문제가 다 들어가면 예상 시간)
+        setTarget(pick.all ? Math.max(1, Math.ceil(pick.seconds / 60)) * 60_000 : c.minutes * 60_000);
+        const t = Date.now();
+        setStartedAt(t);
+        setNow(t);
+        setFocus(true);
+        setPhase('run');
+        remember(c, pick.timed);
+      } catch {
+        toast('문제를 불러오지 못했어요. 인터넷 연결을 확인해 주세요.', 'bad');
+        setPhase('start');
+      } finally {
+        setStarting(false);
+      }
+    },
+    // qcols 는 features 로 정해진다
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [plan, choice, starting, figuresOn, me?.features.sourceFigures, remember, setFocus, toast],
+  );
+
+  // 홈의 'N분 KOK 시작': 읽기가 끝나 바로 시작할 문제가 정해지면 한 번 시작한다 (한 번 쓴 것은 ref 로 기억)
+  const autoUsed = useRef<typeof auto>(null);
+  useEffect(() => {
+    if (!auto || autoUsed.current === auto) return;
+    autoUsed.current = auto;
+    void start(auto.pick, { plan: auto.plan, choice: auto.choice });
+  }, [auto, start]);
 
   if (!me) return <div className="h-48 animate-pulse rounded-2xl bg-surface-2" />;
 
@@ -442,55 +546,6 @@ export function ReviewSession({
       return;
     }
     setIdx(idx + 1);
-  };
-
-  /** 지난번에 고른 시간·기간을 기억한다 (다음에 그대로 고른 채 연다) */
-  const remember = (c: StartChoice, timed: boolean) => {
-    const r = me.settings.review;
-    const next = { ...r, ...(timed ? { minutes: c.minutes } : {}), ...(choosesPeriod(mode) ? { period: c.period } : {}) };
-    if (next.minutes === r.minutes && next.period === r.period) return;
-    void sb()
-      .from('profiles')
-      .update({ settings: { ...me.settings, review: next } })
-      .eq('id', me.userId)
-      .then(
-        () => {},
-        () => {},
-      );
-  };
-
-  /** 시작: 고른 문제를 읽고 집중 모드로 */
-  const start = async (pick: StartPick) => {
-    if (!plan || !choice || starting) return;
-    setStarting(true);
-    try {
-      const items = await buildItems(
-        pick.cards.map((c) => c.question_id),
-        plan,
-        qcols,
-      );
-      if (!items.length) {
-        toast('문제를 불러오지 못했어요. 다시 해 주세요.', 'bad');
-        return;
-      }
-      setQueue(items);
-      setIdx(0);
-      setResults([]);
-      setStopped(false);
-      answered.current = 0;
-      // 목표 시간: 고른 시간 (기간의 문제가 다 들어가면 예상 시간)
-      setTarget(pick.all ? Math.max(1, Math.ceil(pick.seconds / 60)) * 60_000 : choice.minutes * 60_000);
-      const t = Date.now();
-      setStartedAt(t);
-      setNow(t);
-      setFocus(true);
-      setPhase('run');
-      remember(choice, pick.timed);
-    } catch {
-      toast('문제를 불러오지 못했어요. 인터넷 연결을 확인해 주세요.', 'bad');
-    } finally {
-      setStarting(false);
-    }
   };
 
   const showVisual = async () => {

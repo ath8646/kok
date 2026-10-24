@@ -177,7 +177,7 @@ export type CourseNode =
 
 /**
  * 길 위의 칸들을 차례대로: 단계마다 레슨들 → 단계 복습, 맨 끝에 총정리.
- * 끝낸 칸 다음 하나만 '지금 할 것'(current)이고 그 뒤는 잠긴다 (듀오링고처럼 한 칸씩). 끝낸 칸은 언제든 다시 할 수 있다
+ * 끝낸 칸 다음 하나만 '지금 할 것'(current)이고 그 뒤는 locked = 아직 차례가 아님 (듀오링고처럼 한 칸씩. 화면은 한 번 묻고 건너뛰게 해 준다). 끝낸 칸은 언제든 다시 할 수 있다
  */
 export function courseNodes(plan: CoursePlan, progress: CourseProgress): CourseNode[] {
   const out: CourseNode[] = [];

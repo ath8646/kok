@@ -175,6 +175,17 @@ export default function WrongPage() {
     }
   };
 
+  const itemIds = useMemo(() => new Set(items.map((x) => x.q.id)), [items]);
+  /** 여러 문제를 한 번에 고르거나 풀기 (약점 개념 카드: 그 개념의 틀린 문제 모두) */
+  const pickMany = (ids: string[], on: boolean) =>
+    setPicked((cur) => {
+      const next = new Set(cur);
+      for (const id of ids) {
+        if (on) next.add(id);
+        else next.delete(id);
+      }
+      return next;
+    });
   const pickedCount = items.filter((x) => picked.has(x.q.id)).length;
   const allPicked = items.length > 0 && pickedCount === items.length;
   const headerMenu: MenuItem[] = [
@@ -189,7 +200,7 @@ export default function WrongPage() {
       <span className="kok-bone mt-[7px] h-2.5 w-52 max-w-full" />
     </span>
   ) : selecting ? (
-    <span className="kok-swap">문제를 눌러 고르고, 아래에서 한꺼번에 빼요</span>
+    <span className="kok-swap">문제나 개념을 눌러 고르고, 아래에서 한꺼번에 빼요</span>
   ) : (
     <span key={subtitleText} className="kok-swap">
       {subtitleText}
@@ -263,40 +274,41 @@ export default function WrongPage() {
       ) : (
         // 자리 표시와 같은 모양의 카드는 그 자리에 두고, 안의 글만 위에서부터 차례로 번지며 나타난다
         <>
-          {weak.length && !selecting ? (
+          {weak.length ? (
             <>
               <SectionTitle>
                 <span className="kok-fill block">약점 개념 {weak.length}개</span>
               </SectionTitle>
+              {selecting ? <p className="-mt-2 px-1 text-xs text-muted">개념을 고르면 그 개념의 틀린 문제가 모두 골라져요.</p> : null}
               <div className="grid gap-2">
                 {weak.map((w, i) => {
                   const n = notes.get(w.note_id);
                   const t = titles.get(w.note_id)?.get(w.key_point_id)?.title ?? w.key_point_id;
+                  const ids = w.questionIds.filter((id) => itemIds.has(id));
+                  const pickedAll = ids.length > 0 && ids.every((id) => picked.has(id));
                   return (
-                    <Card key={`${w.note_id}:${w.key_point_id}`} className="grid gap-2" style={{ ['--i' as string]: i + 1 }}>
-                      <div className="kok-fill flex flex-wrap items-center justify-between gap-2">
-                        <div className="min-w-0">
-                          <p className="truncate font-bold">{t}</p>
-                          <p className="truncate text-sm text-muted">{n?.title ?? '노트'}</p>
-                        </div>
-                        <Chip tone="bad">틀린 문제 {w.count}</Chip>
-                      </div>
-                      <div className="kok-fill flex flex-wrap gap-2">
-                        <LinkButton size="sm" href={`/review?kp=${w.note_id}:${w.key_point_id}`}>
-                          이 개념 풀기
-                        </LinkButton>
-                        {n ? (
-                          <>
-                            <Link className={buttonClass('secondary', 'sm')} href={`/notes/${n.source_id}?kp=${encodeURIComponent(w.key_point_id)}`}>
-                              노트에서 보기
-                            </Link>
-                            <Link className={buttonClass('secondary', 'sm')} href={`/notes/${n.source_id}?tab=visual&kp=${encodeURIComponent(w.key_point_id)}`}>
-                              마인드맵에서 보기
-                            </Link>
-                          </>
-                        ) : null}
-                      </div>
-                    </Card>
+                    <WeakCard
+                      key={`${w.note_id}:${w.key_point_id}`}
+                      index={selecting ? 0 : i + 1}
+                      title={t}
+                      noteTitle={n?.title ?? '노트'}
+                      count={w.count}
+                      links={
+                        n
+                          ? { solve: `/review?kp=${w.note_id}:${w.key_point_id}`, note: `/notes/${n.source_id}?kp=${encodeURIComponent(w.key_point_id)}`, map: `/notes/${n.source_id}?tab=visual&kp=${encodeURIComponent(w.key_point_id)}` }
+                          : { solve: `/review?kp=${w.note_id}:${w.key_point_id}` }
+                      }
+                      selecting={selecting}
+                      picked={pickedAll}
+                      onPick={() => pickMany(ids, !pickedAll)}
+                      onLongPress={() => {
+                        if (selecting) pickMany(ids, !pickedAll);
+                        else {
+                          startSelect();
+                          pickMany(ids, true);
+                        }
+                      }}
+                    />
                   );
                 })}
               </div>
@@ -308,7 +320,7 @@ export default function WrongPage() {
               틀린 문제 {items.length}개
             </span>
           </SectionTitle>
-          {!selecting ? <p className="-mt-2 px-1 text-xs text-muted">카드를 꾹 누르면 여러 개를 한꺼번에 뺄 수 있어요.</p> : null}
+          {!selecting ? <p className="-mt-2 px-1 text-xs text-muted">카드를 꾹 누르면 여러 개를 한꺼번에 뺄 수 있어요 (개념 카드를 꾹 누르면 그 개념의 문제 모두).</p> : null}
           <div className="grid gap-2">
             {items.map(({ q, lapses }, i) => (
               <WrongCard
@@ -364,6 +376,85 @@ export default function WrongPage() {
         </p>
         <p className="mt-2 text-sm text-muted">문제와 복습 카드는 그대로 있어요. 다시 틀리면 오답노트에 다시 들어와요.</p>
       </Sheet>
+    </div>
+  );
+}
+
+/** 약점 개념 카드: 개념 풀기·노트·마인드맵 링크. 꾹 누르면 그 개념의 틀린 문제를 모두 골라 여러 개 고르기 (고르는 동안은 링크로 가지 않는다) */
+function WeakCard({
+  index,
+  title,
+  noteTitle,
+  count,
+  links,
+  selecting,
+  picked,
+  onPick,
+  onLongPress,
+}: {
+  index: number;
+  title: string;
+  noteTitle: string;
+  count: number;
+  links: { solve: string; note?: string; map?: string };
+  selecting: boolean;
+  picked: boolean;
+  onPick: () => void;
+  onLongPress: () => void;
+}) {
+  const press = useLongPress(onLongPress, true);
+  const selectProps = selecting ? { role: 'checkbox' as const, 'aria-checked': picked, tabIndex: 0, onKeyDown: pickKeyHandler(onPick) } : {};
+  return (
+    <div
+      className="kok-no-callout relative"
+      style={{ ['--i' as string]: index }}
+      {...press}
+      onClickCapture={(e) => {
+        press.onClickCapture(e);
+        if (e.defaultPrevented) return;
+        if (selecting) {
+          e.preventDefault();
+          e.stopPropagation();
+          onPick();
+        }
+      }}
+    >
+      <Card className={cx('grid gap-2', selecting && 'kok-card-hover cursor-pointer', selecting && picked && 'ring-2 ring-accent ring-offset-2 ring-offset-bg')} {...selectProps}>
+        <div className="kok-fill flex flex-wrap items-center justify-between gap-2">
+          <div className="flex min-w-0 items-center gap-2.5">
+            {selecting ? (
+              <span
+                aria-hidden="true"
+                className={cx('grid h-6 w-6 shrink-0 place-items-center rounded-full border-2 transition-colors', picked ? 'border-accent bg-accent text-accent-ink' : 'border-line bg-surface')}
+              >
+                {picked ? <Icon d={ICONS.check} size={14} strokeWidth={3} /> : null}
+              </span>
+            ) : null}
+            <div className="min-w-0">
+              <p className="truncate font-bold">{title}</p>
+              <p className="truncate text-sm text-muted">{noteTitle}</p>
+            </div>
+          </div>
+          <Chip tone="bad">틀린 문제 {count}</Chip>
+        </div>
+        {!selecting ? (
+          <div className="kok-fill flex flex-wrap gap-2">
+            <LinkButton size="sm" href={links.solve}>
+              이 개념 풀기
+            </LinkButton>
+            {links.note ? (
+              <Link className={buttonClass('secondary', 'sm')} href={links.note}>
+                노트에서 보기
+              </Link>
+            ) : null}
+            {links.map ? (
+              <Link className={buttonClass('secondary', 'sm')} href={links.map}>
+                마인드맵에서 보기
+              </Link>
+            ) : null}
+          </div>
+        ) : null}
+      </Card>
     </div>
   );
 }

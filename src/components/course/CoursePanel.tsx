@@ -1,5 +1,5 @@
 'use client';
-// 노트의 '학습' 탭: 단계별 학습 (Pro). 없으면 수준을 골라 만들고, 있으면 길(CoursePath)을 보여 레슨을 하나씩 연다(LessonPlayer).
+// 노트의 '레슨' 탭: 단계별 학습 (Pro). 없으면 수준을 골라 만들고, 있으면 길(CoursePath)을 보여 레슨을 하나씩 연다(LessonPlayer). 뒤 칸은 한 번 묻고 건너뛸 수 있다.
 // 진도는 note_courses.progress 에 브라우저가 바로 저장한다 (RLS: 내 것, progress 칸만). 무료는 Pro 에서 어떻게 되는지 미리보기만
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
@@ -66,6 +66,8 @@ export function CoursePanel({
   const [creating, setCreating] = useState(false);
   const [open, setOpen] = useState<CourseNode | null>(null);
   const [confirmDelete, setConfirmDelete] = useState(false);
+  /** 아직 차례가 아닌 칸을 눌렀다: 건너뛸지 묻는다 */
+  const [skipTo, setSkipTo] = useState<CourseNode | null>(null);
   const [remaking, setRemaking] = useState(false);
   const [deleting, setDeleting] = useState(false);
 
@@ -242,7 +244,7 @@ export function CoursePanel({
         )}
       </section>
 
-      <CoursePath plan={course.plan} nodes={nodes} onOpen={setOpen} onLocked={() => toast('앞 레슨을 먼저 끝내면 열려요.', 'plain')} />
+      <CoursePath plan={course.plan} nodes={nodes} onOpen={setOpen} onLocked={setSkipTo} />
 
       {open ? (
         open.kind === 'lesson' ? (
@@ -268,6 +270,35 @@ export function CoursePanel({
           />
         )
       ) : null}
+
+      {/* 건너뛰기: 앞 레슨을 안 하고 뒤 칸을 열 수 있다 (한 번 묻는다) */}
+      <Sheet
+        open={!!skipTo}
+        onClose={() => setSkipTo(null)}
+        title="앞 레슨을 건너뛸까요?"
+        footer={
+          <div className="grid grid-cols-2 gap-2">
+            <Button variant="secondary" size="lg" onClick={() => setSkipTo(null)}>
+              앞 레슨부터
+            </Button>
+            <Button
+              size="lg"
+              onClick={() => {
+                const n = skipTo;
+                setSkipTo(null);
+                if (n) setOpen(n);
+              }}
+            >
+              건너뛰고 시작
+            </Button>
+          </div>
+        }
+      >
+        <p className="text-[15px] leading-relaxed">
+          <b>{skipTo ? (skipTo.kind === 'final' ? '총정리' : skipTo.title) : ''}</b>
+          {skipTo?.kind === 'lesson' ? '은 앞 레슨 다음에 하도록 되어 있어요. 앞 레슨 위에 쌓이는 내용이라 차례대로 하면 더 쉬워요.' : '은 앞 레슨들을 끝낸 뒤에 푸는 문제예요. 지금 바로 풀어 볼 수도 있어요.'}
+        </p>
+      </Sheet>
 
       <Sheet
         open={confirmDelete}
@@ -463,7 +494,7 @@ function SamplePath({ muted }: { muted: boolean }) {
                 n.state === 'current' && 'is-current',
               )}
             >
-              <Icon d={n.state === 'done' ? ICONS.check : n.state === 'locked' ? ICONS.lock : ICONS.star} size={26} strokeWidth={2.4} />
+              <Icon d={n.state === 'done' ? ICONS.check : ICONS.star} size={26} strokeWidth={2.4} />
             </span>
             {n.state === 'done' ? <Stars n={n.stars} size={12} /> : null}
             <span className={cx('text-xs font-semibold', n.state === 'locked' ? 'text-muted' : 'text-ink')}>{n.title}</span>

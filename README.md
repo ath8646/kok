@@ -125,7 +125,7 @@ Vercel → Settings → Environment Variables 에만 넣어요. 이 저장소는
 ## 개발
 
 ```bash
-npm install            # 설치 뒤 pdf.js 일꾼을 public/pdfjs/ 로 복사해요 (앱 안 PDF 보기)
+npm install
 npm run dev            # http://localhost:3000 (환경변수는 .env.local 에)
 npm test               # 단위 시험 (vitest)
 npm run lint

@@ -4,7 +4,7 @@ import { createRequire } from 'node:module';
 import path from 'node:path';
 
 // PDF 보기(앱 안에서 PDF 요약 정리 읽기)에 쓰는 pdf.js 일꾼 파일을 public/pdfjs/ 로 복사한다 (빌드·개발 서버가 설정을 읽을 때).
-// 앱의 pdfjs-dist 와 같은 버전이어야 해서(버전이 다르면 pdf.js 가 멈춘다) 설치 때(package.json postinstall)와 여기서 한 번 더.
+// 앱의 pdfjs-dist 와 같은 버전이어야 해서(버전이 다르면 pdf.js 가 멈춘다) 여기서 복사한다 (손으로는 node tools/pdfjs/copy-worker.mjs).
 // public/pdfjs/ 는 git 에 넣지 않는다. 못 복사해도 빌드는 계속한다 (PDF 보기만 안 된다)
 try {
   // (설정 파일은 Next 가 바꿔서 읽어 import.meta.url 이 없을 수 있다: 프로젝트 폴더 기준으로 찾는다)

@@ -9,8 +9,7 @@
     "lint": "eslint",
     "typecheck": "next typegen && tsc --noEmit",
     "test": "vitest run",
-    "check:secrets": "node scripts/check-secrets.mjs",
-    "postinstall": "node tools/pdfjs/copy-worker.mjs"
+    "check:secrets": "node scripts/check-secrets.mjs"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.135.0",

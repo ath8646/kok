@@ -1,5 +1,5 @@
 // PDF 보기(앱 안에서 PDF 요약 정리 읽기)에 쓰는 pdf.js 일꾼 파일을 public/pdfjs/ 로 복사한다.
-// 앱의 pdfjs-dist 와 같은 버전이어야 해서(버전이 다르면 pdf.js 가 멈춘다) 설치할 때 복사한다 (package.json postinstall). next.config.ts 도 설정을 읽을 때 같은 일을 한다.
+// 앱의 pdfjs-dist 와 같은 버전이어야 해서(버전이 다르면 pdf.js 가 멈춘다) next.config.ts 가 설정을 읽을 때(빌드·개발 서버) 복사한다. 이 스크립트는 손으로 복사할 때 쓴다.
 // public/pdfjs/ 는 git 에 넣지 않는다
 import { copyFileSync, mkdirSync } from 'node:fs';
 import { createRequire } from 'node:module';

@@ -87,6 +87,7 @@ export default function AdminPage() {
   const [testModel, setTestModel] = useState<'fast' | 'careful' | 'adminTest'>('fast');
   const [testResult, setTestResult] = useState<string | null>(null);
   const [schemaResult, setSchemaResult] = useState<SchemaTest | null>(null);
+  const [figResult, setFigResult] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [q, setQ] = useState('');
   const [plansKey, setPlansKey] = useState(0);
@@ -222,7 +223,39 @@ export default function AdminPage() {
           >
             AI 답 모양 시험
           </Button>
+          <Button
+            size="sm"
+            variant="secondary"
+            busy={busy === 'figures'}
+            onClick={async () => {
+              setBusy('figures');
+              setFigResult(null);
+              try {
+                const r = await api<{
+                  cut: { ok: boolean; message: string; size?: string; ms: number };
+                  dbReady: boolean;
+                  settingOn: boolean;
+                  redraw: boolean;
+                }>('/api/admin/test-figures', { method: 'POST', body: '{}' });
+                setFigResult(
+                  [
+                    r.cut.ok ? `그림 자르기 됨 (${r.cut.size}, ${(r.cut.ms / 1000).toFixed(1)}초)` : `그림 자르기 안 됨: ${r.cut.message}`,
+                    r.dbReady ? 'DB 그림 칸 있음' : 'DB 그림 칸 없음: schema.sql 을 다시 실행해 주세요',
+                    r.settingOn ? "내 설정 '자료 그림' 켬" : "내 설정 '자료 그림' 꺼짐",
+                    r.redraw ? 'KOK 스타일 다시 그리기 됨(Pro)' : '다시 그리기는 Pro',
+                  ].join(' · '),
+                );
+              } catch (e) {
+                setFigResult((e as Error).message);
+              } finally {
+                setBusy(null);
+              }
+            }}
+          >
+            자료 그림 시험
+          </Button>
         </div>
+        {figResult ? <p className="text-sm">{figResult}</p> : null}
         {testResult ? <p className="text-sm">{testResult}</p> : null}
         {schemaResult ? <SchemaTestList result={schemaResult} /> : null}
         <p className="text-xs text-muted">

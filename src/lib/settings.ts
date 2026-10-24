@@ -74,8 +74,6 @@ export type Notice = z.infer<typeof zNotice>;
 const zTier = z.enum(['fast', 'careful', 'admin']);
 export type ModelTier = z.infer<typeof zTier>;
 
-export const VISUAL_TYPES = ['mindmap', 'table', 'timeline'] as const;
-
 /**
  * 테마 (Pro): 색, 글꼴, 노트 종이 무늬, 별표 빛. 무료는 기본만 쓴다.
  * 고르는 화면의 차례대로 (default = KOK 인디고, ocean = 블루, forest = 라임, night = 미드나잇 …: 번호는 예전 이름 그대로 둔다)
@@ -107,7 +105,6 @@ export const DEFAULT_THEME = {
   dark: null,
   glow: DEFAULT_GLOW,
 } as const satisfies { color: ThemeColor; font: ThemeFont; paper: ThemePaper; mode: ThemeMode; light: ThemeRef | null; dark: ThemeRef | null; glow: Glow };
-export type VisualType = (typeof VISUAL_TYPES)[number];
 
 export const zUserSettings = z.object({
   models: z

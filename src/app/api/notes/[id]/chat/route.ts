@@ -9,20 +9,12 @@ import { UserFacingError, errorResponse } from '@/lib/server/errors';
 import { loadOwnedNote, noteForPrompt } from '@/lib/server/notes';
 import { runTaskFull } from '@/lib/server/tasks';
 import { textBlock } from '@/lib/server/claude';
-import {
-  chatAttachmentMetas,
-  chatFileBlocks,
-  chatFolderIdsOfNotes,
-  historyLine,
-  readChatFiles,
-  removeChatFolders,
-  zChatAttachments,
-} from '@/lib/server/chat-input';
-import { readChatAnswer } from '@/lib/chat-solution';
+import { chatAttachmentMetas, chatFileBlocks, chatFolderIdsOfNotes, readChatFiles, removeChatFolders, zChatAttachments } from '@/lib/server/chat-input';
+import { historyLine, readChatAnswer } from '@/lib/chat-solution';
 import { CHAT_SYSTEM, chatPrompt, wrap } from '@/lib/ai/prompts';
 import { noteChatJsonSchema, readChatQuestion, toQuestionRow, zChat } from '@/lib/ai/schemas';
 import { drawChatFigure } from '@/lib/server/chat-figure';
-import { FILE_ONLY_CONTENT, type ChatAttachmentMeta, type ChatProposal, type ChatSolution } from '@/lib/chat';
+import { CHAT_TERM_LIMITS, FILE_ONLY_CONTENT, type ChatAttachmentMeta, type ChatProposal, type ChatSolution } from '@/lib/chat';
 import { THINK_OUT } from '@/lib/ai/models';
 
 // AI 답(최대 100초, 먼저 생각하고 답한다) + Pro 그림(남은 시간 안에서) + 저장
@@ -142,6 +134,13 @@ export async function POST(req: NextRequest, ctx: RouteContext<'/api/notes/[id]/
         status: 'pending',
         addition: { key_point_id: a.key_point_id.slice(0, 20), title: a.title.trim().slice(0, 60), text: a.text.trim().slice(0, 1200) },
       };
+    } else if (out.proposal.kind === 'terms' && allow.allowNote) {
+      const seen = new Set<string>();
+      const terms = out.proposal.terms
+        .map((t) => ({ term: t.term.trim().slice(0, CHAT_TERM_LIMITS.term), meaning: t.meaning.trim().slice(0, CHAT_TERM_LIMITS.meaning) }))
+        .filter((t) => t.term && t.meaning && !seen.has(t.term) && seen.add(t.term))
+        .slice(0, CHAT_TERM_LIMITS.count);
+      if (terms.length) proposal = { kind: 'terms', outside: out.outside_note, status: 'pending', terms };
     }
 
     // 붙인 파일: Pro 는 보관(노트를 지우면 같이 지운다), 아니면 이름만

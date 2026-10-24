@@ -183,5 +183,3 @@ export async function chatFolderIdsOfNotes(admin: SupabaseClient, userId: string
   }
   return [...ids];
 }
-
-export { finishReply, historyLine, readChatSolution } from '@/lib/chat-solution';

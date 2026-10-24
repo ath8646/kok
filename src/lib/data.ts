@@ -160,11 +160,6 @@ export async function fetchNoteMeta(): Promise<{ concepts: Map<string, Map<strin
   return { concepts, noteSource };
 }
 
-/** 노트마다 개념 (노트 id → 개념 id → 중요도·이름·별표) */
-export async function fetchImportance(): Promise<Map<string, Map<string, ConceptInfo>>> {
-  return (await fetchNoteMeta()).concepts;
-}
-
 export type PlanData = {
   /** in_review: 이 문제의 노트가 복습에 들어가는지 (자료함에서 끈 노트는 false. 노트에서 직접 푸는 것은 된다) */
   cards: Array<PlanCard & { note_id: string | null; key_point_id: string | null; in_review: boolean }>;

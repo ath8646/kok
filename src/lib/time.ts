@@ -13,11 +13,6 @@ export function kstMonthStart(now: Date = new Date()): Date {
   return new Date(Date.UTC(k.getUTCFullYear(), k.getUTCMonth(), 1) - KST_OFFSET_MS);
 }
 
-export function kstNextMonthStart(now: Date = new Date()): Date {
-  const k = new Date(now.getTime() + KST_OFFSET_MS);
-  return new Date(Date.UTC(k.getUTCFullYear(), k.getUTCMonth() + 1, 1) - KST_OFFSET_MS);
-}
-
 /** 'YYYY-MM-DD' (KST) */
 export function kstDateString(now: Date = new Date()): string {
   return new Date(now.getTime() + KST_OFFSET_MS).toISOString().slice(0, 10);

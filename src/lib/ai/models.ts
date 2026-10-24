@@ -47,10 +47,6 @@ export function priceFor(model: ModelId, promptTokens: number): Price {
   return rule.base;
 }
 
-export function knownModel(model: ModelId): boolean {
-  return model in PRICES;
-}
-
 /** 한 번의 API 호출 비용(달러) */
 export function costUsd(model: ModelId, usage: Usage): number {
   const cacheWrite = usage.cache_creation_input_tokens ?? 0;

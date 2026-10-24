@@ -86,11 +86,6 @@ export function quickSubjects<T extends DrawerSubject>(list: T[], max = QUICK_MA
   return kept ? [...shown, kept] : shown;
 }
 
-/** 칩 줄에 안 보이는 과목이 있는지 (서랍 버튼을 보일지) */
-export function hasMore<T extends DrawerSubject>(list: T[], shown: T[]): boolean {
-  return list.length > shown.length;
-}
-
 /** 고르는 목록 (자료 넣기·문제 넣기): 고정 → 최근 쓴 차례, 보관한 과목은 빼고 (keep 은 남긴다) */
 export function pickerOrder<T extends DrawerSubject>(list: T[], keep?: string | null): T[] {
   const open = list.filter((s) => !s.archived || s.id === keep);

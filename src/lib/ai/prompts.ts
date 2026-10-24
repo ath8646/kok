@@ -360,8 +360,12 @@ export function chatSolveRules(o: { note: boolean; figures: boolean }): string {
       : '',
     '  - solution.question: the same problem as a review question the student can save: mcq if the problem has choices, ox if it asks true or false, otherwise short. ' +
       chatQuestionRules({ note: o.note }),
-    '  - solution.subject: the school subject in Korean, like "수학", "과학", "영어", "국어" or "사회". solution.unit: the unit or topic in Korean, like "이차함수" or "광합성". Each at most 20 characters.',
-    '- Otherwise set solution.include to false, solution.problem, subject and unit to "", solution.steps to []' +
+    o.note
+      ? ''
+      : '  - solution.subject: the school subject in Korean, like "수학", "과학", "영어", "국어" or "사회". solution.unit: the unit or topic in Korean, like "이차함수" or "광합성". Each at most 20 characters.',
+    '- Otherwise set solution.include to false, solution.problem' +
+      (o.note ? '' : ', subject and unit') +
+      ' to "", solution.steps to []' +
       (o.figures ? ', solution.needs_figure to false' : '') +
       ', and fill solution.question with empty values (type "short", every text "", lists [], difficulty "medium").',
     SOLVE_METHOD,
@@ -400,9 +404,11 @@ export function chatPrompt(o: ChatOptions): string {
           '- If the student asks you to add something to the note (for example "노트에 넣어줘"), set proposal.kind to "note" and fill proposal.note_addition:',
           '  key_point_id of the key point in <note> it belongs to ("" for a new key point), title (that key point\'s title, or a short new title), and text (1 to 3 sentences in the style of the note).',
           '  In reply, say where it will go and ask whether to add it.',
+          '- If the student asks you to add terms or vocabulary (for example "용어로 넣어줘", "용어 정리해 줘"), set proposal.kind to "terms" and put 1 to 10 items in proposal.terms: term (the word as used in the note or the material) and meaning (one short sentence in the style of the note). Skip terms that are already in the note\'s terms unless the student asks to change them.',
+          '  In reply, say which terms you picked and ask whether to add them.',
         ].join('\n')
-      : '- If the student asks you to add something to the note, say in reply that adding to the note from chat is turned off and can be turned on in 설정 > AI 채팅.',
-    '- Otherwise set proposal.kind to "none", proposal.questions to [], and every proposal.note_addition field to "".',
+      : '- If the student asks you to add something to the note (text or terms), say in reply that adding to the note from chat is turned off and can be turned on in 설정 > AI 채팅.',
+    '- Use only one proposal at a time. Otherwise set proposal.kind to "none", proposal.questions and proposal.terms to [], and every proposal.note_addition field to "".',
     '- Never say that something was already added: the student decides with the buttons under your reply.',
     o.solve ? chatSolveRules({ note: true, figures: o.solve.figures }) : '',
   ]
@@ -488,7 +494,8 @@ export function themeImagePrompt(): string {
 
 const REDRAW_COMMON = [
   '- Copy every label exactly as written in the picture: names, numbers, years, units, and markers like (가), (나), A, B, ㉠. Never add a name, number or answer that is not written in the picture, and never replace a marker with what it stands for.',
-  '- Keep everything a student could be asked about. Leave out decorations, shading, page numbers and text that is not part of the figure.',
+  '- Keep everything a student could be asked about: a student will answer questions while looking at your redraw, so every value, label, marker, legend entry, arrow and axis tick that the picture shows must be in the data. Leave out only decorations, shading, page numbers and text that is not part of the figure.',
+  '- Read small print and numbers carefully; if a part of the picture is unreadable or cannot be shown with these fields, keep the rest exact rather than guessing. Before answering, check the picture once more against your data for anything missing or changed.',
   '- title: the title printed inside the picture, copied exactly; "" if there is none. notes: a source line printed in the picture (like "자료: 통계청"); "" if there is none.',
   '- Every object has every field. Fill fields you do not use with "", 0, false or [].',
   '- tone: the listed color closest to the color used in the picture for that thing; give things that the picture tells apart different tones.',

@@ -1,5 +1,5 @@
 // 간격 반복 (FSRS, ts-fsrs). 카드 상태는 cards 표의 칸 + fsrs(json) 에 나눠 저장한다.
-import { fsrs, createEmptyCard, Rating, TypeConvert, type Card, type FSRS, type Grade, type State } from 'ts-fsrs';
+import { fsrs, createEmptyCard, TypeConvert, type Card, type FSRS, type Grade, type State } from 'ts-fsrs';
 
 const cache = new Map<number, FSRS>();
 
@@ -78,5 +78,3 @@ export function dueLabel(dueIso: string, now: Date = new Date()): string {
   if (mo < 12) return `${mo}달 뒤`;
   return `${Math.round(mo / 12)}년 뒤`;
 }
-
-export { Rating };

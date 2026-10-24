@@ -811,15 +811,16 @@ const noFigure = { include: false, view: { x_min: 0, x_max: 0, y_min: 0, y_max: 
 function fakeChatSolution(solveProps, wantSolve) {
   const pro = !!solveProps?.properties?.needs_figure;
   const flag = pro ? { needs_figure: wantSolve } : {};
-  if (!wantSolve) return { include: false, problem: '', steps: [], ...flag, question: emptyQuestion, subject: '', unit: '' };
+  // 과목·단원 칸은 홈 채팅에만 있다 (실제 Claude 는 스키마에 있는 칸만 쓴다)
+  const guess = solveProps?.properties?.subject ? (wantSolve ? { subject: '수학', unit: '피타고라스 정리' } : { subject: '', unit: '' }) : {};
+  if (!wantSolve) return { include: false, problem: '', steps: [], ...flag, question: emptyQuestion, ...guess };
   return {
     include: true,
     problem: '직각삼각형 ABC 에서 ∠A = 90°, AB = 4 cm, AC = 3 cm 일 때 빗변 BC 의 길이를 구하시오.',
     steps: CHAT_STEPS.map((text) => ({ text })),
     ...flag,
     question: { ...emptyQuestion, type: 'short', prompt: '∠A = 90° 인 직각삼각형 ABC 에서 AB = 4 cm, AC = 3 cm 일 때 BC 의 길이는? (cm)', answer: '5', accepted: ['5cm', '5 cm'], explanation: '피타고라스 정리로 $3^2+4^2=25$ 이니 빗변은 5 cm 예요.', difficulty: 'easy' },
-    subject: '수학',
-    unit: '피타고라스 정리',
+    ...guess,
   };
 }
 
@@ -874,7 +875,7 @@ function fakeChat(textOf, props = {}, images = 0) {
   const q = (textOf.match(/<question>\n([\s\S]*?)\n<\/question>/) || [])[1] || '';
   const allowQuestions = !/adding questions from chat is turned off/.test(textOf);
   const allowNote = !/adding to the note from chat is turned off/.test(textOf);
-  const none = { kind: 'none', questions: [], note_addition: { key_point_id: '', title: '', text: '' } };
+  const none = { kind: 'none', questions: [], note_addition: { key_point_id: '', title: '', text: '' }, terms: [] };
   const wantSolve = images > 0 || /풀어/.test(q);
   const solution = props.solution ? { solution: fakeChatSolution(props.solution, wantSolve) } : {};
   // 홈 AI 채팅 (노트 없음)
@@ -891,6 +892,14 @@ function fakeChat(textOf, props = {}, images = 0) {
       reply: '노트로 문제 2개를 만들었어요. 넣을지 골라 주세요.',
       outside_note: false,
       proposal: { ...none, kind: 'questions', questions: fakeQuiz().questions.slice(0, 2).map(toChatQuestion) },
+      ...solution,
+    };
+  }
+  if (/용어/.test(q) && allowNote) {
+    return {
+      reply: '노트에서 중요한 용어 2개를 골랐어요. 넣을까요?',
+      outside_note: false,
+      proposal: { ...none, kind: 'terms', terms: [{ term: '엽록체', meaning: '식물 세포에서 광합성이 일어나는 초록색 소기관이에요.' }, { term: '틸라코이드', meaning: '엽록체 안에서 빛을 받아 에너지를 만드는 납작한 주머니예요.' }] },
       ...solution,
     };
   }

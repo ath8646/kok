@@ -36,7 +36,13 @@ export type ProposalStatus = 'pending' | 'applied' | 'cancelled';
 export type ChatProposal =
   | { kind: 'none'; outside: boolean }
   | { kind: 'questions'; outside: boolean; status: ProposalStatus; questions: ChatQuestion[] }
-  | { kind: 'note'; outside: boolean; status: ProposalStatus; addition: { key_point_id: string; title: string; text: string } };
+  | { kind: 'note'; outside: boolean; status: ProposalStatus; addition: { key_point_id: string; title: string; text: string } }
+  | { kind: 'terms'; outside: boolean; status: ProposalStatus; terms: ChatTerm[] };
+
+/** 용어로 넣자고 할 때의 용어 하나 (노트 body.terms 의 모양) */
+export type ChatTerm = { term: string; meaning: string };
+/** 한 번에 넣자고 할 수 있는 용어 수·길이 */
+export const CHAT_TERM_LIMITS = { count: 10, term: 40, meaning: 300 } as const;
 
 /** 채팅에 붙인 사진·파일 (path: Pro 노트 채팅에서 보관한 파일. 없으면 이름만 남는다) */
 export type ChatAttachmentMeta = { kind: 'image' | 'pdf' | 'text'; name: string; path?: string };

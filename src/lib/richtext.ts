@@ -197,13 +197,6 @@ export function stripMarks(input: string): string {
     .join('\n');
 }
 
-/** 수식 표시를 빼고 읽기 쉬운 글로 (검색·미리보기용) */
-export function plainText(input: string): string {
-  return splitMath(input)
-    .map((p) => (p.kind === 'text' ? p.text : p.tex))
-    .join('');
-}
-
 const SUB: Record<string, string> = {
   '0': '₀',
   '1': '₁',

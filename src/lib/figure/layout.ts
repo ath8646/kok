@@ -332,40 +332,6 @@ export function f2(n: number): string {
   return String(Math.round(n * 100) / 100);
 }
 
-/** 점 이름 자리: 그림 가운데에서 바깥쪽으로 */
-export function labelOffset(p: Pt, center: Pt, dist = 13): { dx: number; dy: number; anchor: 'start' | 'middle' | 'end'; baseline: number } {
-  let ux = p.x - center.x;
-  let uy = p.y - center.y;
-  const len = Math.hypot(ux, uy);
-  if (len < 1e-6) {
-    ux = 0.7;
-    uy = -0.7;
-  } else {
-    ux /= len;
-    uy /= len;
-  }
-  const anchor = ux > 0.35 ? 'start' : ux < -0.35 ? 'end' : 'middle';
-  // 글자 높이의 반쯤 아래로 내려야 가운데에 온다
-  const baseline = uy > 0.35 ? 0.85 : uy < -0.35 ? 0 : 0.36;
-  return { dx: ux * dist, dy: uy * dist, anchor, baseline };
-}
-
-/** 선분 가운데의 이름 자리: 그림 가운데의 반대쪽으로 */
-export function segmentLabelAt(A: Pt, B: Pt, center: Pt, dist = 12): Pt {
-  const mx = (A.x + B.x) / 2;
-  const my = (A.y + B.y) / 2;
-  let nx = -(B.y - A.y);
-  let ny = B.x - A.x;
-  const len = Math.hypot(nx, ny) || 1;
-  nx /= len;
-  ny /= len;
-  if ((mx + nx - center.x) ** 2 + (my + ny - center.y) ** 2 < (mx - nx - center.x) ** 2 + (my - ny - center.y) ** 2) {
-    nx = -nx;
-    ny = -ny;
-  }
-  return { x: mx + nx * dist, y: my + ny * dist };
-}
-
 /** 선을 화면 칸 끝까지 늘린다 (직선은 양쪽, 반직선은 한쪽) */
 export function extendLine(A: Pt, B: Pt, m: Pick<Mapper, 'left' | 'top' | 'right' | 'bottom'>, both: boolean): [Pt, Pt] {
   const dx = B.x - A.x;

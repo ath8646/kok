@@ -367,6 +367,9 @@ async def figure_steps(browser):
     ctx, page = await new_ctx(browser, "student")
     fsid = await add_one(page, me_id, "고구려 지도.pdf", "application/pdf", make_figure_pdf(), "pdf")
     figs = json.loads(db(f"select coalesce(body->'figures', '[]'::jsonb)::text from public.notes where source_id = '{fsid}'"))
+    # 관리자가 노트 화면에서 보는 자료 그림 기록: 찾고·자르고·그림 문제까지
+    flog = json.loads(db(f"select body->'figure_log' from public.notes where source_id = '{fsid}'"))
+    assert flog["looked"] >= 1 and flog["found"] >= 1 and flog["cut"] >= 1 and flog["questions"] >= 1 and not flog["errors"], flog
     # 너무 작은 그림(장식)은 빼고 지도 하나: 개념(이름으로 찾은 k2)에 붙는다
     assert len(figs) == 1, figs
     fig = figs[0]
@@ -437,9 +440,11 @@ async def figure_steps(browser):
             seen = True
             await expect(q_fig).to_contain_text("자료 그림")
             await expect(page.locator("main")).not_to_contain_text("5세기 고구려 영토")
-            # 다시 그린 그림 속 제목도 문제 위에서는 숨긴다
-            await expect(page.locator("main")).not_to_contain_text("고구려의 전성기")
+            # 문제 위에서는 설정과 상관없이 원본이 먼저다 (다시 그린 그림은 빠진 것이 있을 수 있다). 바꾸면 다시 그린 그림 속 제목도 숨긴다
+            await expect(q_fig.get_by_role("radio", name="원본")).to_have_attribute("aria-checked", "true")
+            await q_fig.get_by_role("radio", name="다시 그린 그림").click()
             await expect(q_fig.get_by_role("radio", name="다시 그린 그림")).to_have_attribute("aria-checked", "true")
+            await expect(page.locator("main")).not_to_contain_text("고구려의 전성기")
             await shot(page, "98-figure-question", full=False)
             # 그림의 크게 보기 창이 열려 있으면 숫자 키로 뒤의 문제에 답하지 않는다
             await q_fig.get_by_role("button", name="크게 보기").click()
@@ -1590,6 +1595,18 @@ async def main():
         await expect(chat.get_by_text("노트 밖 설명 포함").first).to_be_visible()
         await chat.get_by_role("button", name="넣기", exact=True).click()
         await expect(page.get_by_text("노트에 넣었어요.")).to_be_visible()
+        # 용어도 넣자고 할 수 있다: 새 용어는 뒤에 붙고, 이미 있는 용어는 뜻만 바뀐다
+        terms_before = json.loads(psql(f"select coalesce(body->'terms', '[]'::jsonb)::text from public.notes where source_id = '{note_sid}'"))
+        await box.fill("중요한 용어를 정리해서 넣어 줘")
+        await box.press("Enter")
+        await expect(chat.get_by_text("이 용어 2개를 노트에 넣을까요?")).to_be_visible(timeout=15000)
+        await chat.get_by_role("button", name="넣기", exact=True).click()
+        await expect(page.get_by_text(re.compile(r"용어 \d개를 넣었어요\."))).to_be_visible()
+        terms_after = json.loads(psql(f"select coalesce(body->'terms', '[]'::jsonb)::text from public.notes where source_id = '{note_sid}'"))
+        names = [t["term"] for t in terms_after]
+        assert names[-1] == "틸라코이드" and len(terms_after) == len(terms_before) + 1, (terms_before, terms_after)
+        assert next(t for t in terms_after if t["term"] == "엽록체")["meaning"].startswith("식물 세포에서"), terms_after
+        assert all(t.get("edited") for t in terms_after if t["term"] in ("엽록체", "틸라코이드")), terms_after
         await box.fill("문제 하나만 더 만들어 줘")
         await box.press("Enter")
         await expect(chat.get_by_role("button", name="취소", exact=True)).to_be_visible(timeout=15000)

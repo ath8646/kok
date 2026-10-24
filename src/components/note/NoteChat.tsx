@@ -210,6 +210,7 @@ export function NoteChat({
   );
   const left = me.energy.unlimited ? null : Math.floor(me.energy.remaining ?? 0);
   const allowQuestions = me.settings.chat.allowQuestions;
+  const allowNote = me.settings.chat.allowNote;
   const canSend = !sending && (!!text.trim() || attach.picks.length > 0);
 
   const pickTier = (t: ModelTier) => {
@@ -288,7 +289,17 @@ export function NoteChat({
         (m ?? []).map((x) => (x.id === msg.id && x.proposal && x.proposal.kind !== 'none' ? { ...x, proposal: { ...x.proposal, status: r.status } } : x)),
       );
       if (r.status === 'applied') {
-        toast(msg.proposal?.kind === 'questions' ? `문제 ${r.added}개를 넣었어요.` : '노트에 넣었어요.', 'ok', DONE);
+        toast(
+          msg.proposal?.kind === 'questions'
+            ? `문제 ${r.added}개를 넣었어요.`
+            : msg.proposal?.kind === 'terms'
+              ? r.added
+                ? `용어 ${r.added}개를 넣었어요.`
+                : '이미 있는 용어라 바뀐 게 없어요.'
+              : '노트에 넣었어요.',
+          'ok',
+          DONE,
+        );
         onApplied();
       }
     } catch (e) {
@@ -405,7 +416,11 @@ export function NoteChat({
                     풀어 줘요.
                   </p>
                   <div className="flex flex-wrap gap-2">
-                    {[...SUGGESTIONS, ...(allowQuestions ? ['이 노트로 문제 3개 만들어 줘'] : [])].map((s) => (
+                    {[
+                      ...SUGGESTIONS,
+                      ...(allowQuestions ? ['이 노트로 문제 3개 만들어 줘'] : []),
+                      ...(allowNote ? ['중요한 용어를 정리해서 넣어 줘'] : []),
+                    ].map((s) => (
                       <button
                         key={s}
                         type="button"
@@ -563,6 +578,20 @@ function ProposalCard({
               </li>
             ))}
           </ol>
+        </>
+      ) : proposal.kind === 'terms' ? (
+        <>
+          <p className="text-xs font-bold text-accent">이 용어 {proposal.terms.length}개를 노트에 넣을까요?</p>
+          <dl className="mt-2 grid gap-1.5">
+            {proposal.terms.map((t, i) => (
+              <div key={i} className="rounded-xl bg-surface-2 px-3 py-2 text-sm">
+                <dt className="font-bold">{t.term}</dt>
+                <dd className="text-[13px] text-muted">
+                  <RichText text={t.meaning} />
+                </dd>
+              </div>
+            ))}
+          </dl>
         </>
       ) : (
         <>

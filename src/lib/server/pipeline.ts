@@ -204,10 +204,40 @@ const REDRAW_OUT_TOKENS = 8000;
 /** 정리할 때 찾은 그림 하나가 늘리는 답 길이 (종류·이름·설명·시험 포인트·네 모서리) */
 const FIGURE_OUT_TOKENS = 400;
 
-/** 자료 그림을 찾는지: PDF·사진이고, 설정에서 켜 두었고, DB 에 칸이 있을 때 (schema.sql 을 다시 실행하기 전에는 예전처럼) */
-async function sourceFiguresOn(ctx: Ctx): Promise<boolean> {
-  if (ctx.src.kind === 'text' || !ctx.settings.quiz.sourceFigures) return false;
-  return (await getFeatures(ctx.admin)).sourceFigures;
+/** 자료 그림을 찾지 않는 까닭 (찾으면 null): 글 자료·설정에서 끔·DB 에 칸이 없음 (schema.sql 을 다시 실행하기 전에는 예전처럼) */
+async function sourceFiguresOff(ctx: Ctx): Promise<FigureLog['skipped'] | null> {
+  if (ctx.src.kind === 'text') return 'text';
+  if (!ctx.settings.quiz.sourceFigures) return 'setting_off';
+  return (await getFeatures(ctx.admin)).sourceFigures ? null : 'db_outdated';
+}
+
+/**
+ * 자료 그림이 어디까지 됐는지 (노트의 body.figure_log 로 남겨 관리자가 노트 화면에서 본다: 그림이 없을 때 까닭을 알 수 있게).
+ * looked: 그림을 찾으라고 한 조각 수, found: AI 가 찾은 그림, cut: 잘라 저장한 그림, questions: 그림 문제, errors: 자르기·저장 오류 (3개까지)
+ */
+export type FigureLog = {
+  looked: number;
+  skipped?: 'text' | 'setting_off' | 'db_outdated' | 'last_try' | 'full';
+  found: number;
+  cut: number;
+  questions?: number;
+  errors: string[];
+};
+
+function figLogOf(draft: Record<string, unknown>): FigureLog {
+  const v = (draft.figLog ?? {}) as Partial<FigureLog>;
+  return {
+    looked: Number(v.looked ?? 0),
+    skipped: v.skipped,
+    found: Number(v.found ?? 0),
+    cut: Number(v.cut ?? 0),
+    errors: Array.isArray(v.errors) ? v.errors.slice(0, 3) : [],
+  };
+}
+
+function logError(log: FigureLog, e: unknown) {
+  const m = e instanceof Error ? `${e.name}: ${e.message}` : String(e);
+  if (log.errors.length < 3) log.errors.push(m.slice(0, 200));
 }
 
 /** 정리하는 동안 자른 그림 (개념은 아직 이름으로: 조각마다 개념 번호가 달라서) */
@@ -232,12 +262,13 @@ type FigureHolder = { kind: 'pdf'; bytes: Uint8Array; firstPage: number } | { ki
  * AI 가 찾은 그림을 원본에서 잘라 `내id/figs/자료id/fN.jpg` 에 저장한다 (쪽마다 한 번만 그린다).
  * 자르거나 저장하지 못한 그림은 뺀다: 그림 때문에 노트 만들기가 멈추지 않게. already: 이미 자른 그림 수 (파일 번호)
  */
-async function cutAndStore(ctx: Ctx, found: FoundFigure[], holder: FigureHolder, already: number, deadline: number): Promise<CutFigure[]> {
+async function cutAndStore(ctx: Ctx, found: FoundFigure[], holder: FigureHolder, already: number, deadline: number, log: FigureLog): Promise<CutFigure[]> {
   const out: CutFigure[] = [];
   for (const page of [...new Set(found.map((f) => f.page))]) {
     // 시간이 넘으면 남은 쪽은 자르지 않는다 (그 그림은 뺀다)
     if (Date.now() > deadline) {
       console.warn('[kok] figure cut out of time', ctx.src.id, page);
+      logError(log, 'out of time');
       break;
     }
     const here = found.filter((f) => f.page === page);
@@ -256,15 +287,20 @@ async function cutAndStore(ctx: Ctx, found: FoundFigure[], holder: FigureHolder,
       );
     } catch (e) {
       console.warn('[kok] figure cut failed', ctx.src.id, page, e);
+      logError(log, e);
       continue;
     }
     for (let k = 0; k < here.length; k++) {
       const cut = cuts[k];
-      if (!cut) continue;
+      if (!cut) {
+        logError(log, 'bad corners');
+        continue;
+      }
       const path = figurePath(ctx.src.user_id, ctx.src.id, already + out.length + 1);
       const { error } = await ctx.admin.storage.from(SOURCES_BUCKET).upload(path, cut.jpeg, { contentType: 'image/jpeg', upsert: true });
       if (error) {
         console.warn('[kok] figure upload failed', ctx.src.id, error.message);
+        logError(log, `upload: ${error.message}`);
         continue;
       }
       out.push({ ...here[k], crop: path, w: cut.width, h: cut.height });
@@ -318,6 +354,8 @@ async function stepCutFigures(ctx: Ctx): Promise<Partial<SourceRow>> {
   const pending = pendingOf(src.draft);
   const tries = Number(src.draft.figCutTries ?? 0);
   let cuts = cutsOf(src.draft);
+  const log = figLogOf(src.draft);
+  const before = cuts.length;
   if (pending && tries < CUT_TRIES) {
     // 해 보는 수를 먼저 적어 둔다: 자르다가 함수가 멈춰도 다음에는 그만 자르게
     await ctx.admin
@@ -330,15 +368,18 @@ async function stepCutFigures(ctx: Ctx): Promise<Partial<SourceRow>> {
         pending.chunk,
         pending.found.map((f) => f.page),
       );
-      if (holder) cuts = [...cuts, ...(await cutAndStore(ctx, pending.found, holder, cuts.length, Date.now() + CUT_BUDGET_MS))];
+      if (holder) cuts = [...cuts, ...(await cutAndStore(ctx, pending.found, holder, cuts.length, Date.now() + CUT_BUDGET_MS, log))];
     } catch (e) {
       // 원본을 못 받았다: 그림 없이 노트를 만든다
       console.warn('[kok] figure cut skipped', src.id, e);
+      logError(log, e);
     }
   } else if (pending) {
     console.warn('[kok] figure cut gave up after tries', src.id);
+    logError(log, 'cut stopped twice (time limit?)');
   }
-  const draft: Record<string, unknown> = { ...src.draft, figCuts: cuts };
+  log.cut += cuts.length - before;
+  const draft: Record<string, unknown> = { ...src.draft, figCuts: cuts, figLog: log };
   delete draft.figFound;
   delete draft.figCutTries;
   // 한 조각짜리 자료: 노트가 정해졌으니 그림을 개념에 붙이고 다음 단계를 정한다
@@ -425,7 +466,11 @@ async function stepOrganize(ctx: Ctx): Promise<Partial<SourceRow>> {
   // 이 조각의 마지막 시도면(두 번 실패) 그림은 찾지 않는다: 그림 때문에(답이 길어 잘리는 등) 노트가 실패하지 않게
   const prevCuts = i === 0 ? [] : cutsOf(src.draft);
   const lastTry = Number(src.draft.attempts ?? 0) >= MAX_ATTEMPTS - 1;
-  const room = !lastTry && (await sourceFiguresOn(ctx)) ? Math.min(MAX_FIGURES_PER_PART, MAX_FIGURES - prevCuts.length) : 0;
+  const off = await sourceFiguresOff(ctx);
+  const room = !lastTry && !off ? Math.min(MAX_FIGURES_PER_PART, MAX_FIGURES - prevCuts.length) : 0;
+  const figLog = i === 0 ? figLogOf({}) : figLogOf(src.draft);
+  if (room > 0) figLog.looked++;
+  else figLog.skipped = off ?? (lastTry ? 'last_try' : 'full');
   let holder: FigureHolder | null = null;
 
   if (src.kind === 'pdf') {
@@ -493,11 +538,12 @@ async function stepOrganize(ctx: Ctx): Promise<Partial<SourceRow>> {
     const range = holder.kind === 'pdf' ? { from: meta.pageStart ?? 1, to: meta.pageEnd ?? 1 } : { from: meta.imageStart ?? 1, to: meta.imageEnd ?? 1 };
     const found = readFoundFigures((json as { figures?: unknown } | null)?.figures, range, meta.figures);
     if (found.length) figFound = { chunk: i, found };
+    figLog.found += found.length;
   }
   const partials = [...(src.partials ?? []), note];
   const next = i + 1;
   const progress = Math.round(5 + (55 * next) / total);
-  const kept: Record<string, unknown> = { ...src.draft, attempts: 0, figCuts: prevCuts };
+  const kept: Record<string, unknown> = { ...src.draft, attempts: 0, figCuts: prevCuts, figLog };
   if (figFound) kept.figFound = figFound;
   if (next < total) {
     return { partials, chunk_index: next, progress, draft: kept };
@@ -505,8 +551,9 @@ async function stepOrganize(ctx: Ctx): Promise<Partial<SourceRow>> {
   // 여러 조각이거나 노트에 더하는 자료면 합치기 단계로
   if (total > 1 || src.parent_id) return { partials, chunk_index: next, step: 'merge', progress, draft: kept };
   // 한 조각짜리: 그림이 있으면 자른 뒤 개념에 붙이고 다음 단계를 정한다 (stepCutFigures)
-  if (figFound) return { partials: [], chunk_index: next, step: 'visual', progress: 62, draft: { ...src.draft, note, attempts: 0, figCuts: [], figFound } };
-  const draft: Record<string, unknown> = { ...src.draft, note, figures: [], attempts: 0 };
+  if (figFound)
+    return { partials: [], chunk_index: next, step: 'visual', progress: 62, draft: { ...src.draft, note, attempts: 0, figCuts: [], figFound, figLog } };
+  const draft: Record<string, unknown> = { ...src.draft, note, figures: [], attempts: 0, figLog };
   delete draft.figCuts;
   return { partials: [], chunk_index: next, step: 'visual', progress: 62, draft };
 }
@@ -830,12 +877,15 @@ async function stepCheckAndFinish(ctx: Ctx): Promise<'done' | Partial<SourceRow>
   const baseFigures = readFigures({ figures: ctx.src.draft.baseFigures });
   const figures = draftFigures(ctx.src.draft).slice(0, Math.max(0, MAX_NOTE_FIGURES - baseFigures.length));
   const allFigures = [...baseFigures, ...figures];
+  const figLog = figLogOf(ctx.src.draft);
   let noteBody: Record<string, unknown> = { ...note, recommended: visual.recommended, ...(allFigures.length ? { figures: allFigures } : {}) };
   // 그림 문제는 그 그림을 문제에 그대로 남긴다 (그림이 없어졌으면 문제를 뺀다: '다음 지도' 같은 말이 남지 않게)
   const byId = new Map(figures.map((f) => [f.id, f]));
   const saved = kept
     .filter((x) => !x.figure_id || byId.has(x.figure_id))
     .map(({ figure_id, ...row }) => (figure_id ? { ...row, source_figure: questionFigure(byId.get(figure_id)!) } : row));
+  // 자료 그림이 어디까지 됐는지 (관리자가 노트 화면에서 본다). 노트에 더한 자료는 지금 노트의 기록을 그대로 둔다
+  if (!parentNoteId(ctx)) noteBody.figure_log = { ...figLog, questions: saved.filter((x) => 'source_figure' in x).length };
   const pid = parentNoteId(ctx);
   if (pid) {
     // 그림 보기 설정(노트마다)은 지금 노트의 것을 그대로 쓴다
@@ -1007,5 +1057,4 @@ export async function runSteps(sourceId: string, budgetMs = 90_000): Promise<Ste
   return outcome;
 }
 
-export type { Ctx as PipelineCtx };
 export { getAccount, getAppSettings };

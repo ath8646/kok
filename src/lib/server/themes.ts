@@ -193,8 +193,6 @@ export function fallbackPattern(spec: Pick<ThemeSpec, 'light'>, seedText: string
   return { kind: 'pattern', svg: codePatternSvg(kind, spec.light.accent, mix(spec.light.accent, '#ffffff', 0.45), h || 1) };
 }
 
-export type AiImageResult = { image: ThemeImage; dim: number; note: string | null };
-
 /**
  * AI 배경 그림: Cloudflare(무료 몫 안에서) → 실패하면 null (부르는 쪽이 무늬로 바꾼다).
  * 한 사람 하루 한도는 그림을 실제로 그릴 때만 센다.

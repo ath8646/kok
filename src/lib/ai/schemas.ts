@@ -254,25 +254,27 @@ export const chatQuestionSchema: JsonSchema = obj({
 });
 
 /**
- * 채팅에서 푼 문제: 읽은 문제, 글로 된 단계 풀이, 노트에 넣을 문제 모양, 과목·단원 짐작.
- * figures(Pro): 그림이 도움이 되는지(needs_figure) — true 일 때만 두 번째 호출로 그림을 받는다 (chatFigureJsonSchema)
+ * 채팅에서 푼 문제: 읽은 문제, 글로 된 단계 풀이, 노트에 넣을 문제 모양, (홈 채팅만) 과목·단원 짐작.
+ * figures(Pro): 그림이 도움이 되는지(needs_figure) — true 일 때만 두 번째 호출로 그림을 받는다 (chatFigureJsonSchema).
+ * guess: 과목·단원 칸 (홈 채팅: 노트가 없어서 넣을 곳을 짐작한다. 노트 채팅은 이 노트에 넣으니 없다)
  */
-export function chatSolutionSchema(figures: boolean): JsonSchema {
+export function chatSolutionSchema(o: { figures: boolean; guess: boolean }): JsonSchema {
   return obj({
     include: { type: 'boolean' },
     problem: str,
     steps: textStepsJsonSchema,
-    ...(figures ? { needs_figure: { type: 'boolean' } } : {}),
+    ...(o.figures ? { needs_figure: { type: 'boolean' } } : {}),
     question: chatQuestionSchema,
-    subject: str,
-    unit: str,
+    ...(o.guess ? { subject: str, unit: str } : {}),
   });
 }
 
+/** 노트 채팅이 넣자고 하는 것: 문제, 개념 글, 용어 (넣기 전에는 늘 학생에게 묻는다) */
 const proposalSchema = obj({
-  kind: { type: 'string', enum: ['none', 'questions', 'note'] },
+  kind: { type: 'string', enum: ['none', 'questions', 'note', 'terms'] },
   questions: { type: 'array', items: chatQuestionSchema },
   note_addition: obj({ key_point_id: str, title: str, text: str }),
+  terms: { type: 'array', items: obj({ term: str, meaning: str }) },
 });
 
 /**
@@ -281,7 +283,7 @@ const proposalSchema = obj({
  */
 export function noteChatJsonSchema(o: { solve: boolean; figures: boolean }): JsonSchema {
   return obj({
-    ...(o.solve ? { solution: chatSolutionSchema(o.figures) } : {}),
+    ...(o.solve ? { solution: chatSolutionSchema({ figures: o.figures, guess: false }) } : {}),
     reply: str,
     // 노트 밖 일반 지식을 보탰는지 (화면에 표시)
     outside_note: { type: 'boolean' },
@@ -291,7 +293,7 @@ export function noteChatJsonSchema(o: { solve: boolean; figures: boolean }): Jso
 
 /** 홈 AI 채팅 (노트 없이 아무 과목이나). 풀이를 먼저, 답 글은 마지막에 */
 export function homeChatJsonSchema(figures: boolean): JsonSchema {
-  return obj({ solution: chatSolutionSchema(figures), reply: str });
+  return obj({ solution: chatSolutionSchema({ figures, guess: true }), reply: str });
 }
 
 /**
@@ -404,13 +406,13 @@ export const zChat = z.object({
   solution: zChatSolutionRaw.optional().catch(undefined),
   proposal: z
     .object({
-      kind: z.enum(['none', 'questions', 'note']).catch('none'),
+      kind: z.enum(['none', 'questions', 'note', 'terms']).catch('none'),
       questions: z.array(z.unknown()).catch([]),
       note_addition: zNoteAddition.catch({ key_point_id: '', title: '', text: '' }),
+      terms: z.array(z.object({ term: z.string().catch(''), meaning: z.string().catch('') })).catch([]),
     })
-    .catch({ kind: 'none', questions: [], note_addition: { key_point_id: '', title: '', text: '' } }),
+    .catch({ kind: 'none', questions: [], note_addition: { key_point_id: '', title: '', text: '' }, terms: [] }),
 });
-export type ChatResult = z.infer<typeof zChat>;
 
 export const zHomeChat = z.object({
   reply: z.string().catch(''),
@@ -442,7 +444,6 @@ export const zThemeAi = z.object({
   image_prompt: z.string().catch(''),
   pattern_svg: z.string().catch(''),
 });
-export type ThemeAi = z.infer<typeof zThemeAi>;
 
 export const themeImageJsonSchema: JsonSchema = obj({ image_prompt: str });
 export const zThemeImageAi = z.object({ image_prompt: z.string().catch('') });
@@ -472,7 +473,6 @@ export const zGrade = z.object({
   feedback: z.string().catch(''),
   missing_points: z.array(z.string()).catch([]),
 });
-export type GradeResult = z.infer<typeof zGrade>;
 
 /** AI 문제 → DB 문제 행. 이상한 문제는 null */
 /** 같이 인정할 답 하나의 최대 길이 */

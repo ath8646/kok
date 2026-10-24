@@ -1,11 +1,11 @@
-// 노트 채팅에서 AI 가 넣자고 한 것(문제·노트 내용)을 학생이 [넣기]·[취소]로 정한다. AI 를 다시 부르지 않는다
+// 노트 채팅에서 AI 가 넣자고 한 것(문제·노트 내용·용어)을 학생이 [넣기]·[취소]로 정한다. AI 를 다시 부르지 않는다
 // save_problem: AI 가 풀어 준 문제를 이 노트의 문제로 넣는다 (그림 풀이도 같이, AI 가 문제를 다시 만들어도 남게 잠가 둔다)
 import type { NextRequest } from 'next/server';
 import { z } from 'zod';
 import { assertSameOrigin, assertUuid, readJson, requireAccount } from '@/lib/server/auth';
 import { UserFacingError, errorResponse } from '@/lib/server/errors';
 import { assertNoAppendRunning, loadOwnedNote, updateNoteBody } from '@/lib/server/notes';
-import { applyNoteAddition } from '@/lib/note-edit';
+import { applyNoteAddition, applyTerms } from '@/lib/note-edit';
 import { getFeatures } from '@/lib/server/account';
 import type { ChatProposal, ChatSolution } from '@/lib/chat';
 
@@ -35,7 +35,7 @@ export async function POST(req: NextRequest, ctx: RouteContext<'/api/notes/[id]/
     if (!msg || !p || p.kind === 'none') throw new UserFacingError('not_found', '넣을 내용을 찾을 수 없어요.', 404);
     if (p.status !== 'pending') throw new UserFacingError('done', p.status === 'applied' ? '이미 넣었어요.' : '이미 취소했어요.', 409);
     // 노트 글을 바꾸는 것은 자료를 더하는 동안 미룬다 (넣기를 다시 누를 수 있게 그대로 둔다)
-    if (action === 'apply' && p.kind === 'note') await assertNoAppendRunning(admin, note.source_id);
+    if (action === 'apply' && (p.kind === 'note' || p.kind === 'terms')) await assertNoAppendRunning(admin, note.source_id);
 
     // 먼저 '정했다'로 바꿔 둔다: 두 번 눌러도(창 두 개 등) 한 번만 넣는다
     const status = action === 'apply' ? 'applied' : 'cancelled';
@@ -55,6 +55,13 @@ export async function POST(req: NextRequest, ctx: RouteContext<'/api/notes/[id]/
           const { data, error: qErr } = await admin.rpc('kok_add_questions', { p_note: note.id, p_questions: p.questions, p_replace: false });
           if (qErr) throw qErr;
           added = Number(data ?? p.questions.length);
+        } else if (p.kind === 'terms') {
+          // 용어: 새 용어는 뒤에, 이미 있는 용어는 뜻만 (읽은 그대로일 때만 저장: updateNoteBody)
+          await updateNoteBody(admin, note.id, acc.userId, (cur) => {
+            const r = applyTerms(cur.note, p.terms);
+            added = r.added;
+            return { ...cur.raw, terms: r.note.terms };
+          });
         } else {
           // 지금 노트에 더한다. 읽은 뒤 노트가 바뀌었으면(다른 탭, 자료 더하기 마무리) 다시 읽어 더한다 (덮어쓰지 않게)
           await updateNoteBody(admin, note.id, acc.userId, (cur) => ({ ...cur.raw, key_points: applyNoteAddition(cur.note, p.addition).key_points }));

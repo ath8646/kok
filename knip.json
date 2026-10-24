@@ -1,0 +1,8 @@
+{
+  "$schema": "https://unpkg.com/knip@6/schema.json",
+  "entry": ["src/app/**/*.{ts,tsx}", "src/proxy.ts", "tools/**/*.{mjs,ts}", "scripts/*.mjs", "public/sw.js"],
+  "project": ["src/**/*.{ts,tsx}", "tools/**/*.{mjs,ts}", "scripts/*.mjs"],
+  "ignore": ["tools/icons/build.mjs"],
+  "ignoreDependencies": ["pg", "prettier", "tailwindcss", "topojson-client", "world-atlas"],
+  "ignoreExportsUsedInFile": true
+}

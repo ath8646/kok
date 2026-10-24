@@ -12,7 +12,7 @@ const securityHeaders = [
 // 자료 처리(그림 자르기)를 돌리는 라우트: PDF 쪽을 그리는 pdf.js 가 실행할 때 파일로 읽는 글꼴·CMap·wasm·색 프로필을 같이 싣는다.
 // (pdf.js 일꾼 파일과 @napi-rs/canvas 의 네이티브 파일은 src/lib/server/figure-image.ts 가 바로 읽어서 따라 실린다)
 // 키는 라우트 경로 패턴이라 [ ] 를 \\ 로 막는다.
-const PIPELINE_ROUTES = ['/api/sources', '/api/sources/\\[id\\]/process', '/api/sources/\\[id\\]/retry', '/api/internal/process'];
+const PIPELINE_ROUTES = ['/api/sources', '/api/sources/\\[id\\]/process', '/api/sources/\\[id\\]/retry', '/api/internal/process', '/api/admin/test-figures'];
 const PDFJS_RUNTIME_FILES = [
   './node_modules/pdfjs-dist/cmaps/**/*',
   './node_modules/pdfjs-dist/standard_fonts/**/*',

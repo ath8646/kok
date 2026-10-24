@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { materialLabel, onlyInVersion, removalPlan, toVersionRow, versionItems, type Material, type VersionRow } from '@/lib/versions';
-import { applyNoteAddition } from '@/lib/note-edit';
+import { applyNoteAddition, applyTerms } from '@/lib/note-edit';
 import { zNote } from '@/lib/ai/schemas';
 
 const first: Material = { source_id: 'p', kind: 'pdf', title: '01A79432.pdf', page_count: 12 };
@@ -65,11 +65,7 @@ describe('버전 기록 목록', () => {
   });
 
   it('버전을 지우면 같이 지워지는 자료는 그 버전에만 있는 더한 자료다', () => {
-    const rows: VersionRow[] = [
-      row(1, [first]),
-      row(2, [first, child]),
-      row(3, [first, child, { ...child, source_id: 'm1', title: '합친 노트' }]),
-    ];
+    const rows: VersionRow[] = [row(1, [first]), row(2, [first, child]), row(3, [first, child, { ...child, source_id: 'm1', title: '합친 노트' }])];
     expect(onlyInVersion(rows, 3, 'p').map((m) => m.source_id)).toEqual(['m1']);
     expect(onlyInVersion(rows, 2, 'p')).toEqual([]);
     expect(onlyInVersion(rows, 1, 'p')).toEqual([]);
@@ -135,5 +131,27 @@ describe('채팅에서 노트에 넣기', () => {
     expect(added.title).toBe('전압');
     expect(added.explanation).toBe('전압은 전기를 미는 힘이에요.');
     expect(['k1', 'k2']).not.toContain(added.id);
+  });
+});
+
+describe('채팅에서 용어 넣기', () => {
+  const note = { terms: [{ term: '엽록체', meaning: '광합성이 일어나는 곳' }] };
+  it('새 용어는 뒤에, 이미 있는 용어(띄어쓰기·대소문자 무시)는 뜻만 바꾸고 고친 표시를 남긴다', () => {
+    const r = applyTerms(note, [
+      { term: '엽 록체', meaning: '식물 세포의 초록색 소기관' },
+      { term: '기공', meaning: '잎의 작은 구멍' },
+      { term: ' ', meaning: '빈 용어' },
+      { term: '없는 뜻', meaning: '' },
+    ]);
+    expect(r.added).toBe(2);
+    expect(r.note.terms).toEqual([
+      { term: '엽록체', meaning: '식물 세포의 초록색 소기관', edited: true },
+      { term: '기공', meaning: '잎의 작은 구멍', edited: true },
+    ]);
+  });
+  it('뜻까지 같은 용어는 세지 않고 노트를 바꾸지 않는다', () => {
+    const r = applyTerms(note, [{ term: '엽록체', meaning: '광합성이 일어나는 곳' }]);
+    expect(r.added).toBe(0);
+    expect(r.note).toBe(note);
   });
 });

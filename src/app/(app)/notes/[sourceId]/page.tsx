@@ -784,7 +784,9 @@ export default function NotePage() {
   const reorganize = async () => {
     if (!note || reorg) return;
     if (
-      !confirm('겹치는 개념을 AI가 하나로 묶고 차례를 다듬을까요?\n지금 노트는 원본 탭의 버전 기록에 남아서 언제든 돌아갈 수 있어요. 문제와 푼 기록은 그대로예요.')
+      !confirm(
+        '겹치는 개념을 AI가 하나로 묶고 차례를 다듬을까요?\n지금 노트는 원본 탭의 버전 기록에 남아서 언제든 돌아갈 수 있어요. 문제와 푼 기록은 그대로예요.',
+      )
     )
       return;
     setReorg('note');
@@ -905,7 +907,13 @@ export default function NotePage() {
   const loadingOld = showOld && !old;
   // 자료를 더하는 동안에는 지금 노트의 정리·그림을 고치지 않는다 (합치는 바탕이 바뀌면 처음부터 다시 합쳐야 해서)
   const appendRunning = versionsOn && kidsActive && !old;
-  const aiLocked = old ? '지난 버전에서는 AI로 다시 만들 수 없어요. 이 버전을 쓰면 할 수 있어요.' : appendRunning ? APPEND_LOCK : reorg ? REORG_LOCK : undefined;
+  const aiLocked = old
+    ? '지난 버전에서는 AI로 다시 만들 수 없어요. 이 버전을 쓰면 할 수 있어요.'
+    : appendRunning
+      ? APPEND_LOCK
+      : reorg
+        ? REORG_LOCK
+        : undefined;
   const editLocked = appendRunning ? APPEND_LOCK : reorg && !old ? REORG_LOCK : undefined;
   // 여러 노트를 합친 노트 (지금 버전만): 'AI로 다시 정리' 안내 (Pro). 다시 정리하면 표시가 없어진다
   const mergedMark = !old && mergeOn ? readMergedMark(note.body) : null;
@@ -981,6 +989,8 @@ export default function NotePage() {
       </div>
 
       {versionsOn ? <AppendStatus kids={kids} onChanged={() => setKidsTick((x) => x + 1)} /> : null}
+
+      {me.isAdmin && !old ? <FigureLogLine body={note.body} /> : null}
 
       {/* 여러 노트를 합친 노트: 겹치는 개념을 AI 가 하나로 다듬을 수 있다 (Pro). 닫아도 메뉴에 남는다 */}
       {mergedMark && (!mergedMark.hide || reorg) ? (
@@ -1312,5 +1322,29 @@ export default function NotePage() {
         </div>
       </Sheet>
     </div>
+  );
+}
+
+const FIGURE_SKIP: Record<string, string> = {
+  text: '글 자료라 그림을 찾지 않았어요',
+  setting_off: "설정 '자료 그림'이 꺼져 있어요",
+  db_outdated: 'DB 에 그림 칸이 없어요 (schema.sql 다시 실행)',
+  last_try: '마지막 시도라 그림을 찾지 않았어요',
+  full: '그림이 이미 가득 찼어요',
+};
+
+/** 관리자만: 이 노트를 만들 때 자료 그림이 어디까지 됐는지 (그림 문제가 없을 때 까닭을 찾게) */
+function FigureLogLine({ body }: { body: unknown }) {
+  const log = body && typeof body === 'object' ? (body as { figure_log?: Record<string, unknown> }).figure_log : undefined;
+  if (!log || typeof log !== 'object') return null;
+  const n = (k: string) => Number(log[k] ?? 0);
+  const skipped = typeof log.skipped === 'string' ? (FIGURE_SKIP[log.skipped] ?? log.skipped) : '';
+  const errors = Array.isArray(log.errors) ? log.errors.map(String) : [];
+  return (
+    <p className="rounded-2xl bg-surface-2 px-4 py-2.5 text-xs text-muted">
+      관리자 · 자료 그림: 찾은 조각 {n('looked')} · AI가 찾은 그림 {n('found')} · 자른 그림 {n('cut')} · 그림 문제 {n('questions')}
+      {skipped ? ` · ${skipped}` : ''}
+      {errors.length ? <span className="mt-0.5 block break-all">오류: {errors.join(' / ')}</span> : null}
+    </p>
   );
 }

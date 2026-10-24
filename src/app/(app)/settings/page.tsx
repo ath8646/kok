@@ -313,7 +313,7 @@ export default function SettingsPage() {
             />
             <Toggle
               id="set-chat-note"
-              label="대화하다가 '노트에 넣어 줘' 하면 노트에 알맞게 넣어 주기"
+              label="대화하다가 '노트에 넣어 줘'·'용어로 넣어 줘' 하면 노트의 개념·용어에 알맞게 넣어 주기"
               checked={draft.chat.allowNote}
               onChange={(v) => set('chat', { allowNote: v })}
             />
@@ -456,7 +456,7 @@ export default function SettingsPage() {
             />
             <p className="text-xs text-muted">
               {me.canFigures
-                ? '끄면 KOK 스타일로 다시 그린 그림부터 보여 줘요. 그림마다 원본과 바꿔 볼 수 있어요.'
+                ? '끄면 개념 카드에서 KOK 스타일로 다시 그린 그림부터 보여 줘요. 문제 위에서는 풀 때 빠진 것이 없게 늘 원본이 먼저예요. 그림마다 바꿔 볼 수 있어요.'
                 : '자료 그림은 원본에서 잘라 보여 줘요. Pro는 지도·그래프·표·연표·도식을 KOK 스타일로 다시 그려 줘요.'}
             </p>
           </div>

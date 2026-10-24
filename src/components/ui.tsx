@@ -176,23 +176,6 @@ export function Chip({
   return <span className={cx('inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-xs font-semibold', tones[tone], className)}>{children}</span>;
 }
 
-export function ProgressBar({ value, tone = 'accent', label }: { value: number; tone?: 'accent' | 'ok' | 'warn'; label?: string }) {
-  const color = tone === 'ok' ? 'bg-ok' : tone === 'warn' ? 'bg-warn' : 'bg-fab';
-  const v = Math.max(0, Math.min(100, value));
-  return (
-    <div
-      className="h-2 w-full overflow-hidden rounded-full bg-surface-2"
-      role="progressbar"
-      aria-valuenow={Math.round(v)}
-      aria-valuemin={0}
-      aria-valuemax={100}
-      aria-label={label}
-    >
-      <div className={cx('h-full origin-left rounded-full transition-[width] duration-500', color)} style={{ width: `${v}%` }} />
-    </div>
-  );
-}
-
 /** 동그란 진행 고리 */
 export function ProgressRing({
   value,
@@ -336,17 +319,6 @@ export function LargeHeader({
         {subtitle ? <div className="mt-1 text-[15px] text-muted">{subtitle}</div> : null}
       </div>
     </>
-  );
-}
-
-/** 작은 위 띠 (뒤로 가기 + 제목) */
-export function TopBar({ back, title, actions }: { back?: { href: string; label: string }; title?: ReactNode; actions?: ReactNode }) {
-  return (
-    <div className={cx(TOPBAR, 'is-collapsed')}>
-      {back ? <BackLink back={back} /> : <span className="w-2" aria-hidden="true" />}
-      <p className="min-w-0 flex-1 truncate text-[17px] font-bold">{title}</p>
-      <div className="flex shrink-0 items-center gap-0.5">{actions}</div>
-    </div>
   );
 }
 

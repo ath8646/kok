@@ -329,12 +329,6 @@ export function edgeCurve(e: Edge, layout: Layout): [P, P, P, P] {
   ];
 }
 
-/** 연결선 경로 (부드러운 곡선) */
-export function edgePath(e: Edge, layout: Layout): string {
-  const [p0, p1, p2, p3] = edgeCurve(e, layout);
-  return `M${p0.x} ${p0.y}C${p1.x} ${p1.y},${p2.x} ${p2.y},${p3.x} ${p3.y}`;
-}
-
 const r2 = (n: number) => Math.round(n * 10) / 10;
 
 /**

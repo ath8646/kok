@@ -1,6 +1,7 @@
 'use client';
 // 자료 그림 한 장: KOK 스타일로 다시 그린 그림(Pro)과 원본에서 자른 그림을 바꿔 볼 수 있다.
-// 처음 보이는 것은 설정의 '원본 그림 먼저 보기'를 따르고, 다시 그린 그림이 없으면 원본이다.
+// 개념 카드에서 처음 보이는 것은 설정의 '원본 그림 먼저 보기'를 따르고, 문제 위에서는 늘 원본이 먼저다
+// (다시 그린 그림은 AI 가 읽은 만큼만 담겨서 문제를 풀 때 빠진 것이 있을 수 있다). 다시 그린 그림이 없으면 원본이다.
 // question: 문제 위에 둘 때는 제목·설명을 숨긴다 (제목이 답을 알려 줄 수 있어서). 크게 보기는 시트로.
 import { useState, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
@@ -94,7 +95,7 @@ export function SourceFigureView({
   fig: QuestionFigure;
   /** card: 개념 카드·자료 그림 (제목·설명), question: 문제 위 (제목·설명을 숨긴다) */
   variant?: 'card' | 'question';
-  /** 설정: 원본 그림 먼저 보기 */
+  /** 설정: 원본 그림 먼저 보기 (개념 카드에서만. 문제 위에서는 늘 원본이 먼저) */
   originalFirst?: boolean;
   /** 원본 자리 ('3쪽', '사진 2'). onOpenPage 가 있으면 누르면 원본 탭으로 */
   pageLabel?: string;
@@ -105,10 +106,10 @@ export function SourceFigureView({
   footer?: ReactNode;
 }) {
   const hasArt = !!fig.art;
-  const [view, setView] = useState<View>(hasArt && !originalFirst ? 'art' : 'original');
+  const question = variant === 'question';
+  const [view, setView] = useState<View>(hasArt && !originalFirst && !question ? 'art' : 'original');
   const shown: View = view === 'art' && hasArt ? 'art' : 'original';
   const [zoom, setZoom] = useState(false);
-  const question = variant === 'question';
   const kindLabel = FIG_KIND_LABEL[fig.kind];
   // 문제 위에서는 제목·설명을 화면 읽기에도 알리지 않는다 (답을 알려 줄 수 있어서)
   const name = question ? '자료 그림' : fig.title || kindLabel;

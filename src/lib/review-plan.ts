@@ -116,11 +116,6 @@ function arrange<T extends PlanCard>(ranked: T[], interleave: boolean): T[] {
   return out;
 }
 
-/** 아직 오늘 풀 문제 수 (홈 화면 숫자) */
-export function countDueToday(cards: PlanCard[], subjects: PlanSubject[], opts: PlanOptions): number {
-  return pickToday(cards, subjects, opts).length;
-}
-
 // ------------------------------------------------------------- 기간과 시간으로 고르기
 /**
  * 복습 기간. due = 복습할 차례 (FSRS 가 정한 날이 된 문제, 하루 최대 수 안에서 = 오늘 복습).

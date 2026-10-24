@@ -4,7 +4,6 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
-    "prebuild": "node tools/pdfjs/copy-worker.mjs",
     "build": "next build",
     "start": "next start",
     "lint": "eslint",

@@ -1,4 +1,20 @@
 import type { NextConfig } from 'next';
+import { copyFileSync, mkdirSync } from 'node:fs';
+import { createRequire } from 'node:module';
+import path from 'node:path';
+
+// PDF 보기(앱 안에서 PDF 요약 정리 읽기)에 쓰는 pdf.js 일꾼 파일을 public/pdfjs/ 로 복사한다 (빌드·개발 서버가 설정을 읽을 때).
+// 앱의 pdfjs-dist 와 같은 버전이어야 해서(버전이 다르면 pdf.js 가 멈춘다) 설치 때(package.json postinstall)와 여기서 한 번 더.
+// public/pdfjs/ 는 git 에 넣지 않는다. 못 복사해도 빌드는 계속한다 (PDF 보기만 안 된다)
+try {
+  // (설정 파일은 Next 가 바꿔서 읽어 import.meta.url 이 없을 수 있다: 프로젝트 폴더 기준으로 찾는다)
+  const require = createRequire(path.join(process.cwd(), 'package.json'));
+  const outDir = path.join(process.cwd(), 'public', 'pdfjs');
+  mkdirSync(outDir, { recursive: true });
+  copyFileSync(require.resolve('pdfjs-dist/legacy/build/pdf.worker.min.mjs'), path.join(outDir, 'pdf.worker.min.mjs'));
+} catch (e) {
+  console.warn('[kok] pdf.js worker copy failed:', e instanceof Error ? e.message : e);
+}
 
 // KOK은 거의 모든 화면이 사용자마다 달라서 cacheComponents 를 끈다.
 // (끄면 partialPrefetching 도 같이 빼야 한다)

@@ -3,6 +3,7 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import { supabaseBrowser } from './supabase/client';
 import type { CardRow, QuestionRow, SourceListRow, SubjectRow } from './types';
 import type { PlanCard, PlanSubject } from './review-plan';
+import { readSession, type Answered, type SessionKey, type SessionRow } from './review-session';
 import { kstDayStart } from './time';
 import { previewText } from './richtext';
 
@@ -232,6 +233,62 @@ export async function fetchPlanData(): Promise<PlanData> {
     doneToday: done.count ?? 0,
     concepts,
   };
+}
+
+// ------------------------------------------------------------- 저장한 복습 세션 (features.sessions)
+/** 저장한 세션 하나 (없으면 null) */
+export async function fetchSession(key: SessionKey): Promise<SessionRow | null> {
+  const { data, error } = await sb().from('review_sessions').select('*').eq('key', key).maybeSingle();
+  if (error) throw error;
+  return data ? readSession(data) : null;
+}
+
+/** 세션을 만들거나 바꾼다 (열쇠마다 하나) */
+export async function saveSession(row: Omit<SessionRow, 'created_at' | 'updated_at'> & { user_id: string }): Promise<void> {
+  const { error } = await sb().from('review_sessions').upsert(row, { onConflict: 'user_id,key' });
+  if (error) throw error;
+}
+
+/** 세션의 계획만 바꾼다 (새 문제를 나눠 넣은 뒤) */
+export async function updateSessionPlan(key: SessionKey, plan: string[]): Promise<void> {
+  const { error } = await sb().from('review_sessions').update({ plan, seen_at: new Date().toISOString() }).eq('key', key);
+  if (error) throw error;
+}
+
+export async function deleteSession(key: SessionKey): Promise<void> {
+  const { error } = await sb().from('review_sessions').delete().eq('key', key);
+  if (error) throw error;
+}
+
+/** 푼 문제 하나를 세션에 적는다 (DB 함수가 한 문제씩 더한다) */
+export async function recordSessionAnswer(key: SessionKey, qid: string, entry: Answered): Promise<void> {
+  const { error } = await sb().rpc('kok_session_answer', { p_key: key, p_qid: qid, p_entry: entry });
+  if (error) throw error;
+}
+
+/** 어느 때 뒤에 푼 문제: 문제 번호 → 가장 늦게 푼 때 (세션 밖에서 푼 문제도 끝낸 것으로 세려고) */
+export async function fetchReviewedSince(iso: string): Promise<Map<string, string>> {
+  const out = new Map<string, string>();
+  for (let from = 0; ; from += 1000) {
+    const { data, error } = await sb().from('review_logs').select('question_id, reviewed_at').gte('reviewed_at', iso).range(from, from + 999);
+    if (error) throw error;
+    for (const r of data ?? []) {
+      if (!r.question_id) continue;
+      const id = String(r.question_id);
+      const at = String(r.reviewed_at);
+      if ((out.get(id) ?? '') < at) out.set(id, at);
+    }
+    if (!data || data.length < 1000) break;
+  }
+  return out;
+}
+
+/** 세션을 만든 뒤에 푼 문제만 (fetchReviewedSince 에서) */
+export function reviewedAfter(m: Map<string, string>, iso: string): Set<string> {
+  const since = Date.parse(iso);
+  const out = new Set<string>();
+  for (const [id, at] of m) if (Date.parse(at) >= since) out.add(id);
+  return out;
 }
 
 /** 최근 푼 기록 (답하는 데 걸린 시간): 내 빠르기로 복습 시간마다 문제 수를 맞춘다 */

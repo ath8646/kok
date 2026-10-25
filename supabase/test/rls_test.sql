@@ -873,6 +873,25 @@ do $$ begin
     raise exception 'course delete should be denied';
   exception when insufficient_privilege then null;
   end;
+  -- 저장한 복습 세션: 내 것은 모두 쓰고, 푼 문제는 함수로 하나씩 더한다
+  insert into public.review_sessions (user_id, key, minutes, day, plan) values (auth.uid(), 'home', 5, current_date, '["q1","q2"]'::jsonb);
+  perform public.kok_session_answer('home', 'q1', '{"ok": true, "sec": 30, "at": "x"}'::jsonb);
+  perform public.kok_session_answer('home', 'q2', '{"ok": false, "sec": 20, "at": "y"}'::jsonb);
+  if (select answered->'q1'->>'ok' || (answered->'q2'->>'sec') from public.review_sessions where key = 'home') <> 'true20' then
+    raise exception 'session answers should be added one by one';
+  end if;
+  update public.review_sessions set plan = '["q1","q2","q3"]'::jsonb where key = 'home';
+  if (select jsonb_array_length(plan) from public.review_sessions where key = 'home') <> 3 then raise exception 'A can update own session'; end if;
+  begin
+    insert into public.review_sessions (user_id, key, minutes, day) values ('22222222-2222-2222-2222-222222222222', 'home', 5, current_date);
+    raise exception 'session for another user should be denied';
+  exception when insufficient_privilege then null;
+  end;
+  begin
+    insert into public.review_sessions (user_id, key, minutes, day) values (auth.uid(), 'bogus', 5, current_date);
+    raise exception 'session key should be checked';
+  exception when check_violation then null;
+  end;
   -- PDF 요약: 내 것은 보이고 이름만 고친다
   if (select count(*) from public.note_pdfs) <> 1 then raise exception 'A sees own pdf'; end if;
   update public.note_pdfs set name = '기권과 날씨';
@@ -920,16 +939,23 @@ do $$ begin
   if (select count(*) from public.chat_messages) <> 0 then raise exception 'B must not see A chat'; end if;
   if (select count(*) from public.note_courses) <> 0 then raise exception 'B must not see A course'; end if;
   if (select count(*) from public.note_pdfs) <> 0 then raise exception 'B must not see A pdf'; end if;
+  if (select count(*) from public.review_sessions) <> 0 then raise exception 'B must not see A session'; end if;
   update public.note_courses set progress = '{"hack":true}'::jsonb;
   update public.note_pdfs set name = 'hack';
   delete from public.chat_messages;
   update public.note_versions set body = '{}'::jsonb;
+  perform public.kok_session_answer('home', 'q9', '{"ok": true, "sec": 1, "at": "z"}'::jsonb);
+  delete from public.review_sessions;
 end $$;
 select set_config('request.jwt.claim.sub', '11111111-1111-1111-1111-111111111111', false);
 do $$ begin
   if (select count(*) from public.chat_messages) <> 1 then raise exception 'B must not delete A chat'; end if;
   if (select progress->>'hack' from public.note_courses) is not null then raise exception 'B must not edit A course'; end if;
   if (select name from public.note_pdfs) <> '기권과 날씨' then raise exception 'B must not rename A pdf'; end if;
+  if (select count(*) from public.review_sessions where answered ? 'q9') <> 0 then raise exception 'B must not write A session'; end if;
+  if (select count(*) from public.review_sessions) <> 1 then raise exception 'B must not delete A session'; end if;
+  delete from public.review_sessions where key = 'home';
+  if (select count(*) from public.review_sessions) <> 0 then raise exception 'A can delete own session'; end if;
   if (select body->>'summary' from public.note_versions where note_id = current_setting('kok.v_note')::uuid and number = 1) <> '고친 버전' then raise exception 'B must not edit A version'; end if;
   delete from public.chat_messages;
   if (select count(*) from public.chat_messages) <> 0 then raise exception 'A can clear own chat'; end if;

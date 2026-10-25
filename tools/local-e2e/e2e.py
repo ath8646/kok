@@ -921,8 +921,64 @@ async def main():
         assert shown and int(shown.group(1)) == n_quick <= n_due, (shown and shown.group(0), n_quick, n_due)
         print("   quick start:", n_quick, "of", n_due, "due")
         await shot(page, "15a-home-quick-start", full=False)
+        # 저장한 오늘 KOK (review_sessions): 고른 문제가 그대로 적혀 있다
+        assert db(f"select jsonb_array_length(plan) || ' ' || minutes || ' ' || period from public.review_sessions where user_id = '{USERS['student'][0]}' and key = 'home'") == f"{n_quick} 5 due"
         await page.get_by_role("button", name="그만하기").click()
         await expect(page.get_by_role("heading", name="다음에 또 만나요")).to_be_visible(timeout=10000)
+
+        step("home: progress of today's KOK is saved — answer two, leave, the card shows n/X, continue with the rest, start over clears it")
+        assert n_quick >= 4, n_quick
+
+        async def answer_current(page):
+            """지금 문제에 답하고 다음으로 (유형마다)"""
+            card_text = await page.locator("main").inner_text()
+            if await page.get_by_role("button", name="O 맞다").count():
+                await page.get_by_role("button", name="X 틀리다").click()
+            elif await page.get_by_label("답").count():
+                await page.get_by_label("답").fill("잎의 구멍" if "기체가 드나드는" in card_text else "전분")
+                await page.get_by_role("button", name="확인").click()
+            else:
+                await page.locator("main button:has-text('1')").first.click()
+            await expect(page.get_by_role("button", name="다음")).to_be_visible(timeout=15000)
+            await page.get_by_role("button", name="다음").click()
+
+        await page.goto(BASE + "/home")
+        await quick.click()
+        await expect(page.get_by_role("button", name="그만하기")).to_be_visible(timeout=15000)
+        for _ in range(2):
+            await answer_current(page)
+        await poll_db(f"select count(*) from public.review_sessions s, jsonb_object_keys(s.answered) k where s.user_id = '{USERS['student'][0]}' and s.key = 'home'", "2")
+        await page.get_by_role("button", name="그만하기").click()
+        await expect(page.get_by_role("heading", name="여기까지 풀었어요")).to_be_visible(timeout=10000)
+        await page.goto(BASE + "/home")
+        await expect(page.get_by_text(f"{n_quick - 2}문제 남았어요")).to_be_visible()
+        await expect(page.get_by_role("progressbar", name="오늘 복습 진행")).to_have_attribute("aria-valuenow", str(round(2 / n_quick * 100)))
+        await expect(page.get_by_text("오늘 2문제 풀었어요")).to_be_visible()
+        await shot(page, "15b-home-progress", full=False)
+        # 이어서 하기: 남은 문제만
+        cont = page.get_by_role("link", name=f"이어서 하기 · {n_quick - 2}문제")
+        await expect(cont).to_be_visible()
+        await cont.click()
+        await expect(page.get_by_role("button", name="그만하기")).to_be_visible(timeout=15000)
+        await expect(page.get_by_text(f"1 / {n_quick - 2}")).to_be_visible()
+        await answer_current(page)
+        await page.get_by_role("button", name="그만하기").click()
+        await expect(page.get_by_role("heading", name="여기까지 풀었어요")).to_be_visible(timeout=10000)
+        # 홈: 3개 풀었고, '처음부터'는 한 번 묻고 저장한 진행을 지운다 → 남은 복습할 차례로 새 계획 (푼 문제는 그대로 복습 기록에)
+        await page.goto(BASE + "/home")
+        await expect(page.get_by_text("오늘 3문제 풀었어요")).to_be_visible()
+        await page.get_by_role("button", name="처음부터", exact=True).click()
+        sheet = page.get_by_role("dialog", name="오늘의 KOK 처음부터")
+        await expect(sheet.get_by_text("오늘 푼 3문제의 복습 기록은 그대로 남아요.")).to_be_visible()
+        await sheet.get_by_role("button", name="처음부터").click()
+        await expect(page.get_by_text("오늘의 KOK을 새로 골랐어요.")).to_be_visible()
+        await poll_db(f"select count(*) from public.review_sessions where user_id = '{USERS['student'][0]}' and key = 'home'", "0")
+        await expect(page.get_by_role("link", name=re.compile(r"^5분 KOK 시작$"))).to_be_visible()
+        # 새 계획은 아직 복습할 차례인 문제로 (방금 틀린 문제는 1분 뒤 다시 차례가 될 수 있어 하나쯤 더 들어갈 수 있다)
+        fresh = re.search(r"(\d+)문제 남았어요", await page.locator("main").inner_text())
+        assert fresh and 1 <= int(fresh.group(1)) <= n_due - 1, (fresh and fresh.group(0), n_due)
+        await expect(page.get_by_role("progressbar", name="오늘 복습 진행")).to_have_attribute("aria-valuenow", "0")
+        assert int(db(f"select count(*) from public.review_logs where user_id = '{USERS['student'][0]}'")) >= 3
 
         step("review session: pick a period and a time, core questions first, no hard stop")
         await page.goto(BASE + "/review")
@@ -995,10 +1051,43 @@ async def main():
         assert not re.search("[\U0001F300-\U0001FAFF\u2600-\u27BF]", end_text), end_text
         await shot(page, "19-review-end", full=False)
         print("   answered:", seen, sorted(answered_types))
-        # 다시 열면 고른 기간(오늘)이 그대로 (복습할 차례가 남아 있으면 그것이 먼저)
+        # 다시 열면 고른 기간(오늘)이 그대로 (복습할 차례가 남아 있으면 그것이 먼저). 끝까지 푼 세션은 저장한 것이 지워진다
         await page.goto(BASE + "/review")
         await expect(page.get_by_role("radiogroup", name="언제 공부한 문제를 풀까요?")).to_be_visible()
         print("   reopened with:", await page.get_by_role("radio", checked=True).first.inner_text())
+        assert db(f"select count(*) from public.review_sessions where user_id = '{USERS['student'][0]}' and key = 'review'") == "0"
+        await expect(page.get_by_role("region", name="하던 복습")).to_have_count(0)
+
+        step("review tab: a session stopped halfway is saved — the start screen offers to continue it or start over")
+        # 전체 기간·30분으로 시작해 하나만 풀고 그만두면 '하던 복습' 카드가 보인다
+        await periods.get_by_role("radio", name=re.compile("^전체")).click()
+        times = page.get_by_role("radiogroup", name="얼마나 풀까요?")
+        if await times.count():
+            await times.get_by_role("radio", name=re.compile("^30분")).click()
+        n_all = int(re.search(r"(\d+)문제 시작", await start_btn.inner_text()).group(1))
+        assert n_all >= 3, n_all
+        await start_btn.click()
+        await expect(page.get_by_role("button", name="그만하기")).to_be_visible(timeout=15000)
+        await poll_db(f"select jsonb_array_length(plan) || ' ' || period from public.review_sessions where user_id = '{USERS['student'][0]}' and key = 'review'", f"{n_all} all")
+        await answer_current(page)
+        await page.get_by_role("button", name="그만하기").click()
+        await expect(page.get_by_role("heading", name="여기까지 풀었어요")).to_be_visible(timeout=10000)
+        await page.goto(BASE + "/review")
+        keep = page.get_by_role("region", name="하던 복습")
+        await expect(keep).to_be_visible()
+        await expect(keep.get_by_text(re.compile(r"분 · 전체"))).to_be_visible()
+        await expect(keep.get_by_label(f"{n_all}문제 가운데 1문제 풀었어요")).to_be_visible()
+        await shot(page, "19a-review-resume", full=False)
+        await keep.get_by_role("button", name=f"이어서 하기 · {n_all - 1}문제").click()
+        await expect(page.get_by_role("button", name="그만하기")).to_be_visible(timeout=15000)
+        await expect(page.get_by_text(f"1 / {n_all - 1}")).to_be_visible()
+        await page.get_by_role("button", name="그만하기").click()
+        await expect(page.get_by_role("heading", name="다음에 또 만나요")).to_be_visible(timeout=10000)
+        await page.goto(BASE + "/review")
+        await expect(keep).to_be_visible()
+        await keep.get_by_role("button", name="처음부터").click()
+        await expect(keep).to_have_count(0)
+        await poll_db(f"select count(*) from public.review_sessions where user_id = '{USERS['student'][0]}' and key = 'review'", "0")
 
         step("wrong note")
         await page.goto(BASE + "/wrong")

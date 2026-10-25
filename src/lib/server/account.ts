@@ -154,6 +154,8 @@ export type Features = {
   courses: boolean;
   /** PDF 요약 정리 (note_pdfs) */
   pdfs: boolean;
+  /** 저장한 복습 세션 (review_sessions + kok_session_answer): 홈의 N분 KOK·복습 탭 이어서 하기 */
+  sessions: boolean;
 };
 
 /** schema.sql 을 다시 실행하기 전의 DB 에는 함수가 없다 (PostgREST 가 함수를 못 찾음) */
@@ -170,7 +172,7 @@ let featuresCache: { at: number; value: Features } | null = null;
  */
 export async function getFeatures(admin: SupabaseClient): Promise<Features> {
   if (featuresCache && Date.now() - featuresCache.at < 60_000) return featuresCache.value;
-  const [v, p, r, c, f, t, ti, ac, qf, pf, cf, og, sf, sd, vk, rs, nc, np] = await Promise.all([
+  const [v, p, r, c, f, t, ti, ac, qf, pf, cf, og, sf, sd, vk, rs, nc, np, se] = await Promise.all([
     admin.from('note_versions').select('id').limit(1),
     admin.from('sources').select('parent_id').limit(1),
     admin.from('questions').select('rested_hidden').limit(1),
@@ -190,6 +192,7 @@ export async function getFeatures(admin: SupabaseClient): Promise<Features> {
     admin.rpc('kok_reorder_subjects', { p_ids: [] }),
     admin.from('note_courses').select('id').limit(1),
     admin.from('note_pdfs').select('id').limit(1),
+    admin.from('review_sessions').select('key').limit(1),
   ]);
   const value: Features = {
     versions: !v.error && !p.error,
@@ -205,6 +208,7 @@ export async function getFeatures(admin: SupabaseClient): Promise<Features> {
     merge: !sd.error && !vk.error && !rs.error,
     courses: !nc.error,
     pdfs: !np.error,
+    sessions: !se.error,
   };
   featuresCache = { at: Date.now(), value };
   return value;

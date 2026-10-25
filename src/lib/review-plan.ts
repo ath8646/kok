@@ -91,7 +91,7 @@ export function pickToday<T extends PlanCard>(cards: T[], subjects: PlanSubject[
 }
 
 /** 푸는 순서: 과목끼리 모으거나(우선순위가 높은 과목부터), 섞어 풀기면 과목을 번갈아 낸다. 과목 안에서는 받은 순서 그대로 */
-function arrange<T extends PlanCard>(ranked: T[], interleave: boolean): T[] {
+export function arrange<T extends PlanCard>(ranked: T[], interleave: boolean): T[] {
   if (!interleave) {
     const order: string[] = [];
     for (const c of ranked) if (!order.includes(c.subject_id)) order.push(c.subject_id);
@@ -218,31 +218,43 @@ export type TimedPlan<T> = {
   all: boolean;
 };
 
-type ConceptCard = PlanCard & { note_id?: string | null; key_point_id?: string | null };
+export type ConceptCard = PlanCard & { note_id?: string | null; key_point_id?: string | null };
+
+/** 같은 개념이 몰리지 않게 세는 열쇠: 개념이 없으면 문제마다 */
+export function conceptKey(c: { question_id: string; note_id?: string | null; key_point_id?: string | null } | undefined): string | null {
+  if (!c) return null;
+  return c.note_id && c.key_point_id ? `${c.note_id}:${c.key_point_id}` : `q:${c.question_id}`;
+}
+
+/** 이미 고른(푼) 문제: 같은 개념 깎기와 시간 예산에 넣는다 */
+export type Seed = { key: string | null; sec: number };
 
 /**
- * 시간마다 풀 문제. 핵심 점수 순서(같은 개념이 몰리지 않게)로 한 줄을 세우고, 시간마다 그 앞부분을 자른다
- * (그래서 5분 문제는 늘 15분 문제 안에 있다). 마지막 문제는 절반 넘게 들어가면 넣는다.
+ * 핵심 점수 순서(같은 개념이 몰리지 않게)로 한 줄을 세운다. 예산(초)을 넘기 직전까지 — 마지막 문제는 절반 넘게 들어가면 넣는다.
+ * seed 가 있으면 그 문제들이 이미 줄 앞에 있는 셈이다 (이어서 풀 때·새 문제를 나눠 넣을 때).
  */
-export function plansForTimes<T extends ConceptCard>(
+function buildLine<T extends ConceptCard>(
   pool: T[],
   subjects: PlanSubject[],
-  minutes: readonly number[],
-  o: { now?: Date; pace?: number; interleave: boolean },
-): TimedPlan<T>[] {
-  const now = o.now ?? new Date();
+  budgetSec: number,
+  o: { now: Date; pace?: number; seeds?: Seed[] },
+): Array<{ c: T; sec: number }> {
   const subj = new Map(subjects.map((s) => [s.id, s]));
   const rest = pool.map((c) => ({
     c,
-    score: coreScore(c, subj.get(c.subject_id), now),
+    score: coreScore(c, subj.get(c.subject_id), o.now),
     sec: secondsFor(c, o.pace ?? 1),
-    key: c.note_id && c.key_point_id ? `${c.note_id}:${c.key_point_id}` : `q:${c.question_id}`,
+    key: conceptKey(c) ?? `q:${c.question_id}`,
     due: Date.parse(c.due),
   }));
-  const budgetMax = Math.max(0, ...minutes) * 60;
   const used = new Map<string, number>();
-  const line: typeof rest = [];
   let total = 0;
+  for (const s of o.seeds ?? []) {
+    if (s.key) used.set(s.key, (used.get(s.key) ?? 0) + 1);
+    total += s.sec;
+  }
+  const seeded = (o.seeds?.length ?? 0) > 0;
+  const line: typeof rest = [];
   while (rest.length) {
     let bi = 0;
     let bv = -Infinity;
@@ -256,12 +268,27 @@ export function plansForTimes<T extends ConceptCard>(
       }
     }
     const best = rest[bi];
-    if (line.length && total + best.sec / 2 > budgetMax) break;
+    if ((line.length || seeded) && total + best.sec / 2 > budgetSec) break;
     rest.splice(bi, 1);
     line.push(best);
     total += best.sec;
     used.set(best.key, (used.get(best.key) ?? 0) + 1);
   }
+  return line;
+}
+
+/**
+ * 시간마다 풀 문제. 핵심 점수 순서(같은 개념이 몰리지 않게)로 한 줄을 세우고, 시간마다 그 앞부분을 자른다
+ * (그래서 5분 문제는 늘 15분 문제 안에 있다). 마지막 문제는 절반 넘게 들어가면 넣는다.
+ */
+export function plansForTimes<T extends ConceptCard>(
+  pool: T[],
+  subjects: PlanSubject[],
+  minutes: readonly number[],
+  o: { now?: Date; pace?: number; interleave: boolean },
+): TimedPlan<T>[] {
+  const now = o.now ?? new Date();
+  const line = buildLine(pool, subjects, Math.max(0, ...minutes) * 60, { now, pace: o.pace });
   return minutes.map((m) => {
     const picked: typeof line = [];
     let t = 0;
@@ -279,6 +306,28 @@ export function plansForTimes<T extends ConceptCard>(
       all: picked.length === pool.length,
     };
   });
+}
+
+/**
+ * 이어서 풀 문제: 이미 푼(고른) 문제(seeds)가 줄 앞에 있는 셈 치고, 남은 시간 예산에 들어가는 문제를 핵심 점수 순서로 고른다.
+ * seeds 가 없으면 plansForTimes 의 그 시간 계획과 같다. 저장한 복습 세션을 이어서 할 때·새로 생긴 문제를 나눠 넣을 때 쓴다 (review-session.ts)
+ */
+export function continuePlan<T extends ConceptCard>(
+  pool: T[],
+  subjects: PlanSubject[],
+  minutes: number,
+  o: { now?: Date; pace?: number; interleave: boolean; seeds?: Seed[] },
+): TimedPlan<T> {
+  const now = o.now ?? new Date();
+  const line = buildLine(pool, subjects, minutes * 60, { now, pace: o.pace, seeds: o.seeds });
+  return {
+    cards: arrange(
+      line.map((p) => p.c),
+      o.interleave,
+    ),
+    seconds: Math.round(line.reduce((t, r) => t + r.sec, 0)),
+    all: line.length === pool.length,
+  };
 }
 
 /** 고른 문제가 어떤 문제인지 (먼저 해당하는 하나로 센다) */

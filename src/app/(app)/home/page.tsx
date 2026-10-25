@@ -1,14 +1,31 @@
 'use client';
 // 홈 (오늘): AI에게 물어보기, 오늘 복습, 5분 KOK, 이번 주 공부한 날, 남은 에너지, 시험 D-day, 정리 중인 자료, 최근 노트
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
 import { EnergyPill, useMe } from '@/components/AppShell';
 import { HomeAsk } from '@/components/chat/HomeChat';
 import { ProcessingList, useActiveSources } from '@/components/ProcessingList';
 import { SOURCES_CHANGED, useQuickAdd } from '@/components/QuickAdd';
-import { Energy, ICONS, Icon, LargeHeader, LinkButton, ProgressRing, SectionTitle, cx } from '@/components/ui';
-import { NOTE_PEEK, fetchPlanData, fetchSources, fetchStudyDays, peekText, sb, type NotePeek, type PlanData, type SourceRowWithUnit } from '@/lib/data';
-import { pickToday, streakInfo } from '@/lib/review-plan';
+import { Button, DONE, Energy, ICONS, Icon, LargeHeader, LinkButton, ProgressRing, SectionTitle, Sheet, cx, useToast } from '@/components/ui';
+import {
+  NOTE_PEEK,
+  deleteSession,
+  fetchPlanData,
+  fetchRecentPace,
+  fetchReviewedSince,
+  fetchSession,
+  fetchSources,
+  fetchStudyDays,
+  peekText,
+  reviewedAfter,
+  sb,
+  type NotePeek,
+  type PlanData,
+  type SourceRowWithUnit,
+} from '@/lib/data';
+import { continuePlan, paceFrom, pickToday, streakInfo } from '@/lib/review-plan';
+import { resumePlan, type SessionRow } from '@/lib/review-session';
 import { daysUntil, kstDateString } from '@/lib/time';
 import { subjectVar } from '@/lib/colors';
 import { dueLabel } from '@/lib/srs';
@@ -34,6 +51,21 @@ async function fetchRecent(): Promise<Recent[]> {
 }
 
 const WEEK = ['월', '화', '수', '목', '금', '토', '일'];
+
+/** 오늘의 KOK (features.sessions): 저장한 세션(그날 것)과 세션 밖에서 푼 문제, 내 빠르기 (새 계획을 고를 때) */
+type HomeSession = { row: SessionRow | null; reviewed: Map<string, string>; pace: number };
+
+async function fetchHomeSession(plan: PlanData): Promise<HomeSession> {
+  const [row, logs] = await Promise.all([fetchSession('home').catch(() => null), fetchRecentPace().catch(() => [])]);
+  const todayRow = row && row.day === kstDateString(new Date()) ? row : null;
+  const reviewed = todayRow ? await fetchReviewedSince(todayRow.created_at).catch(() => new Map<string, string>()) : new Map<string, string>();
+  const types = new Map(plan.cards.map((c) => [c.question_id, c.type]));
+  const pace = paceFrom(logs.map((l) => ({ ms: l.ms, type: l.question_id ? types.get(l.question_id) : null })));
+  return { row: todayRow, reviewed, pace };
+}
+
+/** 오늘의 KOK 카드에 보일 것: 전체·끝낸·남은 수, 저장한 세션이 있는지(started), 다 풀고도 더 풀 문제가 있는지(more) */
+type TodayView = { total: number; done: number; remaining: number; started: boolean; more: boolean };
 
 /** 에너지 카드 아래 한 줄: 어떤 플랜의 에너지인지, 언제 채워지는지 */
 function energyFoot(me: MeResponse): string {
@@ -64,18 +96,27 @@ export default function HomePage() {
   const { me } = useMe();
   const quick = useQuickAdd();
   const active = useActiveSources();
+  const router = useRouter();
+  const toast = useToast();
   const [plan, setPlan] = useState<PlanData | null>(null);
   const [days, setDays] = useState<string[]>([]);
   const [recent, setRecent] = useState<Recent[] | null>(null);
   const [err, setErr] = useState(false);
   const [version, setVersion] = useState(0);
+  /** 저장한 오늘의 KOK (features.sessions 일 때만 읽는다) */
+  const [home, setHome] = useState<HomeSession | null>(null);
+  const [confirmRestart, setConfirmRestart] = useState(false);
+  const [clearing, setClearing] = useState(false);
+  const sessionsOn = !!me?.features.sessions;
 
   useEffect(() => {
     let alive = true;
     Promise.all([fetchPlanData(), fetchStudyDays(120).catch(() => []), fetchRecent().catch(() => [])])
-      .then(([p, d, r]) => {
+      .then(async ([p, d, r]) => {
+        const h = sessionsOn ? await fetchHomeSession(p) : null;
         if (!alive) return;
         setPlan(p);
+        setHome(h);
         setDays(d);
         setRecent(r);
       })
@@ -83,7 +124,7 @@ export default function HomePage() {
     return () => {
       alive = false;
     };
-  }, [active.doneCount, version]);
+  }, [active.doneCount, version, sessionsOn]);
 
   const reloadActive = active.reload;
   useEffect(() => {
@@ -114,13 +155,61 @@ export default function HomePage() {
   const wrongCount = live.filter((c) => c.in_wrong_note).length;
   const hasCards = !!plan?.cards.length;
   const doneToday = plan?.doneToday ?? 0;
-  const dayTotal = doneToday + today.length;
   const subjectOf = new Map((plan?.subjects ?? []).map((s) => [s.id, s]));
 
-  const title = !plan ? '오늘' : today.length ? `오늘 복습 ${today.length}문제` : hasCards ? '오늘 할 일 끝!' : '첫 자료를 넣어 보세요';
+  // 오늘의 KOK: 저장한 세션이 있으면 그 진행(다른 데서 푼 문제도 끝낸 것으로), 없으면 지금 시작하면 고를 N분 분량 (시작하면 같은 계산으로 같은 문제)
+  let view: TodayView;
+  if (plan && home) {
+    const now = new Date();
+    if (home.row) {
+      const byId = new Map(plan.cards.map((c) => [c.question_id, c]));
+      const res = resumePlan(home.row, today, {
+        subjects: plan.planSubjects,
+        interleave: settings.interleave,
+        now,
+        cardOf: (id) => byId.get(id),
+        reviewedSince: reviewedAfter(home.reviewed, home.row.created_at),
+      });
+      const inPlan = new Set(res.plan);
+      view = { total: res.done.length + res.remaining.length, done: res.done.length, remaining: res.remaining.length, started: true, more: today.some((c) => !inPlan.has(c.question_id)) };
+    } else {
+      const c = continuePlan(today, plan.planSubjects, settings.minutes, { now, pace: home.pace, interleave: settings.interleave });
+      view = { total: c.cards.length, done: 0, remaining: c.cards.length, started: false, more: !c.all };
+    }
+  } else {
+    view = { total: doneToday + today.length, done: doneToday, remaining: today.length, started: false, more: false };
+  }
+  /** 오늘의 KOK 을 처음부터: 저장한 세션을 지우면 새 계획을 고른다 (푼 문제의 복습 기록은 그대로) */
+  const restartToday = async () => {
+    setClearing(true);
+    try {
+      await deleteSession('home');
+      setConfirmRestart(false);
+      setHome(null);
+      setVersion((v) => v + 1);
+      toast('오늘의 KOK을 새로 골랐어요.', 'ok', DONE);
+    } catch {
+      toast('지우지 못했어요. 다시 해 주세요.', 'bad');
+    } finally {
+      setClearing(false);
+    }
+  };
+  /** 다 풀고 조금 더: 저장한 세션을 지우고 새 계획으로 바로 시작 */
+  const moreToday = async () => {
+    setClearing(true);
+    try {
+      await deleteSession('home');
+      router.push('/review?start=1');
+    } catch {
+      toast('시작하지 못했어요. 다시 해 주세요.', 'bad');
+      setClearing(false);
+    }
+  };
+
+  const title = !plan ? '오늘' : view.remaining ? `오늘 복습 ${view.remaining}문제` : hasCards ? '오늘 할 일 끝!' : '첫 자료를 넣어 보세요';
   const subtitleText = !plan
     ? null
-    : today.length
+    : view.remaining
       ? `${me.nickname ?? ''}님, 잊어버리기 직전인 문제가 기다려요`
       : hasCards
         ? nextDue
@@ -176,11 +265,11 @@ export default function HomePage() {
         // 자리 표시와 같은 크기의 카드는 그 자리에 두고, 안의 글만 번지며 나타난다. 화면의 핵심 카드라 테마 빛이 번진다(kok-hero)
         <section className="kok-card kok-hero grid gap-4 p-5">
           <div className="kok-fill flex items-center gap-4" style={{ ['--i' as string]: 0 }}>
-            <ProgressRing value={dayTotal ? (doneToday / dayTotal) * 100 : 100} size={76} stroke={7} label="오늘 복습 진행">
-              {today.length ? (
+            <ProgressRing value={view.total ? (view.done / view.total) * 100 : 100} size={76} stroke={7} label="오늘 복습 진행">
+              {view.remaining ? (
                 <span className="text-center leading-none">
-                  <span className="block font-display text-[22px] tabular-nums">{doneToday}</span>
-                  <span className="text-[11px] font-semibold text-muted">/ {dayTotal}</span>
+                  <span className="block font-display text-[22px] tabular-nums">{view.done}</span>
+                  <span className="text-[11px] font-semibold text-muted">/ {view.total}</span>
                 </span>
               ) : (
                 <Icon d={ICONS.check} size={30} strokeWidth={2.6} className="text-fab" />
@@ -188,15 +277,30 @@ export default function HomePage() {
             </ProgressRing>
             <div className="min-w-0">
               <p className="text-sm font-semibold text-muted">오늘의 KOK</p>
-              <p className="font-display text-xl leading-snug">{today.length ? `${today.length}문제 남았어요` : '복습 완료'}</p>
-              <p className="text-sm text-muted">{doneToday ? `오늘 ${doneToday}문제 풀었어요` : '하루 5분이면 충분해요'}</p>
+              <p className="font-display text-xl leading-snug">{view.remaining ? `${view.remaining}문제 남았어요` : '복습 완료'}</p>
+              <p className="text-sm text-muted">
+                {view.done ? `오늘 ${view.done}문제 풀었어요` : `하루 ${settings.minutes}분이면 충분해요`}
+                {view.started && view.done > 0 && view.remaining > 0 ? (
+                  <>
+                    {' · '}
+                    <button type="button" className="font-semibold underline" onClick={() => setConfirmRestart(true)}>
+                      처음부터
+                    </button>
+                  </>
+                ) : null}
+              </p>
             </div>
           </div>
-          {today.length ? (
-            // 고르는 화면 없이 지난번 시간(기본 5분)만큼의 오늘 복습 문제로 바로 시작한다 (?start=1)
+          {view.remaining ? (
+            // 고르는 화면 없이 바로 시작한다 (?start=1): 저장한 오늘 KOK 이 있으면 남은 문제로 이어서, 없으면 지난번 시간(기본 5분)만큼 골라서
             <LinkButton href="/review?start=1" size="lg" className="kok-fill kok-cta w-full">
-              {settings.minutes}분 KOK 시작
+              {view.done ? `이어서 하기 · ${view.remaining}문제` : `${settings.minutes}분 KOK 시작`}
             </LinkButton>
+          ) : view.started && view.more ? (
+            // 오늘의 KOK 을 다 풀었고 복습할 차례가 더 남았으면: 새로 골라 바로 시작
+            <Button variant="secondary" className="kok-fill w-full" busy={clearing} onClick={moreToday}>
+              조금 더 하기
+            </Button>
           ) : (
             // 오늘 복습을 다 했으면: 오답 다시 보기, 오답이 없으면 지난 공부를 기간으로 골라 다시 풀기
             <LinkButton href={wrongCount ? '/review?mode=wrong' : '/review'} variant="secondary" className="kok-fill w-full">
@@ -383,6 +487,27 @@ export default function HomePage() {
         </Link>
       </div>
       {err ? <p className="text-sm text-bad">복습 정보를 불러오지 못했어요. 새로 고침해 주세요.</p> : null}
+
+      {/* 오늘의 KOK 처음부터: 저장한 진행을 지우고 새로 고른다 (빛나는 카드 밖에 둔다: 카드가 isolation 이라 안에 두면 아래 메뉴 밑에 깔린다) */}
+      <Sheet
+        open={confirmRestart}
+        onClose={() => !clearing && setConfirmRestart(false)}
+        title="오늘의 KOK 처음부터"
+        footer={
+          <div className="grid grid-cols-2 gap-2">
+            <Button variant="secondary" size="lg" onClick={() => setConfirmRestart(false)} disabled={clearing}>
+              그대로 두기
+            </Button>
+            <Button size="lg" busy={clearing} onClick={restartToday}>
+              처음부터
+            </Button>
+          </div>
+        }
+      >
+        <p className="text-[15px] leading-relaxed">
+          오늘 푼 <b>{view.done}문제</b>의 복습 기록은 그대로 남아요. 오늘의 KOK만 새로 골라서 처음부터 시작해요.
+        </p>
+      </Sheet>
     </div>
   );
 }

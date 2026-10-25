@@ -46,6 +46,8 @@ export type MeResponse = {
     courses: boolean;
     /** PDF 요약 정리 (note_pdfs) */
     pdfs: boolean;
+    /** 저장한 복습 세션 (review_sessions): 홈의 N분 KOK·복습 탭 이어서 하기 */
+    sessions: boolean;
   };
   consented: boolean;
   settings: UserSettings;

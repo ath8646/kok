@@ -779,6 +779,47 @@ drop trigger if exists note_pdfs_touch on public.note_pdfs;
 create trigger note_pdfs_touch before update on public.note_pdfs
   for each row execute function public.kok_touch_updated_at();
 
+-- ---------------------------------------------------------------------
+-- 저장한 복습 세션: 홈의 'N분 KOK'(key home, 그날만)·복습 탭(review)·오답 다시 풀기(wrong)의 고른 문제(plan)와 푼 것(answered).
+-- 한 사람에 열쇠마다 하나. 지금 풀 문제는 화면이 열 때마다 다시 계산한다 (src/lib/review-session.ts). 학생이 모든 칸을 직접 쓴다.
+-- answered: {문제 id: {ok, sec(계획의 예상 시간), at}}, pace: 만들 때의 빠르기, seen_at: 새 문제를 나눠 넣은 때
+-- ---------------------------------------------------------------------
+create table if not exists public.review_sessions (
+  user_id uuid not null references auth.users(id) on delete cascade,
+  key text not null check (key in ('home', 'review', 'wrong')),
+  minutes int not null check (minutes between 1 and 120),
+  period text not null default 'due' check (period in ('due', 'today', '3d', '7d', '30d', 'all')),
+  subject_id uuid references public.subjects(id) on delete cascade,
+  pace real not null default 1 check (pace between 0.3 and 3),
+  day date not null,
+  plan jsonb not null default '[]'::jsonb check (jsonb_typeof(plan) = 'array' and pg_column_size(plan) < 32768),
+  answered jsonb not null default '{}'::jsonb check (jsonb_typeof(answered) = 'object' and pg_column_size(answered) < 65536),
+  seen_at timestamptz not null default now(),
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  primary key (user_id, key)
+);
+drop trigger if exists review_sessions_touch on public.review_sessions;
+create trigger review_sessions_touch before update on public.review_sessions
+  for each row execute function public.kok_touch_updated_at();
+
+-- 푼 문제 하나를 세션에 적는다 (한 번에 한 문제씩 더해서, 두 기기가 같이 써도 서로 덮지 않게). 내 세션만 (security invoker)
+create or replace function public.kok_session_answer(p_key text, p_qid text, p_entry jsonb)
+returns void
+language sql
+security invoker
+set search_path = public
+as $$
+  update public.review_sessions
+     set answered = coalesce(answered, '{}'::jsonb) || jsonb_build_object(p_qid, p_entry)
+   where user_id = (select auth.uid())
+     and key = p_key
+     and char_length(p_qid) <= 64
+     and pg_column_size(p_entry) <= 256;
+$$;
+revoke execute on function public.kok_session_answer(text, text, jsonb) from public, anon;
+grant execute on function public.kok_session_answer(text, text, jsonb) to authenticated, service_role;
+
 -- =====================================================================
 -- 권한(GRANT): 로그인 안 한 사람(anon)은 아무것도 못 하고,
 -- 로그인한 사람(authenticated)은 아래에 적은 것만 할 수 있다.
@@ -791,7 +832,7 @@ revoke all on
   public.coupons, public.coupon_redemptions, public.reports, public.app_settings, public.rate_hits,
   public.upload_tickets, public.account_tombstones, public.custom_plans,
   public.note_versions, public.chat_messages, public.user_themes, public.theme_images, public.app_counters,
-  public.note_courses, public.note_pdfs
+  public.note_courses, public.note_pdfs, public.review_sessions
 from anon, authenticated;
 
 grant all on
@@ -800,7 +841,7 @@ grant all on
   public.coupons, public.coupon_redemptions, public.reports, public.app_settings, public.rate_hits,
   public.upload_tickets, public.account_tombstones, public.custom_plans,
   public.note_versions, public.chat_messages, public.user_themes, public.theme_images, public.app_counters,
-  public.note_courses, public.note_pdfs
+  public.note_courses, public.note_pdfs, public.review_sessions
 to service_role;
 grant usage, select on all sequences in schema public to service_role;
 
@@ -853,6 +894,9 @@ grant update (progress) on public.note_courses to authenticated;
 grant select on public.note_pdfs to authenticated;
 grant update (name) on public.note_pdfs to authenticated;
 
+-- 저장한 복습 세션: 내 것은 모두 (RLS 가 내 행만 허락한다)
+grant select, insert, update, delete on public.review_sessions to authenticated;
+
 -- 푼 기록: 보기, 쓰기
 grant select, insert on public.review_logs to authenticated;
 grant usage, select on sequence public.review_logs_id_seq to authenticated;
@@ -897,6 +941,7 @@ alter table public.theme_images enable row level security;
 alter table public.app_counters enable row level security;
 alter table public.note_courses enable row level security;
 alter table public.note_pdfs enable row level security;
+alter table public.review_sessions enable row level security;
 
 -- profiles
 drop policy if exists "profiles: read own" on public.profiles;
@@ -976,6 +1021,11 @@ create policy "note_pdfs: read own" on public.note_pdfs
 drop policy if exists "note_pdfs: update own" on public.note_pdfs;
 create policy "note_pdfs: update own" on public.note_pdfs
   for update to authenticated using (user_id = (select auth.uid())) with check (user_id = (select auth.uid()));
+
+-- review_sessions: 내 것만
+drop policy if exists "review_sessions: own" on public.review_sessions;
+create policy "review_sessions: own" on public.review_sessions
+  for all to authenticated using (user_id = (select auth.uid())) with check (user_id = (select auth.uid()));
 
 -- questions
 drop policy if exists "user_themes: read own" on public.user_themes;

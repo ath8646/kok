@@ -90,7 +90,8 @@ describe('quick-add: 입력한 글', () => {
 
 describe('카드 미리보기 글', () => {
   it('수식을 읽을 수 있는 글자로 바꾼다', async () => {
-    const { previewText, texToText } = await import('@/lib/richtext');
+    const { previewText } = await import('@/lib/richtext');
+    const { texToText } = await import('@/lib/tex-text');
     expect(previewText('식물은 $CO_2$와 물을 포도당으로 바꾼다.')).toBe('식물은 CO₂와 물을 포도당으로 바꾼다.');
     expect(texToText('6CO_2 + 6H_2O \\rightarrow C_6H_{12}O_6 + 6O_2')).toBe('6CO₂ + 6H₂O → C₆H₁₂O₆ + 6O₂');
     expect(texToText('x^2 + y^{2} = r^2')).toBe('x² + y² = r²');

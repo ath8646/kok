@@ -1,15 +1,18 @@
 // PDF 요약 정리: 정리 노트를 손글씨 필기 느낌의 PDF 로 그린다 (AI 없음).
 // 어두운 모눈종이 위에 제목·구역 알약·개념 띠·정의 상자·주의·예시·공식·마인드맵·자료 그림·확인해 볼 것.
 // 글꼴: 본문 고운돋움(Gowun Dodum)·제목 주아(Jua), OFL (src/lib/server/pdf-fonts, 한글 11172자·2350자 부분 글꼴.
-// 글리프 길이를 2바이트로 맞춘 글꼴만 쓴다: pdf-lib 의 부분 글꼴 만들기가 홀수 길이를 깨뜨린다)
+// 글리프 길이를 2바이트로 맞춘 글꼴만 쓴다: pdf-lib 의 부분 글꼴 만들기가 홀수 길이를 깨뜨린다).
+// 두 글꼴에 없는 수식 글자는 DejaVu Sans 에서 뽑은 글꼴로: 그리스 문자는 ExtraLight(본문 획 굵기와 비슷), 위아래 첨자·⇌ 같은 기호는 Book
+// (tools/pdf-fonts/math-font.py). 수식은 texToText 로 한 줄 글로 바꾸고, 제목·용어·이름처럼 꾸미기 없이 그리는 글은 plainMathText 로
 import 'server-only';
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
-import fontkit from '@pdf-lib/fontkit';
+import fontkit, { type Font as KitFont } from '@pdf-lib/fontkit';
 import { PDFDocument, rgb, type PDFFont, type PDFImage, type PDFPage, type RGB } from 'pdf-lib';
 import type { Mindmap, Note } from '@/lib/ai/schemas';
 import type { PdfTheme } from '@/lib/note-pdf';
-import { parseRich, texToText, type Inline } from '@/lib/richtext';
+import { parseRich, plainMathText, type Inline } from '@/lib/richtext';
+import { texToText } from '@/lib/tex-text';
 
 export type PdfFigure = { title: string; caption: string; bytes: Uint8Array; w: number; h: number };
 export type NotePdfInput = {
@@ -92,15 +95,18 @@ const PALETTES: Record<PdfTheme, Palette> = {
 };
 
 // ------------------------------------------------------------- 글꼴
-let fontCache: Promise<{ body: Uint8Array; head: Uint8Array }> | null = null;
+/** 본문·제목 글꼴, 그다음 차례로 찾는 수식 글꼴들 */
+const FONT_FILES = ['GowunDodum-Regular.sub.woff2', 'Jua-Regular.sub.woff2', 'DejaVuSans-Greek.sub.woff2', 'DejaVuSans-Math.sub.woff2'];
+let fontCache: Promise<Uint8Array[]> | null = null;
 function loadFonts() {
   fontCache ??= (async () => {
     const dir = path.join(process.cwd(), 'src', 'lib', 'server', 'pdf-fonts');
-    const [body, head] = await Promise.all([readFile(path.join(dir, 'GowunDodum-Regular.sub.woff2')), readFile(path.join(dir, 'Jua-Regular.sub.woff2'))]);
-    return { body: new Uint8Array(body), head: new Uint8Array(head) };
+    return (await Promise.all(FONT_FILES.map((f) => readFile(path.join(dir, f))))).map((b) => new Uint8Array(b));
   })();
   return fontCache;
 }
+/** 글자 모양 재기용 (위에 붙는 표시 자리): 필요할 때만 읽는다 */
+const kitCache: KitFont[] = [];
 
 type Run = { text: string; b?: boolean; mark?: boolean; red?: boolean };
 
@@ -131,18 +137,24 @@ class Sheet {
   /** 위에서부터 잰 지금 자리 */
   y = MARGIN.top;
   private chars: { body: Set<number>; head: Set<number> };
+  /** 본문 글꼴에 없는 글자를 차례로 찾는 글꼴 (그리스 문자 → 수식 기호) */
+  private extra: Array<{ font: PDFFont; chars: Set<number> }>;
 
   constructor(
     readonly doc: PDFDocument,
     readonly p: Palette,
     readonly body: PDFFont,
     readonly head: PDFFont,
+    extra: PDFFont[],
+    /** 글자 모양 (위에 붙는 표시를 앞 글자 위에 놓을 때) */
+    private kit: (font: PDFFont) => KitFont | null,
   ) {
     this.chars = { body: new Set(body.getCharacterSet()), head: new Set(head.getCharacterSet()) };
+    this.extra = extra.map((font) => ({ font, chars: new Set(font.getCharacterSet()) }));
     this.newPage();
   }
 
-  /** 글꼴에 없는 글자는 □ 로 (pdf-lib 가 멈추지 않게) */
+  /** 어느 글꼴에도 없는 글자는 □ 로 (pdf-lib 가 멈추지 않게) */
   clean(s: string, font: 'body' | 'head' = 'body'): string {
     const set = this.chars[font];
     let out = '';
@@ -151,9 +163,53 @@ class Sheet {
       if (ch === '\n' || ch === '\t') out += ' ';
       else if (set.has(cp)) out += ch;
       else if (cp >= 0xe000 && cp <= 0xf8ff) continue;
-      else out += this.chars.body.has(cp) ? ch : '□';
+      else out += this.chars.body.has(cp) || this.extra.some((f) => f.chars.has(cp)) ? ch : '□';
     }
     return out;
+  }
+
+  /** 글을 글꼴이 같은 조각으로: 고른 글꼴 → 본문 글꼴 → 수식 글꼴들. 위에 붙는 표시(x̄ 의 막대)는 따로 */
+  pieces(text: string, prefer: PDFFont = this.body): Array<{ text: string; font: PDFFont; mark: boolean }> {
+    const out: Array<{ text: string; font: PDFFont; mark: boolean }> = [];
+    for (const ch of text) {
+      const cp = ch.codePointAt(0) ?? 0;
+      const head = prefer === this.head && this.chars.head.has(cp);
+      const font = head ? this.head : this.chars.body.has(cp) ? this.body : (this.extra.find((f) => f.chars.has(cp))?.font ?? this.body);
+      const mark = /\p{Mn}/u.test(ch);
+      const last = out[out.length - 1];
+      if (!mark && last && !last.mark && last.font === font) last.text += ch;
+      else out.push({ text: ch, font, mark });
+    }
+    return out;
+  }
+
+  /** 한 줄을 그린다 (글꼴에 없는 글자는 다른 글꼴로, 위에 붙는 표시는 앞 글자 가운데 위로). 그린 너비를 돌려준다 */
+  draw(text: string, x: number, baseline: number, size: number, color: RGB, o: { font?: PDFFont; page?: PDFPage; bold?: boolean } = {}): number {
+    const page = o.page ?? this.page;
+    const put = (t: string, font: PDFFont, px: number, py: number) => {
+      page.drawText(t, { x: px, y: py, size, font, color });
+      if (o.bold) page.drawText(t, { x: px + 0.35, y: py, size, font, color });
+    };
+    let cx = x;
+    let base: { x: number; w: number; ch: string; font: PDFFont } | null = null;
+    for (const pt of this.pieces(text, o.font)) {
+      if (!pt.mark) {
+        put(pt.text, pt.font, cx, baseline);
+        cx += pt.font.widthOfTextAtSize(pt.text, size);
+        const ch = Array.from(pt.text).pop() ?? '';
+        const w = pt.font.widthOfTextAtSize(ch, size);
+        base = { x: cx - w, w, ch, font: pt.font };
+        continue;
+      }
+      const mk = this.kit(pt.font);
+      const bk = base && this.kit(base.font);
+      if (!base || !mk || !bk) continue;
+      const m = mk.glyphForCodePoint(pt.text.codePointAt(0) ?? 0).bbox;
+      const top = (bk.glyphForCodePoint(base.ch.codePointAt(0) ?? 0).bbox.maxY * size) / bk.unitsPerEm;
+      const k = size / mk.unitsPerEm;
+      put(pt.text, pt.font, base.x + base.w / 2 - ((m.minX + m.maxX) / 2) * k, baseline + Math.max(0, top + size * 0.08 - m.minY * k));
+    }
+    return cx - x;
   }
 
   newPage() {
@@ -182,7 +238,7 @@ class Sheet {
   }
 
   width(text: string, size: number, font: PDFFont = this.body): number {
-    return font.widthOfTextAtSize(text, size);
+    return this.pieces(text, font).reduce((a, pt) => a + (pt.mark ? 0 : pt.font.widthOfTextAtSize(pt.text, size)), 0);
   }
 
   /**
@@ -195,7 +251,7 @@ class Sheet {
     let start = 0;
     let lastSpace = -1;
     let i = 0;
-    const measure = (a: number, b: number) => font.widthOfTextAtSize(chars.slice(a, b).join(''), size);
+    const measure = (a: number, b: number) => this.width(chars.slice(a, b).join(''), size, font);
     while (i < chars.length) {
       const ch = chars[i];
       if (ch === '\n') {
@@ -229,29 +285,15 @@ class Sheet {
     return this.wrapRanges(text, size, width, font).map(([a, b]) => chars.slice(a, b).join(''));
   }
 
-  /** 제목 글꼴에 없는 글자는 본문 글꼴로 (한 줄을 조각내어 그린다) */
+  /** 제목 글꼴로 한 줄 (제목 글꼴에 없는 글자는 본문·수식 글꼴로) */
   drawHead(text: string, x: number, yTop: number, size: number, color: RGB, align: 'left' | 'center' = 'left', maxWidth?: number) {
-    const parts: Array<{ text: string; font: PDFFont }> = [];
-    for (const ch of text) {
-      const cp = ch.codePointAt(0) ?? 0;
-      const font = this.chars.head.has(cp) ? this.head : this.body;
-      const last = parts[parts.length - 1];
-      if (last && last.font === font) last.text += ch;
-      else parts.push({ text: ch, font });
-    }
-    const total = parts.reduce((a, pt) => a + pt.font.widthOfTextAtSize(pt.text, size), 0);
-    let cx = align === 'center' ? x + ((maxWidth ?? 0) - total) / 2 : x;
-    const baseline = this.py(yTop + size * 0.86);
-    for (const pt of parts) {
-      this.page.drawText(pt.text, { x: cx, y: baseline, size, font: pt.font, color });
-      cx += pt.font.widthOfTextAtSize(pt.text, size);
-    }
+    const total = this.headWidth(text, size);
+    const cx = align === 'center' ? x + ((maxWidth ?? 0) - total) / 2 : x;
+    this.draw(text, cx, this.py(yTop + size * 0.86), size, color, { font: this.head });
     return total;
   }
   headWidth(text: string, size: number): number {
-    let w = 0;
-    for (const ch of text) w += (this.chars.head.has(ch.codePointAt(0) ?? 0) ? this.head : this.body).widthOfTextAtSize(ch, size);
-    return w;
+    return this.width(text, size, this.head);
   }
 
   /**
@@ -282,9 +324,7 @@ class Sheet {
           const w = this.width(piece, size);
           const baseline = this.py(this.y + size * 0.86);
           if (r.mark) this.page.drawRectangle({ x: cx - 1, y: baseline - size * 0.22, width: w + 2, height: size * 1.1, color: this.p.mark, opacity: this.p === PALETTES.dark ? 0.28 : 0.55 });
-          const c = r.red ? this.p.pink : color;
-          this.page.drawText(piece, { x: cx, y: baseline, size, font: this.body, color: c });
-          if (r.b) this.page.drawText(piece, { x: cx + 0.35, y: baseline, size, font: this.body, color: c });
+          this.draw(piece, cx, baseline, size, r.red ? this.p.pink : color, { bold: r.b });
           cx += w;
         }
         this.y += lh;
@@ -321,10 +361,10 @@ class Sheet {
   /** 쪽 맨 위 제목: 가운데, 아래 밑줄 (샘플 필기의 장 제목처럼). 오른쪽 위에 작은 글 (KOK · 과목 · 날짜) */
   title(text: string, meta: string) {
     const size = 24;
-    const m = this.clean(meta);
+    const m = this.clean(plainMathText(meta));
     const mw = this.width(m, 8.5);
-    this.page.drawText(m, { x: MARGIN.x + CONTENT_W - mw, y: this.py(MARGIN.top - 24 + 8.5 * 0.86), size: 8.5, font: this.body, color: this.p.muted });
-    const lines = this.wrap(this.clean(text, 'head'), size, CONTENT_W, this.head);
+    this.draw(m, MARGIN.x + CONTENT_W - mw, this.py(MARGIN.top - 24 + 8.5 * 0.86), 8.5, this.p.muted);
+    const lines = this.wrap(this.clean(plainMathText(text), 'head'), size, CONTENT_W, this.head);
     for (const l of lines) {
       this.drawHead(l, MARGIN.x, this.y, size, this.p.text, 'center', CONTENT_W);
       this.y += size * 1.3;
@@ -353,7 +393,7 @@ class Sheet {
     const size = 11.5;
     const h = 21;
     this.need(h + 40);
-    const lines = this.wrap(this.clean(label, 'head'), size, CONTENT_W - 20 - (right ? 50 : 0), this.head);
+    const lines = this.wrap(this.clean(plainMathText(label), 'head'), size, CONTENT_W - 20 - (right ? 50 : 0), this.head);
     const hh = h + (lines.length - 1) * (size * 1.3);
     this.roundRect(MARGIN.x, this.y, CONTENT_W, hh, 4, { fill: this.p.lavender, opacity: this.p.barAlpha });
     this.page.drawRectangle({ x: MARGIN.x, y: this.py(this.y, hh), width: 3, height: hh, color: this.p.lavender });
@@ -364,7 +404,7 @@ class Sheet {
     }
     if (right) {
       const rw = this.width(right, 9);
-      this.page.drawText(right, { x: MARGIN.x + CONTENT_W - rw - 8, y: this.py(this.y + 6 + 9 * 0.86), size: 9, font: this.body, color: this.p.yellow });
+      this.draw(right, MARGIN.x + CONTENT_W - rw - 8, this.py(this.y + 6 + 9 * 0.86), 9, this.p.yellow);
     }
     this.y += hh + 7;
   }
@@ -373,17 +413,16 @@ class Sheet {
   defBox(term: string, meaning: string) {
     const size = BODY;
     const pad = 6;
-    const label = `${this.clean(term)} : `;
+    const label = `${this.clean(plainMathText(term))} : `;
     const lw = this.width(label, size);
     const inner = CONTENT_W - pad * 2;
-    const lines = this.wrap(this.clean(meaning), size, Math.max(60, inner - lw));
+    const lines = this.wrap(this.clean(plainMathText(meaning)), size, Math.max(60, inner - lw));
     const h = pad * 2 + lines.length * LINE - (LINE - size * 1.15);
     this.need(h + 4);
     this.roundRect(MARGIN.x, this.y, CONTENT_W, h, 3, { stroke: this.p.line, strokeOpacity: this.p.lineAlpha, strokeWidth: 0.9 });
     const top = this.y + pad;
-    this.page.drawText(label, { x: MARGIN.x + pad, y: this.py(top + size * 0.86), size, font: this.body, color: this.p.lavender });
-    this.page.drawText(label, { x: MARGIN.x + pad + 0.35, y: this.py(top + size * 0.86), size, font: this.body, color: this.p.lavender });
-    lines.forEach((l, i) => this.page.drawText(l, { x: MARGIN.x + pad + lw, y: this.py(top + i * LINE + size * 0.86), size, font: this.body, color: this.p.text }));
+    this.draw(label, MARGIN.x + pad, this.py(top + size * 0.86), size, this.p.lavender, { bold: true });
+    lines.forEach((l, i) => this.draw(l, MARGIN.x + pad + lw, this.py(top + i * LINE + size * 0.86), size, this.p.text));
     this.y += h + 6;
   }
 
@@ -400,7 +439,7 @@ class Sheet {
     const top = this.y;
     this.roundRect(MARGIN.x, top + 1.5, lw, 14, 7, { fill: color, opacity: this.p === PALETTES.dark ? 0.22 : 0.14, stroke: color, strokeWidth: 0.8 });
     const tw = this.width(label, 8.5);
-    this.page.drawText(label, { x: MARGIN.x + (lw - tw) / 2, y: this.py(top + 1.5 + 2.5 + 8.5 * 0.86), size: 8.5, font: this.body, color });
+    this.draw(label, MARGIN.x + (lw - tw) / 2, this.py(top + 1.5 + 2.5 + 8.5 * 0.86), 8.5, color);
     const h = this.rich(lines, x, width);
     void h;
     this.y += 4;
@@ -411,7 +450,7 @@ class Sheet {
     const lead = '=> ';
     const lw = this.width(lead, BODY);
     this.need(LINE);
-    this.page.drawText(lead, { x: MARGIN.x + 6, y: this.py(this.y + BODY * 0.86), size: BODY, font: this.body, color: this.p.lavender });
+    this.draw(lead, MARGIN.x + 6, this.py(this.y + BODY * 0.86), BODY, this.p.lavender);
     this.rich(richLines(text), MARGIN.x + 6 + lw, CONTENT_W - 6 - lw, { color: this.p.muted });
   }
 
@@ -426,13 +465,13 @@ class Sheet {
     let yy = this.y + 6;
     for (const l of lines) {
       const w = this.width(l, size);
-      this.page.drawText(l, { x: MARGIN.x + (CONTENT_W - w) / 2, y: this.py(yy + size * 0.86), size, font: this.body, color: this.p.text });
+      this.draw(l, MARGIN.x + (CONTENT_W - w) / 2, this.py(yy + size * 0.86), size, this.p.text);
       yy += size * 1.35;
     }
     if (label) {
-      const t = this.clean(label);
+      const t = this.clean(plainMathText(label));
       const w = this.width(t, 8.5);
-      this.page.drawText(t, { x: MARGIN.x + (CONTENT_W - w) / 2, y: this.py(yy + 1 + 8.5 * 0.86), size: 8.5, font: this.body, color: this.p.muted });
+      this.draw(t, MARGIN.x + (CONTENT_W - w) / 2, this.py(yy + 1 + 8.5 * 0.86), 8.5, this.p.muted);
     }
     this.y += h + 8;
   }
@@ -444,7 +483,7 @@ class Sheet {
     const kidsOf = (id: string) => mm.nodes.filter((n) => n.parent_id === id);
     const spineX = MARGIN.x + 14;
     // 뿌리
-    const rootText = this.clean(mm.root_label || '주제', 'head');
+    const rootText = this.clean(plainMathText(mm.root_label) || '주제', 'head');
     const rw = this.headWidth(rootText, 12.5) + 24;
     this.need(60);
     const rootTop = this.y;
@@ -454,14 +493,15 @@ class Sheet {
     let spineFrom = rootTop + 24;
     level1.forEach((n, i) => {
       const color = this.p.branches[i % this.p.branches.length];
-      const label = this.clean(n.label, 'head');
-      const hint = n.hint ? this.clean(n.hint) : '';
+      const label = this.clean(plainMathText(n.label), 'head');
+      const hint = n.hint ? this.clean(plainMathText(n.hint)) : '';
       const kids = kidsOf(n.id);
       const grand = (k: { id: string }) => kidsOf(k.id);
       const kidText = kids
         .map((k) => {
           const g = grand(k);
-          return g.length ? `${this.clean(k.label)} (${g.map((x) => this.clean(x.label)).join(', ')})` : this.clean(k.label);
+          const name = (x: { label: string }) => this.clean(plainMathText(x.label));
+          return g.length ? `${name(k)} (${g.map(name).join(', ')})` : name(k);
         })
         .join('  ·  ');
       const est = 22 + (hint ? LINE : 0) + (kidText ? this.wrap(kidText, 9.5, CONTENT_W - 44).length * 14 : 0) + 8;
@@ -477,14 +517,14 @@ class Sheet {
       this.roundRect(spineX + 12, top, pw, 20, 10, { fill: color, opacity: this.p === PALETTES.dark ? 0.9 : 1 });
       this.drawHead(label, spineX + 21, top + 4, 11, this.p === PALETTES.dark ? this.p.lavenderInk : hex('#ffffff'));
       if (hint) {
-        this.page.drawText(hint, { x: spineX + 12 + pw + 8, y: this.py(top + 5 + 9 * 0.86), size: 9, font: this.body, color: this.p.muted });
+        this.draw(hint, spineX + 12 + pw + 8, this.py(top + 5 + 9 * 0.86), 9, this.p.muted);
       }
       this.y += 24;
       if (kidText) {
         const lines = this.wrap(kidText, 9.5, CONTENT_W - 44);
         for (const l of lines) {
           this.need(14);
-          this.page.drawText(l, { x: spineX + 26, y: this.py(this.y + 9.5 * 0.86), size: 9.5, font: this.body, color: this.p.text });
+          this.draw(l, spineX + 26, this.py(this.y + 9.5 * 0.86), 9.5, this.p.text);
           this.y += 14;
         }
       }
@@ -505,7 +545,7 @@ class Sheet {
       h = maxH;
       w = h * ratio;
     }
-    const capLines = f.caption ? this.wrap(this.clean(f.caption), 9, CONTENT_W - 20) : [];
+    const capLines = f.caption ? this.wrap(this.clean(plainMathText(f.caption)), 9, CONTENT_W - 20) : [];
     const block = h + 12 + (f.title ? 15 : 0) + capLines.length * 12.5 + 10;
     this.need(Math.min(block, PAGE.h - MARGIN.top - MARGIN.bottom));
     const x = MARGIN.x + (CONTENT_W - w) / 2;
@@ -513,12 +553,12 @@ class Sheet {
     this.page.drawImage(img, { x, y: this.py(this.y + 3, h), width: w, height: h });
     this.y += h + 12;
     if (f.title) {
-      const t = this.clean(f.title, 'head');
+      const t = this.clean(plainMathText(f.title), 'head');
       this.drawHead(t, MARGIN.x + 10, this.y, 10.5, this.p.lavender);
       this.y += 15;
     }
     for (const l of capLines) {
-      this.page.drawText(l, { x: MARGIN.x + 10, y: this.py(this.y + 9 * 0.86), size: 9, font: this.body, color: this.p.muted });
+      this.draw(l, MARGIN.x + 10, this.py(this.y + 9 * 0.86), 9, this.p.muted);
       this.y += 12.5;
     }
     this.y += 10;
@@ -539,12 +579,11 @@ class Sheet {
     const n = this.pages.length;
     this.pages.forEach((pg, i) => {
       const t = `${i + 1} / ${n}`;
-      const w = this.body.widthOfTextAtSize(t, 8.5);
-      pg.drawText(t, { x: (PAGE.w - w) / 2, y: 22, size: 8.5, font: this.body, color: this.p.muted });
+      this.draw(t, (PAGE.w - this.width(t, 8.5)) / 2, 22, 8.5, this.p.muted, { page: pg });
       pg.drawText('KOK', { x: PAGE.w - MARGIN.x - this.head.widthOfTextAtSize('KOK', 10), y: 21, size: 10, font: this.head, color: this.p.lavender });
       if (i > 0) {
-        const short = this.clean(title, 'head').slice(0, 30);
-        pg.drawText(short, { x: MARGIN.x, y: 22, size: 8.5, font: this.body, color: this.p.muted });
+        const short = Array.from(this.clean(plainMathText(title), 'head')).slice(0, 30).join('');
+        this.draw(short, MARGIN.x, 22, 8.5, this.p.muted, { page: pg });
       }
     });
   }
@@ -562,9 +601,14 @@ export async function buildNotePdf(input: NotePdfInput): Promise<{ bytes: Uint8A
   doc.setAuthor('KOK');
   doc.setCreator('KOK');
   doc.setCreationDate(input.date);
-  const [body, head] = await Promise.all([doc.embedFont(fonts.body, { subset: true }), doc.embedFont(fonts.head, { subset: true })]);
+  const embedded = await Promise.all(fonts.map((f) => doc.embedFont(f, { subset: true })));
+  const [body, head, ...extra] = embedded;
+  const kit = (font: PDFFont) => {
+    const i = embedded.indexOf(font);
+    return i < 0 ? null : (kitCache[i] ??= fontkit.create(fonts[i]));
+  };
   const p = PALETTES[input.theme];
-  const s = new Sheet(doc, p, body, head);
+  const s = new Sheet(doc, p, body, head, extra, kit);
   const note = input.note;
   const date = input.date.toLocaleDateString('ko-KR', { year: 'numeric', month: 'long', day: 'numeric', timeZone: 'Asia/Seoul' });
   const metaParts = ['@ KOK', input.subject, input.unit || note.unit, date].filter(Boolean);

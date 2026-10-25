@@ -2,6 +2,8 @@
 // 여는 $ 바로 뒤와 닫는 $ 바로 앞은 빈칸이 아니고, 닫는 $ 뒤에 숫자가 오지 않는다.
 // 그래서 "$5 와 $10" 같은 돈 표기는 수식으로 보지 않는다.
 
+import { texToText } from './tex-text';
+
 export type RichPart = { kind: 'text'; text: string } | { kind: 'math'; tex: string; display: boolean };
 
 export function splitMath(input: string): RichPart[] {
@@ -197,144 +199,16 @@ export function stripMarks(input: string): string {
     .join('\n');
 }
 
-const SUB: Record<string, string> = {
-  '0': '₀',
-  '1': '₁',
-  '2': '₂',
-  '3': '₃',
-  '4': '₄',
-  '5': '₅',
-  '6': '₆',
-  '7': '₇',
-  '8': '₈',
-  '9': '₉',
-  '+': '₊',
-  '-': '₋',
-  '=': '₌',
-  '(': '₍',
-  ')': '₎',
-  a: 'ₐ',
-  e: 'ₑ',
-  o: 'ₒ',
-  x: 'ₓ',
-  n: 'ₙ',
-  i: 'ᵢ',
-  m: 'ₘ',
-};
-const SUP: Record<string, string> = {
-  '0': '⁰',
-  '1': '¹',
-  '2': '²',
-  '3': '³',
-  '4': '⁴',
-  '5': '⁵',
-  '6': '⁶',
-  '7': '⁷',
-  '8': '⁸',
-  '9': '⁹',
-  '+': '⁺',
-  '-': '⁻',
-  '=': '⁼',
-  '(': '⁽',
-  ')': '⁾',
-  n: 'ⁿ',
-  i: 'ⁱ',
-  x: 'ˣ',
-};
-const TEX_SYMBOLS: Array<[RegExp, string]> = [
-  [/\\(?:times)\b/g, '×'],
-  [/\\(?:cdot)\b/g, '·'],
-  [/\\(?:div)\b/g, '÷'],
-  [/\\(?:pm)\b/g, '±'],
-  [/\\(?:rightleftharpoons|leftrightarrow|Leftrightarrow)\b/g, '⇄'],
-  [/\\(?:rightarrow|longrightarrow|Rightarrow|to)\b/g, '→'],
-  [/\\(?:leftarrow|Leftarrow)\b/g, '←'],
-  [/\\(?:leq|le)\b/g, '≤'],
-  [/\\(?:geq|ge)\b/g, '≥'],
-  [/\\(?:neq|ne)\b/g, '≠'],
-  [/\\(?:approx)\b/g, '≈'],
-  [/\\(?:infty)\b/g, '∞'],
-  [/\\(?:propto)\b/g, '∝'],
-  [/\\(?:sum)\b/g, '∑'],
-  [/\\(?:int)\b/g, '∫'],
-  [/\\(?:partial)\b/g, '∂'],
-  [/\\(?:nabla)\b/g, '∇'],
-  [/\\(?:therefore)\b/g, '∴'],
-  [/\\(?:because)\b/g, '∵'],
-  [/\\(?:perp)\b/g, '⊥'],
-  [/\\(?:parallel)\b/g, '∥'],
-  [/\\(?:angle)\b/g, '∠'],
-  [/\\(?:triangle)\b/g, '△'],
-  [/\\(?:ldots|cdots|dots)\b/g, '…'],
-  [/\\(?:in)\b/g, '∈'],
-  [/\\(?:subset)\b/g, '⊂'],
-  [/\\(?:cup)\b/g, '∪'],
-  [/\\(?:cap)\b/g, '∩'],
-  [/\\(?:ast)\b/g, '*'],
-  [/\^\s*\{?\\circ\}?/g, '°'],
-  [/\\(?:degree)\b/g, '°'],
-  [/\\(?:pi)\b/g, 'π'],
-  [/\\(?:alpha)\b/g, 'α'],
-  [/\\(?:beta)\b/g, 'β'],
-  [/\\(?:gamma)\b/g, 'γ'],
-  [/\\(?:Delta)\b/g, 'Δ'],
-  [/\\(?:delta)\b/g, 'δ'],
-  [/\\(?:theta)\b/g, 'θ'],
-  [/\\(?:lambda)\b/g, 'λ'],
-  [/\\(?:mu)\b/g, 'μ'],
-  [/\\(?:sigma)\b/g, 'σ'],
-  [/\\(?:omega)\b/g, 'ω'],
-  [/\\(?:Omega)\b/g, 'Ω'],
-  [/\\(?:rho)\b/g, 'ρ'],
-  [/\\(?:tau)\b/g, 'τ'],
-  [/\\(?:phi)\b/g, 'φ'],
-  [/\\(?:epsilon|varepsilon)\b/g, 'ε'],
-  [/\\(?:eta)\b/g, 'η'],
-  [/\\(?:kappa)\b/g, 'κ'],
-  [/\\(?:nu)\b/g, 'ν'],
-  [/\\(?:Sigma)\b/g, 'Σ'],
-  [/\\(?:Gamma)\b/g, 'Γ'],
-  [/\\(?:Theta)\b/g, 'Θ'],
-  [/\\(?:Lambda)\b/g, 'Λ'],
-  [/\\(?:Phi)\b/g, 'Φ'],
-];
-
-function mapAll(s: string, table: Record<string, string>): string | null {
-  let out = '';
-  for (const ch of s) {
-    const m = table[ch];
-    if (!m) return null;
-    out += m;
-  }
-  return out;
-}
-
-/** 수식 한 조각을 글자로 대강 바꾼다 (CO_2 → CO₂, x^2 → x², \times → ×) */
-export function texToText(tex: string): string {
-  let t = tex;
-  t = t.replace(/\\(?:text|mathrm|textbf|mathbf|operatorname)\{([^{}]*)\}/g, '$1');
-  t = t.replace(/\\frac\{([^{}]*)\}\{([^{}]*)\}/g, '$1/$2');
-  t = t.replace(/\\sqrt\{([^{}]*)\}/g, '√($1)');
-  for (const [re, s] of TEX_SYMBOLS) t = t.replace(re, s);
-  t = t.replace(/_\{([^{}]*)\}|_([^\s{}\\])/g, (m, a: string | undefined, b: string | undefined) => {
-    const raw = a ?? b ?? '';
-    return mapAll(raw.replace(/\s+/g, ''), SUB) ?? raw;
-  });
-  t = t.replace(/\^\{([^{}]*)\}|\^([^\s{}\\])/g, (m, a: string | undefined, b: string | undefined) => {
-    const raw = a ?? b ?? '';
-    return mapAll(raw.replace(/\s+/g, ''), SUP) ?? `^${raw}`;
-  });
-  t = t.replace(/\\left|\\right/g, '');
-  t = t.replace(/\\[a-zA-Z]+/g, '');
-  t = t.replace(/[{}]/g, '').replace(/\\,|\;|\\!|\\ /g, ' ');
-  return t.replace(/\s+/g, ' ').trim();
+/** 꾸미기 기호(**, ==, !!)를 빼고 수식은 읽을 수 있는 글자로. 나머지 글은 그대로 (PDF 의 제목·용어처럼 __init__ 도 지키는 곳) */
+export function plainMathText(input: string): string {
+  return splitMath(stripRich(input ?? ''))
+    .map((p) => (p.kind === 'text' ? p.text : texToText(p.tex)))
+    .join('');
 }
 
 /** 카드 미리보기용: 수식은 읽을 수 있는 글자로, 줄바꿈과 꾸미기 기호는 정리 */
 export function previewText(input: string): string {
-  return splitMath(stripRich(input ?? ''))
-    .map((p) => (p.kind === 'text' ? p.text : texToText(p.tex)))
-    .join('')
+  return plainMathText(input)
     .replace(/\*\*|__|`/g, '')
     .replace(/\s+/g, ' ')
     .trim();

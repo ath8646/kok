@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { hasRichMarks, parseRich, previewText, stripMarks, stripRich, type Inline } from '@/lib/richtext';
+import { hasRichMarks, parseRich, plainMathText, previewText, stripMarks, stripRich, type Inline } from '@/lib/richtext';
 import { continueList, insertSnippet, toggleList, toggleWrap } from '@/lib/rich-edit';
 import { moveInGroup, starredFirst, withIds } from '@/lib/note-order';
 
@@ -38,6 +38,8 @@ describe('쉬운 꾸미기 읽기', () => {
   it('미리보기·검색 글에는 기호가 없다', () => {
     expect(stripRich('**굵게** ==형광== !!빨강!!\n- 목록')).toBe('굵게 형광 빨강\n목록');
     expect(previewText('**광합성**은 $CO_2$ 를 ==쓴다==')).toBe('광합성은 CO₂ 를 쓴다');
+    // PDF 제목·용어: 꾸미기만 빼고 __init__ 같은 글은 그대로
+    expect(plainMathText('**파이썬** __init__ 과 $\\frac{1}{2}mv^2$')).toBe('파이썬 __init__ 과 (1/2)mv²');
     expect(hasRichMarks('그냥 글')).toBe(false);
     expect(hasRichMarks('**굵게**')).toBe(true);
     expect(hasRichMarks('- 목록')).toBe(true);

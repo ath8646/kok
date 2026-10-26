@@ -309,6 +309,17 @@
   background: var(--bg);
   opacity: var(--theme-dim, 0.6);
 }
+/* 테마 고치기에서 글자가 잘 보이는 정도보다 덜 덮게 고르면(사진은 50%까지) 그림의 아주 어둡거나 밝은 곳이 더 비친다.
+   그래서 화면 바탕 위에 바로 놓인 글자는 둘레에 바탕색을 둘러 읽히게 한다 (--theme-halo: src/lib/themes/css.ts, 평소에는 none).
+   제 바탕이 있는 칸(카드·버튼·칩·시트·메뉴·입력 칸·그림) 안의 글자에는 필요 없어서 뺀다 */
+:root[data-bg] body {
+  text-shadow: var(--theme-halo, none);
+}
+:root[data-bg] :is(.kok-card, .kok-hero, .kok-glow, .kok-chip-on, .kok-tabbar, .kok-fab, .kok-bubble, .kok-star-badge, .kok-detail-card, .kok-paper),
+:root[data-bg] :is(.kok-toasts, [role='dialog'], [role='menu'], [role='listbox'], input, textarea, svg, [style*='background']),
+:root[data-bg] :is([class^='bg-'], [class*=' bg-']):not([class*='bg-transparent']) {
+  text-shadow: none;
+}
 
 /* 테마 글꼴 (글꼴 파일은 고른 사람만 받는다). 제목(font-display)도 같은 글꼴로 */
 :root[data-font='round'] {

@@ -444,6 +444,44 @@ describe('배경 그림 위에서도 글자가 잘 보인다', () => {
     }
   });
 
+  it('직접 고른 덮는 정도는 그대로 (사진은 50%까지): 테마 색은 그대로 두고 글자 둘레에 바탕색을 두른다', () => {
+    const base = {
+      light: { bg: '#f6eeec', surface: '#fffaf9', accent: '#8b3a0e' },
+      dark: { bg: '#140d0b', surface: '#241b18', accent: '#f0a070' },
+      image: { kind: 'file', id: '0f8fad5b-d9cb-469f-a165-70867728950e' },
+    };
+    const auto = readSpec({ ...base, dim: 0.6 })!;
+    const exact = readSpec({ ...base, dim: 0.5, dimExact: true })!;
+    const autoId = '1f8fad5b-d9cb-469f-a165-70867728950e';
+    const exactId = '2f8fad5b-d9cb-469f-a165-70867728950e';
+    rememberCustomThemes([
+      { id: autoId, name: '자동', spec: auto },
+      { id: exactId, name: '직접', spec: exact },
+    ]);
+    for (const mode of MODES) {
+      const a = specLook(auto, mode);
+      const e = specLook(exact, mode);
+      // 직접 고르지 않은 테마는 예전처럼 글자가 잘 보이는 정도까지 올려 덮는다
+      expect(a.dim).toBeGreaterThan(0.7);
+      expect(a.halo).toBe(false);
+      expect(e.dim).toBe(0.5);
+      expect(e.halo).toBe(true);
+      expect(e.readDim).toBe(a.dim);
+      // 글자 색·빛은 잘 보이는 정도에 맞춘 그대로 (검정·흰색으로 몰리지 않는다)
+      expect(e.tokens).toEqual(a.tokens);
+      expect(lookFor(`custom:${exactId}`, mode).fx).toEqual(lookFor(`custom:${autoId}`, mode).fx);
+    }
+    // 사진은 50% 밑으로 내려가지 않고, 잘 보이는 정도 이상이면 둘레가 없다
+    expect(specLook(readSpec({ ...base, dim: 0.3, dimExact: true })!, 'light').dim).toBe(0.5);
+    for (const mode of MODES) expect(specLook(readSpec({ ...base, dim: 0.9, dimExact: true })!, mode)).toMatchObject({ dim: 0.9, halo: false });
+    // 테마 CSS: 둘레가 필요할 때만 --theme-halo
+    expect(themeCss(specLook(exact, 'light'), specLook(exact, 'dark'))).toContain('--theme-halo:0 0 1px var(--bg),0 0 2px var(--bg)');
+    expect(themeCss(specLook(auto, 'light'), specLook(auto, 'dark'))).toContain('--theme-halo:none');
+    expect(themeCss(specLook(auto, 'light'), specLook(auto, 'dark'))).not.toContain('0 0 1px');
+    // 그 밖의 값은 받지 않는다
+    expect(zThemeSpec.safeParse({ ...base, dim: 0.5, dimExact: 'yes' }).success).toBe(false);
+  });
+
   it('무늬는 실제로 칠하는 색만큼만 덮는다 (옅은 무늬는 그대로, 진한 무늬는 더 덮는다)', () => {
     const light = readSpec({
       light: { bg: '#f3f3f6', surface: '#ffffff', accent: '#b84c08' },

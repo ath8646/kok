@@ -90,11 +90,12 @@ export async function POST(req: NextRequest, ctx: RouteContext<'/api/themes/[id]
       note = imageFailNote(made.fail);
     }
 
-    // 그리는 동안 다른 곳에서 색·이름을 고쳤을 수 있다: 그림·덮는 정도만 지금 테마에 넣는다 (읽은 그대로일 때만 저장)
+    // 그리는 동안 다른 곳에서 색·이름을 고쳤을 수 있다: 그림·덮는 정도만 지금 테마에 넣는다 (읽은 그대로일 때만 저장).
+    // 새 그림은 처음 덮는 정도부터 (예전 그림에 직접 고른 값은 지운다)
     let current = theme;
     for (let attempt = 0; attempt < 3; attempt++) {
       if (attempt) current = await loadOwnTheme(admin, acc.userId, id);
-      const spec = zThemeSpec.parse({ ...current.spec, image, dim });
+      const spec = zThemeSpec.parse({ ...current.spec, image, dim, dimExact: undefined });
       const { data, error } = await admin
         .from('user_themes')
         .update({ spec })

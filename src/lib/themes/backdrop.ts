@@ -11,6 +11,8 @@ import type { ThemeImage, ThemeSpec } from './spec';
 
 export const MIN_DIM = 0.2;
 export const MAX_DIM = 0.92;
+/** 사진·AI 그림을 직접 고를 때 가장 적게 덮는 정도 (무늬는 MIN_DIM) */
+export const MIN_PHOTO_DIM = 0.5;
 /** 밝은 모드: 그림을 덮은 뒤 가장 어두운 곳의 밝기가 이 이상 (이보다 어두우면 회색 글자가 묻힌다) */
 const LIGHT_FLOOR = 0.45;
 /** 어두운 모드: 가장 밝은 곳의 밝기가 이 이하 */
@@ -46,11 +48,29 @@ export function fitDim(inks: Ink[], bg: string, mode: Mode, dim: number): number
   return MAX_DIM;
 }
 
-/** 내가 만든 테마의 한 모드 모습: 색 칸, 그림, 실제로 덮는 정도 */
+/** 그림 종류마다 직접 고를 수 있는 가장 적게 덮는 정도 */
+export function minDimFor(image: ThemeImage | null): number {
+  return image?.kind === 'file' ? MIN_PHOTO_DIM : MIN_DIM;
+}
+
+/**
+ * 내가 만든 테마의 한 모드 모습: 색 칸, 그림, 실제로 덮는 정도.
+ * 보통은 글자가 잘 보이는 정도(fitDim)까지 올려 덮는다. 테마 고치기에서 직접 고른 값(dimExact)은 그대로 덮고,
+ * 그 값이 글자가 잘 보이는 정도보다 낮으면 글자 색은 그 정도에 맞춘 색 그대로 두고(테마 색이 검정·흰색으로 몰리지 않게)
+ * 화면 바탕 위 글자 둘레에 바탕색을 두른다(halo)
+ */
 export function specLook(spec: ThemeSpec, mode: Mode): ModeLook {
   const palette = spec[mode];
   const inks = imageInks(spec.image);
   if (!inks.length) return { tokens: deriveTokens(palette, mode), image: null, dim: spec.dim };
-  const dim = fitDim(inks, palette.bg, mode, spec.dim);
-  return { tokens: deriveTokens(palette, mode, backdropColors(inks, palette.bg, dim)), image: spec.image, dim };
+  const fit = fitDim(inks, palette.bg, mode, spec.dim);
+  const dim = spec.dimExact ? Math.min(MAX_DIM, Math.max(minDimFor(spec.image), spec.dim)) : fit;
+  const readDim = Math.max(dim, fit);
+  return {
+    tokens: deriveTokens(palette, mode, backdropColors(inks, palette.bg, readDim)),
+    image: spec.image,
+    dim,
+    readDim,
+    halo: dim < readDim - 0.005,
+  };
 }

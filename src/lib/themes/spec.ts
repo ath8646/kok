@@ -55,6 +55,11 @@ export const zThemeSpec = z.object({
   image: zThemeImage.nullable().default(null),
   /** 그림 위에 바탕색을 얼마나 덮을지 (글자가 잘 보이게). 0.2 ~ 0.92 */
   dim: z.number().min(0.2).max(0.92).default(0.6),
+  /**
+   * 테마 고치기에서 덮는 정도를 직접 고른 테마: 고른 값 그대로 덮는다 (없으면 글자가 잘 보이는 정도까지 올린다).
+   * 그보다 낮으면 화면 바탕 위 글자 둘레에 바탕색을 두른다 (themes/backdrop.ts specLook 의 halo)
+   */
+  dimExact: z.boolean().optional(),
   /** 이 테마를 고르면 같이 바꿀 글꼴·종이 (AI 가 고른 것, 없으면 그대로) */
   font: z.enum(THEME_FONTS).nullable().default(null),
   paper: z.enum(THEME_PAPERS).nullable().default(null),

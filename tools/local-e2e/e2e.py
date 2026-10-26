@@ -2735,6 +2735,11 @@ async def main():
         await editor.get_by_role("radiogroup", name="배경 그림").get_by_role("radio", name="사진").click()
         await editor.get_by_label("배경 사진 고르기").set_input_files(files=[{"name": "bg.png", "mimeType": "image/png", "buffer": make_png()}])
         await expect(editor.locator('[style*="/api/themes/images/"]').first).to_be_attached(timeout=15000)
+        # 사진은 덮는 정도를 50%까지 직접 낮출 수 있다: 고른 값 그대로 덮고, 글자가 잘 보이는 정도보다 낮으면 바탕 위 글자 둘레에 바탕색
+        dim_slider = editor.get_by_label("그림 위를 덮는 정도")
+        await expect(dim_slider).to_have_attribute("min", "50")
+        await dim_slider.fill("50")
+        await expect(editor.get_by_text(re.compile("글자 둘레에 바탕색을 둘러"))).to_be_visible()
         await shot(page, "51-theme-editor", full=False)
         await editor.get_by_role("button", name="저장하고 쓰기").click()
         await expect(editor).to_be_hidden()
@@ -2743,6 +2748,13 @@ async def main():
         assert photo != ai_image
         row = sql(f"select concat_ws(' ', kind, mime, width, height) from public.theme_images where id = '{photo}'")
         assert row == "upload image/jpeg 900 600", row
+        assert sql(f"select concat_ws(' ', spec->>'dim', spec->>'dimExact') from public.user_themes where user_id = '{student_id}' and name = '물결 테마'") == "0.5 true"
+        assert await css_var(page, "--theme-dim") == "0.50"
+        assert (await css_var(page, "--theme-halo")).startswith("0 0 1px"), await css_var(page, "--theme-halo")
+        await page.goto(BASE + "/home")
+        await expect(page.locator(".kok-card").first).to_be_visible()
+        halo = await page.evaluate("(() => [getComputedStyle(document.querySelector('main h1, main .kok-swap') || document.body).textShadow, getComputedStyle(document.querySelector('.kok-card')).textShadow])()")
+        assert halo[0] != "none" and halo[1] == "none", halo
         await page.goto(BASE + "/library")
         await page.wait_for_timeout(1200)
         await shot(page, "51-library-photo", full=False)

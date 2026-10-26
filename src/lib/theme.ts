@@ -117,7 +117,8 @@ function presetLook(color: ThemeColor, mode: Mode): ModeLook {
  */
 export function specLookFx(spec: ThemeSpec, mode: Mode): ModeLook {
   const look = specLook(spec, mode);
-  const seen = look.image ? backdropColors(imageInks(look.image), spec[mode].bg, look.dim) : [];
+  // 직접 낮춘 테마도 빛은 글자 색을 맞춘 덮는 정도로 (바탕 위 글자는 둘레의 바탕색이 받쳐 준다)
+  const seen = look.image ? backdropColors(imageInks(look.image), spec[mode].bg, look.readDim ?? look.dim) : [];
   return { ...look, fx: fxTokens(look.tokens, spec.fx, mode, null, seen) };
 }
 

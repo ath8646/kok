@@ -41,7 +41,8 @@ import {
 import { contrast, fitPalette, mix, type Mode, type Palette } from '@/lib/themes/colors';
 import { BASE_TOKENS, presetTokens } from '@/lib/themes/presets';
 import { readSpec, MAX_THEMES, THEME_NAME_MAX, type ThemeImage, type ThemeSpec } from '@/lib/themes/spec';
-import { imageCss, type ModeLook } from '@/lib/themes/css';
+import { haloShadow, imageCss, type ModeLook } from '@/lib/themes/css';
+import { minDimFor } from '@/lib/themes/backdrop';
 import { GLOW_TONE_INFO, glowPair, glowTokens } from '@/lib/themes/glow';
 import { DEFAULT_FX, isDefaultFx, type ThemeFx } from '@/lib/themes/fx';
 import { StarButton } from './note/StarButton';
@@ -977,7 +978,7 @@ function ThemeScreen({ look, mode, fx }: { look: ModeLook; mode: Mode; fx: Theme
           </>
         ) : null}
         <div className="absolute inset-0 -z-10" style={{ background: MINI_AURA }} />
-        <div className="absolute inset-x-[7%] top-[9%] grid gap-0.5">
+        <div className="absolute inset-x-[7%] top-[9%] grid gap-0.5" style={{ textShadow: look.halo ? haloShadow(0.35) : undefined }}>
           <p className="truncate font-display text-[11px] leading-tight">오늘 복습 6문제</p>
           <p className="truncate text-[7px]" style={{ color: t['--muted'] }}>
             잊어버리기 직전이에요
@@ -1215,12 +1216,17 @@ function ThemeEditor({
   const aiEst = Math.round(estimateSmallTask(clientModel(me, 'fast'), me.usdPerEnergy, 500, 150) * 10) / 10;
   // 설명 없이 '다시 그리기'는 AI 가 그린 그림일 때만 (그 그림의 설명으로 다시 그린다)
   const canRedraw = spec.image?.kind === 'file' && spec.image.ai === true;
-  // 실제 화면에서 덮는 정도 (글자가 잘 보이게 고른 값보다 올라갈 수 있다)
+  // 실제 화면에서 덮는 정도 (직접 고르지 않은 테마는 글자가 잘 보이게 고른 값보다 올라갈 수 있다)
   const realDims = MODES.map((m) => looks[m].dim);
   const raised = !!spec.image && realDims.some((d) => d > spec.dim + 0.005);
+  // 직접 고른 값이 글자가 잘 보이는 정도보다 낮은 모드: 바탕 위 글자 둘레에 바탕색을 두른다
+  const readDims = MODES.map((m) => looks[m].readDim ?? looks[m].dim);
+  const haloed = !!spec.image && MODES.some((m) => looks[m].halo);
 
   const setColor = (m: Mode, k: keyof Palette, v: string) => setSpec((s) => ({ ...s, [m]: fitPalette({ ...s[m], [k]: v }, m, basePalette(m)) }));
-  const setImage = (image: ThemeImage | null, dim?: number) => setSpec((s) => ({ ...s, image, dim: dim ?? s.dim }));
+  // 그림을 바꾸면 덮는 정도는 그 그림의 처음 값부터 (직접 고른 값은 지운다)
+  const setImage = (image: ThemeImage | null, dim?: number) =>
+    setSpec((s) => ({ ...s, image, dim: dim ?? s.dim, dimExact: dim === undefined ? s.dimExact : undefined }));
 
   /** 저장 (새 테마면 만든다). 저장한 행 */
   const save = async (next: ThemeSpec = spec): Promise<ThemeRow | null> => {
@@ -1478,14 +1484,20 @@ function ThemeEditor({
                   </span>
                   <input
                     type="range"
-                    min={spec.image.kind === 'file' ? 70 : 20}
+                    min={Math.round(minDimFor(spec.image) * 100)}
                     max={92}
                     step={1}
                     value={Math.round(spec.dim * 100)}
                     aria-label="그림 위를 덮는 정도"
-                    onChange={(e) => setSpec((s) => ({ ...s, dim: Number(e.target.value) / 100 }))}
+                    onChange={(e) => setSpec((s) => ({ ...s, dim: Number(e.target.value) / 100, dimExact: true }))}
                   />
-                  {raised ? (
+                  {haloed ? (
+                    <span className="text-xs text-muted">
+                      글자가 잘 보이는 정도(
+                      {MODES.flatMap((m, i) => (looks[m].halo ? [`${MODE_LABEL[m]} ${Math.round(readDims[i] * 100)}%`] : [])).join(', ')})보다 낮아서, 그림 위
+                      글자 둘레에 바탕색을 둘러 읽기 쉽게 해요.
+                    </span>
+                  ) : raised ? (
                     <span className="text-xs text-muted">
                       글자가 잘 보이게 {MODES.map((m, i) => `${MODE_LABEL[m]} ${Math.round(realDims[i] * 100)}%`).join(', ')}로 덮어요.
                     </span>

@@ -12,6 +12,10 @@ export type ModeLook = {
   image: ThemeImage | null;
   /** 그림 위에 바탕색을 덮는 정도 */
   dim: number;
+  /** 글자 색을 맞춘 덮는 정도 (직접 낮춘 테마는 dim 보다 높다, 없으면 dim) */
+  readDim?: number;
+  /** 글자가 잘 보이는 정도보다 덜 덮어서 화면 바탕 위 글자 둘레에 바탕색을 두른다 */
+  halo?: boolean;
   /** 별표 빛 색 (themes/glow.ts). 없으면 globals.css 의 기본 빛 */
   glow?: GlowMap;
   /** 화면 꾸미기 색 (themes/fx.ts). 없으면 globals.css 의 기본 꾸미기 */
@@ -19,6 +23,11 @@ export type ModeLook = {
 };
 
 const RGBA = /^rgba\(\d{1,3}, \d{1,3}, \d{1,3}, (0|1|0?\.\d{1,3})\)$/;
+
+/** 글자 둘레에 바탕색을 두르는 그림자 (가까울수록 진하게 겹친다). 작은 미리보기는 scale 로 줄인다 */
+export function haloShadow(scale = 1): string {
+  return [1, 2, 3, 6, 10].map((r) => `0 0 ${+(r * scale).toFixed(2)}px var(--bg)`).join(',');
+}
 
 /** 그림을 CSS url() 로. 올린 그림은 우리 서버 주소(로그인한 사람만 받을 수 있다)로 쓴다 */
 export function imageCss(img: ThemeImage | null): string {
@@ -53,6 +62,7 @@ function block(look: ModeLook): string {
     `--theme-image-size:${tile ? `${PATTERN_SIZE}px` : 'cover'}`,
     `--theme-image-repeat:${tile ? 'repeat' : 'no-repeat'}`,
     `--theme-dim:${dim.toFixed(2)}`,
+    `--theme-halo:${look.image && look.halo ? haloShadow() : 'none'}`,
   );
   return parts.join(';');
 }

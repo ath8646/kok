@@ -10,7 +10,7 @@ import { QuestionFigure, StepsDisclosure, useSolution } from './figure/SolutionV
 import { SourceFigureView } from './figure/SourceFigureView';
 import { RichText } from './RichText';
 import { Button, Chip, ICONS, Icon, cx, inputClass, Spinner } from './ui';
-import { pageLabel } from './NoteView';
+import { pageName } from '@/lib/page-labels';
 
 export type ReviewQuestion = {
   id: string;
@@ -386,7 +386,7 @@ export function QuestionCard({
                 출처{' '}
                 {q.pages
                   .slice(0, 4)
-                  .map((p) => pageLabel(sourceKind, p))
+                  .map((p) => pageName(sourceKind, p))
                   .join(', ')}
               </span>
             ) : null}

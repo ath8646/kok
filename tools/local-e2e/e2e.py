@@ -116,8 +116,9 @@ def make_jpeg(color=(240, 240, 230), w=1600, h=1200) -> bytes:
 
 
 def make_figure_pdf() -> bytes:
-    """자료 그림 시험용 PDF 한 쪽: 글과 빨간 네모(지도 자리). 네모는 (100,400)~(495,700)pt = 0~1000 으로 (168,169)~(832,525)"""
-    stream = "BT /F1 20 Tf 72 780 Td (Goguryeo map) Tj ET\n1 0 0 rg 100 400 395 300 re f\n0 0 1 rg 120 650 40 30 re f"
+    """자료 그림 시험용 PDF 한 쪽: 글과 빨간 네모(지도 자리), 쪽 아래에 인쇄된 쪽 번호 114 (책의 114쪽).
+    네모는 (100,400)~(495,700)pt = 쪽의 비율로 (0.168,0.169)~(0.832,0.525)"""
+    stream = "BT /F1 20 Tf 72 780 Td (Goguryeo map) Tj ET\n1 0 0 rg 100 400 395 300 re f\n0 0 1 rg 120 650 40 30 re f\n0 0 0 rg BT /F1 10 Tf 60 30 Td (114) Tj ET"
     objs = [
         "<< /Type /Catalog /Pages 2 0 R >>",
         "<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
@@ -370,10 +371,18 @@ async def figure_steps(browser):
     # 관리자가 노트 화면에서 보는 자료 그림 기록: 찾고·자르고·그림 문제까지
     flog = json.loads(db(f"select body->'figure_log' from public.notes where source_id = '{fsid}'"))
     assert flog["looked"] >= 1 and flog["found"] >= 1 and flog["cut"] >= 1 and flog["questions"] >= 1 and not flog["errors"], flog
-    # 너무 작은 그림(장식)은 빼고 지도 하나: 개념(이름으로 찾은 k2)에 붙는다
+    # 쪽을 그림으로 보여 줬는데 없던 그림(장식)은 뺀다: 지도 하나가 개념(이름으로 찾은 k2)에 붙는다
+    assert flog.get("missed") == 1, flog
     assert len(figs) == 1, figs
     fig = figs[0]
     assert (fig["id"], fig["kind"], fig["key_point_id"], fig["page"]) == ("f1", "map", "k2", 1), fig
+    # 자리는 쪽 그림(Claude 가 줄이지 않는 크기)을 보여 주고 픽셀로 받는다: 한 번에 그 쪽 하나
+    fake = json.loads(urllib.request.urlopen("http://localhost:54321/__stats").read())
+    assert fake["tasks"].get("locate", 0) >= 1, fake["tasks"]
+    assert any(c["images"] == 1 and "5세기 고구려 영토" in c["asked"] for c in fake.get("locate", [])), fake.get("locate")
+    # 인쇄된 쪽 번호(PDF 글자 '114'): 노트의 쪽 표시는 책의 쪽으로, 그림도 그 번호를 들고 다닌다
+    assert json.loads(db(f"select body->'page_labels' from public.notes where source_id = '{fsid}'")) == [{"from": 1, "to": 1, "add": 113}]
+    assert fig.get("printed") == 114, fig
     assert fig["crop"] == f"{me_id}/figs/{fsid}/f1.jpg", fig
     crop_file = files_root / fig["crop"]
     assert crop_file.exists(), crop_file
@@ -393,7 +402,11 @@ async def figure_steps(browser):
     assert await wait_ready(page)
     fig_el = page.locator("#kp-k2 figure")
     await expect(fig_el).to_contain_text("5세기 고구려 영토")
-    await expect(fig_el).to_contain_text("1쪽")
+    await expect(fig_el).to_contain_text("114쪽")
+    # 개념의 쪽 칩도 책의 쪽 번호로 (누르면 원본의 PDF 1쪽을 연다)
+    await expect(page.locator("#kp-k1").get_by_role("button", name="114쪽")).to_be_visible()
+    # 인쇄된 번호를 모르는 쪽(시험 PDF 밖의 2쪽)은 헷갈리지 않게 PDF 쪽으로
+    await expect(page.locator("#kp-k2").get_by_role("button", name="PDF 2쪽")).to_be_visible()
     views = fig_el.get_by_role("radiogroup", name=re.compile("보기$"))
     await expect(views.get_by_role("radio", name="다시 그린 그림")).to_have_attribute("aria-checked", "true")
     # 다시 그린 지도: 그림 이름(화면 읽기)에 지도 속 글이 들어 있다
@@ -476,6 +489,46 @@ async def figure_steps(browser):
     await shot(dpage, "96-figure-desktop-dark", full=False)
     await no_hscroll(dpage, "note with figure (desktop)")
     await dctx.close()
+
+    step("source figures: '자료 그림 다시 찾기' re-finds a figure on its page, and takes out (and rests the question of) one it cannot find")
+    rctx, rpage = await new_ctx(browser, "student")
+    crop_file = files_root / fig["crop"]
+    before = crop_file.stat().st_mtime_ns
+    calls_before = json.loads(urllib.request.urlopen("http://localhost:54321/__stats").read())["tasks"].get("locate", 0)
+    await rpage.goto(BASE + f"/notes/{fsid}")
+    assert await wait_ready(rpage)
+    await rpage.get_by_role("button", name="노트 메뉴").click()
+    await rpage.get_by_role("menuitem", name="자료 그림 다시 찾기").click()
+    sheet = rpage.get_by_role("dialog", name="자료 그림 다시 찾기")
+    await expect(sheet).to_contain_text("그림 1개")
+    await sheet.get_by_role("button", name="다시 찾기").click()
+    await expect(sheet.get_by_text("1개를 다시 잘랐어요.")).to_be_visible(timeout=60000)
+    await expect(sheet.get_by_role("list", name="그림마다 결과")).to_contain_text("114쪽에서 다시 잘랐어요")
+    await shot(rpage, "96-figure-relocate", full=False)
+    await sheet.get_by_role("button", name="확인").click()
+    await expect(sheet).to_have_count(0)
+    again = json.loads(db(f"select body->'figures' from public.notes where source_id = '{fsid}'"))
+    assert len(again) == 1 and again[0]["page"] == 1 and again[0]["printed"] == 114 and again[0]["crop"] == fig["crop"], again
+    assert crop_file.stat().st_mtime_ns > before, "crop file was not rewritten"
+    assert json.loads(urllib.request.urlopen("http://localhost:54321/__stats").read())["tasks"].get("locate", 0) == calls_before + 1
+    # 끝내 못 찾는 그림: 노트에서 빼고 그 그림 문제는 쉬게 한다 (지우지 않는다)
+    urllib.request.urlopen("http://localhost:54321/__fail?task=locate&mode=miss")
+    try:
+        await rpage.get_by_role("button", name="노트 메뉴").click()
+        await rpage.get_by_role("menuitem", name="자료 그림 다시 찾기").click()
+        await sheet.get_by_role("button", name="다시 찾기").click()
+        await expect(sheet.get_by_text("1개는 찾지 못해 뺐어요.")).to_be_visible(timeout=60000)
+        await expect(sheet.get_by_role("list", name="그림마다 결과")).to_contain_text("그림 문제 1개는 쉬게 했어요")
+        await sheet.get_by_role("button", name="확인").click()
+    finally:
+        urllib.request.urlopen("http://localhost:54321/__fail?task=")
+    assert db(f"select coalesce(jsonb_array_length(body->'figures'), 0) from public.notes where source_id = '{fsid}'") == "0"
+    assert db(f"select status {fq}") == "suspended", db(f"select status {fq}")
+    # 그림이 없으면 메뉴에도 없다
+    await rpage.get_by_role("button", name="노트 메뉴").click()
+    await expect(rpage.get_by_role("menuitem", name="자료 그림 다시 찾기")).to_have_count(0)
+    await rpage.keyboard.press("Escape")
+    await rctx.close()
 
     step("source figures: a free account gets the original only, a tilted photo comes out straight, deleting the note removes the cut-outs")
     other_id = USERS["other"][0]

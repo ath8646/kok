@@ -6,7 +6,7 @@ import { adminClient, SOURCES_BUCKET } from '@/lib/supabase/admin';
 import {
   checkJsonSchema,
   noteJsonSchema,
-  organizeFiguresJsonSchema,
+  organizeJsonSchema,
   zMindmap,
   quizFiguresJsonSchema,
   quizJsonSchema,
@@ -61,7 +61,10 @@ import { UserFacingError } from './errors';
 import { adminDetail } from './tasks';
 import { removePaths } from './files';
 import { noteForPrompt } from './notes';
-import { cutFigures, type FigureSource } from './figure-image';
+import { cutOnPage, openFigurePage, openPdfPages, pdfPrintedNumbers } from './figure-image';
+import { locateOnPages, type FindPage } from './figure-find';
+import { nextPages, SEARCH_BATCH, SEARCH_CALLS_MAX } from '@/lib/figure-locate';
+import { buildPageLabels, offsetOf, printedPage, type PageAnchor, type PageEvidence, type PageLabels } from '@/lib/page-labels';
 import { cleanMindmap, maxNodesFor, visualOutTokens } from '@/lib/mindmap-clean';
 import {
   KEY_POINTS_MAX,
@@ -223,13 +226,15 @@ async function sourceFiguresOff(ctx: Ctx): Promise<FigureLog['skipped'] | null> 
 
 /**
  * 자료 그림이 어디까지 됐는지 (노트의 body.figure_log 로 남겨 관리자가 노트 화면에서 본다: 그림이 없을 때 까닭을 알 수 있게).
- * looked: 그림을 찾으라고 한 조각 수, found: AI 가 찾은 그림, cut: 잘라 저장한 그림, questions: 그림 문제, errors: 자르기·저장 오류 (3개까지)
+ * looked: 그림을 찾으라고 한 조각 수, found: AI 가 찾은 그림, cut: 잘라 저장한 그림, missed: 쪽을 보여 줬는데 끝내 못 찾은 그림 (뺐다),
+ * questions: 그림 문제, errors: 자르기·저장·자리 찾기 오류 (3개까지)
  */
 export type FigureLog = {
   looked: number;
   skipped?: 'text' | 'setting_off' | 'db_outdated' | 'last_try' | 'full';
   found: number;
   cut: number;
+  missed?: number;
   questions?: number;
   errors: string[];
 };
@@ -241,6 +246,7 @@ function figLogOf(draft: Record<string, unknown>): FigureLog {
     skipped: v.skipped,
     found: Number(v.found ?? 0),
     cut: Number(v.cut ?? 0),
+    ...(Number(v.missed ?? 0) ? { missed: Number(v.missed) } : {}),
     errors: Array.isArray(v.errors) ? v.errors.slice(0, 3) : [],
   };
 }
@@ -269,70 +275,23 @@ function afterNote(ctx: Ctx, figures: SourceFigure[]): 'figures' | 'visual' {
 type FigureHolder = { kind: 'pdf'; bytes: Uint8Array; firstPage: number } | { kind: 'image'; photos: Map<number, Uint8Array> };
 
 /**
- * AI 가 찾은 그림을 원본에서 잘라 `내id/figs/자료id/fN.jpg` 에 저장한다 (쪽마다 한 번만 그린다).
- * 자르거나 저장하지 못한 그림은 뺀다: 그림 때문에 노트 만들기가 멈추지 않게. already: 이미 자른 그림 수 (파일 번호)
+ * 정리 단계에서 찾고 아직 자리를 찾지 않은 그림 (그 조각 번호와 쪽 범위와 함께).
+ * from·to: 그 조각의 쪽(사진) 범위 (그림을 찾아볼 범위, 예전 자료는 없다), fails: AI 가 바빠 찾지 못한 수
  */
-async function cutAndStore(ctx: Ctx, found: FoundFigure[], holder: FigureHolder, already: number, deadline: number, log: FigureLog): Promise<CutFigure[]> {
-  const out: CutFigure[] = [];
-  for (const page of [...new Set(found.map((f) => f.page))]) {
-    // 시간이 넘으면 남은 쪽은 자르지 않는다 (그 그림은 뺀다)
-    if (Date.now() > deadline) {
-      console.warn('[kok] figure cut out of time', ctx.src.id, page);
-      logError(log, 'out of time');
-      break;
-    }
-    const here = found.filter((f) => f.page === page);
-    let source: FigureSource | null = null;
-    if (holder.kind === 'pdf') source = { kind: 'pdf', bytes: holder.bytes, page: page - holder.firstPage + 1 };
-    else {
-      const bytes = holder.photos.get(page);
-      if (bytes) source = { kind: 'image', bytes };
-    }
-    if (!source) continue;
-    let cuts: Awaited<ReturnType<typeof cutFigures>>;
-    try {
-      cuts = await cutFigures(
-        source,
-        here.map((f) => f.corners),
-      );
-    } catch (e) {
-      console.warn('[kok] figure cut failed', ctx.src.id, page, e);
-      logError(log, e);
-      continue;
-    }
-    for (let k = 0; k < here.length; k++) {
-      const cut = cuts[k];
-      if (!cut) {
-        logError(log, 'bad corners');
-        continue;
-      }
-      const path = figurePath(ctx.src.user_id, ctx.src.id, already + out.length + 1);
-      const { error } = await ctx.admin.storage.from(SOURCES_BUCKET).upload(path, cut.jpeg, { contentType: 'image/jpeg', upsert: true });
-      if (error) {
-        console.warn('[kok] figure upload failed', ctx.src.id, error.message);
-        logError(log, `upload: ${error.message}`);
-        continue;
-      }
-      out.push({ ...here[k], crop: path, w: cut.width, h: cut.height });
-    }
-  }
-  return out;
-}
-
-/** 정리 단계에서 찾고 아직 자르지 않은 그림 (그 조각 번호와 함께) */
-type PendingCut = { chunk: number; found: FoundFigure[] };
+type PendingCut = { chunk: number; from?: number; to?: number; found: FoundFigure[]; fails?: number };
 
 function pendingOf(draft: Record<string, unknown>): PendingCut | null {
   const v = draft.figFound as Partial<PendingCut> | null | undefined;
-  return v && Number.isInteger(v.chunk) && Array.isArray(v.found) ? { chunk: Number(v.chunk), found: v.found } : null;
+  if (!v || !Number.isInteger(v.chunk) || !Array.isArray(v.found)) return null;
+  return { chunk: Number(v.chunk), from: v.from, to: v.to, found: v.found, fails: Number(v.fails ?? 0) };
 }
 
-/** 자르기를 해 보는 수 (자르다가 함수가 멈추면 다음 번에 한 번 더, 그래도 안 되면 그 그림은 뺀다) */
+/** 자리 찾기를 해 보는 수 (그리다가 함수가 멈추면 다음 번에 한 번 더, 그래도 안 되면 그 묶음은 뺀다) */
 const CUT_TRIES = 2;
-/** 한 번 자를 때 쓰는 시간 (넘으면 남은 쪽은 뺀다) */
-const CUT_BUDGET_MS = 60_000;
+/** AI 서버가 바빠 자리를 찾지 못했을 때 다시 해 보는 수 (넘으면 그 묶음은 뺀다: 그림 때문에 노트가 멈추지 않게) */
+const LOCATE_FAILS_MAX = 2;
 
-/** 그림을 자를 원본을 다시 받는다: PDF 는 나눠 둔 조각(있으면) 또는 원본 파일, 사진은 그림이 있는 사진만 */
+/** 그림을 자를 원본을 다시 받는다: PDF 는 나눠 둔 조각(있으면) 또는 원본 파일, 사진은 보여 줄 사진만 */
 async function holderFor(ctx: Ctx, chunk: number, pages: number[]): Promise<FigureHolder | null> {
   const { src, admin } = ctx;
   if (src.kind === 'pdf') {
@@ -355,9 +314,71 @@ async function holderFor(ctx: Ctx, chunk: number, pages: number[]): Promise<Figu
   return null;
 }
 
+/** 조각의 쪽(사진) 범위: 정리할 때 적어 둔 것, 예전 자료는 조각에서 다시 센다 */
+function pendingRange(src: SourceRow, p: PendingCut): { from: number; to: number } {
+  if (Number.isInteger(p.from) && Number.isInteger(p.to)) return { from: Number(p.from), to: Number(p.to) };
+  if (src.kind === 'pdf') {
+    const parts = pdfPartsOf(src);
+    const c = parts ? parts[Math.min(p.chunk, parts.length - 1)] : planChunks(src.page_count ?? 1)[p.chunk];
+    if (c) return { from: c.start, to: c.end };
+  }
+  const pages = p.found.map((f) => f.page);
+  return { from: Math.min(...pages), to: Math.max(...pages) };
+}
+
+/** 그려 둔 쪽들 (PDF 는 한 번 열어 여러 쪽을). 그리지 못한 쪽은 뺀다 */
+async function openPages(holder: FigureHolder, pages: number[], log: FigureLog): Promise<FindPage[]> {
+  const out: FindPage[] = [];
+  if (holder.kind === 'pdf') {
+    try {
+      const drawn = await openPdfPages(
+        holder.bytes,
+        pages.map((p) => p - holder.firstPage + 1),
+      );
+      drawn.forEach((fp, k) => {
+        if (fp) out.push({ page: pages[k], fp });
+      });
+    } catch (e) {
+      console.warn('[kok] figure pages could not be drawn', pages, e);
+      logError(log, e);
+    }
+    return out;
+  }
+  for (const page of pages) {
+    const bytes = holder.photos.get(page);
+    if (!bytes) continue;
+    try {
+      out.push({ page, fp: await openFigurePage({ kind: 'image', bytes }) });
+    } catch (e) {
+      console.warn('[kok] figure photo could not be read', page, e);
+      logError(log, e);
+    }
+  }
+  return out;
+}
+
+/** 쪽 하나씩 읽은 인쇄된 쪽 번호 (그림을 찾을 때 AI 가 읽은 것: 노트의 쪽 표시에 쓴다) */
+function anchorsOf(draft: Record<string, unknown>): PageAnchor[] {
+  const v = draft.pageAnchors;
+  if (!Array.isArray(v)) return [];
+  return v.filter(
+    (a): a is PageAnchor => !!a && typeof a === 'object' && Number.isInteger((a as PageAnchor).page) && Number.isInteger((a as PageAnchor).printed),
+  );
+}
+
+function addAnchors(list: PageAnchor[], pages: FindPage[], printed: number[]): PageAnchor[] {
+  const out = [...list];
+  pages.forEach((p, k) => {
+    if (printed[k] > 0 && !out.some((a) => a.page === p.page)) out.push({ page: p.page, printed: printed[k] });
+  });
+  return out.slice(-200);
+}
+
 /**
- * 자료 그림 자르기 (AI 없음): 정리 단계에서 찾은 그림을 원본에서 잘라 저장한다. 정리 다음 번에 따로 돌아서,
- * 자르다 오래 걸리거나 멈춰도 정리(AI)를 다시 하지 않는다. 한 조각짜리 자료면 그림을 개념에 붙이고 다음 단계를 정한다
+ * 자료 그림 자리 찾기와 자르기: 정리 단계에서 찾은 그림을, 그 쪽을 그림으로 그려 AI 에 보여 주고(픽셀 상자) 원본에서 잘라 저장한다.
+ * 한 번 부를 때 묶음 하나(같은 쪽이라고 한 그림들)만: 처음에는 그 쪽만, 없으면 가까운 쪽부터 SEARCH_BATCH 쪽씩 (조각 안에서,
+ * AI 한 번에 묻는 수는 SEARCH_CALLS_MAX 까지). 끝내 없으면 그 그림은 뺀다 (엉뚱한 곳을 자른 그림을 두지 않게).
+ * 자르거나 찾다가 안 돼도 노트는 만든다. 한 조각짜리 자료면 다 찾은 뒤 그림을 개념에 붙이고 다음 단계를 정한다
  */
 async function stepCutFigures(ctx: Ctx): Promise<Partial<SourceRow>> {
   const { src } = ctx;
@@ -365,33 +386,120 @@ async function stepCutFigures(ctx: Ctx): Promise<Partial<SourceRow>> {
   const tries = Number(src.draft.figCutTries ?? 0);
   let cuts = cutsOf(src.draft);
   const log = figLogOf(src.draft);
-  const before = cuts.length;
-  if (pending && tries < CUT_TRIES) {
-    // 해 보는 수를 먼저 적어 둔다: 자르다가 함수가 멈춰도 다음에는 그만 자르게
-    await ctx.admin
-      .from('sources')
-      .update({ draft: { ...src.draft, figCutTries: tries + 1 } })
-      .eq('id', src.id);
-    try {
-      const holder = await holderFor(
-        ctx,
-        pending.chunk,
-        pending.found.map((f) => f.page),
-      );
-      if (holder) cuts = [...cuts, ...(await cutAndStore(ctx, pending.found, holder, cuts.length, Date.now() + CUT_BUDGET_MS, log))];
-    } catch (e) {
-      // 원본을 못 받았다: 그림 없이 노트를 만든다
-      console.warn('[kok] figure cut skipped', src.id, e);
-      logError(log, e);
+  let anchors = anchorsOf(src.draft);
+  let left: FoundFigure[] = pending ? [...pending.found] : [];
+  let fails = pending?.fails ?? 0;
+
+  if (pending && left.length) {
+    const lead = left[0];
+    const calls = Number(lead.calls ?? 0);
+    // 같은 쪽이라고 한, 아직 같은 만큼 찾아본 그림들을 한 번에
+    const group = left.filter((f) => f.page === lead.page && Number(f.calls ?? 0) === calls);
+    const range = pendingRange(src, pending);
+    const pages =
+      src.kind === 'image'
+        ? calls
+          ? []
+          : [lead.page]
+        : calls >= SEARCH_CALLS_MAX
+          ? []
+          : nextPages({
+              claimed: lead.page,
+              hints: [...new Set(group.flatMap((f) => f.hints ?? []))],
+              from: range.from,
+              to: range.to,
+              tried: lead.tried ?? [],
+              batch: calls ? SEARCH_BATCH : 1,
+            });
+    const drop = (why: string | null) => {
+      left = left.filter((f) => !group.includes(f));
+      if (why) logError(log, why);
+      else log.missed = (log.missed ?? 0) + group.length;
+    };
+    // 볼 쪽을 다 봤는데 없다: 그 그림은 뺀다 (오류가 아니라 AI 가 정리할 때 잘못 찾은 그림)
+    if (!pages.length) drop(null);
+    else if (tries >= CUT_TRIES) {
+      // 두 번 해 봐도 끝나지 않았다 (그리다가 함수가 멈춤): 이 묶음은 뺀다
+      console.warn('[kok] figure locate gave up after tries', src.id, lead.page);
+      drop('locate stopped twice (time limit?)');
+    } else {
+      // 해 보는 수를 먼저 적어 둔다: 그리다가 함수가 멈춰도 다음에는 그만하게
+      await ctx.admin
+        .from('sources')
+        .update({ draft: { ...src.draft, figCutTries: tries + 1 } })
+        .eq('id', src.id);
+      try {
+        const holder = await holderFor(ctx, pending.chunk, pages);
+        const shown = holder ? await openPages(holder, pages, log) : [];
+        // 쪽을 하나도 그리지 못했다: 본 것으로 치고 다음 쪽들을 본다 (다 보면 뺀다)
+        if (!shown.length) left = left.map((f) => (group.includes(f) ? { ...f, tried: [...new Set([...(f.tried ?? []), ...pages])], calls: calls + 1 } : f));
+        else {
+          const found = await locateOnPages({
+            kind: src.kind === 'image' ? 'image' : 'pdf',
+            pages: shown,
+            asks: group.map((f) => ({ kind: f.kind, title: f.title, caption: f.caption })),
+            call: (content, schema, maxTokens) => ai(ctx, 'locate', content, schema, maxTokens),
+          });
+          anchors = addAnchors(anchors, shown, found.printed);
+          fails = 0;
+          const done = new Set<FoundFigure>();
+          for (let k = 0; k < group.length; k++) {
+            const hit = found.hits[k];
+            if (!hit) continue;
+            const at = shown[hit.at];
+            done.add(group[k]);
+            const cut = await cutOnPage(at.fp, hit.quad).catch((e) => {
+              console.warn('[kok] figure cut failed', src.id, at.page, e);
+              return null;
+            });
+            if (!cut) {
+              logError(log, 'bad box');
+              continue;
+            }
+            const path = figurePath(src.user_id, src.id, cuts.length + 1);
+            const { error } = await ctx.admin.storage.from(SOURCES_BUCKET).upload(path, cut.jpeg, { contentType: 'image/jpeg', upsert: true });
+            if (error) {
+              console.warn('[kok] figure upload failed', src.id, error.message);
+              logError(log, `upload: ${error.message}`);
+              continue;
+            }
+            const printed = found.printed[hit.at];
+            const { tried: _t, calls: _c, hints: _h, corners: _o, ...fig } = group[k];
+            void _t;
+            void _c;
+            void _h;
+            void _o;
+            cuts = [...cuts, { ...fig, page: at.page, ...(printed > 0 ? { printed } : {}), crop: path, w: cut.width, h: cut.height }];
+            log.cut++;
+          }
+          // 찾지 못한 그림은 본 쪽을 적고 다음 번에 가까운 쪽을 더 본다
+          const seen = shown.map((p) => p.page);
+          left = left
+            .filter((f) => !done.has(f))
+            .map((f) => (group.includes(f) ? { ...f, tried: [...new Set([...(f.tried ?? []), ...pages, ...seen])], calls: calls + 1 } : f));
+        }
+      } catch (e) {
+        if (e instanceof UserFacingError) throw e;
+        if (e instanceof AiCallError && e.kind === 'retryable' && fails + 1 < LOCATE_FAILS_MAX) {
+          // AI 서버가 잠깐 바쁘다: 다음 번에 같은 쪽을 다시 본다
+          fails++;
+          console.warn('[kok] figure locate busy, will retry', src.id, e.message);
+        } else {
+          console.warn('[kok] figure locate failed, dropping these figures', src.id, e);
+          drop(e instanceof Error ? `${e.name}: ${e.message}` : String(e));
+          fails = 0;
+        }
+      }
     }
-  } else if (pending) {
-    console.warn('[kok] figure cut gave up after tries', src.id);
-    logError(log, 'cut stopped twice (time limit?)');
   }
-  log.cut += cuts.length - before;
-  const draft: Record<string, unknown> = { ...src.draft, figCuts: cuts, figLog: log };
-  delete draft.figFound;
+
+  const draft: Record<string, unknown> = { ...src.draft, figCuts: cuts, figLog: log, pageAnchors: anchors };
   delete draft.figCutTries;
+  if (pending && left.length) {
+    draft.figFound = { ...pending, found: left, fails };
+    return { draft };
+  }
+  delete draft.figFound;
   // 한 조각짜리 자료: 노트가 정해졌으니 그림을 개념에 붙이고 다음 단계를 정한다
   if (src.step === 'visual' && draft.note) {
     const figures = toSourceFigures(cuts, (draft.note as Note).key_points);
@@ -484,6 +592,16 @@ async function stepOrganize(ctx: Ctx): Promise<Partial<SourceRow>> {
   let holder: FigureHolder | null = null;
   // 이 조각의 양 (개념 수를 정한다): PDF 는 쪽 수, 사진은 장 수, 글은 글자 수
   let size: PartSize = { kind: src.kind };
+  // PDF 글자에서 읽은 인쇄된 쪽 번호 (노트의 쪽 표시: 글자가 없는 스캔 PDF 는 AI 가 읽은 번호를 쓴다)
+  let textNums: number[] | null = null;
+  const readTextNums = async (bytes: Uint8Array): Promise<number[] | null> => {
+    try {
+      return await pdfPrintedNumbers(bytes);
+    } catch (e) {
+      console.warn('[kok] page numbers skipped', src.id, e);
+      return null;
+    }
+  };
 
   if (src.kind === 'pdf') {
     const parts = pdfPartsOf(src);
@@ -506,6 +624,7 @@ async function stepOrganize(ctx: Ctx): Promise<Partial<SourceRow>> {
       size = { kind: 'pdf', pages: part.end - part.start + 1 };
       content.push(pdfBlock(bytes));
       holder = { kind: 'pdf', bytes, firstPage: part.start };
+      textNums = await readTextNums(bytes);
     } else {
       const bytes = await download(admin, src.file_paths[0]);
       if (bytes.byteLength > pdfPartMaxBytes()) {
@@ -521,6 +640,7 @@ async function stepOrganize(ctx: Ctx): Promise<Partial<SourceRow>> {
       size = { kind: 'pdf', pages: c.end - c.start + 1 };
       content.push(pdfBlock(slice));
       holder = { kind: 'pdf', bytes: slice, firstPage: c.start };
+      textNums = await readTextNums(slice);
     }
   } else if (src.kind === 'image') {
     const paths = src.file_paths.slice(i * IMAGES_PER_CHUNK, (i + 1) * IMAGES_PER_CHUNK);
@@ -543,45 +663,104 @@ async function stepOrganize(ctx: Ctx): Promise<Partial<SourceRow>> {
     content.push(textBlock(wrap('material', text)));
   }
   if (room > 0 && holder) meta.figures = room;
+  // PDF: 쪽마다 인쇄된 쪽 번호도 받는다 (PDF 글자에서 읽었으면 그것을 쓰지만, 스캔 PDF 가 많아서 늘 받는다)
+  if (src.kind === 'pdf') meta.pageNumbers = true;
   // 자료 양에 따라 개념 수를 정한다 (조각마다 적어 두고 합칠 때 더한다)
   meta.keyPoints = keyPointRange(size);
   content.push(textBlock(organizePrompt(meta)));
 
-  // 답 길이는 개념 수에 따라, 그림을 찾으면 그만큼 더 (그림 하나에 약 400토큰)
+  // 답 길이는 개념 수에 따라, 그림을 찾으면 그만큼 더
   const json = await ai(
     ctx,
     'organize',
     content,
-    meta.figures ? organizeFiguresJsonSchema : noteJsonSchema,
-    noteOutTokens(meta.keyPoints.max, meta.figures ?? 0),
+    organizeJsonSchema({ figures: !!meta.figures, pageNumbers: !!meta.pageNumbers }),
+    noteOutTokens(meta.keyPoints.max, meta.figures ?? 0) + (meta.pageNumbers ? 200 : 0),
   );
   const note = normalizeNote(zNote.parse(json), meta.keyPoints.max);
-  // 찾은 그림은 다음 번에 원본에서 자른다 (stepCutFigures: AI 를 부른 이 단계와 나눠서, 자르다 오래 걸려도 정리를 다시 하지 않게).
+  // 쪽 번호: 이 조각의 증거 (PDF 글자·AI 가 읽은 번호). 처음 조각부터 다시 정리하면 예전 것은 버린다
+  const evidence = i === 0 ? [] : evidenceOf(src.draft).filter((e) => e.start !== meta.pageStart);
+  let partAdd: number | null = null;
+  if (src.kind === 'pdf' && meta.pageStart && meta.pageEnd) {
+    const n = meta.pageEnd - meta.pageStart + 1;
+    const aiNums = readNums((json as { page_numbers?: unknown } | null)?.page_numbers, n);
+    const text = textNums?.length === n && textNums.some(Boolean) ? textNums : null;
+    evidence.push({ start: meta.pageStart, end: meta.pageEnd, ...(text ? { text } : {}), ai: aiNums });
+    partAdd = (text ? offsetOf({ start: meta.pageStart, nums: text }) : null) ?? offsetOf({ start: meta.pageStart, nums: aiNums });
+  }
+  // 찾은 그림은 다음 번에 그 쪽을 그림으로 그려 자리를 찾고 자른다 (stepCutFigures: AI 를 부른 이 단계와 나눠서, 오래 걸려도 정리를 다시 하지 않게).
   // 개념은 노트가 정해진 뒤 이름으로 붙인다
   let figFound: PendingCut | null = null;
   if (meta.figures && holder) {
     const range = holder.kind === 'pdf' ? { from: meta.pageStart ?? 1, to: meta.pageEnd ?? 1 } : { from: meta.imageStart ?? 1, to: meta.imageEnd ?? 1 };
-    const found = readFoundFigures((json as { figures?: unknown } | null)?.figures, range, meta.figures);
-    if (found.length) figFound = { chunk: i, found };
+    const found = readFoundFigures((json as { figures?: unknown } | null)?.figures, range, meta.figures).map((f) => {
+      // 그 쪽에 인쇄된 번호로 짐작한 쪽: AI 가 쪽을 잘못 셌으면 여기를 먼저 본다
+      const guess = f.printed && partAdd !== null ? f.printed - partAdd : null;
+      return guess && guess !== f.page && guess >= range.from && guess <= range.to ? { ...f, hints: [guess] } : f;
+    });
+    if (found.length) figFound = { chunk: i, from: range.from, to: range.to, found };
     figLog.found += found.length;
   }
   const partials = [...(src.partials ?? []), note];
   const next = i + 1;
   const progress = Math.round(5 + (55 * next) / total);
   const partRanges = [...(i === 0 ? [] : rangesOf(src.draft)), meta.keyPoints];
-  const kept: Record<string, unknown> = { ...src.draft, attempts: 0, figCuts: prevCuts, figLog, partRanges };
+  const kept: Record<string, unknown> = { ...src.draft, attempts: 0, figCuts: prevCuts, figLog, partRanges, pageEvidence: evidence };
+  if (i === 0) delete kept.pageAnchors;
   if (figFound) kept.figFound = figFound;
   if (next < total) {
     return { partials, chunk_index: next, progress, draft: kept };
   }
   // 여러 조각이거나 노트에 더하는 자료면 합치기 단계로
   if (total > 1 || src.parent_id) return { partials, chunk_index: next, step: 'merge', progress, draft: kept };
-  // 한 조각짜리: 그림이 있으면 자른 뒤 개념에 붙이고 다음 단계를 정한다 (stepCutFigures)
-  if (figFound)
-    return { partials: [], chunk_index: next, step: 'visual', progress: 62, draft: { ...src.draft, note, attempts: 0, figCuts: [], figFound, figLog } };
-  const draft: Record<string, unknown> = { ...src.draft, note, figures: [], attempts: 0, figLog };
+  // 한 조각짜리: 그림이 있으면 자리를 찾아 자른 뒤 개념에 붙이고 다음 단계를 정한다 (stepCutFigures)
+  const one: Record<string, unknown> = { ...src.draft, note, attempts: 0, figLog, pageEvidence: evidence };
+  delete one.pageAnchors;
+  if (figFound) return { partials: [], chunk_index: next, step: 'visual', progress: 62, draft: { ...one, figCuts: [], figFound } };
+  const draft: Record<string, unknown> = { ...one, figures: [] };
   delete draft.figCuts;
   return { partials: [], chunk_index: next, step: 'visual', progress: 62, draft };
+}
+
+/** 조각마다의 쪽 번호 증거: PDF 쪽 start~end 에 인쇄된 번호 (PDF 글자 text, AI 가 읽은 ai) */
+type PartEvidence = { start: number; end: number; text?: number[]; ai?: number[] };
+
+function evidenceOf(draft: Record<string, unknown>): PartEvidence[] {
+  const v = draft.pageEvidence;
+  if (!Array.isArray(v)) return [];
+  return v.filter(
+    (e): e is PartEvidence => !!e && typeof e === 'object' && Number.isInteger((e as PartEvidence).start) && Number.isInteger((e as PartEvidence).end),
+  );
+}
+
+/** AI 가 읽은 번호 n 개 (모자라면 0, 이상한 값은 0) */
+function readNums(raw: unknown, n: number): number[] {
+  const list = Array.isArray(raw) ? raw : [];
+  return Array.from({ length: n }, (_, k) => {
+    const v = Math.round(Number(list[k]));
+    return Number.isFinite(v) && v > 0 && v < 100000 ? v : 0;
+  });
+}
+
+/** 정리를 마친 자료의 인쇄된 쪽 번호 구간 (PDF 만: 조각마다의 증거 + 그림을 찾을 때 쪽 하나씩 읽은 번호) */
+function pageLabelsOf(src: SourceRow): PageLabels {
+  if (src.kind !== 'pdf') return [];
+  const parts = evidenceOf(src.draft).map((e) => ({
+    from: e.start,
+    to: e.end,
+    text: e.text ? ({ start: e.start, nums: e.text } satisfies PageEvidence) : null,
+    ai: e.ai ? ({ start: e.start, nums: e.ai } satisfies PageEvidence) : null,
+  }));
+  return buildPageLabels(parts, anchorsOf(src.draft));
+}
+
+/** 그림마다 그 쪽에 인쇄된 번호 (구간이 있으면 구간으로, 없으면 그 쪽에서 읽은 번호 그대로) */
+function withPrinted<T extends { page: number; printed?: number }>(figs: T[], labels: PageLabels): T[] {
+  return figs.map((f) => {
+    const n = printedPage(labels, f.page);
+    if (n) return { ...f, printed: n };
+    return f;
+  });
 }
 
 /** 조각마다 정한 개념 수 (예전 자료에는 없다: 조각의 개념 수로 어림) */
@@ -922,11 +1101,15 @@ async function stepCheckAndFinish(ctx: Ctx): Promise<'done' | Partial<SourceRow>
     visuals.push({ type: 'timeline', spec: { title: visual.timeline.title, events: visual.timeline.events } });
   }
   // 자료 그림: 노트에 더할 때는 지금 노트의 그림 뒤에 새 그림 (노트 하나에 MAX_NOTE_FIGURES 장까지: 넘는 새 그림과 그 문제는 뺀다)
+  // 인쇄된 쪽 번호(책의 쪽): 이 자료의 쪽 번호 구간. 새 그림은 그 쪽의 번호를 들고 다닌다 (노트를 합쳐도 제 자료의 번호로 보이게)
+  const labels = pageLabelsOf(ctx.src);
   const baseFigures = readFigures({ figures: ctx.src.draft.baseFigures });
-  const figures = draftFigures(ctx.src.draft).slice(0, Math.max(0, MAX_NOTE_FIGURES - baseFigures.length));
+  const figures = withPrinted(draftFigures(ctx.src.draft).slice(0, Math.max(0, MAX_NOTE_FIGURES - baseFigures.length)), labels);
   const allFigures = [...baseFigures, ...figures];
   const figLog = figLogOf(ctx.src.draft);
   let noteBody: Record<string, unknown> = { ...note, recommended: visual.recommended, ...(allFigures.length ? { figures: allFigures } : {}) };
+  // 노트의 쪽 표시는 처음 넣은 자료의 쪽이다 (더한 자료의 쪽 번호는 합칠 때 비운다): 새 노트에만 적는다
+  if (!parentNoteId(ctx) && labels.length) noteBody.page_labels = labels;
   // 그림 문제는 그 그림을 문제에 그대로 남긴다 (그림이 없어졌으면 문제를 뺀다: '다음 지도' 같은 말이 남지 않게)
   const byId = new Map(figures.map((f) => [f.id, f]));
   const saved = kept
@@ -936,10 +1119,11 @@ async function stepCheckAndFinish(ctx: Ctx): Promise<'done' | Partial<SourceRow>
   if (!parentNoteId(ctx)) noteBody.figure_log = { ...figLog, questions: saved.filter((x) => 'source_figure' in x).length };
   const pid = parentNoteId(ctx);
   if (pid) {
-    // 그림 보기 설정(노트마다)은 지금 노트의 것을 그대로 쓴다
+    // 그림 보기 설정(노트마다)과 쪽 번호 구간은 지금 노트의 것을 그대로 쓴다
     const { data: cur } = await ctx.admin.from('notes').select('body').eq('id', pid).maybeSingle();
-    const view = (cur?.body as Record<string, unknown> | undefined)?.view;
-    if (view) noteBody = { ...noteBody, view };
+    const curBody = cur?.body as Record<string, unknown> | undefined;
+    if (curBody?.view) noteBody = { ...noteBody, view: curBody.view };
+    if (curBody?.page_labels) noteBody = { ...noteBody, page_labels: curBody.page_labels };
   }
   // 원본 파일: Pro·관리자는 계속, 무료는 처리 뒤 freeFileDays 일, 테스트 플랜은 플랜이 끝나고 freeFileDays 일
   const keepFrom = ctx.acc.plan.kind === 'custom' && ctx.acc.plan.until ? Math.max(Date.parse(ctx.acc.plan.until), Date.now()) : Date.now();

@@ -162,8 +162,11 @@ const arr = (items: unknown) => ({ type: 'array', items });
 const tone = oneOf(ART_TONES);
 const legend = arr(obj({ tone, text: str, kind: oneOf(['area', 'line', 'dot']) }));
 
+// redrawable: 이 칸들로 그대로 다시 그릴 수 없는 그림(사진·옛 지도·도시 크기의 지도·읽을 수 없는 그림 …)이면 false (원본만 쓴다).
+// 맨 앞에 둔다: AI 는 칸 차례대로 쓰니 먼저 정하고, false 면 나머지를 비워 짧게 끝낸다
 const SCHEMAS: Record<ArtKind, JsonSchema> = {
   map: obj({
+    redrawable: bool,
     title: str,
     notes: str,
     view: obj({ west: num, east: num, south: num, north: num }),
@@ -176,6 +179,7 @@ const SCHEMAS: Record<ArtKind, JsonSchema> = {
     legend,
   }),
   chart: obj({
+    redrawable: bool,
     title: str,
     notes: str,
     type: oneOf(CHART_TYPES),
@@ -191,8 +195,9 @@ const SCHEMAS: Record<ArtKind, JsonSchema> = {
     value_labels: bool,
     slice_tones: arr(tone),
   }),
-  table: obj({ title: str, notes: str, columns: strArr, rows: arr(strArr), row_header: bool }),
+  table: obj({ redrawable: bool, title: str, notes: str, columns: strArr, rows: arr(strArr), row_header: bool }),
   timeline: obj({
+    redrawable: bool,
     title: str,
     notes: str,
     events: arr(obj({ when: str, year: num, label: str, detail: str, tone })),
@@ -200,6 +205,7 @@ const SCHEMAS: Record<ArtKind, JsonSchema> = {
     even: bool,
   }),
   diagram: obj({
+    redrawable: bool,
     title: str,
     notes: str,
     cols: int,
@@ -284,6 +290,22 @@ function lonLatPts(v: unknown, maxPts: number): number[] {
   return pts;
 }
 
+/** 그릴 것들(점 셋 넘게)이 보는 범위의 한 점에 모여 있는지 (도시 지도를 넓은 범위에 그리면 이름이 모두 겹친다) */
+function clumped(content: number[], view: MapView): boolean {
+  if (content.length < 8) return false;
+  let x0 = Infinity;
+  let x1 = -Infinity;
+  let y0 = Infinity;
+  let y1 = -Infinity;
+  for (let k = 0; k + 1 < content.length; k += 2) {
+    x0 = Math.min(x0, content[k]);
+    x1 = Math.max(x1, content[k]);
+    y0 = Math.min(y0, content[k + 1]);
+    y1 = Math.max(y1, content[k + 1]);
+  }
+  return x1 - x0 < (view.east - view.west) * MAP_CLUMP_FRAC && y1 - y0 < (view.north - view.south) * MAP_CLUMP_FRAC;
+}
+
 /** 지도 보는 범위. 이상하면 그릴 것들을 감싸는 범위로 */
 function viewOf(v: unknown, content: number[]): MapView | null {
   const r = isObj(v) ? v : {};
@@ -318,7 +340,28 @@ function viewOf(v: unknown, content: number[]): MapView | null {
   return { west: round(west), east: round(east), south: round(south), north: round(north) };
 }
 
+/**
+ * 지도로 다시 그리지 않는 크기: 보는 범위가 가로·세로 모두 이보다 좁으면(약 45km, 도시·궁궐·싸움터) 해안선 밑그림이 맞지 않고
+ * 경도·위도가 소수 둘째 자리(약 1km)라 이름이 한데 겹친다 → 원본만 쓴다
+ */
+export const MAP_MIN_SPAN = 0.4;
+/** 지도 위 글이 이보다 길면 지도에 쓰인 이름이 아니라 둘레의 설명 글(사진 설명·문제 글)을 옮긴 것이다 */
+export const MAP_LABEL_MAX_CHARS = 24;
+/** 점·글이 셋 넘는데 모두 보는 범위의 이 비율 안에 모여 있으면 범위가 잘못된 것 (한가운데 겹쳐 그려진다) */
+const MAP_CLUMP_FRAC = 0.08;
+
+const shortLabel = (s: string) => Array.from(s).length <= MAP_LABEL_MAX_CHARS;
+
+/** AI 가 준 보는 범위가 도시 크기인지 (가로·세로 모두 MAP_MIN_SPAN 보다 좁다) */
+function tinyView(v: unknown): boolean {
+  if (!isObj(v)) return false;
+  const w = num_(v.east, NaN) - num_(v.west, NaN);
+  const h = num_(v.north, NaN) - num_(v.south, NaN);
+  return Number.isFinite(w) && Number.isFinite(h) && Math.abs(w) < MAP_MIN_SPAN && Math.abs(h) < MAP_MIN_SPAN;
+}
+
 function normalizeMap(r: Raw): MapArt | null {
+  if (tinyView(r.view)) return null;
   const areas: MapArea[] = list(r.areas)
     .map((a) => ({
       label: text(a.label, ART_LIMITS.label),
@@ -339,14 +382,15 @@ function normalizeMap(r: Raw): MapArt | null {
     }))
     .filter((l) => l.pts.length >= 4)
     .slice(0, ART_LIMITS.lines);
+  // 긴 글(둘레의 설명 글을 옮긴 것)은 뺀다: 지도에 쓰인 이름만
   const places: MapPlace[] = list(r.places)
     .map((p) => ({ label: text(p.label, ART_LIMITS.label), lon: num_(p.lon, NaN), lat: num_(p.lat, NaN), kind: pick(p.kind, PLACE_KINDS, 'city') }))
-    .filter((p) => Number.isFinite(p.lon) && Number.isFinite(p.lat))
+    .filter((p) => Number.isFinite(p.lon) && Number.isFinite(p.lat) && shortLabel(p.label))
     .map((p) => ({ ...p, lon: round(clamp(p.lon, -180, 180)), lat: round(clamp(p.lat, -85, 85)) }))
     .slice(0, ART_LIMITS.places);
   const labels: MapLabel[] = list(r.labels)
     .map((l) => ({ text: text(l.text, ART_LIMITS.label), lon: num_(l.lon, NaN), lat: num_(l.lat, NaN), kind: pick(l.kind, MAP_LABEL_KINDS, 'region') }))
-    .filter((l) => l.text && Number.isFinite(l.lon) && Number.isFinite(l.lat))
+    .filter((l) => l.text && shortLabel(l.text) && Number.isFinite(l.lon) && Number.isFinite(l.lat))
     .map((l) => ({ ...l, lon: round(clamp(l.lon, -180, 180)), lat: round(clamp(l.lat, -85, 85)) }))
     .slice(0, ART_LIMITS.labels);
   if (!areas.length && !lines.length && !places.length && !labels.length) return null;
@@ -358,6 +402,7 @@ function normalizeMap(r: Raw): MapArt | null {
   ];
   const view = viewOf(r.view, content);
   if (!view) return null;
+  if (clumped(content, view)) return null;
   return {
     v: 1,
     kind: 'map',
@@ -597,9 +642,13 @@ const shrinkLine = (pts: number[], tol: number) => {
   return s.length >= 4 ? s : [pts[0], pts[1], pts[pts.length - 2], pts[pts.length - 1]];
 };
 
-/** 받은 설계도가 쓸 만하면 Art, 아니면 null (그릴 것이 없거나 크기를 맞출 수 없을 때) */
+/**
+ * 받은 설계도가 쓸 만하면 Art, 아니면 null (AI 가 그대로 다시 그릴 수 없다고 했거나(redrawable false), 그릴 것이 없거나,
+ * 크기를 맞출 수 없을 때). 저장한 설계도에는 redrawable 칸이 없다 (있을 때 false 만 거절)
+ */
 export function normalizeArt(kind: ArtKind, raw: unknown): Art | null {
   if (!(ART_KINDS as readonly string[]).includes(kind) || !isObj(raw)) return null;
+  if (raw.redrawable === false) return null;
   const art = NORMALIZERS[kind](raw);
   return art ? fitSize(art) : null;
 }

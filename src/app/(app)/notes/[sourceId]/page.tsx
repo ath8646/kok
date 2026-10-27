@@ -13,6 +13,7 @@ import { CoursePanel } from '@/components/course/CoursePanel';
 import { NotePdfs } from '@/components/note/NotePdfs';
 import { OriginalPanel } from '@/components/note/OriginalPanel';
 import { OriginalTab } from '@/components/note/OriginalTab';
+import { RelocateFiguresSheet } from '@/components/note/RelocateFigures';
 import { AppendStatus } from '@/components/note/AppendStatus';
 import { NoteChat } from '@/components/note/NoteChat';
 import { useStuck } from '@/components/useStuck';
@@ -46,6 +47,7 @@ import { estimateSmallTask } from '@/lib/ai/models';
 import { clientModel } from '@/lib/client-model';
 import { keyPointMemory } from '@/lib/memory';
 import { readFigures } from '@/lib/source-figures';
+import { readPageLabels } from '@/lib/page-labels';
 import { zMindmap, zNote, zTable, zTimeline, type Mindmap, type TableSpec, type TimelineSpec } from '@/lib/ai/schemas';
 import type { QuestionRow, SubjectRow } from '@/lib/types';
 import { subjectVar } from '@/lib/colors';
@@ -273,6 +275,8 @@ export default function NotePage() {
   const [page, setPage] = useState<number | null>(null);
   const [glance, setGlance] = useState(true);
   const [reporting, setReporting] = useState(false);
+  // 자료 그림 다시 찾기 (원본에서 그림 자리를 새 방법으로)
+  const [relocating, setRelocating] = useState(false);
   const [reason, setReason] = useState('');
   const [renaming, setRenaming] = useState(false);
   const [newTitle, setNewTitle] = useState('');
@@ -464,6 +468,8 @@ export default function NotePage() {
   const docVisuals = useMemo<Visuals>(() => (old ? old.visuals : (visuals ?? {})), [old, visuals]);
   // 자료 그림 (PDF·사진 속 그림을 잘라 둔 것, Pro 는 다시 그린 그림도): 개념 카드 안에 보인다
   const docFigures = useMemo(() => readFigures(raw), [raw]);
+  // 인쇄된 쪽 번호 (책의 쪽): 쪽 표시만 바뀌고 원본 열기는 PDF 쪽 그대로
+  const pageLabels = useMemo(() => readPageLabels(raw), [raw]);
   const liveQuestions = useMemo(() => (questions ?? []).filter((q) => q.status !== 'hidden'), [questions]);
   // 풀 수 있는 문제 (쉬는 문제 빼고)가 있을 때만 '이 노트 문제 풀기'
   const canPractice = useMemo(() => liveQuestions.some((q) => q.status === 'active'), [liveQuestions]);
@@ -968,6 +974,9 @@ export default function NotePage() {
               ...(mergedMark ? [{ label: 'AI로 다시 정리', icon: ICONS.sparkle, onSelect: () => (me.canAppend ? reorganize() : router.push('/plan')) }] : []),
               ...(mergeOn && !old ? [{ label: '다른 과목으로 옮기기', icon: ICONS.move, onSelect: startMove }] : []),
               ...(versionsOn ? [{ label: versions.length ? '버전 기록' : '자료 더하기', icon: ICONS.file, onSelect: () => setTab('original') }] : []),
+              ...(sourceFiguresOn && !old && !appendRunning && source.kind !== 'text' && docFigures.length
+                ? [{ label: '자료 그림 다시 찾기', icon: ICONS.image, onSelect: () => setRelocating(true) }]
+                : []),
               ...(reportable ? [{ label: '이상해요 (신고)', icon: ICONS.edit, onSelect: () => setReporting(true) }] : []),
             ]}
           />
@@ -1149,6 +1158,7 @@ export default function NotePage() {
                   setTab('original');
                 }}
                 figures={docFigures}
+                pageLabels={pageLabels}
                 originalFirst={!!me?.settings.visual.originalFirst}
                 onFiguresChange={(next) => saveBody({ ...raw, figures: next })}
               />
@@ -1242,6 +1252,7 @@ export default function NotePage() {
                 liveQuestionCount={liveQuestions.length}
                 appendBusy={kidsActive}
                 focusPage={page}
+                pageLabels={pageLabels}
                 busy={verBusy}
                 onOpen={openVersion}
                 onUse={switchTo}
@@ -1249,7 +1260,14 @@ export default function NotePage() {
                 onAdd={(files, text) => quick.addToNote(files, text, false)}
               />
             ) : (
-              <OriginalPanel kind={source.kind} text={source.text_content} paths={source.file_paths} expireAt={source.files_expire_at} focusPage={page} />
+              <OriginalPanel
+                kind={source.kind}
+                text={source.text_content}
+                paths={source.file_paths}
+                expireAt={source.files_expire_at}
+                focusPage={page}
+                pageLabels={pageLabels}
+              />
             )
           ) : null}
         </>
@@ -1313,6 +1331,16 @@ export default function NotePage() {
         </form>
       </Sheet>
 
+      {note ? (
+        <RelocateFiguresSheet
+          open={relocating}
+          onClose={() => setRelocating(false)}
+          noteId={note.id}
+          figures={docFigures.map((f) => ({ id: f.id, title: f.title }))}
+          onDone={reload}
+        />
+      ) : null}
+
       <Sheet open={reporting} onClose={() => setReporting(false)} title="이상해요">
         <div className="grid gap-3">
           <p className="text-sm text-muted">정리나 그림에서 틀린 곳, 이상한 곳을 알려 주세요. 관리자가 확인해요. 직접 고칠 수도 있어요.</p>
@@ -1360,7 +1388,8 @@ function FigureLogLine({ body }: { body: unknown }) {
   const errors = Array.isArray(log.errors) ? log.errors.map(String) : [];
   return (
     <p className="rounded-2xl bg-surface-2 px-4 py-2.5 text-xs text-muted">
-      관리자 · 자료 그림: 찾은 조각 {n('looked')} · AI가 찾은 그림 {n('found')} · 자른 그림 {n('cut')} · 그림 문제 {n('questions')}
+      관리자 · 자료 그림: 찾은 조각 {n('looked')} · AI가 찾은 그림 {n('found')} · 자른 그림 {n('cut')}
+      {n('missed') ? ` · 쪽에서 못 찾은 그림 ${n('missed')}` : ''} · 그림 문제 {n('questions')}
       {skipped ? ` · ${skipped}` : ''}
       {errors.length ? <span className="mt-0.5 block break-all">오류: {errors.join(' / ')}</span> : null}
     </p>

@@ -74,6 +74,7 @@ const EFFORT_TASKS: Array<[keyof ModelsConfig['effort'], string]> = [
   ['theme', '테마 만들기'],
   ['solve', '풀이 (그림·단계)'],
   ['redraw', '자료 그림 다시 그리기'],
+  ['locate', '자료 그림 자리 찾기'],
 ];
 
 export default function AdminPage() {
@@ -232,14 +233,16 @@ export default function AdminPage() {
               setFigResult(null);
               try {
                 const r = await api<{
-                  cut: { ok: boolean; message: string; size?: string; ms: number };
+                  cut: { ok: boolean; message: string; size?: string; vision?: string; ms: number };
                   dbReady: boolean;
                   settingOn: boolean;
                   redraw: boolean;
                 }>('/api/admin/test-figures', { method: 'POST', body: '{}' });
                 setFigResult(
                   [
-                    r.cut.ok ? `그림 자르기 됨 (${r.cut.size}, ${(r.cut.ms / 1000).toFixed(1)}초)` : `그림 자르기 안 됨: ${r.cut.message}`,
+                    r.cut.ok
+                      ? `그림 자르기 됨 (AI에 보낼 쪽 ${r.cut.vision ?? '?'} → 자른 그림 ${r.cut.size}, ${(r.cut.ms / 1000).toFixed(1)}초)`
+                      : `그림 자르기 안 됨: ${r.cut.message}`,
                     r.dbReady ? 'DB 그림 칸 있음' : 'DB 그림 칸 없음: schema.sql 을 다시 실행해 주세요',
                     r.settingOn ? "내 설정 '자료 그림' 켬" : "내 설정 '자료 그림' 꺼짐",
                     r.redraw ? 'KOK 스타일 다시 그리기 됨(Pro)' : '다시 그리기는 Pro',

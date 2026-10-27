@@ -50,9 +50,13 @@ describe('다시 그리기 설계도: JSON 스키마', () => {
     expect(problems).toEqual([]);
   });
 
-  it('종류마다 스키마가 따로이고 작다', () => {
-    for (const kind of ART_KINDS) expect(bytes(artJsonSchema(kind))).toBeLessThan(2500);
+  it('종류마다 스키마가 따로이고 작다, 그대로 다시 그릴 수 있는지(redrawable)를 맨 먼저 쓴다', () => {
+    for (const kind of ART_KINDS) {
+      expect(bytes(artJsonSchema(kind))).toBeLessThan(2500);
+      expect(Object.keys((artJsonSchema(kind) as { properties: object }).properties)[0]).toBe('redrawable');
+    }
     expect(artJsonSchema('map')).not.toEqual(artJsonSchema('chart'));
+    expect(redrawPrompt({ kind: 'map' })).toContain('redrawable: false');
   });
 
   it('지시에 종류별 설명과 그대로 옮기기 규칙이 들어간다', () => {
@@ -96,6 +100,34 @@ describe('다시 그리기 설계도: 검사 (normalizeArt)', () => {
     // 범위가 이상하면 그릴 것들을 감싸는 범위로
     expect(art.view.west).toBeLessThan(10);
     expect(art.view.east).toBeGreaterThanOrEqual(180);
+  });
+
+  it('그대로 다시 그릴 수 없는 그림은 원본만 (null): AI 가 아니라고 함·도시 크기 지도·한가운데 몰린 지도', () => {
+    expect(normalizeArt('map', { ...MAP_RAW, redrawable: false })).toBeNull();
+    expect(normalizeArt('table', { redrawable: false, title: '', notes: '', columns: ['a'], rows: [['1']], row_header: false })).toBeNull();
+    // 예전에 저장한 설계도(redrawable 칸이 없다)는 그대로 읽는다
+    expect(readArt(normalizeArt('map', MAP_RAW))).not.toBeNull();
+    expect(normalizeArt('map', { ...MAP_RAW, redrawable: true })).not.toBeNull();
+    // 도성도처럼 도시 안의 지도 (보는 범위가 가로·세로 모두 약 45km 아래)
+    const city = [
+      { label: '경복궁', lon: 126.977, lat: 37.579, kind: 'site' },
+      { label: '종묘', lon: 126.994, lat: 37.574, kind: 'site' },
+      { label: '숭례문', lon: 126.975, lat: 37.56, kind: 'site' },
+      { label: '흥인지문', lon: 127.009, lat: 37.571, kind: 'site' },
+    ];
+    expect(
+      normalizeArt('map', { ...MAP_RAW, view: { west: 126.95, east: 127.03, south: 37.54, north: 37.6 }, areas: [], lines: [], places: city, labels: [] }),
+    ).toBeNull();
+    // 범위는 넓은데 점·글이 모두 한 곳에 몰려 있다 (이름이 한가운데 겹쳐 그려진다)
+    expect(
+      normalizeArt('map', { ...MAP_RAW, view: { west: 120, east: 132, south: 33, north: 43 }, areas: [], lines: [], places: city, labels: [] }),
+    ).toBeNull();
+    // 둘레의 설명 글을 옮긴 긴 글은 빼고 지도에 쓰인 이름만
+    const art = normalizeArt('map', {
+      ...MAP_RAW,
+      labels: [...MAP_RAW.labels, { text: '세계 유산 종묘: 왕실 조상의 패를 모신 곳이다. 유교 예법에 따라', lon: 127, lat: 37.5, kind: 'note' }],
+    }) as MapArt;
+    expect(art.labels.map((l) => l.text)).toEqual(['동해']);
   });
 
   it('긴 글은 줄이고 개수는 한도까지만', () => {

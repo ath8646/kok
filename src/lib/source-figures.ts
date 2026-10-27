@@ -49,6 +49,8 @@ export type SourceFigure = {
   key_point_id: string;
   /** 원본 쪽 번호 (사진이면 사진 번호), 모르면 0 */
   page: number;
+  /** 그 쪽에 인쇄된 쪽 번호 (책의 쪽, 모르면 없음: 화면에는 이 번호로 보인다, page-labels.ts) */
+  printed?: number;
   /** 원본에서 자른 그림 (저장소 경로, `내id/figs/자료id/f1.jpg`) */
   crop: string;
   /** 자른 그림 크기 (자리를 먼저 잡아 두려고) */
@@ -79,6 +81,7 @@ const zStored = z.object({
   asks: z.unknown().optional(),
   key_point_id: z.unknown().optional(),
   page: z.number().int().min(0).max(100000).catch(0),
+  printed: z.number().int().min(1).max(99999).optional().catch(undefined),
   // 저장소 경로: 내id/figs/자료id/파일 (다른 곳을 가리키지 않게)
   crop: z.string().regex(/^[0-9a-f-]{36}\/figs\/[0-9a-f-]{36}\/f\d{1,4}\.jpg$/),
   w: z.number().int().min(1).max(10000).catch(800),
@@ -98,6 +101,7 @@ function readOne(raw: unknown): SourceFigure | null {
     asks: clean(d.asks, LIMITS.asks),
     key_point_id: clean(d.key_point_id, 40),
     page: d.page,
+    ...(d.printed ? { printed: d.printed } : {}),
     crop: d.crop,
     w: d.w,
     h: d.h,
@@ -144,7 +148,11 @@ export function questionFigure(f: SourceFigure): QuestionFigure {
 }
 
 // ---------------------------------------------------------------- AI 가 찾은 그림
-/** 정리할 때 AI 가 찾은 그림 (아직 자르기 전) */
+/**
+ * 정리할 때 AI 가 찾은 그림 (아직 자리를 찾고 자르기 전). 자리는 쪽을 그림으로 그려 한 장씩 보여 주고 받는다 (figure-locate.ts).
+ * printed: AI 가 그 쪽에서 읽은 인쇄된 쪽 번호, hints: 그 번호로 짐작한 PDF 쪽 (AI 가 쪽을 잘못 셌을 때 먼저 볼 쪽),
+ * tried: 이미 보여 줬는데 없던 쪽, calls: 찾느라 물어본 수. corners: 예전 정리(0~1000 꼭짓점, 이제 쓰지 않는다)
+ */
 export type FoundFigure = {
   page: number;
   kind: FigKind;
@@ -153,67 +161,26 @@ export type FoundFigure = {
   asks: string;
   /** 붙일 개념의 이름 (조각마다 개념 번호가 달라서 이름으로 찾는다) */
   kpTitle: string;
-  corners: Corners;
+  printed?: number;
+  hints?: number[];
+  tried?: number[];
+  calls?: number;
+  corners?: Corners;
 };
 
 const zFound = z.object({
   page: z.number().catch(0),
+  printed_page: z.number().catch(0),
   kind: zFigKind,
   title: z.unknown().optional(),
   caption: z.unknown().optional(),
   asks: z.unknown().optional(),
   key_point_title: z.unknown().optional(),
-  corners: z.array(z.number()).catch([]),
 });
 
-/** 0~1000 안으로. 숫자가 아니면 null */
-/** 꼭짓점이 쪽 밖으로 나가도 받는 정도 (사진 가장자리에 걸친 비스듬한 그림: 자를 때 쪽 밖은 흰색으로 채운다. figure-image.ts 의 OUT_OF_RANGE 와 같게) */
-const CORNER_SLACK = 100;
-
-function unit(v: number): number | null {
-  if (!Number.isFinite(v)) return null;
-  return Math.min(1000 + CORNER_SLACK, Math.max(-CORNER_SLACK, v));
-}
-
-/** 네 모서리로 읽는다: 여덟 수(네 점) 또는 네 수(왼쪽 위·오른쪽 아래 상자) */
-export function readCorners(raw: number[]): Corners | null {
-  let pts = raw.map(unit);
-  if (pts.some((v) => v === null)) return null;
-  if (pts.length === 4) {
-    const [x0, y0, x1, y1] = pts as number[];
-    pts = [x0, y0, x1, y0, x1, y1, x0, y1];
-  }
-  if (pts.length !== 8) return null;
-  // 모두 0~1 사이면 0~1 비율로 준 것 (드물게): 1000 배로
-  if ((pts as number[]).every((v) => v <= 1) && (pts as number[]).some((v) => v > 0)) pts = (pts as number[]).map((v) => v * 1000);
-  const c = pts as Corners;
-  const xs = [c[0], c[2], c[4], c[6]];
-  const ys = [c[1], c[3], c[5], c[7]];
-  // 너무 작은 그림(쪽의 3% 안)은 그림이 아니거나 잘못 찾은 것
-  if (Math.max(...xs) - Math.min(...xs) < 30 || Math.max(...ys) - Math.min(...ys) < 30) return null;
-  return c;
-}
-
-function boxOf(c: Corners) {
-  const xs = [c[0], c[2], c[4], c[6]];
-  const ys = [c[1], c[3], c[5], c[7]];
-  return { x0: Math.min(...xs), y0: Math.min(...ys), x1: Math.max(...xs), y1: Math.max(...ys) };
-}
-
-/** 두 그림이 거의 같은 자리인지 (같은 그림을 두 번 찾았을 때) */
-function sameSpot(a: Corners, b: Corners): boolean {
-  const p = boxOf(a);
-  const q = boxOf(b);
-  const w = Math.max(0, Math.min(p.x1, q.x1) - Math.max(p.x0, q.x0));
-  const h = Math.max(0, Math.min(p.y1, q.y1) - Math.max(p.y0, q.y0));
-  const inter = w * h;
-  const union = (p.x1 - p.x0) * (p.y1 - p.y0) + (q.x1 - q.x0) * (q.y1 - q.y0) - inter;
-  return union > 0 && inter / union > 0.6;
-}
-
 /**
- * AI 가 찾은 그림을 읽는다: 이 조각의 쪽(사진) 범위 안, 모서리가 올바른 것, 같은 자리를 두 번 찾은 것은 하나로, max 개까지.
- * range: 이 조각의 원래 쪽(사진) 번호 범위
+ * AI 가 찾은 그림을 읽는다: 이 조각의 쪽(사진) 범위 안(벗어나면 가장 가까운 쪽: 그 둘레를 찾아본다), 이름이나 설명이 있는 것,
+ * 같은 쪽의 같은 이름은 하나로, max 개까지. range: 이 조각의 원래 쪽(사진) 번호 범위
  */
 export function readFoundFigures(raw: unknown, range: { from: number; to: number }, max: number): FoundFigure[] {
   if (!Array.isArray(raw) || max <= 0) return [];
@@ -221,16 +188,12 @@ export function readFoundFigures(raw: unknown, range: { from: number; to: number
   for (const item of raw.slice(0, 20)) {
     const r = zFound.safeParse(item);
     if (!r.success) continue;
-    let page = Math.round(r.data.page);
-    // 한 쪽(사진 한 장)짜리 조각이면 쪽 번호를 잘못 적어도 그 쪽이다
-    if (range.from === range.to) page = range.from;
-    if (page < range.from || page > range.to) continue;
-    const corners = readCorners(r.data.corners);
-    if (!corners) continue;
-    if (out.some((f) => f.page === page && sameSpot(f.corners, corners))) continue;
+    const page = Number.isFinite(r.data.page) ? Math.min(range.to, Math.max(range.from, Math.round(r.data.page))) : range.from;
     const title = clean(r.data.title, LIMITS.title);
     const caption = clean(r.data.caption, LIMITS.caption);
     if (!caption && !title) continue;
+    if (out.some((f) => f.page === page && f.title === (title || FIG_KIND_LABEL[r.data.kind]) && f.caption === caption)) continue;
+    const printed = Math.round(r.data.printed_page);
     out.push({
       page,
       kind: r.data.kind,
@@ -238,7 +201,7 @@ export function readFoundFigures(raw: unknown, range: { from: number; to: number
       caption,
       asks: clean(r.data.asks, LIMITS.asks),
       kpTitle: clean(r.data.key_point_title, 120),
-      corners,
+      ...(printed > 0 && printed < 100000 ? { printed } : {}),
     });
     if (out.length >= max) break;
   }
@@ -301,6 +264,7 @@ export function toSourceFigures(cuts: CutFigure[], kps: ReadonlyArray<{ id: stri
     asks: c.asks,
     key_point_id: matchKeyPoint(c.kpTitle, kps),
     page: c.page,
+    ...(c.printed ? { printed: c.printed } : {}),
     crop: c.crop,
     w: c.w,
     h: c.h,

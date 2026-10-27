@@ -101,6 +101,8 @@ export function estimateEnergy(m: MaterialEstimate, model: ModelId, usdPerEnergy
     calls.push({ input_tokens: Math.round(perChunk + 2500), output_tokens: Math.round(Math.min(6000, 800 + perChunk * 0.15)) });
   }
   if (chunks > 1) calls.push({ input_tokens: chunks * 4000 + 1500, output_tokens: Math.min(10_000, 1500 + chunks * 2500) }); // 합치기
+  // 자료 그림 자리 찾기 (PDF·사진): 그림이 있는 쪽을 그림으로 보여 준다 (그림 몇 개, 못 찾으면 가까운 쪽까지)
+  if (m.kind !== 'text') for (let i = 0; i < 3; i++) calls.push({ input_tokens: 2 * 1540 + 900, output_tokens: 400 });
   calls.push({ input_tokens: Math.round(noteTokens + 1500), output_tokens: Math.round(Math.min(5000, 1200 + noteTokens * 0.3)) }); // 그림
   calls.push({ input_tokens: Math.round(noteTokens + 2000), output_tokens: Math.round(Math.min(9000, 1500 + noteTokens * 0.6)) }); // 문제
   calls.push({ input_tokens: Math.round(noteTokens + 5500), output_tokens: 800 }); // 검사

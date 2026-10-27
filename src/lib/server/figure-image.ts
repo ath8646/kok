@@ -14,6 +14,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { createRequire } from 'node:module';
 import type { Canvas } from '@napi-rs/canvas';
+import { visionSize, type Quad } from '@/lib/figure-locate';
+import { contentMask, padEmpty, snapRect, type ContentMask } from '@/lib/figure-snap';
 
 /** 그림의 네 꼭짓점 (0~1000): 왼쪽 위 x,y · 오른쪽 위 x,y · 오른쪽 아래 x,y · 왼쪽 아래 x,y */
 export type Corners = [number, number, number, number, number, number, number, number];
@@ -145,8 +147,11 @@ async function renderPdfPage(bytes: Uint8Array, pageNumber: number): Promise<Pag
   const timeout = new Promise<never>((_, reject) => {
     timer = setTimeout(() => reject(new FigureImageError('PDF 쪽을 그리는 데 너무 오래 걸려요.')), RENDER_TIMEOUT_MS);
   });
+  const drawing = drawPage(task, pageNumber, createCanvas);
+  // 시간이 넘어 그리기를 멈춘 뒤에 나는 오류는 여기서 받는다 (처리되지 않은 오류로 남지 않게)
+  drawing.catch(() => {});
   try {
-    return await Promise.race([drawPage(task, pageNumber, createCanvas), timeout]);
+    return await Promise.race([drawing, timeout]);
   } catch (e) {
     if (e instanceof FigureImageError) throw e;
     throw new FigureImageError('PDF 쪽을 그리지 못했어요.', { cause: e });
@@ -159,7 +164,12 @@ async function renderPdfPage(bytes: Uint8Array, pageNumber: number): Promise<Pag
 
 /** 문서를 열고 쪽 하나를 흰 바탕에 그린다 (긴 변 PAGE_LONG_SIDE) */
 async function drawPage(task: ReturnType<Pdfjs['getDocument']>, pageNumber: number, createCanvas: CanvasLib['createCanvas']): Promise<Page> {
-  const doc = await task.promise;
+  return drawOne(await task.promise, pageNumber, createCanvas);
+}
+
+type PdfDoc = Awaited<ReturnType<Pdfjs['getDocument']>['promise']>;
+
+async function drawOne(doc: PdfDoc, pageNumber: number, createCanvas: CanvasLib['createCanvas']): Promise<Page> {
   if (!Number.isInteger(pageNumber) || pageNumber < 1 || pageNumber > doc.numPages) {
     throw new FigureImageError(`쪽 번호가 PDF 밖이에요: ${pageNumber} / ${doc.numPages}`);
   }
@@ -428,6 +438,183 @@ async function cutWarp(page: Page, plan: Extract<CutPlan, { kind: 'warp' }>, max
   const { ImageData } = await loadCanvas();
   canvas.getContext('2d').putImageData(new ImageData(out, w, h), 0, 0);
   return encode(canvas, quality);
+}
+
+// ------------------------------------------------------------- 인쇄된 쪽 번호 (PDF 글자)
+/** 쪽 번호로 보는 글: 숫자만 (앞뒤 '-', '–', '·', 'p.', '쪽' 은 뺀다) */
+function pageNumberText(s: string): number | null {
+  const t = s
+    .replace(/\s+/g, '')
+    .replace(/^[-–—·|]+|[-–—·|]+$/g, '')
+    .replace(/^p\.?/i, '')
+    .replace(/쪽$/, '');
+  if (!/^\d{1,4}$/.test(t)) return null;
+  const n = Number(t);
+  return n > 0 ? n : null;
+}
+
+/**
+ * PDF 글자에서 쪽마다 인쇄된 쪽 번호를 읽는다 (AI 없음, 쪽 하나에 하나, 없으면 0): PDF 쪽 라벨(/PageLabels)이 숫자면 그것,
+ * 아니면 쪽의 위·아래 10% 안에 따로 쓰인 숫자 가운데 쪽마다 같은 차이로 이어지는 것. 글자가 없는 PDF(스캔)는 모두 0, 읽지 못하면 null
+ */
+export async function pdfPrintedNumbers(bytes: Uint8Array, timeoutMs = 8000): Promise<number[] | null> {
+  const pdfjs = await loadPdfjs();
+  const task = pdfjs.getDocument({ data: bytes.slice(), ...pdfAssets(), cMapPacked: true, useSystemFonts: false, disableFontFace: true, verbosity: 0 });
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<null>((resolve) => {
+    timer = setTimeout(() => resolve(null), timeoutMs);
+  });
+  const work = (async (): Promise<number[]> => {
+    const doc = await task.promise;
+    const n = doc.numPages;
+    const labels = await doc.getPageLabels().catch(() => null);
+    if (labels && labels.length === n) {
+      const nums = labels.map((l) => pageNumberText(String(l ?? '')) ?? 0);
+      if (nums.filter(Boolean).length * 2 > n) return nums;
+    }
+    // 쪽마다 위·아래 띠의 숫자들 (후보)
+    const cands: number[][] = [];
+    for (let i = 1; i <= n; i++) {
+      const page = await doc.getPage(i);
+      const h = page.getViewport({ scale: 1 }).height;
+      const tc = await page.getTextContent();
+      const here: number[] = [];
+      for (const it of tc.items) {
+        if (!('str' in it) || !Array.isArray(it.transform)) continue;
+        const y = Number(it.transform[5]);
+        if (!(y < h * 0.1 || y > h * 0.9)) continue;
+        const v = pageNumberText(it.str);
+        if (v !== null && !here.includes(v)) here.push(v);
+      }
+      cands.push(here);
+      page.cleanup();
+    }
+    // 쪽마다 같은 차이(번호 - 쪽)로 이어지는 후보를 고른다
+    const count = new Map<number, number>();
+    cands.forEach((c, i) => new Set(c.map((v) => v - i)).forEach((d) => count.set(d, (count.get(d) ?? 0) + 1)));
+    let best: number | null = null;
+    for (const [d, c] of count) if (best === null || c > (count.get(best) ?? 0)) best = d;
+    return cands.map((c, i) => (best !== null && c.includes(best + i) ? best + i : 0));
+  })();
+  // 시간이 넘은 뒤에 실패해도 처리되지 않은 오류가 남지 않게
+  const safe = work.catch((e) => {
+    console.warn('[kok] page numbers from pdf text failed', e);
+    return null;
+  });
+  try {
+    return await Promise.race([safe, timeout]);
+  } finally {
+    clearTimeout(timer);
+    await task.destroy().catch(() => {});
+  }
+}
+
+// ------------------------------------------------------------- 쪽을 그려 두고 AI 에 보여 주고 자르기
+/** 그려 둔 쪽(또는 읽은 사진). 같은 쪽에서 그림을 여러 개 찾고 자를 때 한 번만 그린다 */
+export type FigurePage = { kind: 'pdf' | 'image'; width: number; height: number; page: Page; mask?: ContentMask };
+
+/** 쪽의 내용 픽셀 표 (처음 쓸 때 한 번 만든다) */
+function maskOf(fp: FigurePage): ContentMask {
+  fp.mask ??= { m: contentMask({ data: fp.page.pixels(), width: fp.width, height: fp.height }), W: fp.width, H: fp.height };
+  return fp.mask;
+}
+
+export async function openFigurePage(src: FigureSource): Promise<FigurePage> {
+  const page = src.kind === 'pdf' ? await renderPdfPage(src.bytes, src.page) : await decodeImage(src.bytes);
+  return { kind: src.kind, width: page.width, height: page.height, page };
+}
+
+/**
+ * PDF 를 한 번만 열어 여러 쪽을 그린다 (쪽 번호는 그 PDF 안에서 1부터). 그리지 못한 쪽은 null.
+ * PDF 를 열지 못하거나 시간이 넘으면 FigureImageError
+ */
+export async function openPdfPages(bytes: Uint8Array, pages: number[]): Promise<Array<FigurePage | null>> {
+  if (!pages.length) return [];
+  const pdfjs = await loadPdfjs();
+  const { createCanvas } = await loadCanvas();
+  const task = pdfjs.getDocument({
+    data: bytes.slice(),
+    ...pdfAssets(),
+    cMapPacked: true,
+    useSystemFonts: false,
+    disableFontFace: true,
+    maxImageSize: MAX_IMAGE_PIXELS,
+    verbosity: 0,
+  });
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new FigureImageError('PDF 쪽을 그리는 데 너무 오래 걸려요.')), RENDER_TIMEOUT_MS + pages.length * 8000);
+  });
+  const work = (async () => {
+    const doc = await task.promise;
+    const out: Array<FigurePage | null> = [];
+    for (const n of pages) {
+      try {
+        const page = await drawOne(doc, n, createCanvas);
+        out.push({ kind: 'pdf', width: page.width, height: page.height, page });
+      } catch (e) {
+        console.warn('[kok] pdf page not drawn', n, e);
+        out.push(null);
+      }
+    }
+    return out;
+  })();
+  work.catch(() => {});
+  try {
+    return await Promise.race([work, timeout]);
+  } catch (e) {
+    if (e instanceof FigureImageError) throw e;
+    throw new FigureImageError('PDF 쪽을 그리지 못했어요.', { cause: e });
+  } finally {
+    clearTimeout(timer);
+    await task.destroy().catch(() => {});
+  }
+}
+
+/** AI 에 보여 줄 쪽 그림: Claude 가 줄이지 않는 크기(visionSize)의 JPEG. 받은 픽셀 좌표 × scale = 쪽 좌표 */
+export async function visionImage(fp: FigurePage, quality = 0.82): Promise<{ jpeg: Uint8Array; width: number; height: number; sx: number; sy: number }> {
+  const { createCanvas } = await loadCanvas();
+  const size = visionSize(fp.width, fp.height);
+  const out = createCanvas(size.width, size.height);
+  const ctx = out.getContext('2d');
+  ctx.fillStyle = '#ffffff';
+  ctx.fillRect(0, 0, size.width, size.height);
+  ctx.imageSmoothingQuality = 'high';
+  ctx.drawImage(fp.page.canvas, 0, 0, fp.width, fp.height, 0, 0, size.width, size.height);
+  const buf = await out.encode('jpeg', Math.round(quality * 100));
+  return {
+    jpeg: new Uint8Array(buf.buffer, buf.byteOffset, buf.byteLength),
+    width: size.width,
+    height: size.height,
+    sx: fp.width / size.width,
+    sy: fp.height / size.height,
+  };
+}
+
+/**
+ * 쪽 좌표(픽셀)의 네 꼭짓점으로 자른다. PDF 쪽은 반듯한 상자를 쪽의 여백에 맞춰 다듬고(figure-snap.ts) 조금 넉넉히,
+ * 사진은 비스듬하면 원근 보정. 자르지 못하면 null
+ */
+export async function cutOnPage(fp: FigurePage, quad: Quad, opts: CutOptions = {}): Promise<Cut | null> {
+  const maxSide = Math.max(64, Math.round(opts.maxSide ?? 1400));
+  const quality = opts.quality ?? 0.85;
+  const { width: W, height: H } = fp;
+  if (fp.kind === 'pdf') {
+    const xs = [quad[0], quad[2], quad[4], quad[6]];
+    const ys = [quad[1], quad[3], quad[5], quad[7]];
+    const box = { x0: Math.max(0, Math.min(...xs)), y0: Math.max(0, Math.min(...ys)), x1: Math.min(W, Math.max(...xs)), y1: Math.min(H, Math.max(...ys)) };
+    if (box.x1 - box.x0 < MIN_SIDE * Math.max(W, H) || box.y1 - box.y0 < MIN_SIDE * Math.max(W, H)) return null;
+    const mask = maskOf(fp);
+    // 다듬은 상자 둘레에 조금 (쪽 긴 변의 0.4%): 빈 곳으로만 (옆의 설명 글에 닿지 않게)
+    const r = padEmpty(mask, snapRect(mask, box), Math.round(Math.max(W, H) * 0.004));
+    const plan = { kind: 'rect' as const, x: r.x0, y: r.y0, w: r.x1 - r.x0, h: r.y1 - r.y0 };
+    return cutRect(fp.page, plan, maxSide, quality);
+  }
+  // 사진: 0~1000 꼭짓점으로 바꿔 예전과 같은 방법으로 (반듯하면 네모, 비스듬하면 원근 보정)
+  const corners = quad.map((v, i) => (i % 2 === 0 ? (v / W) * 1000 : (v / H) * 1000)) as Corners;
+  const plan = planCut(corners, W, H, opts.pad ?? 0.02, false);
+  if (!plan) return null;
+  return plan.kind === 'rect' ? cutRect(fp.page, plan, maxSide, quality) : cutWarp(fp.page, plan, maxSide, quality);
 }
 
 /**

@@ -28,29 +28,35 @@ export type MaterialMeta = {
   parts?: number;
   /** 이 조각에서 찾을 자료 그림 수 (0 이나 없으면 찾지 않는다) */
   figures?: number;
+  /** PDF 쪽마다 인쇄된 쪽 번호도 받는다 (organizeJsonSchema pageNumbers) */
+  pageNumbers?: boolean;
   /** 이 조각에서 뽑을 개념 수 (자료 양에 따라, lib/ai/scale.ts keyPointRange). 없으면 3~7 */
   keyPoints?: { min: number; max: number };
 };
 
-/** 자료 그림 찾기 (PDF·사진): 노트의 개념 다음에 쓴다 */
-function figureRules(max: number, kind: 'pdf' | 'image'): string {
+/**
+ * 자료 그림 찾기 (PDF·사진): 노트의 개념 다음에 쓴다. 어느 쪽에 무엇이 있는지만 받는다
+ * (자리는 쪽을 그림으로 그려 한 장씩 보여 주고 픽셀로 받는다: locatePrompt)
+ */
+function figureRules(max: number, kind: 'pdf' | 'image', firstPage: number): string {
   const where = kind === 'pdf' ? 'page' : 'photo';
   return [
     `- figures: the pictures in this part that a student must study for exams: maps, charts or graphs, tables printed as pictures, timelines, diagrams, photos of artifacts, places or people, artworks, historical documents, cartoons. At most ${max}, the most important first. Skip decorations, icons, logos, page headers, plain text boxes and pictures that only repeat the text. Each has:`,
-    `  - page: the original ${where} number where it appears.`,
-    '  - kind: "map" | "chart" | "table" | "timeline" | "diagram" | "photo" | "artwork" | "document" | "cartoon" | "other".',
+    kind === 'pdf'
+      ? `  - page: the original page number where it appears. Count the pages of the attached PDF in order: its first page is page ${firstPage}, the next is ${firstPage + 1}, and so on. printed_page: the page number printed on that page; 0 if none is printed.`
+      : `  - page: the original ${where} number where it appears.`,
+    '  - kind: "map" | "chart" | "table" | "timeline" | "diagram" | "photo" | "artwork" | "document" | "cartoon" | "other". Use "map" only for a map drawn for the material that shows regions, routes, places or distributions on real geography. An old map made in the past (like 대동여지도 or 천하도) is "document", a painting of a landscape or a town is "artwork", and a plan of a city, a palace or a site is "other".',
     '  - title: a short name, at most 20 characters, as the material names it (like "5세기 고구려의 영토").',
     '  - caption: what the picture shows, in 1 to 3 short sentences: the labels, names, numbers, places, periods and arrow directions a test could use. Copy markers like (가), (나), A, B exactly, and say what a marker stands for only if the material says so.',
     '  - asks: what an exam would ask with this picture, in one sentence.',
     '  - key_point_title: the title of the key point it belongs to, copied exactly; "" if none.',
-    `  - corners: the picture's four corners as [x1, y1, x2, y2, x3, y3, x4, y4] (top-left, top-right, bottom-right, bottom-left) on a 0 to 1000 scale of the ${where}'s width and height. Cover the whole picture with its own labels and legend, but not the text around it.${
-      kind === 'pdf'
-        ? ' The page is flat, so give an upright rectangle: x1 = x4, x2 = x3, y1 = y2, y3 = y4.'
-        : ' If the picture looks tilted or skewed, as in a photo taken at an angle, give the tilted corners; otherwise give an upright rectangle.'
-    }`,
     '- If there is no such picture, return an empty figures list.',
   ].join('\n');
 }
+
+/** PDF 쪽마다 인쇄된 쪽 번호 (노트의 쪽 표시를 책의 쪽 번호로) */
+const PAGE_NUMBERS_RULE =
+  '- page_numbers: for each page of the attached PDF in order, the page number printed on that page (in a corner, the header or the footer); 0 if none is printed. Copy what is printed; do not guess.';
 
 export function organizePrompt(meta: MaterialMeta): string {
   const where =
@@ -82,7 +88,29 @@ export function organizePrompt(meta: MaterialMeta): string {
     '- pitfalls: common confusions and exam traps, each with the key_point_id it belongs to.',
     '- examples: short examples taken from the material, each with its key_point_id.',
     own,
-    meta.figures && meta.kind !== 'text' ? figureRules(meta.figures, meta.kind) : '',
+    meta.pageNumbers && meta.kind === 'pdf' ? PAGE_NUMBERS_RULE : '',
+    meta.figures && meta.kind !== 'text' ? figureRules(meta.figures, meta.kind, meta.pageStart ?? 1) : '',
+  ]
+    .filter(Boolean)
+    .join('\n');
+}
+
+/**
+ * 자료 그림 자리 찾기: 쪽(사진)을 그림으로 그려 보여 주고 픽셀 상자를 받는다.
+ * images: 보낸 차례대로 원래 쪽(사진) 번호와 픽셀 크기 (AI 가 그대로 보는 크기로 줄여 보낸다: figure-locate.ts visionSize)
+ */
+export function locatePrompt(o: { kind: 'pdf' | 'image'; images: Array<{ page: number; width: number; height: number }> }): string {
+  const list = o.images.map((im, i) => `Image ${i + 1} is ${o.kind === 'pdf' ? 'page' : 'photo'} ${im.page}, ${im.width}×${im.height} pixels.`).join(' ');
+  return [
+    `The attached images are ${o.kind === 'pdf' ? 'pages' : 'photos'} of a study material. ${list} A study note says the pictures in <figures> appear on them.`,
+    'For each picture in <figures>, return one item with its index:',
+    `- image: the number of the image that shows this picture (1 for the first image); 0 if no image shows it. Match its title, caption and kind: a different picture, even of the same kind, is not it.`,
+    o.kind === 'pdf'
+      ? '- box: the bounding box of the picture as [x1, y1, x2, y2] (top-left and bottom-right corners) in pixel coordinates of that image, with (0, 0) at its top-left corner. Cover the whole picture with its own labels, legend and insets; leave out its caption line, the body text, question boxes and other pictures next to it. Use [0, 0, 0, 0] when image is 0.'
+      : '- corners: the four corners of the picture as [x1, y1, x2, y2, x3, y3, x4, y4] (top-left, top-right, bottom-right, bottom-left) in pixel coordinates of that image, with (0, 0) at its top-left corner. If the picture looks tilted or skewed, as in a photo taken at an angle, give the tilted corners; otherwise an upright rectangle. Cover the whole picture with its own labels and legend, but not the text around it. Use eight 0s when image is 0.',
+    o.kind === 'pdf'
+      ? '- printed: for each image in order, the page number printed on that page (in a corner, the header or the footer); 0 if none is printed.'
+      : '',
   ]
     .filter(Boolean)
     .join('\n');
@@ -567,8 +595,9 @@ export function themeImagePrompt(): string {
 // 원본에서 자른 그림 한 장(붙인 사진)을 보고 KOK 스타일 설계도(src/lib/art/spec.ts)를 만든다
 
 const REDRAW_COMMON = [
+  '- redrawable: false when the picture cannot be redrawn faithfully with these fields: a photo or a painting, an old hand-drawn map or document, a map of an area smaller than about 50 km across (a city, a palace, a fortress or a battle site), a picture whose labels you cannot read, or a picture that is cut off or mixed with other pictures. Then fill every other field with "", 0, false or [].',
   '- Copy every label exactly as written in the picture: names, numbers, years, units, and markers like (가), (나), A, B, ㉠. Never add a name, number or answer that is not written in the picture, and never replace a marker with what it stands for.',
-  '- Keep everything a student could be asked about: a student will answer questions while looking at your redraw, so every value, label, marker, legend entry, arrow and axis tick that the picture shows must be in the data. Leave out only decorations, shading, page numbers and text that is not part of the figure.',
+  '- Keep everything a student could be asked about: a student will answer questions while looking at your redraw, so every value, label, marker, legend entry, arrow and axis tick that the picture shows must be in the data. Leave out decorations, shading, page numbers and text that is not part of the figure: the caption under it, body text, question boxes and callouts around it.',
   '- Read small print and numbers carefully; if a part of the picture is unreadable or cannot be shown with these fields, keep the rest exact rather than guessing. Before answering, check the picture once more against your data for anything missing or changed.',
   '- title: the title printed inside the picture, copied exactly; "" if there is none. notes: a source line printed in the picture (like "자료: 통계청"); "" if there is none.',
   '- Every object has every field. Fill fields you do not use with "", 0, false or [].',
@@ -578,7 +607,7 @@ const REDRAW_COMMON = [
 const REDRAW_BY_KIND: Record<ArtKind, string[]> = {
   map: [
     'This is a map. Describe it in real longitude and latitude so the app can draw it on a real coastline.',
-    '- view: the west, east, south and north edges (degrees) of the area the picture shows.',
+    '- view: the west, east, south and north edges (degrees) of the area the picture shows. If that area is smaller than about 50 km across, set redrawable false.',
     '- land: true for a real geographic map; false for a schematic map whose shapes are not real geography. borders: true only for a present-day map whose country borders matter.',
     '- areas: each shaded territory or region as a polygon, pts = [lon1, lat1, lon2, lat2, ...] with 6 to 40 points along the borders shown. The app clips areas to the coastline, so trace land borders carefully and let coastal edges run a little out to sea. label: the name or marker written in that area ("" if none). style: fill, hatch (striped) or outline (border only). clip: false only for areas that cover the sea.',
     '- lines: routes and attacks in travel order with arrow true (kind route, or sea_route at sea), rivers (river), borders or front lines (border), walls such as 장성 (wall), roads (road). pts as in areas, 2 to 40 points.',

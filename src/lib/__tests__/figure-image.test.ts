@@ -5,7 +5,18 @@ vi.mock('server-only', () => ({}));
 
 import { PDFDocument, StandardFonts, rgb } from 'pdf-lib';
 import { createCanvas, loadImage } from '@napi-rs/canvas';
-import { FigureImageError, cutFigures, figureImageStats, homography, planCut, type Corners } from '@/lib/server/figure-image';
+import {
+  FigureImageError,
+  cutFigures,
+  cutOnPage,
+  figureImageStats,
+  homography,
+  openPdfPages,
+  planCut,
+  visionImage,
+  type Corners,
+} from '@/lib/server/figure-image';
+import { visionTokens, VISION_MAX_EDGE, VISION_MAX_TOKENS, type Quad } from '@/lib/figure-locate';
 
 type Rgba = { width: number; height: number; data: Uint8ClampedArray };
 
@@ -175,6 +186,46 @@ describe('PDF 쪽에서 그림 자르기', () => {
     const before = figureImageStats.pdfRenders;
     expect(await cutFigures({ kind: 'pdf', bytes: new Uint8Array([1]), page: 1 }, [])).toEqual([]);
     expect(figureImageStats.pdfRenders).toBe(before);
+  });
+});
+
+describe('쪽을 그림으로 보여 주고 받은 픽셀 상자로 자르기 (자리 찾기)', () => {
+  it('PDF 를 한 번 열어 여러 쪽을 그리고, 없는 쪽은 null', async () => {
+    const pdf = await samplePdf(3);
+    const before = figureImageStats.pdfRenders;
+    const pages = await openPdfPages(pdf, [3, 1, 9]);
+    expect(pages.map((p) => (p ? `${p.width}x${p.height}` : null))).toEqual(['1413x2000', '1413x2000', null]);
+    expect(figureImageStats.pdfRenders - before).toBe(2);
+    await expect(openPdfPages(new Uint8Array([1, 2, 3]), [1])).rejects.toBeInstanceOf(FigureImageError);
+  });
+
+  it('AI 에 보낼 쪽 그림은 Claude 가 줄이지 않는 크기 (받은 좌표 × 비율 = 쪽 좌표)', async () => {
+    const [fp] = await openPdfPages(await samplePdf(), [1]);
+    const v = await visionImage(fp!);
+    expect(Math.max(v.width, v.height)).toBeLessThanOrEqual(VISION_MAX_EDGE);
+    expect(visionTokens(v.width, v.height)).toBeLessThanOrEqual(VISION_MAX_TOKENS);
+    expect(v.sx * v.width).toBeCloseTo(fp!.width, 5);
+    expect(v.sy * v.height).toBeCloseTo(fp!.height, 5);
+    const img = await pixelsOf(v.jpeg);
+    expect([img.width, img.height]).toEqual([v.width, v.height]);
+  });
+
+  it('조금 어긋난 상자도 쪽의 여백에 맞춰 그림만 자른다 (둘레 글은 빼고)', async () => {
+    const [fp] = await openPdfPages(await samplePdf(), [1]);
+    const sx = fp!.width / PAGE.w;
+    const sy = fp!.height / PAGE.h;
+    // 빨간 네모보다 안쪽으로 6% 좁은 상자 (AI 가 조금 좁게 준 것)
+    const x0 = (RED.x + RED.w * 0.06) * sx;
+    const x1 = (RED.x + RED.w * 0.94) * sx;
+    const y0 = (PAGE.h - RED.y - RED.h * 0.94) * sy;
+    const y1 = (PAGE.h - RED.y - RED.h * 0.06) * sy;
+    const cut = await cutOnPage(fp!, [x0, y0, x1, y0, x1, y1, x0, y1] as Quad);
+    expect(cut).not.toBeNull();
+    const p = await pixelsOf(cut!.jpeg);
+    // 네모 전체가 들어온다: 가장자리 가까이도 빨강, 둘레 여백은 얇다
+    expect(share(p, { x0: 0.03, y0: 0.03, x1: 0.97, y1: 0.97 }, isRed)).toBeGreaterThan(0.9);
+    expect(Math.abs(p.width / p.height - RED.w / RED.h)).toBeLessThan(0.08);
+    expect(p.width).toBeLessThan(RED.w * sx * 1.08);
   });
 });
 

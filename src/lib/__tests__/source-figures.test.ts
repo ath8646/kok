@@ -5,7 +5,6 @@ import {
   figuresForPrompt,
   matchKeyPoint,
   questionFigure,
-  readCorners,
   readFigures,
   readFoundFigures,
   readQuestionFigure,
@@ -35,31 +34,37 @@ const fig = (over: Partial<SourceFigure> = {}): SourceFigure => ({
 describe('자료 그림: AI 가 찾은 그림 읽기', () => {
   const found = (over: Record<string, unknown> = {}) => ({
     page: 3,
+    printed_page: 0,
     kind: 'map',
     title: '고구려 영토',
     caption: '5세기 고구려',
     asks: '',
     key_point_title: '광개토 대왕',
-    corners: [100, 100, 900, 100, 900, 600, 100, 600],
     ...over,
   });
 
-  it('쪽 범위 안의 그림만, 모서리가 올바른 것만 읽는다', () => {
+  it('자리(꼭짓점) 없이 어느 쪽에 무엇이 있는지만 읽는다: 쪽 범위 밖은 가장 가까운 쪽(그 둘레를 찾아본다)', () => {
+    const got = readFoundFigures([found(), found({ page: 9, title: '뒤' }), found({ page: -2, title: '앞' })], { from: 1, to: 5 }, 4);
+    expect(got.map((f) => [f.page, f.title])).toEqual([
+      [3, '고구려 영토'],
+      [5, '뒤'],
+      [1, '앞'],
+    ]);
+    expect(got[0]).toMatchObject({ kind: 'map', kpTitle: '광개토 대왕' });
+    expect(got[0]).not.toHaveProperty('corners');
+  });
+
+  it('인쇄된 쪽 번호를 같이 읽는다 (0·이상한 값은 없음)', () => {
     const got = readFoundFigures(
-      [found(), found({ page: 9 }), found({ corners: [1, 2, 3] }), found({ corners: [10, 10, 20, 10, 20, 20, 10, 20] })],
+      [found({ printed_page: 145 }), found({ title: 'b', printed_page: 0 }), found({ title: 'c', printed_page: 'x' })],
       { from: 1, to: 5 },
       4,
     );
-    expect(got).toHaveLength(1);
-    expect(got[0]).toMatchObject({ page: 3, kind: 'map', title: '고구려 영토', kpTitle: '광개토 대왕' });
+    expect(got.map((f) => f.printed)).toEqual([145, undefined, undefined]);
   });
 
-  it('같은 자리를 두 번 찾으면 하나로, 최대 수까지만', () => {
-    const got = readFoundFigures(
-      [found(), found({ corners: [110, 105, 905, 100, 900, 610, 100, 600] }), found({ page: 4 }), found({ page: 5 })],
-      { from: 1, to: 5 },
-      2,
-    );
+  it('같은 쪽의 같은 그림을 두 번 찾으면 하나로, 최대 수까지만', () => {
+    const got = readFoundFigures([found(), found(), found({ page: 4 }), found({ page: 5 })], { from: 1, to: 5 }, 2);
     expect(got.map((f) => f.page)).toEqual([3, 4]);
   });
 
@@ -67,18 +72,10 @@ describe('자료 그림: AI 가 찾은 그림 읽기', () => {
     expect(readFoundFigures([found({ page: 0 })], { from: 2, to: 2 }, 4)[0].page).toBe(2);
   });
 
-  it('모르는 종류는 그림(other), 이름이 없으면 종류 이름', () => {
-    const got = readFoundFigures([found({ kind: 'Painting', title: '' })], { from: 3, to: 3 }, 4);
+  it('모르는 종류는 그림(other), 이름이 없으면 종류 이름, 이름도 설명도 없으면 뺀다', () => {
+    const got = readFoundFigures([found({ kind: 'Painting', title: '' }), found({ title: '', caption: '' })], { from: 3, to: 3 }, 4);
+    expect(got).toHaveLength(1);
     expect(got[0]).toMatchObject({ kind: 'other', title: '그림' });
-  });
-
-  it('네 모서리: 네 수(상자)도 받고, 0~1 비율도 1000 배로, 너무 작으면 뺀다', () => {
-    expect(readCorners([100, 200, 500, 800])).toEqual([100, 200, 500, 200, 500, 800, 100, 800]);
-    expect(readCorners([0.1, 0.2, 0.9, 0.2, 0.9, 0.8, 0.1, 0.8])).toEqual([100, 200, 900, 200, 900, 800, 100, 800]);
-    expect(readCorners([100, 100, 110, 100, 110, 400, 100, 400])).toBeNull();
-    expect(readCorners([100, NaN, 500, 800])).toBeNull();
-    // 쪽 밖으로 조금 나간 꼭짓점은 그대로 (비스듬한 그림이 찌그러지지 않게), 너무 나간 것은 100 까지
-    expect(readCorners([-50, 0, 1200, 0, 1200, 900, -50, 900])).toEqual([-50, 0, 1100, 0, 1100, 900, -50, 900]);
   });
 
   it('목록이 아니면 빈 목록', () => {
@@ -118,7 +115,7 @@ describe('자료 그림: 개념에 붙이기', () => {
       caption: '설명',
       asks: '',
       kpTitle: '장수왕의 남진 정책',
-      corners: [0, 0, 1000, 0, 1000, 1000, 0, 1000] as [number, number, number, number, number, number, number, number],
+      printed: 116,
       crop: `${U}/figs/${S}/f1.jpg`,
       w: 900,
       h: 700,
@@ -129,7 +126,7 @@ describe('자료 그림: 개념에 붙이기', () => {
       4,
     );
     expect(out).toHaveLength(MAX_FIGURES);
-    expect(out[0]).toMatchObject({ id: 'f4', key_point_id: 'k2', art: null });
+    expect(out[0]).toMatchObject({ id: 'f4', key_point_id: 'k2', art: null, printed: 116 });
     expect(out[1].id).toBe('f5');
   });
 
@@ -151,6 +148,12 @@ describe('자료 그림: 노트·문제에 둔 그림 읽기', () => {
     expect(got[1].art).toBeNull();
     expect(readFigures({})).toEqual([]);
     expect(readFigures(null)).toEqual([]);
+  });
+
+  it('인쇄된 쪽 번호는 있으면 그대로, 이상하면 없는 것으로 (예전 그림은 없다)', () => {
+    const got = readFigures({ figures: [fig({ printed: 145 }), fig({ id: 'f2', printed: -3 }), fig({ id: 'f3' })] });
+    expect(got.map((f) => f.printed)).toEqual([145, undefined, undefined]);
+    expect(got[2]).not.toHaveProperty('printed');
   });
 
   it('문제에 남기는 그림에는 시험 포인트·개념이 없다', () => {

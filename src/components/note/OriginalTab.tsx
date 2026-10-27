@@ -8,6 +8,7 @@ import { clientModel } from '@/lib/client-model';
 import { MIN_TEXT_CHARS } from '@/lib/quick-add';
 import { materialLabel, versionItems, type ChildSource, type Material, type VersionRow } from '@/lib/versions';
 import { OriginalPanel } from './OriginalPanel';
+import type { PageLabels } from '@/lib/page-labels';
 import { Button, Chip, EnergyEstimate, ICONS, Icon, LinkButton, cx } from '../ui';
 
 const KIND_ICON = { text: ICONS.pen, pdf: ICONS.file, image: ICONS.image } as const;
@@ -39,6 +40,7 @@ export function OriginalTab({
   liveQuestionCount,
   appendBusy,
   focusPage,
+  pageLabels,
   busy,
   onOpen,
   onUse,
@@ -60,6 +62,8 @@ export function OriginalTab({
   /** 더하는 자료를 정리하는 중인지 (그동안 버전을 바꾸거나 지울 수 없다) */
   appendBusy: boolean;
   focusPage: number | null;
+  /** 처음 자료의 인쇄된 쪽 번호 (노트의 쪽 표시와 같게) */
+  pageLabels?: PageLabels;
   /** 하고 있는 일 ('use-2', 'del-3') */
   busy: string | null;
   onOpen: (n: number) => void;
@@ -173,11 +177,19 @@ export function OriginalTab({
                 parent={parent}
                 kid={kids.find((k) => k.id === m.source_id) ?? null}
                 focusPage={m.source_id === parent.id ? focusPage : null}
+                pageLabels={m.source_id === parent.id ? pageLabels : undefined}
               />
             ))}
           </>
         ) : (
-          <OriginalPanel kind={parent.kind} text={parent.text_content} paths={parent.file_paths} expireAt={parent.files_expire_at} focusPage={focusPage} />
+          <OriginalPanel
+            kind={parent.kind}
+            text={parent.text_content}
+            paths={parent.file_paths}
+            expireAt={parent.files_expire_at}
+            focusPage={focusPage}
+            pageLabels={pageLabels}
+          />
         )}
       </section>
     </div>
@@ -191,12 +203,14 @@ function MaterialCard({
   parent,
   kid,
   focusPage,
+  pageLabels,
 }: {
   m: Material;
   index: number;
   parent: ParentSource;
   kid: ChildSource | null;
   focusPage: number | null;
+  pageLabels?: PageLabels;
 }) {
   const isParent = m.source_id === parent.id;
   const [open, setOpen] = useState(isParent);
@@ -226,7 +240,14 @@ function MaterialCard({
       {open ? (
         <div id={id}>
           {src ? (
-            <OriginalPanel kind={m.kind} text={src.text_content} paths={src.file_paths ?? []} expireAt={src.files_expire_at} focusPage={focusPage} />
+            <OriginalPanel
+              kind={m.kind}
+              text={src.text_content}
+              paths={src.file_paths ?? []}
+              expireAt={src.files_expire_at}
+              focusPage={focusPage}
+              pageLabels={pageLabels}
+            />
           ) : (
             <p className="kok-card p-4 text-sm text-muted">이 자료의 원본을 찾을 수 없어요.</p>
           )}

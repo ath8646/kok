@@ -45,6 +45,8 @@ export async function runTask(
     think?: boolean;
     /** 답이 최대 길이에 닿아 잘렸을 때 보여 줄 말 (다시 해도 같으니 '다시 해 주세요' 대신). 없으면 보통 오류 */
     tooLong?: string;
+    /** 1분 요청 수를 센다 (기본 true). 한 요청 안에서 이어 부르는 두 번째부터는 false (이미 센 작업의 뒷단계) */
+    rateLimit?: boolean;
   },
 ): Promise<unknown> {
   return (await runTaskFull(admin, acc, app, t)).json;
@@ -62,7 +64,7 @@ export async function runTaskFull(
     t.minEstimate === 0
       ? 0
       : Math.max(t.minEstimate ?? 0, estimateSmallTask(model, app.limits.usdPerEnergy, contentTokens(t.content) + (t.extraInputTokens ?? 0), t.outTokens));
-  await assertAiAllowed(admin, acc, app, { estimate, rateLimit: true });
+  await assertAiAllowed(admin, acc, app, { estimate, rateLimit: t.rateLimit ?? true });
   try {
     const res = await callJson({
       model,

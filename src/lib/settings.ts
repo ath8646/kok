@@ -3,8 +3,11 @@ import { z } from 'zod';
 import { REVIEW_PERIODS } from './review-plan';
 
 export type Effort = 'low' | 'medium' | 'high';
-/** solve: 문제 그림·단계 풀이, 사진·파일로 보낸 문제 풀기 (홈 채팅). redraw: 자료 그림을 KOK 스타일로 다시 그리기 (Pro) */
-export type AiTask = 'organize' | 'merge' | 'visual' | 'quiz' | 'check' | 'grade' | 'chat' | 'theme' | 'solve' | 'redraw';
+/**
+ * solve: 문제 그림·단계 풀이, 사진·파일로 보낸 문제 풀기 (홈 채팅). redraw: 자료 그림을 KOK 스타일로 다시 그리기 (Pro).
+ * locate: 자료 그림의 자리 찾기 (쪽을 그림으로 그려 보여 주고 픽셀 상자를 받는다, 정리 모델)
+ */
+export type AiTask = 'organize' | 'merge' | 'visual' | 'quiz' | 'check' | 'grade' | 'chat' | 'theme' | 'solve' | 'redraw' | 'locate';
 
 // ------------------------------------------------------------- 운영 설정 (app_settings)
 /**
@@ -50,6 +53,7 @@ export const zModelsConfig = z.object({
       theme: zEffort.catch('low'),
       solve: zEffort.catch('medium'),
       redraw: zEffort.catch('medium'),
+      locate: zEffort.catch('low'),
     })
     .catch({
       organize: 'medium',
@@ -62,6 +66,7 @@ export const zModelsConfig = z.object({
       theme: 'low',
       solve: 'medium',
       redraw: 'medium',
+      locate: 'low',
     }),
 });
 export type ModelsConfig = z.infer<typeof zModelsConfig>;

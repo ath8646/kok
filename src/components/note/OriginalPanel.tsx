@@ -2,6 +2,7 @@
 // 원본 보기: 내가 쓴 글, PDF(쪽 번호로 열기), 사진
 import { useEffect, useState } from 'react';
 import { sb } from '@/lib/data';
+import { pageName, type PageLabels } from '@/lib/page-labels';
 import { Card, buttonClass } from '../ui';
 
 export function OriginalPanel({
@@ -10,12 +11,15 @@ export function OriginalPanel({
   paths,
   expireAt,
   focusPage,
+  pageLabels,
 }: {
   kind: 'text' | 'pdf' | 'image';
   text: string | null;
   paths: string[];
   expireAt: string | null;
   focusPage: number | null;
+  /** 인쇄된 쪽 번호 (노트의 body.page_labels): 버튼 글만 책의 쪽으로, 여는 자리는 PDF 쪽 그대로 */
+  pageLabels?: PageLabels;
 }) {
   const [urls, setUrls] = useState<string[] | null>(null);
   const [zoom, setZoom] = useState<string | null>(null);
@@ -67,7 +71,7 @@ export function OriginalPanel({
             rel="noopener noreferrer"
             className={buttonClass('primary', 'md', 'justify-self-start')}
           >
-            {focusPage ? `${focusPage}쪽 열기` : 'PDF 열기'}
+            {focusPage ? `${pageName('pdf', focusPage, pageLabels)} 열기` : 'PDF 열기'}
           </a>
         ) : (
           <p className="text-sm text-muted">여는 중…</p>

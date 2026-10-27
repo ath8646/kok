@@ -16,6 +16,7 @@ import { FormulaEditor, KeyPointEditor, SummaryEditor, TermEditor, type KeyPoint
 import { prefersReducedMotion } from './useReducedMotion';
 import { SourceFigureView } from './figure/SourceFigureView';
 import { figuresByKeyPoint, type SourceFigure } from '@/lib/source-figures';
+import { pageName, type PageLabels } from '@/lib/page-labels';
 
 export type NoteBody = Note & { recommended?: string };
 
@@ -29,10 +30,6 @@ const IMPORTANCE: Record<KeyPoint['importance'], { label: string; tone: 'bad' | 
 };
 
 const SORT_ICON = 'M8 5v14M4.5 8.5L8 5l3.5 3.5M16 19V5M12.5 15.5L16 19l3.5-3.5';
-
-export function pageLabel(kind: string, p: number): string {
-  return kind === 'image' ? `사진 ${p}` : `${p}쪽`;
-}
 
 /** 카드 이름을 화면 읽기·순서 줄에 쓸 글로 (꾸미기 기호·수식 표시 없이) */
 function plain(text: string): string {
@@ -201,6 +198,7 @@ export function NoteView({
   figures = [],
   originalFirst = false,
   onFiguresChange,
+  pageLabels,
 }: {
   note: NoteBody;
   kind: string;
@@ -217,6 +215,8 @@ export function NoteView({
   originalFirst?: boolean;
   /** 자료 그림을 빼면 (고칠 수 있을 때만) */
   onFiguresChange?: (next: SourceFigure[]) => void;
+  /** 인쇄된 쪽 번호 (body.page_labels): 쪽 표시를 책의 쪽 번호로 */
+  pageLabels?: PageLabels;
 }) {
   const [editing, setEditing] = useState<string | null>(null);
   const [sorting, setSorting] = useState<Sorting>(null);
@@ -367,7 +367,7 @@ export function NoteView({
       key={f.id}
       fig={f}
       originalFirst={originalFirst}
-      pageLabel={f.page && kind !== 'text' ? pageLabel(kind, f.page) : undefined}
+      pageLabel={f.page && kind !== 'text' ? pageName(kind, f.page, pageLabels, f.printed) : undefined}
       onOpenPage={onOpenPage}
       menu={
         editable && onFiguresChange
@@ -397,7 +397,7 @@ export function NoteView({
             onClick={() => onOpenPage?.(p)}
             className="rounded-full border border-line px-2 py-0.5 text-xs text-muted hover:border-accent hover:text-accent"
           >
-            {pageLabel(kind, p)}
+            {pageName(kind, p, pageLabels)}
           </button>
         ))}
       </span>

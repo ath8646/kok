@@ -35,7 +35,10 @@ pg.types.setTypeParser(1184, (v) => {
 
 const stats = { messages: 0, tasks: {}, maxDocBytes: 0, docs: 0, noText: 0 };
 let failTask = process.env.FAKE_FAIL_TASK || '';
-/** __fail 의 mode: '' = 529 로 거절, 'no_text' = 생각만 하고 글 없이 끝난 답 (생각을 끈 요청에는 정상 답: 서버가 생각을 끄고 다시 부르는지 본다) */
+/**
+ * __fail 의 mode: '' = 529 로 거절, 'no_text' = 생각만 하고 글 없이 끝난 답 (생각을 끈 요청에는 정상 답: 서버가 생각을 끄고 다시 부르는지 본다),
+ * 'miss' = 자리 찾기(task locate)가 모든 그림을 없다고 답한다
+ */
 let failMode = '';
 
 function b64urlJson(s) {
@@ -673,23 +676,55 @@ function fakeNote(text) {
 }
 
 /**
- * 자료 그림 (정리할 때 그림도 찾으라고 했을 때): 시험용 자료의 이름으로 그림 자리를 알려 준다.
- * '고구려 지도' PDF: 1쪽의 빨간 네모 (e2e.py make_figure_pdf), '기울어진 지도' 사진: 비스듬히 찍힌 파란 네모 (make_tilted_jpeg)
+ * 자료 그림 (정리할 때 그림도 찾으라고 했을 때): 시험용 자료의 이름으로 어느 쪽에 무엇이 있는지 알려 준다 (자리는 따로 묻는다: fakeLocate).
+ * '고구려 지도' PDF: 1쪽의 빨간 네모 (e2e.py make_figure_pdf), '기울어진 지도' 사진: 비스듬히 찍힌 파란 네모 (make_tilted_jpeg).
+ * '작은 장식'은 쪽을 보여 주면 없다고 답한다 (서버가 뺀다)
  */
-function fakeFigures(text) {
+function fakeFigures(text, props) {
   const title = (text.match(/study material titled "([^"]*)"/) || [])[1] || '';
-  const base = { kind: 'map', asks: '(가) 나라가 차지한 지역을 묻는다.', key_point_title: '광합성 장소: 엽록체' };
+  const printed = props?.figures?.items?.properties?.printed_page ? { printed_page: 114 } : {};
+  const base = { kind: 'map', asks: '(가) 나라가 차지한 지역을 묻는다.', key_point_title: '광합성 장소: 엽록체', ...printed };
   if (/고구려 지도/.test(title)) {
     return [
-      { ...base, page: 1, title: '5세기 고구려 영토', caption: '(가) 나라가 한강 유역까지 내려온 모습을 보여 주는 지도. 화살표는 남쪽을 가리킨다.', corners: [168, 169, 832, 169, 832, 525, 168, 525] },
-      // 너무 작은 그림은 서버가 뺀다
-      { ...base, page: 1, title: '작은 장식', caption: '장식', corners: [10, 10, 20, 10, 20, 20, 10, 20] },
+      { ...base, page: 1, title: '5세기 고구려 영토', caption: '(가) 나라가 한강 유역까지 내려온 모습을 보여 주는 지도. 화살표는 남쪽을 가리킨다.' },
+      { ...base, page: 1, title: '작은 장식', caption: '장식' },
     ];
   }
   if (/기울어진 지도/.test(title)) {
-    return [{ ...base, kind: 'photo', page: 1, title: '비스듬히 찍은 유물 사진', caption: '(나) 유물을 비스듬히 찍은 사진', corners: [250, 167, 813, 250, 750, 833, 188, 750] }];
+    return [{ ...base, kind: 'photo', page: 1, title: '비스듬히 찍은 유물 사진', caption: '(나) 유물을 비스듬히 찍은 사진' }];
   }
   return [];
+}
+
+/** 시험용 그림의 자리 (쪽·사진 크기에 대한 비율: 꼭짓점 넷 = 왼쪽 위 → 오른쪽 위 → 오른쪽 아래 → 왼쪽 아래) */
+const FAKE_SPOTS = {
+  '5세기 고구려 영토': [0.168, 0.169, 0.832, 0.169, 0.832, 0.525, 0.168, 0.525],
+  '비스듬히 찍은 유물 사진': [0.25, 0.167, 0.813, 0.25, 0.75, 0.833, 0.188, 0.75],
+};
+
+/**
+ * 자료 그림 자리 찾기: 지시에 적힌 그림 크기('Image 1 is page 1, 966×1366 pixels.')로 픽셀 상자를 만든다.
+ * 아는 그림이면 첫 그림에서 찾았다고, 모르는 그림('작은 장식')은 없다고. failMode 'miss' 면 모두 없다고 (끝내 못 찾는 그림을 시험)
+ */
+function fakeLocate(textOf, props) {
+  const sizes = [...textOf.matchAll(/Image (\d+) is (?:page|photo) (\d+), (\d+)×(\d+) pixels/g)].map((m) => ({ w: Number(m[3]), h: Number(m[4]) }));
+  const asked = (() => {
+    try {
+      return JSON.parse((textOf.match(/<figures>\n([\s\S]*?)\n<\/figures>/) || [])[1] || '[]');
+    } catch {
+      return [];
+    }
+  })();
+  const pdf = !!props.printed;
+  const figures = asked.map((f) => {
+    const spot = failTask === 'locate' && failMode === 'miss' ? null : FAKE_SPOTS[f.title];
+    const s = sizes[0];
+    if (!spot || !s) return { index: f.index, image: 0, ...(pdf ? { box: [0, 0, 0, 0] } : { corners: [0, 0, 0, 0, 0, 0, 0, 0] }) };
+    const px = spot.map((v, i) => Math.round(v * (i % 2 === 0 ? s.w : s.h)));
+    return { index: f.index, image: 1, ...(pdf ? { box: [px[0], px[1], px[4], px[5]] } : { corners: px }) };
+  });
+  stats.locate = [...(stats.locate || []), { images: sizes.length, asked: asked.map((f) => f.title) }].slice(-20);
+  return pdf ? { printed: sizes.map(() => 0), figures } : { figures };
 }
 
 function fakeVisual(prompt) {
@@ -1192,11 +1227,16 @@ async function handleClaude(req, res) {
   } else if (props.key_points && /Merge the new material into the current note/.test(textOf)) {
     task = 'merge';
     out = fakeMerged(textOf);
+  } else if (props.figures?.items?.properties?.image) {
+    task = 'locate';
+    out = fakeLocate(textOf, props);
   } else if (props.key_points) {
     task = 'organize';
     out = fakeNote(textOf);
     // 그림도 찾으라고 했으면 (PDF·사진, 자료 그림이 켜져 있을 때)
-    if (props.figures) out.figures = fakeFigures(textOf);
+    if (props.figures) out.figures = fakeFigures(textOf, props);
+    // PDF 쪽마다 인쇄된 쪽 번호: 시험 PDF 는 글자에서 읽는다 (가짜 AI 는 모른다고)
+    if (props.page_numbers) out.page_numbers = [];
   } else if (props.mindmap) {
     task = 'visual';
     out = fakeVisual(textOf);
@@ -1244,7 +1284,8 @@ async function handleClaude(req, res) {
     out = { ok: true };
   }
   stats.tasks[task] = (stats.tasks[task] || 0) + 1;
-  if (failTask && failTask === task) {
+  // mode 'miss' 는 거절하지 않고 답을 바꾼다 (자리 찾기: 모두 없다고)
+  if (failTask && failTask === task && failMode !== 'miss') {
     if (failMode !== 'no_text') return send(res, 529, { type: 'error', error: { type: 'overloaded_error', message: 'Overloaded' } });
     // 실제 Haiku 5.5 가 가끔 하는 일: 답을 생각 안에만 쓰고 글 없이 턴을 끝낸다. 생각을 끈(thinking 칸이 있는) 요청에는 정상 답
     if (!body.thinking) {

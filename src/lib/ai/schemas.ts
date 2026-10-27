@@ -55,24 +55,43 @@ export const zReorganize = z.object({
 });
 
 /**
- * 정리 + 자료 그림 (PDF·사진에서 그림을 찾을 때). 그림은 노트 뒤에 쓴다: 개념을 먼저 정해야 그림을 붙일 개념 이름을 적을 수 있다.
- * corners: 네 모서리 (0~1000, 왼쪽 위·오른쪽 위·오른쪽 아래·왼쪽 아래의 x, y)
+ * 정리 (PDF·사진). pageNumbers(PDF): 쪽마다 인쇄된 쪽 번호. figures: 자료 그림 (어느 쪽에 무엇이 있는지만: 자리는
+ * 나중에 쪽을 그림으로 그려 한 장씩 보여 주고 픽셀로 받는다, figure-locate.ts). 그림은 노트 뒤에 쓴다:
+ * 개념을 먼저 정해야 그림을 붙일 개념 이름을 적을 수 있다. printed_page: 그림이 있는 쪽에 인쇄된 번호 (쪽 번호를 잘못 셌을 때 찾을 쪽)
  */
-export const organizeFiguresJsonSchema: JsonSchema = obj({
-  ...(noteJsonSchema.properties as Record<string, unknown>),
-  figures: {
-    type: 'array',
-    items: obj({
-      page: int,
-      kind: { type: 'string', enum: [...FIG_KINDS] },
-      title: str,
-      caption: str,
-      asks: str,
-      key_point_title: str,
-      corners: intArr,
-    }),
-  },
-});
+export function organizeJsonSchema(o: { figures: boolean; pageNumbers: boolean }): JsonSchema {
+  if (!o.figures && !o.pageNumbers) return noteJsonSchema;
+  return obj({
+    ...(noteJsonSchema.properties as Record<string, unknown>),
+    ...(o.pageNumbers ? { page_numbers: intArr } : {}),
+    ...(o.figures
+      ? {
+          figures: {
+            type: 'array',
+            items: obj({
+              page: int,
+              ...(o.pageNumbers ? { printed_page: int } : {}),
+              kind: { type: 'string', enum: [...FIG_KINDS] },
+              title: str,
+              caption: str,
+              asks: str,
+              key_point_title: str,
+            }),
+          },
+        }
+      : {}),
+  });
+}
+
+/**
+ * 자료 그림 자리 찾기: 쪽 그림(들)을 보고 그림마다 어느 그림의 어디에 있는지 (픽셀). PDF 는 반듯한 상자와 쪽마다 인쇄된 번호,
+ * 사진은 비스듬할 수 있어 네 꼭짓점
+ */
+export function locateJsonSchema(kind: 'pdf' | 'image'): JsonSchema {
+  return kind === 'pdf'
+    ? obj({ printed: intArr, figures: { type: 'array', items: obj({ index: int, image: int, box: intArr }) } })
+    : obj({ figures: { type: 'array', items: obj({ index: int, image: int, corners: intArr }) } });
+}
 
 const zImportance = z
   .string()

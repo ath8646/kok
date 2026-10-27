@@ -32,6 +32,8 @@ export const zThemeFx = z.object({
   tabSeeThrough: z.number().int().min(0).max(60).catch(8),
   /** 빛 색: 테마 색(accent) 또는 별표 빛과 같은 다섯 가지 */
   aura: z.enum(GLOW_TONES).catch('accent'),
+  /** 배경 그림 위 글자 둘레에 바탕색 번짐 (덮는 정도를 글자가 잘 보이는 정도보다 낮췄을 때만 뜻이 있다). 기본은 없음 */
+  textHalo: z.boolean().catch(false),
 });
 export type ThemeFx = z.infer<typeof zThemeFx>;
 
@@ -44,6 +46,7 @@ export const DEFAULT_FX: ThemeFx = {
   floatTab: false,
   tabSeeThrough: 8,
   aura: 'accent',
+  textHalo: false,
 };
 
 /** 예전 테마(꾸미기 없음)·이상한 값은 기본값으로 */
@@ -252,7 +255,13 @@ export function fxTokens(t: TokenMap, fx: ThemeFx, mode: Mode, preset: ThemeColo
   // 메뉴 바탕: 화면 바탕(아래 빛이 비친)·카드 위에 메뉴 색을 (1 - see) 만큼 덮은 색
   const tabBases = [...new Set([...bases.flatMap((b) => [b, mix(mix(b, c2, b1), c1, b2)]), surface].map((b) => mix(b, surface, 1 - see)))];
   const [g1, g2] = fx.bottom
-    ? pairCap(c2, c1, TAB_GLOW[mode], tabBases.map((b): [string, Texts] => [b, textsFor(pageTexts, b)]), AURA_TEXT_SHARE.tab)
+    ? pairCap(
+        c2,
+        c1,
+        TAB_GLOW[mode],
+        tabBases.map((b): [string, Texts] => [b, textsFor(pageTexts, b)]),
+        AURA_TEXT_SHARE.tab,
+      )
     : [0, 0];
 
   return {

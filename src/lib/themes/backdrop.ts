@@ -56,8 +56,8 @@ export function minDimFor(image: ThemeImage | null): number {
 /**
  * 내가 만든 테마의 한 모드 모습: 색 칸, 그림, 실제로 덮는 정도.
  * 보통은 글자가 잘 보이는 정도(fitDim)까지 올려 덮는다. 테마 고치기에서 직접 고른 값(dimExact)은 그대로 덮고,
- * 그 값이 글자가 잘 보이는 정도보다 낮으면 글자 색은 그 정도에 맞춘 색 그대로 두고(테마 색이 검정·흰색으로 몰리지 않게)
- * 화면 바탕 위 글자 둘레에 바탕색을 두른다(halo)
+ * 그 값이 글자가 잘 보이는 정도보다 낮으면 글자 색은 그 정도에 맞춘 색 그대로 둔다(테마 색이 검정·흰색으로 몰리지 않게).
+ * 그때 꾸미기의 '글자 뒤 바탕색 번짐'(fx.textHalo, 기본 없음)을 켰으면 화면 바탕 위 글자 둘레에 바탕색을 두른다(halo)
  */
 export function specLook(spec: ThemeSpec, mode: Mode): ModeLook {
   const palette = spec[mode];
@@ -71,6 +71,6 @@ export function specLook(spec: ThemeSpec, mode: Mode): ModeLook {
     image: spec.image,
     dim,
     readDim,
-    halo: dim < readDim - 0.005,
+    halo: spec.fx.textHalo === true && dim < readDim - 0.005,
   };
 }

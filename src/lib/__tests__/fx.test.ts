@@ -60,7 +60,12 @@ function checkFx(t: TokenMap, f: FxMap, fx: ThemeFx, mode: Mode, label: string, 
   }
   // 핵심 카드 안 빛: 카드 안 모든 글자 (두 색 사이 그라데이션도)
   const s = t['--surface'];
-  const card: Array<[string, number]> = [[t['--ink'], 7], [t['--muted'], 4.5], [t['--accent'], 4.5], ...SEMANTIC_TEXT[mode].map((c): [string, number] => [c, 4.5])];
+  const card: Array<[string, number]> = [
+    [t['--ink'], 7],
+    [t['--muted'], 4.5],
+    [t['--accent'], 4.5],
+    ...SEMANTIC_TEXT[mode].map((c): [string, number] => [c, 4.5]),
+  ];
   const [h1, a1] = parts(f['--hero-1']);
   const [h2, a2] = parts(f['--hero-2']);
   const [n1] = AURA_TEXT_SHARE.hero;
@@ -80,7 +85,10 @@ function checkFx(t: TokenMap, f: FxMap, fx: ThemeFx, mode: Mode, label: string, 
   const see = fx.tabSeeThrough / 100;
   const g1 = parts(f['--tab-glow-1']);
   const g2 = parts(f['--tab-glow-2']);
-  const under = [...bases.flatMap((b) => [b, mix(mix(b, parts(f['--aura-3'])[0], parts(f['--aura-3'])[1]), parts(f['--aura-4'])[0], parts(f['--aura-4'])[1])]), s];
+  const under = [
+    ...bases.flatMap((b) => [b, mix(mix(b, parts(f['--aura-3'])[0], parts(f['--aura-3'])[1]), parts(f['--aura-4'])[0], parts(f['--aura-4'])[1])]),
+    s,
+  ];
   for (const b of under) {
     const base = mix(b, s, 1 - see);
     for (const bg of stacked(base, g1, g2, AURA_TEXT_SHARE.tab)) expectReadable(bg, want(page, base), `${label} tab`);
@@ -90,7 +98,7 @@ function checkFx(t: TokenMap, f: FxMap, fx: ThemeFx, mode: Mode, label: string, 
 const VARIANTS: ThemeFx[] = [
   DEFAULT_FX,
   { ...DEFAULT_FX, details: true, floatTab: true, tabSeeThrough: 60 },
-  { top: false, hero: false, buttons: false, bottom: false, details: false, floatTab: false, tabSeeThrough: 0, aura: 'accent' },
+  { top: false, hero: false, buttons: false, bottom: false, details: false, floatTab: false, tabSeeThrough: 0, aura: 'accent', textHalo: false },
   ...GLOW_TONES.filter((t) => t !== 'accent').map((aura): ThemeFx => ({ ...DEFAULT_FX, details: true, aura })),
 ];
 
@@ -143,7 +151,24 @@ describe('화면 꾸미기 (themes/fx.ts)', () => {
     for (const mode of MODES) {
       const t = BASE_TOKENS[mode];
       const f = fxTokens(t, VARIANTS[2], mode, 'default');
-      for (const k of ['--aura-1', '--aura-2', '--aura-3', '--aura-4', '--hero-1', '--hero-2', '--hero-ring-1', '--hero-halo', '--tab-glow-1', '--tab-glow-2', '--tab-edge-1', '--detail-tint', '--detail-glow', '--chip-on-glow', '--tab-shadow', '--tab-ring-1'] as const)
+      for (const k of [
+        '--aura-1',
+        '--aura-2',
+        '--aura-3',
+        '--aura-4',
+        '--hero-1',
+        '--hero-2',
+        '--hero-ring-1',
+        '--hero-halo',
+        '--tab-glow-1',
+        '--tab-glow-2',
+        '--tab-edge-1',
+        '--detail-tint',
+        '--detail-glow',
+        '--chip-on-glow',
+        '--tab-shadow',
+        '--tab-ring-1',
+      ] as const)
         expect(parts(f[k])[1], `${mode} ${k}`).toBe(0);
       expect(f['--btn-2']).toBe(t['--accent']);
       expect(f['--fab-2']).toBe(t['--fab']);
@@ -154,8 +179,18 @@ describe('화면 꾸미기 (themes/fx.ts)', () => {
     }
   });
 
-  it('기본 꾸미기는 A·B·C·D1 만 켜져 있고, 예전 테마·이상한 값은 기본값으로 읽는다', () => {
-    expect(DEFAULT_FX).toEqual({ top: true, hero: true, buttons: true, bottom: true, details: false, floatTab: false, tabSeeThrough: 8, aura: 'accent' });
+  it('기본 꾸미기는 A·B·C·D1 만 켜져 있고(글자 뒤 번짐은 없음), 예전 테마·이상한 값은 기본값으로 읽는다', () => {
+    expect(DEFAULT_FX).toEqual({
+      top: true,
+      hero: true,
+      buttons: true,
+      bottom: true,
+      details: false,
+      floatTab: false,
+      tabSeeThrough: 8,
+      aura: 'accent',
+      textHalo: false,
+    });
     expect(readFx(undefined)).toEqual(DEFAULT_FX);
     expect(readFx({ top: 'yes', tabSeeThrough: 99, aura: 'rainbow' })).toEqual(DEFAULT_FX);
     expect(readFx({ details: true, tabSeeThrough: 40 })).toEqual({ ...DEFAULT_FX, details: true, tabSeeThrough: 40 });

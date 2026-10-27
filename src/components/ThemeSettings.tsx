@@ -1219,9 +1219,9 @@ function ThemeEditor({
   // 실제 화면에서 덮는 정도 (직접 고르지 않은 테마는 글자가 잘 보이게 고른 값보다 올라갈 수 있다)
   const realDims = MODES.map((m) => looks[m].dim);
   const raised = !!spec.image && realDims.some((d) => d > spec.dim + 0.005);
-  // 직접 고른 값이 글자가 잘 보이는 정도보다 낮은 모드: 바탕 위 글자 둘레에 바탕색을 두른다
+  // 직접 고른 값이 글자가 잘 보이는 정도보다 낮은 모드: 글자 뒤 바탕색 번짐(꾸미기 textHalo)을 고를 수 있다
   const readDims = MODES.map((m) => looks[m].readDim ?? looks[m].dim);
-  const haloed = !!spec.image && MODES.some((m) => looks[m].halo);
+  const belowModes = spec.image ? MODES.filter((m, i) => readDims[i] > looks[m].dim + 0.005) : [];
 
   const setColor = (m: Mode, k: keyof Palette, v: string) => setSpec((s) => ({ ...s, [m]: fitPalette({ ...s[m], [k]: v }, m, basePalette(m)) }));
   // 그림을 바꾸면 덮는 정도는 그 그림의 처음 값부터 (직접 고른 값은 지운다)
@@ -1491,11 +1491,10 @@ function ThemeEditor({
                     aria-label="그림 위를 덮는 정도"
                     onChange={(e) => setSpec((s) => ({ ...s, dim: Number(e.target.value) / 100, dimExact: true }))}
                   />
-                  {haloed ? (
+                  {belowModes.length ? (
                     <span className="text-xs text-muted">
-                      글자가 잘 보이는 정도(
-                      {MODES.flatMap((m, i) => (looks[m].halo ? [`${MODE_LABEL[m]} ${Math.round(readDims[i] * 100)}%`] : [])).join(', ')})보다 낮아서, 그림 위
-                      글자 둘레에 바탕색을 둘러 읽기 쉽게 해요.
+                      글자가 잘 보이는 정도({belowModes.map((m) => `${MODE_LABEL[m]} ${Math.round(readDims[MODES.indexOf(m)] * 100)}%`).join(', ')})보다 낮아요.
+                      {spec.fx.textHalo ? ' 그림 위 글자 둘레에 바탕색을 둘러 읽기 쉽게 해요.' : ' 글자가 그림에 묻히면 아래 스위치를 켜 보세요.'}
                     </span>
                   ) : raised ? (
                     <span className="text-xs text-muted">
@@ -1503,6 +1502,14 @@ function ThemeEditor({
                     </span>
                   ) : null}
                 </label>
+              ) : null}
+              {belowModes.length ? (
+                <Toggle
+                  label="글자 뒤에 바탕색 번짐"
+                  hint="그림 위에 바로 놓인 큰 제목·설명 글자 둘레에 바탕색을 둘러요. 기본은 없음이에요."
+                  checked={spec.fx.textHalo}
+                  onChange={(v) => setSpec((s) => ({ ...s, fx: { ...s.fx, textHalo: v } }))}
+                />
               ) : null}
             </div>
           </Field>

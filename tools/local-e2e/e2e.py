@@ -2739,7 +2739,13 @@ async def main():
         dim_slider = editor.get_by_label("그림 위를 덮는 정도")
         await expect(dim_slider).to_have_attribute("min", "50")
         await dim_slider.fill("50")
-        await expect(editor.get_by_text(re.compile("글자 둘레에 바탕색을 둘러"))).to_be_visible()
+        # 글자 뒤 바탕색 번짐은 기본 없음: 낮추면 스위치가 나타나고, 켜야 둘레가 생긴다
+        await expect(editor.get_by_text(re.compile("아래 스위치를 켜 보세요"))).to_be_visible()
+        halo_switch = editor.get_by_label("글자 뒤에 바탕색 번짐")
+        await expect(halo_switch).not_to_be_checked()
+        await editor.get_by_text("글자 뒤에 바탕색 번짐", exact=True).click()
+        await expect(halo_switch).to_be_checked()
+        await expect(editor.get_by_text(re.compile("바탕색을 둘러 읽기 쉽게 해요"))).to_be_visible()
         await shot(page, "51-theme-editor", full=False)
         await editor.get_by_role("button", name="저장하고 쓰기").click()
         await expect(editor).to_be_hidden()
@@ -2748,7 +2754,7 @@ async def main():
         assert photo != ai_image
         row = sql(f"select concat_ws(' ', kind, mime, width, height) from public.theme_images where id = '{photo}'")
         assert row == "upload image/jpeg 900 600", row
-        assert sql(f"select concat_ws(' ', spec->>'dim', spec->>'dimExact') from public.user_themes where user_id = '{student_id}' and name = '물결 테마'") == "0.5 true"
+        assert sql(f"select concat_ws(' ', spec->>'dim', spec->>'dimExact', spec->'fx'->>'textHalo') from public.user_themes where user_id = '{student_id}' and name = '물결 테마'") == "0.5 true true"
         assert await css_var(page, "--theme-dim") == "0.50"
         assert (await css_var(page, "--theme-halo")).startswith("0 0 1px"), await css_var(page, "--theme-halo")
         await page.goto(BASE + "/home")
@@ -2795,7 +2801,7 @@ async def main():
         await expect(fx_editor).to_be_hidden()
         mint = sql(f"select id from public.user_themes where user_id = '{student_id}' and name = '떠 있는 민트'")
         fx_saved = json.loads(sql(f"select spec->'fx' from public.user_themes where id = '{mint}'"))
-        assert fx_saved == {"top": False, "hero": True, "buttons": True, "bottom": True, "details": True, "floatTab": True, "tabSeeThrough": 40, "aura": "aurora"}, fx_saved
+        assert fx_saved == {"top": False, "hero": True, "buttons": True, "bottom": True, "details": True, "floatTab": True, "tabSeeThrough": 40, "aura": "aurora", "textHalo": False}, fx_saved
         await wait_saved({"light": f"custom:{mint}", "dark": f"custom:{mint}"})
         await wait_css(page, "--tab-float", "1")
         await wait_css(page, "--fx-detail", "1")

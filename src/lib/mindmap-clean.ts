@@ -2,8 +2,18 @@
 // 파이프라인 파일과 나눠 두어서, 그림 다시 만들기 라우트가 자료 처리용 라이브러리(pdf.js·그림 자르기)를 싣지 않게 한다
 import type { Mindmap } from '@/lib/ai/schemas';
 
-export function maxNodesFor(depth: number): number {
-  return depth <= 2 ? 24 : depth === 3 ? 42 : 60;
+/** 마인드맵 노드 수 끝: 깊이와 개념 수에 따라 (개념 7개까지는 예전 값, 그보다 많으면 개념 하나마다 깊이만큼 더, 150까지) */
+export function maxNodesFor(depth: number, keyPoints = 7): number {
+  const base = depth <= 2 ? 24 : depth === 3 ? 42 : 60;
+  const per = depth <= 2 ? 3 : depth === 3 ? 6 : 8;
+  return Math.min(MINDMAP_NODES_MAX, base + per * Math.max(0, keyPoints - 7));
+}
+/** 노트 하나의 마인드맵 노드 수 끝 (노트 합치기의 capNodes 와 같게) */
+export const MINDMAP_NODES_MAX = 150;
+
+/** 마인드맵 답의 길이(토큰): 노드 하나에 약 40토큰 + 표·연표 몫 */
+export function visualOutTokens(maxNodes: number): number {
+  return Math.min(10_000, 2000 + maxNodes * 40);
 }
 
 /** 마인드맵 정리: id 겹침 제거, 개수 제한, 잠긴(편집된) 노드 유지 */

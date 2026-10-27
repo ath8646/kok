@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { useEffect, useMemo, useState } from 'react';
 import { useMe } from '@/components/AppShell';
 import { QuestionPreview } from '@/components/QuestionList';
+import { RichText } from '@/components/RichText';
 import { BarAction, SelectionBar, pickKeyHandler, useMultiSelect } from '@/components/SelectionBar';
 import { useLongPress } from '@/components/useLongPress';
 import {
@@ -295,7 +296,11 @@ export default function WrongPage() {
                       count={w.count}
                       links={
                         n
-                          ? { solve: `/review?kp=${w.note_id}:${w.key_point_id}`, note: `/notes/${n.source_id}?kp=${encodeURIComponent(w.key_point_id)}`, map: `/notes/${n.source_id}?tab=visual&kp=${encodeURIComponent(w.key_point_id)}` }
+                          ? {
+                              solve: `/review?kp=${w.note_id}:${w.key_point_id}`,
+                              note: `/notes/${n.source_id}?kp=${encodeURIComponent(w.key_point_id)}`,
+                              map: `/notes/${n.source_id}?tab=visual&kp=${encodeURIComponent(w.key_point_id)}`,
+                            }
                           : { solve: `/review?kp=${w.note_id}:${w.key_point_id}` }
                       }
                       selecting={selecting}
@@ -320,7 +325,9 @@ export default function WrongPage() {
               틀린 문제 {items.length}개
             </span>
           </SectionTitle>
-          {!selecting ? <p className="-mt-2 px-1 text-xs text-muted">카드를 꾹 누르면 여러 개를 한꺼번에 뺄 수 있어요 (개념 카드를 꾹 누르면 그 개념의 문제 모두).</p> : null}
+          {!selecting ? (
+            <p className="-mt-2 px-1 text-xs text-muted">카드를 꾹 누르면 여러 개를 한꺼번에 뺄 수 있어요 (개념 카드를 꾹 누르면 그 개념의 문제 모두).</p>
+          ) : null}
           <div className="grid gap-2">
             {items.map(({ q, lapses }, i) => (
               <WrongCard
@@ -419,13 +426,19 @@ function WeakCard({
         }
       }}
     >
-      <Card className={cx('grid gap-2', selecting && 'kok-card-hover cursor-pointer', selecting && picked && 'ring-2 ring-accent ring-offset-2 ring-offset-bg')} {...selectProps}>
+      <Card
+        className={cx('grid gap-2', selecting && 'kok-card-hover cursor-pointer', selecting && picked && 'ring-2 ring-accent ring-offset-2 ring-offset-bg')}
+        {...selectProps}
+      >
         <div className="kok-fill flex flex-wrap items-center justify-between gap-2">
           <div className="flex min-w-0 items-center gap-2.5">
             {selecting ? (
               <span
                 aria-hidden="true"
-                className={cx('grid h-6 w-6 shrink-0 place-items-center rounded-full border-2 transition-colors', picked ? 'border-accent bg-accent text-accent-ink' : 'border-line bg-surface')}
+                className={cx(
+                  'grid h-6 w-6 shrink-0 place-items-center rounded-full border-2 transition-colors',
+                  picked ? 'border-accent bg-accent text-accent-ink' : 'border-line bg-surface',
+                )}
               >
                 {picked ? <Icon d={ICONS.check} size={14} strokeWidth={3} /> : null}
               </span>
@@ -501,7 +514,10 @@ function WrongCard({
         }
       }}
     >
-      <Card className={cx('grid gap-2', selecting && 'kok-card-hover cursor-pointer', selecting && picked && 'ring-2 ring-accent ring-offset-2 ring-offset-bg')} {...selectProps}>
+      <Card
+        className={cx('grid gap-2', selecting && 'kok-card-hover cursor-pointer', selecting && picked && 'ring-2 ring-accent ring-offset-2 ring-offset-bg')}
+        {...selectProps}
+      >
         <div className="kok-fill flex items-start gap-2">
           {selecting ? (
             <span
@@ -521,7 +537,9 @@ function WrongCard({
             aria-expanded={expanded}
             tabIndex={selecting ? -1 : undefined}
           >
-            <span className="line-clamp-2 min-w-0 flex-1 font-semibold">{q.prompt}</span>
+            <span className="line-clamp-2 min-w-0 flex-1 font-semibold">
+              <RichText text={q.prompt} />
+            </span>
             <Chip tone="bad">{lapses}번 틀림</Chip>
           </button>
         </div>

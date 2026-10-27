@@ -1219,7 +1219,14 @@ export default function NotePage() {
           ) : null}
 
           {tab === 'course' && coursesOn ? (
-            <CoursePanel me={me} noteId={note.id} noteTitle={title} noteChars={noteChars} canCreate={!old && !appendRunning && !reorg} />
+            <CoursePanel
+              me={me}
+              noteId={note.id}
+              noteTitle={title}
+              noteChars={noteChars}
+              keyPoints={keyPoints.length}
+              canCreate={!old && !appendRunning && !reorg}
+            />
           ) : null}
 
           {tab === 'original' ? (

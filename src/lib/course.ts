@@ -1,6 +1,7 @@
 // 단계별 학습 (Pro): 노트 하나를 AI 가 단계(unit) → 레슨(lesson) → 카드·확인 문제로 나눈 학습 길.
 // 서버가 만들어 note_courses.plan 에 저장하고, 화면은 길(path)을 그려 레슨을 하나씩 열어 준다. 진도는 note_courses.progress (학생이 고친다)
 import { z } from 'zod';
+import { coursePlanRange } from '@/lib/ai/scale';
 import { readChatQuestion, toQuestionRow, type CourseAi } from './ai/schemas';
 import type { QuestionType } from './grading';
 
@@ -10,11 +11,11 @@ export type CourseLevel = (typeof COURSE_LEVELS)[number];
 
 /** 화면 이름과 한 줄 설명 (수준 고르기) */
 export const COURSE_LEVEL_INFO: Record<CourseLevel, { name: string; desc: string }> = {
-  elementary: { name: '초등학생', desc: '쉬운 말과 생활 속 예로, 짧게' },
-  middle: { name: '중학생', desc: '교과서처럼 용어를 풀어 설명' },
-  high: { name: '고등학생', desc: '시험에 나오는 구분·함정까지' },
-  college: { name: '대학생', desc: '원리와 근거, 원어 용어 그대로' },
-  expert: { name: '전문', desc: '깊이 있게, 예외와 한계까지' },
+  elementary: { name: '초등학생', desc: '짧은 문장과 생활 속 예시, 외우기 요령 · 확인은 OX와 쉬운 객관식' },
+  middle: { name: '중학생', desc: '용어 뜻풀이와 원인·결과, 헷갈리는 둘 비교 · 확인은 객관식·OX·빈칸' },
+  high: { name: '고등학생', desc: '시험 말투의 구분·조건·함정, 풀이 예시 · 확인은 응용 객관식·빈칸·단답' },
+  college: { name: '대학생', desc: '원리와 근거, 원어 용어 그대로, 비판적 비교 · 확인은 단답과 두 개념을 잇는 객관식' },
+  expert: { name: '전문', desc: '원리·예외·한계와 실무 함정 · 확인은 미묘한 구분과 판단' },
 };
 
 // ------------------------------------------------------------- 학습 내용 (plan)
@@ -34,8 +35,12 @@ export type CoursePlan = { title: string; intro: string; units: CourseUnit[] };
 
 /** 만들 때 함께 보낼 원본 자료의 끝: 글은 글자 수, PDF 는 앞쪽 몇 쪽(크기도), 사진은 몇 장 */
 export const COURSE_MATERIAL = { textChars: 20_000, pdfPages: 8, pdfBytes: 6 * 1024 * 1024, images: 4 } as const;
-/** 답 길이 (레슨 20개 × 카드·문제) 와 에너지 검사·화면 예상에 쓰는 답 길이 */
-export const COURSE_OUT = { max: 16_000, estimate: 9_000 } as const;
+/** 답 길이와 에너지 검사·화면 예상에 쓰는 답 길이: 개념 수에 따라 (레슨 하나에 카드·문제 약 650토큰) */
+export function courseOut(keyPoints: number): { max: number; estimate: number } {
+  const { lessons } = coursePlanRange(keyPoints);
+  const max = Math.min(24_000, 4000 + lessons.max * 650);
+  return { max, estimate: Math.round(max * 0.6) };
+}
 
 /** 한 학습 길의 크기 끝 (답이 길어지거나 저장 칸(256KB)을 넘지 않게) */
 export const COURSE_LIMITS = { units: 6, lessons: 6, cards: 8, checks: 6, recap: 6, final: 10 } as const;
@@ -119,7 +124,10 @@ export function settleCourse(ai: CourseAi, keyPointIds: readonly string[]): Cour
         .map((c) => ({ kind: c.kind, heading: clip(c.heading, 40), text: clip(c.text, 600), tip: clip(c.tip, 200) }))
         .filter((c) => c.text)
         .slice(0, COURSE_LIMITS.cards);
-      const checks = l.checks.map(settleCheck).filter((c): c is CourseCheck => !!c).slice(0, COURSE_LIMITS.checks);
+      const checks = l.checks
+        .map(settleCheck)
+        .filter((c): c is CourseCheck => !!c)
+        .slice(0, COURSE_LIMITS.checks);
       if (!cards.length) continue;
       lessons.push({
         title: clip(l.title, 40) || `레슨 ${lessons.length + 1}`,

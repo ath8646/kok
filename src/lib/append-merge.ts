@@ -7,7 +7,7 @@ export const NOTE_MERGE_MAX_CHARS = 24_000;
 export const NOTE_TOO_LONG = '노트가 너무 길어서 새 자료를 합치지 못했어요. 이 자료는 새 노트로 넣어 주세요.';
 
 /** 합친 노트를 한 번에 돌려받는 답의 최대 길이 (토큰). 파이프라인의 합치기 단계 max_tokens 와 같다 */
-export const MERGE_OUT_TOKENS = 8000;
+export const MERGE_OUT_TOKENS = 14_000;
 
 /**
  * 글의 토큰 수를 넉넉하게 어림한다: 한글·한자·가나는 한 글자에 1, 그 밖(영어·숫자·JSON 기호)은 0.3.
@@ -30,11 +30,11 @@ export function estimateTokens(text: string): number {
 }
 
 /**
- * 새 자료가 합친 노트를 늘리는 양 (토큰). 합친 노트는 개념 수가 정해져 있어서(새 내용은 있는 개념 안에 넣는다)
- * 새 자료가 아무리 길어도 MERGE_GROWTH_MAX 보다 크게 늘지 않고, 짧아도 MERGE_GROWTH_MIN 은 늘어난다고 본다.
+ * 새 자료가 합친 노트를 늘리는 양 (토큰). 새 자료의 양만큼 개념이 늘 수 있지만(lib/ai/scale.ts appendKeyPointMax, 한 조각 16개까지)
+ * 개념 하나가 약 400토큰이라 아무리 길어도 MERGE_GROWTH_MAX 보다 크게 늘지 않고, 짧아도 MERGE_GROWTH_MIN 은 늘어난다고 본다.
  */
 export const MERGE_GROWTH_MIN = 600;
-export const MERGE_GROWTH_MAX = 1500;
+export const MERGE_GROWTH_MAX = 6000;
 
 export function mergeGrowth(estimate: number): number {
   return Math.min(MERGE_GROWTH_MAX, Math.max(MERGE_GROWTH_MIN, Math.ceil(Number.isFinite(estimate) ? estimate : MERGE_GROWTH_MAX)));

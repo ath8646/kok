@@ -6,7 +6,7 @@ import { getAppSettings } from '@/lib/server/account';
 import { UserFacingError, errorResponse } from '@/lib/server/errors';
 import { assertNoAppendRunning, assertNoteHasContent, assertSameVersion, loadOwnedNote, noteForPrompt, updateNoteBody } from '@/lib/server/notes';
 import { runTask } from '@/lib/server/tasks';
-import { cleanMindmap, maxNodesFor } from '@/lib/mindmap-clean';
+import { cleanMindmap, maxNodesFor, visualOutTokens } from '@/lib/mindmap-clean';
 import { textBlock } from '@/lib/server/claude';
 import { visualPrompt, wrap } from '@/lib/ai/prompts';
 import { visualJsonSchema, zMindmap, zTable, zTimeline, zVisualResult, type Mindmap } from '@/lib/ai/schemas';
@@ -74,7 +74,7 @@ export async function POST(req: NextRequest, ctx: RouteContext<'/api/notes/[id]/
 
     const app = await getAppSettings(admin);
     const v = acc.settings.visual;
-    const maxNodes = maxNodesFor(v.depth);
+    const maxNodes = maxNodesFor(v.depth, note.note.key_points.length);
     const { data: current } = await admin.from('visuals').select('spec').eq('note_id', note.id).eq('user_id', acc.userId).eq('type', 'mindmap').maybeSingle();
     const cur = current ? zMindmap.parse(current.spec) : null;
     // 내가 고친 노드는 그대로 둔다 (너무 많으면 앞의 것만)
@@ -101,8 +101,8 @@ export async function POST(req: NextRequest, ctx: RouteContext<'/api/notes/[id]/
       tier: acc.settings.models.visual,
       content,
       schema: visualJsonSchema,
-      maxTokens: 4000,
-      outTokens: 2500,
+      maxTokens: visualOutTokens(maxNodes),
+      outTokens: Math.round(visualOutTokens(maxNodes) * 0.6),
       timeoutMs: 120_000,
       sourceId: note.source_id,
     });

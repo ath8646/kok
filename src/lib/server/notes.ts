@@ -2,6 +2,7 @@
 import 'server-only';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { zNote, type Note } from '@/lib/ai/schemas';
+import { KEY_POINTS_MAX } from '@/lib/ai/scale';
 import { stripMarks } from '@/lib/richtext';
 import { UserFacingError } from './errors';
 
@@ -85,7 +86,7 @@ export async function updateNoteBody(admin: SupabaseClient, noteId: string, user
 }
 
 /** AI 에 보낼 노트의 최대 길이 (글자). 학생이 노트를 아주 길게 고쳐도 비용이 크게 늘지 않게 */
-export const NOTE_PROMPT_MAX_CHARS = 24_000;
+export const NOTE_PROMPT_MAX_CHARS = 36_000;
 
 function clip(s: unknown, n: number): string {
   const t = typeof s === 'string' ? s : '';
@@ -103,7 +104,7 @@ function noteJson(note: Note, scale: number): string {
   return JSON.stringify({
     title: clipText(note.title, 120),
     summary: clipText(note.summary, n(1500)),
-    key_points: note.key_points.slice(0, 12).map(({ id, title, explanation, why, importance, pages }) => ({
+    key_points: note.key_points.slice(0, KEY_POINTS_MAX).map(({ id, title, explanation, why, importance, pages }) => ({
       id: clip(id, 20),
       title: clipText(title, 120),
       explanation: clipText(explanation, n(1200)),

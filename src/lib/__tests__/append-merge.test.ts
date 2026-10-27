@@ -193,13 +193,14 @@ describe('노트에 자료 더하기: 합친 노트가 답 길이에 들어갈�
 
   it('짧은 노트에 아주 긴 자료(90쪽 PDF 정리 여러 개)를 더해도 합친다', () => {
     const short = noteForMerge(note())!;
-    const parts = JSON.stringify(Array.from({ length: 10 }, () => ({ summary: '가'.repeat(1900) })));
+    const parts = JSON.stringify(Array.from({ length: 20 }, () => ({ summary: '가'.repeat(1900) })));
     expect(estimateTokens(parts)).toBeGreaterThan(MERGE_OUT_TOKENS * 2);
     expect(mergeFits(short, growthOfParts(parts))).toBe(true);
   });
 
   it('노트가 길면 새 자료가 늘릴 양까지 보고 막는다', () => {
-    const big = noteForMerge(note({ summary: '가'.repeat(5600) }))!;
+    // 가장 적게 늘어도 들어가지만, 가장 많이 늘면 넘치는 길이
+    const big = noteForMerge(note({ summary: '가'.repeat(Math.round(MERGE_OUT_TOKENS * 0.9) - 300 - MERGE_GROWTH_MIN - 800) }))!;
     expect(mergeFits(big)).toBe(true);
     expect(mergeFits(big, MERGE_GROWTH_MAX)).toBe(false);
     expect(mergeFits(big, growthOfParts(JSON.stringify({ summary: '나'.repeat(4000) })))).toBe(false);

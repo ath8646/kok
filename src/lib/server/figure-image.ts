@@ -53,6 +53,9 @@ const MIN_SIDE = 0.02;
 const OUT_OF_RANGE = 100;
 /** 변이 가로·세로에서 이 각도 안이면 그냥 네모로 자른다 */
 const STRAIGHT_DEG = 2;
+/** 원근 보정을 할 네모의 조건: 각 꼭짓점의 각이 직각에서 이 각도 안이고, 마주 보는 변의 길이 비가 이 배 안 (그 밖은 AI 가 꼭짓점을 잘못 준 것) */
+const TILT_MAX_DEG = 25;
+const OPPOSITE_RATIO_MAX = 1.6;
 
 /** 시험용: 쪽을 그리거나 사진을 읽은 횟수 */
 export const figureImageStats = { pdfRenders: 0, imageDecodes: 0 };
@@ -232,6 +235,28 @@ function straight(q: Pt[]): boolean {
   return flat(tl, tr, 1) && upright(tr, br, 1) && flat(br, bl, -1) && upright(bl, tl, -1);
 }
 
+/**
+ * 비스듬히 찍힌 사진 속 네모처럼 보이는지: 네 각이 직각에 가깝고 마주 보는 변의 길이가 비슷하다.
+ * AI 가 꼭짓점 하나를 엉뚱한 곳에 주면(순서가 꼬이거나 한 점만 어긋남) 원근 보정이 그림을 심하게 찌그러뜨려서, 그런 네모는 바깥 네모로 자른다
+ */
+function tiltedRect(q: Pt[]): boolean {
+  const [tl, tr, br, bl] = q;
+  const top = dist(tl, tr);
+  const bottom = dist(bl, br);
+  const left = dist(tl, bl);
+  const right = dist(tr, br);
+  if (Math.max(top, bottom) / Math.min(top, bottom) > OPPOSITE_RATIO_MAX) return false;
+  if (Math.max(left, right) / Math.min(left, right) > OPPOSITE_RATIO_MAX) return false;
+  for (let i = 0; i < 4; i++) {
+    const o = q[i];
+    const a = q[(i + 3) % 4];
+    const b = q[(i + 1) % 4];
+    const cos = ((a.x - o.x) * (b.x - o.x) + (a.y - o.y) * (b.y - o.y)) / (dist(o, a) * dist(o, b));
+    if (Math.abs((Math.acos(Math.min(1, Math.max(-1, cos))) * 180) / Math.PI - 90) > TILT_MAX_DEG) return false;
+  }
+  return true;
+}
+
 /** 점들을 감싸는 네모에 여백을 더하고 쪽 안으로 줄인다. 너무 작으면 null */
 function boxPlan(pts: Pt[], W: number, H: number, pad: number): CutPlan | null {
   const xs = pts.map((p) => Math.min(Math.max(p.x, 0), W));
@@ -254,9 +279,10 @@ function boxPlan(pts: Pt[], W: number, H: number, pad: number): CutPlan | null {
 
 /**
  * 꼭짓점(0~1000)을 쪽(W×H 픽셀) 위의 자르기 방법으로 바꾼다.
- * 반듯한 네모면 네모로, 비스듬한 볼록 네모면 원근 보정으로, 이상한 꼭짓점(꼬임·찌그러짐·너무 작음·숫자 아님·쪽 밖)이면 바깥 네모로.
+ * 반듯한 네모면 네모로, 비스듬한 볼록 네모(사진만: PDF 쪽은 평평하다)면 원근 보정으로,
+ * 이상한 꼭짓점(꼬임·찌그러짐·너무 작음·숫자 아님·쪽 밖·네모 같지 않음)이면 바깥 네모로.
  */
-export function planCut(corners: Corners, W: number, H: number, pad = 0.03): CutPlan | null {
+export function planCut(corners: Corners, W: number, H: number, pad = 0.03, flat = false): CutPlan | null {
   if (!(W > 0 && H > 0) || !Array.isArray(corners) || corners.length !== 8) return null;
   const pts: Pt[] = [];
   for (let i = 0; i < 4; i++) {
@@ -277,7 +303,7 @@ export function planCut(corners: Corners, W: number, H: number, pad = 0.03): Cut
   const min = MIN_SIDE * Math.max(W, H);
   const okQuad = !outside && q.length === 4 && [0, 1, 2, 3].every((i) => dist(q[i], q[(i + 1) % 4]) >= min);
   if (!okQuad) return boxPlan(pts, W, H, pad);
-  if (straight(q)) return boxPlan(q, W, H, pad);
+  if (flat || straight(q) || !tiltedRect(q)) return boxPlan(q, W, H, pad);
   const [tl, tr, br, bl] = q;
   const outW = (dist(tl, tr) + dist(bl, br)) / 2;
   const outH = (dist(tl, bl) + dist(tr, br)) / 2;
@@ -417,7 +443,8 @@ export async function cutFigures(src: FigureSource, cuts: Corners[], opts: CutOp
   const out: Array<Cut | null> = [];
   for (const c of cuts) {
     try {
-      const plan = planCut(c, page.width, page.height, pad);
+      // PDF 쪽은 평평해서 늘 네모로 자른다 (AI 가 꼭짓점을 조금 어긋나게 줘도 그림이 찌그러지지 않게)
+      const plan = planCut(c, page.width, page.height, pad, src.kind === 'pdf');
       if (!plan) out.push(null);
       else if (plan.kind === 'rect') out.push(await cutRect(page, plan, maxSide, quality));
       else out.push(await cutWarp(page, plan, maxSide, quality));

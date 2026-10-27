@@ -62,7 +62,18 @@ import { adminDetail } from './tasks';
 import { removePaths } from './files';
 import { noteForPrompt } from './notes';
 import { cutFigures, type FigureSource } from './figure-image';
-import { cleanMindmap, maxNodesFor } from '@/lib/mindmap-clean';
+import { cleanMindmap, maxNodesFor, visualOutTokens } from '@/lib/mindmap-clean';
+import {
+  KEY_POINTS_MAX,
+  QUESTIONS_MAX,
+  appendKeyPointMax,
+  keyPointRange,
+  mergedKeyPointRange,
+  noteOutTokens,
+  quizOutTokens,
+  type PartSize,
+  type Range,
+} from '@/lib/ai/scale';
 
 export const IMAGES_PER_CHUNK = 6;
 export const TEXT_CHARS_PER_CHUNK = 40000;
@@ -175,8 +186,8 @@ async function ai(ctx: Ctx, task: AiTask, content: ContentPart[], schema: Record
   }
 }
 
-/** 노트 번호(k1, k2 …)가 비었거나 겹치면 고친다. 개념은 maxKeyPoints 개까지 */
-export function normalizeNote(note: Note, maxKeyPoints = 9): Note {
+/** 노트 번호(k1, k2 …)가 비었거나 겹치면 고친다. 개념은 maxKeyPoints 개까지 (기본은 노트 끝 KEY_POINTS_MAX) */
+export function normalizeNote(note: Note, maxKeyPoints = KEY_POINTS_MAX): Note {
   const seen = new Set<string>();
   const remap = new Map<string, string>();
   const key_points = note.key_points.slice(0, maxKeyPoints).map((kp, i) => {
@@ -202,7 +213,6 @@ export { cleanMindmap, maxNodesFor };
 /** 다시 그린 그림 한 장의 답 길이 (지도는 영토·길 좌표가 많아 길다) */
 const REDRAW_OUT_TOKENS = 8000;
 /** 정리할 때 찾은 그림 하나가 늘리는 답 길이 (종류·이름·설명·시험 포인트·네 모서리) */
-const FIGURE_OUT_TOKENS = 400;
 
 /** 자료 그림을 찾지 않는 까닭 (찾으면 null): 글 자료·설정에서 끔·DB 에 칸이 없음 (schema.sql 을 다시 실행하기 전에는 예전처럼) */
 async function sourceFiguresOff(ctx: Ctx): Promise<FigureLog['skipped'] | null> {
@@ -472,6 +482,8 @@ async function stepOrganize(ctx: Ctx): Promise<Partial<SourceRow>> {
   if (room > 0) figLog.looked++;
   else figLog.skipped = off ?? (lastTry ? 'last_try' : 'full');
   let holder: FigureHolder | null = null;
+  // 이 조각의 양 (개념 수를 정한다): PDF 는 쪽 수, 사진은 장 수, 글은 글자 수
+  let size: PartSize = { kind: src.kind };
 
   if (src.kind === 'pdf') {
     const parts = pdfPartsOf(src);
@@ -491,6 +503,7 @@ async function stepOrganize(ctx: Ctx): Promise<Partial<SourceRow>> {
       }
       meta.pageStart = part.start;
       meta.pageEnd = part.end;
+      size = { kind: 'pdf', pages: part.end - part.start + 1 };
       content.push(pdfBlock(bytes));
       holder = { kind: 'pdf', bytes, firstPage: part.start };
     } else {
@@ -505,6 +518,7 @@ async function stepOrganize(ctx: Ctx): Promise<Partial<SourceRow>> {
       const slice = await slicePdf(bytes, c.start, c.end);
       meta.pageStart = c.start;
       meta.pageEnd = c.end;
+      size = { kind: 'pdf', pages: c.end - c.start + 1 };
       content.push(pdfBlock(slice));
       holder = { kind: 'pdf', bytes: slice, firstPage: c.start };
     }
@@ -520,17 +534,28 @@ async function stepOrganize(ctx: Ctx): Promise<Partial<SourceRow>> {
       content.push(imageBlock(bytes, mediaTypeOf(paths[k])));
     }
     holder = { kind: 'image', photos };
+    size = { kind: 'image', images: paths.length };
   } else {
     const parts = splitText(src.text_content ?? '', TEXT_CHARS_PER_CHUNK);
     meta.ownWriting = true;
-    content.push(textBlock(wrap('material', parts[Math.min(i, parts.length - 1)] ?? '')));
+    const text = parts[Math.min(i, parts.length - 1)] ?? '';
+    size = { kind: 'text', chars: text.length };
+    content.push(textBlock(wrap('material', text)));
   }
   if (room > 0 && holder) meta.figures = room;
+  // 자료 양에 따라 개념 수를 정한다 (조각마다 적어 두고 합칠 때 더한다)
+  meta.keyPoints = keyPointRange(size);
   content.push(textBlock(organizePrompt(meta)));
 
-  // 그림을 찾으면 답이 그만큼 길어진다 (그림 하나에 약 400토큰)
-  const json = await ai(ctx, 'organize', content, meta.figures ? organizeFiguresJsonSchema : noteJsonSchema, 8000 + (meta.figures ?? 0) * FIGURE_OUT_TOKENS);
-  const note = normalizeNote(zNote.parse(json));
+  // 답 길이는 개념 수에 따라, 그림을 찾으면 그만큼 더 (그림 하나에 약 400토큰)
+  const json = await ai(
+    ctx,
+    'organize',
+    content,
+    meta.figures ? organizeFiguresJsonSchema : noteJsonSchema,
+    noteOutTokens(meta.keyPoints.max, meta.figures ?? 0),
+  );
+  const note = normalizeNote(zNote.parse(json), meta.keyPoints.max);
   // 찾은 그림은 다음 번에 원본에서 자른다 (stepCutFigures: AI 를 부른 이 단계와 나눠서, 자르다 오래 걸려도 정리를 다시 하지 않게).
   // 개념은 노트가 정해진 뒤 이름으로 붙인다
   let figFound: PendingCut | null = null;
@@ -543,7 +568,8 @@ async function stepOrganize(ctx: Ctx): Promise<Partial<SourceRow>> {
   const partials = [...(src.partials ?? []), note];
   const next = i + 1;
   const progress = Math.round(5 + (55 * next) / total);
-  const kept: Record<string, unknown> = { ...src.draft, attempts: 0, figCuts: prevCuts, figLog };
+  const partRanges = [...(i === 0 ? [] : rangesOf(src.draft)), meta.keyPoints];
+  const kept: Record<string, unknown> = { ...src.draft, attempts: 0, figCuts: prevCuts, figLog, partRanges };
   if (figFound) kept.figFound = figFound;
   if (next < total) {
     return { partials, chunk_index: next, progress, draft: kept };
@@ -558,16 +584,31 @@ async function stepOrganize(ctx: Ctx): Promise<Partial<SourceRow>> {
   return { partials: [], chunk_index: next, step: 'visual', progress: 62, draft };
 }
 
+/** 조각마다 정한 개념 수 (예전 자료에는 없다: 조각의 개념 수로 어림) */
+function rangesOf(draft: Record<string, unknown>): Range[] {
+  const raw = draft.partRanges;
+  if (!Array.isArray(raw)) return [];
+  return raw
+    .map((r) => (r && typeof r === 'object' ? { min: Number((r as Range).min), max: Number((r as Range).max) } : null))
+    .filter((r): r is Range => !!r && Number.isFinite(r.min) && Number.isFinite(r.max) && r.min >= 1 && r.max >= r.min);
+}
+
 async function stepMerge(ctx: Ctx): Promise<Partial<SourceRow>> {
   const parts = (ctx.src.partials ?? []).map((p) => zNote.parse(p));
   if (ctx.src.parent_id) return stepAppendMerge(ctx, parts);
-  const content = [textBlock(wrap('partials', JSON.stringify(parts))), textBlock(mergePrompt(parts.length))];
-  const json = await ai(ctx, 'merge', content, noteJsonSchema, 8000);
-  const note = normalizeNote(zNote.parse(json));
+  // 합친 노트의 개념 수: 조각들의 개념 수를 더한다 (겹치는 것만 묶게)
+  const ranges = rangesOf(ctx.src.draft);
+  const range = mergedKeyPointRange(
+    ranges.length === parts.length ? ranges : parts.map((p) => ({ min: Math.max(3, p.key_points.length), max: Math.max(5, p.key_points.length) })),
+  );
+  const content = [textBlock(wrap('partials', JSON.stringify(parts))), textBlock(mergePrompt(parts.length, range))];
+  const json = await ai(ctx, 'merge', content, noteJsonSchema, noteOutTokens(range.max));
+  const note = normalizeNote(zNote.parse(json), range.max);
   // 조각마다 자른 그림을 합친 노트의 개념에 붙인다 (개념 이름으로)
   const figures = toSourceFigures(cutsOf(ctx.src.draft), note.key_points);
   const draft: Record<string, unknown> = { ...ctx.src.draft, note, figures, attempts: 0 };
   delete draft.figCuts;
+  delete draft.partRanges;
   return { partials: [], step: afterNote(ctx, figures), progress: 66, draft };
 }
 
@@ -605,7 +646,12 @@ async function stepAppendMerge(ctx: Ctx, parts: Note[]): Promise<Partial<SourceR
   const partsJson = JSON.stringify(parts);
   // 합친 노트가 답 길이에 들어가지 않을 노트는 AI 를 부르기 전에 막는다
   if (!full || !mergeFits(full, growthOfParts(partsJson))) throw new UserFacingError('note_too_long', NOTE_TOO_LONG, 400);
-  const maxKeyPoints = Math.max(9, current.key_points.length);
+  // 지금 개념은 모두 지키고 새 자료의 양만큼 늘어날 수 있다 (노트 끝까지)
+  const ranges = rangesOf(ctx.src.draft);
+  const maxKeyPoints = appendKeyPointMax(
+    current.key_points.length,
+    ranges.length === parts.length ? ranges : parts.map((p) => ({ min: 3, max: Math.max(5, p.key_points.length) })),
+  );
   const content = [textBlock(wrap('note', full)), textBlock(wrap('new_parts', partsJson)), textBlock(appendMergePrompt(parts.length, maxKeyPoints))];
   let json: unknown;
   try {
@@ -639,6 +685,7 @@ async function stepAppendMerge(ctx: Ctx, parts: Note[]): Promise<Partial<SourceR
   };
   delete draft.baseVersion;
   delete draft.figRound;
+  delete draft.partRanges;
   return { partials: [], step: afterNote(ctx, figures), progress: 66, draft };
 }
 
@@ -682,7 +729,7 @@ async function stepVisual(ctx: Ctx): Promise<Partial<SourceRow>> {
   if (await baseIsStale(ctx)) return remergePatch(ctx.src);
   const note = zNote.parse(ctx.src.draft.note);
   const v = ctx.settings.visual;
-  const maxNodes = maxNodesFor(v.depth);
+  const maxNodes = maxNodesFor(v.depth, note.key_points.length);
   const content = [textBlock(wrap('note', noteForPrompt(note)))];
   // 노트에 더할 때는 지금 마인드맵에서 학생이 고친 노드와 가운데 이름을 그대로 둔다
   let locked: Mindmap['nodes'] = [];
@@ -705,7 +752,7 @@ async function stepVisual(ctx: Ctx): Promise<Partial<SourceRow>> {
     }
   }
   content.push(textBlock(visualPrompt({ depth: v.depth, labelStyle: v.labels, maxNodes })));
-  const json = await ai(ctx, 'visual', content, visualJsonSchema, 4000);
+  const json = await ai(ctx, 'visual', content, visualJsonSchema, visualOutTokens(maxNodes));
   const visual = zVisualResult.parse(json);
   visual.mindmap = cleanMindmap(visual.mindmap, maxNodes, locked);
   if (rootLabel !== null) {
@@ -735,7 +782,7 @@ async function stepQuiz(ctx: Ctx): Promise<Partial<SourceRow>> {
     textBlock(wrap('existing_questions', JSON.stringify(existing))),
     textBlock(quizPrompt({ types: q.types, mix: q.mix, language: q.language, perKeyPoint: q.perKeyPoint, figures: figures.length }, { onlyNew: !!pid })),
   ];
-  const json = await ai(ctx, 'quiz', content, figures.length ? quizFiguresJsonSchema : quizJsonSchema, 8000);
+  const json = await ai(ctx, 'quiz', content, figures.length ? quizFiguresJsonSchema : quizJsonSchema, quizOutTokens(note.key_points.length, figures.length));
   const raw = zQuiz.parse(json).questions;
   const figIds = new Set(figures.map((f) => f.id));
   const rows: QuestionDraftRow[] = raw
@@ -750,7 +797,7 @@ async function stepQuiz(ctx: Ctx): Promise<Partial<SourceRow>> {
     })
     .filter((r): r is NonNullable<typeof r> => !!r)
     .filter((r) => q.types.includes(r.type))
-    .slice(0, 40);
+    .slice(0, QUESTIONS_MAX);
   // 새로 만든 문제는 다시 검사하고 그림 풀이도 처음부터
   const draft: Record<string, unknown> = { ...ctx.src.draft, questions: rows, attempts: 0 };
   delete draft.checked;
@@ -833,7 +880,8 @@ async function stepCheckAndFinish(ctx: Ctx): Promise<'done' | Partial<SourceRow>
         textBlock(checkPrompt({ figures: figs.length > 0 })),
       ];
       try {
-        const json = await ai(ctx, 'check', content, checkJsonSchema, 2500);
+        // 문제마다 판정 한 줄 (약 30토큰)
+        const json = await ai(ctx, 'check', content, checkJsonSchema, Math.min(6000, 1500 + listed.length * 30));
         const verdicts = zCheck.parse(json).verdicts;
         const drop = new Set(verdicts.filter((v) => !v.keep).map((v) => v.index));
         kept = questions.filter((_, i) => !drop.has(i));

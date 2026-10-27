@@ -13,7 +13,8 @@ import { downloadOwn } from '@/lib/server/files';
 import { coursePrompt, wrap } from '@/lib/ai/prompts';
 import { courseJsonSchema, zCourseAi } from '@/lib/ai/schemas';
 import { figuresForPrompt, readFigures } from '@/lib/source-figures';
-import { COURSE_LEVELS, COURSE_MATERIAL, COURSE_OUT, settleCourse } from '@/lib/course';
+import { COURSE_LEVELS, COURSE_MATERIAL, courseOut, settleCourse } from '@/lib/course';
+import { coursePlanRange } from '@/lib/ai/scale';
 import { slicePdf } from '@/lib/pdf';
 import { stripMarks } from '@/lib/richtext';
 
@@ -62,8 +63,9 @@ export async function POST(req: NextRequest, ctx: RouteContext<'/api/notes/[id]/
         : []),
       ...(figures.length ? [textBlock(wrap('figures', JSON.stringify(figuresForPrompt(figures))))] : []),
       ...material.blocks,
-      textBlock(coursePrompt(level)),
+      textBlock(coursePrompt(level, coursePlanRange(note.note.key_points.length))),
     ];
+    const out = courseOut(note.note.key_points.length);
     const app = await getAppSettings(admin);
     const { json, energy, model } = await runTaskFull(admin, acc, app, {
       task: 'course',
@@ -71,8 +73,8 @@ export async function POST(req: NextRequest, ctx: RouteContext<'/api/notes/[id]/
       tier: acc.settings.models.organize,
       content,
       schema: courseJsonSchema,
-      maxTokens: COURSE_OUT.max,
-      outTokens: COURSE_OUT.estimate,
+      maxTokens: out.max,
+      outTokens: out.estimate,
       extraInputTokens: material.tokens,
       timeoutMs: 240_000,
       sourceId: note.source_id,

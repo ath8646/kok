@@ -6,13 +6,141 @@ import { texToText } from './tex-text';
 
 export type RichPart = { kind: 'text'; text: string } | { kind: 'math'; tex: string; display: boolean };
 
+// ------------------------------------------------------------ $ 없이 쓴 수식
+// AI·학생이 $ 없이 쓴 수식("y=e^{2x}과 y축", "a_n = 2^n")도 수식으로 보인다: 글 조각에서 수식 글자만으로 된 덩어리를 찾아
+// 분명한 표시(^, 아래 첨자, \명령, 숫자·연산이 있는 등식)가 있으면 수식 조각으로 바꾼다. 영어 낱말(세 글자 이상, 함수 이름 빼고)과
+// 한글은 덩어리를 끊고, 꾸미기 표시(**, ==, !!, ____)와 주소·메일은 그대로 둔다.
+const MATH_CHARS = /[A-Za-z0-9\\^_{}()[\]+\-−×÷/=<>≤≥≠≈±.,:;'′°%!|& ]+/g;
+const MATH_FUNCS = new Set([
+  'sin',
+  'cos',
+  'tan',
+  'sec',
+  'csc',
+  'cot',
+  'log',
+  'ln',
+  'lim',
+  'exp',
+  'max',
+  'min',
+  'det',
+  'mod',
+  'sinh',
+  'cosh',
+  'tanh',
+  'arcsin',
+  'arccos',
+  'arctan',
+  'deg',
+  'dim',
+  'gcd',
+  'sup',
+  'inf',
+  'sgn',
+]);
+const MATH_WORD = /(?<![\\A-Za-z0-9_^}])[A-Za-z]{2,}(?![A-Za-z_^{])/g;
+/** 두 글자 낱말 중 수식에 흔한 것 (미분 dx·dy…) */
+const MATH_TWO = new Set(['dx', 'dy', 'dz', 'dt', 'du', 'dv', 'dr', 'pi']);
+/** 주소·메일은 수식으로 보지 않는다 */
+const MATH_SKIP = /\S*(?:https?:\/\/|www\.|@)\S*/g;
+const MATH_MARKS = /\*\*|==|!!/g;
+const MATH_STRONG = [
+  /\\[A-Za-z]{2,}/, // \frac, \sqrt, \pi …
+  /\^[{(A-Za-z0-9+\-−]/, // x^2, e^{2x}
+  /_\{|_\d|(?:^|[^A-Za-z0-9])[A-Za-z0-9]_[A-Za-z]/, // a_n, x_{i}, H_2O, CO_2 (snake_case 는 아님)
+  /[A-Za-z0-9)\]]\s*[=<>≤≥≠≈]\s*[-−+(A-Za-z0-9\\]/, // 등식·부등식 (아래에서 숫자·연산이 같이 있어야 한다)
+];
+const MATH_OPERAND = /\d|[+\-−×÷/^\\]/;
+
+function looksLikeMath(run: string): boolean {
+  if (/__/.test(run)) return false;
+  if (!MATH_STRONG.some((re) => re.test(run))) return false;
+  // 등식만으로는 숫자·연산이 같이 있어야 (a = b 같은 영어 글은 그대로)
+  return MATH_STRONG.slice(0, 3).some((re) => re.test(run)) || MATH_OPERAND.test(run);
+}
+
+/** 괄호 짝이 맞게 양 끝을 다듬는다: "1<a<e^2)" → "1<a<e^2", "(x+1" → "x+1" */
+function balanceParens(core: string): string {
+  let t = core;
+  for (;;) {
+    const open = (t.match(/[([]/g) ?? []).length;
+    const close = (t.match(/[)\]]/g) ?? []).length;
+    if (open === close) return t;
+    if (close > open && /[)\]]$/.test(t)) t = t.slice(0, -1).replace(/[\s.,:;!]+$/, '');
+    else if (open > close && /^[([]/.test(t)) t = t.slice(1).replace(/^[\s.,:;!]+/, '');
+    else return t;
+  }
+}
+
+/** 글 조각에서 $ 없이 쓴 수식을 찾아 수식 조각으로 나눈다 (없으면 글 그대로 하나) */
+function bareMath(text: string): RichPart[] {
+  if (!/[\\^_=<>]/.test(text)) return [{ kind: 'text', text }];
+  const out: RichPart[] = [];
+  const push = (t: string) => {
+    if (!t) return;
+    const last = out[out.length - 1];
+    if (last?.kind === 'text') last.text += t;
+    else out.push({ kind: 'text', text: t });
+  };
+  // 주소·메일은 통째로 글
+  let from = 0;
+  for (const u of text.matchAll(MATH_SKIP)) {
+    bareMathRuns(text.slice(from, u.index ?? 0), out, push);
+    push(u[0]);
+    from = (u.index ?? 0) + u[0].length;
+  }
+  bareMathRuns(text.slice(from), out, push);
+  return out.length ? out : [{ kind: 'text', text }];
+}
+
+function bareMathRuns(text: string, out: RichPart[], push: (t: string) => void): void {
+  let at = 0;
+  for (const m of text.matchAll(MATH_CHARS)) {
+    const start = m.index ?? 0;
+    push(text.slice(at, start));
+    at = start + m[0].length;
+    // 영어 낱말(함수 이름 빼고)과 ', ' 는 덩어리를 끊는다
+    const pieces: Array<{ s: number; e: number }> = [];
+    let ps = 0;
+    const cut = (s: number, e: number) => {
+      if (e > ps) pieces.push({ s: ps, e: s });
+      ps = e;
+    };
+    const breaks: Array<{ s: number; e: number }> = [];
+    for (const w of m[0].matchAll(MATH_WORD)) {
+      const word = w[0].toLowerCase();
+      if (!MATH_FUNCS.has(word) && !MATH_TWO.has(word)) breaks.push({ s: w.index ?? 0, e: (w.index ?? 0) + w[0].length });
+    }
+    for (const c of m[0].matchAll(/[,;]\s+/g)) breaks.push({ s: (c.index ?? 0) + 1, e: (c.index ?? 0) + c[0].length });
+    for (const k of m[0].matchAll(MATH_MARKS)) breaks.push({ s: k.index ?? 0, e: (k.index ?? 0) + k[0].length });
+    for (const b of breaks.sort((a, b) => a.s - b.s)) cut(b.s, b.e);
+    pieces.push({ s: ps, e: m[0].length });
+    let last = 0;
+    for (const pc of pieces) {
+      if (pc.e <= pc.s) continue;
+      const raw = m[0].slice(pc.s, pc.e);
+      // 양 끝의 빈칸과 문장 부호는 글로 남기고, 괄호 짝을 맞춘다
+      const trimmed = raw.replace(/^[\s.,:;!]+/, '').replace(/[\s.,:;!]+$/, '');
+      const core = balanceParens(trimmed);
+      const lead = raw.indexOf(core);
+      if (lead < 0 || core.length < 2 || !looksLikeMath(core)) continue;
+      push(m[0].slice(last, pc.s + lead));
+      out.push({ kind: 'math', tex: core, display: false });
+      last = pc.s + lead + core.length;
+    }
+    push(m[0].slice(last));
+  }
+  push(text.slice(at));
+}
+
 export function splitMath(input: string): RichPart[] {
   const s = input ?? '';
   const out: RichPart[] = [];
   let buf = '';
   let i = 0;
   const flush = () => {
-    if (buf) out.push({ kind: 'text', text: buf });
+    if (buf) out.push(...bareMath(buf));
     buf = '';
   };
   while (i < s.length) {

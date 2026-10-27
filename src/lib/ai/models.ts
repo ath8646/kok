@@ -93,15 +93,16 @@ export function estimateEnergy(m: MaterialEstimate, model: ModelId, usdPerEnergy
       : m.kind === 'image'
         ? Math.max(1, Math.ceil((m.images ?? 1) / 6))
         : Math.max(1, Math.ceil((m.chars ?? 0) / 40000));
-  const noteTokens = Math.min(9000, 1500 + materialTokens * 0.08);
+  // 자료가 길수록 개념이 늘어(lib/ai/scale.ts) 정리·합치기·그림·문제 답도 길어진다
+  const noteTokens = Math.min(12_000, 1500 + materialTokens * 0.1);
   const perChunk = materialTokens / chunks;
   const calls: Usage[] = [];
   for (let i = 0; i < chunks; i++) {
-    calls.push({ input_tokens: Math.round(perChunk + 2500), output_tokens: Math.round(Math.min(3000, 800 + perChunk * 0.15)) });
+    calls.push({ input_tokens: Math.round(perChunk + 2500), output_tokens: Math.round(Math.min(6000, 800 + perChunk * 0.15)) });
   }
-  if (chunks > 1) calls.push({ input_tokens: chunks * 3000 + 1500, output_tokens: 3000 }); // 합치기
-  calls.push({ input_tokens: Math.round(noteTokens + 1500), output_tokens: 1500 }); // 그림
-  calls.push({ input_tokens: Math.round(noteTokens + 2000), output_tokens: Math.round(Math.min(4500, 1500 + noteTokens * 0.5)) }); // 문제
+  if (chunks > 1) calls.push({ input_tokens: chunks * 4000 + 1500, output_tokens: Math.min(10_000, 1500 + chunks * 2500) }); // 합치기
+  calls.push({ input_tokens: Math.round(noteTokens + 1500), output_tokens: Math.round(Math.min(5000, 1200 + noteTokens * 0.3)) }); // 그림
+  calls.push({ input_tokens: Math.round(noteTokens + 2000), output_tokens: Math.round(Math.min(9000, 1500 + noteTokens * 0.6)) }); // 문제
   calls.push({ input_tokens: Math.round(noteTokens + 5500), output_tokens: 800 }); // 검사
   const usd = calls.reduce((a, c) => a + costUsd(model, c), 0);
   return Math.max(1, Math.ceil(usdToEnergy(usd, usdPerEnergy)));

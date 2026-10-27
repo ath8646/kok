@@ -10,7 +10,7 @@ import { sb } from '@/lib/data';
 import {
   COURSE_LEVELS,
   COURSE_LEVEL_INFO,
-  COURSE_OUT,
+  courseOut,
   courseNodes,
   courseStats,
   finalChecks,
@@ -46,6 +46,7 @@ export function CoursePanel({
   noteId,
   noteTitle,
   noteChars,
+  keyPoints,
   canCreate,
 }: {
   me: MeResponse;
@@ -53,6 +54,8 @@ export function CoursePanel({
   noteTitle: string;
   /** 노트 글 길이 (예상 에너지) */
   noteChars: number;
+  /** 노트의 개념 수 (레슨 수·예상 에너지) */
+  keyPoints: number;
   /** 지금 만들 수 있는지 (지난 버전을 볼 때·자료를 더하는 중에는 아니다) */
   canCreate: boolean;
 }) {
@@ -141,7 +144,11 @@ export function CoursePanel({
     async (node: CourseNode, stars: number) => {
       if (!course) return;
       const at = new Date().toISOString();
-      const p: CourseProgress = { lessons: { ...course.progress.lessons }, recaps: { ...course.progress.recaps }, ...(course.progress.final ? { final: course.progress.final } : {}) };
+      const p: CourseProgress = {
+        lessons: { ...course.progress.lessons },
+        recaps: { ...course.progress.recaps },
+        ...(course.progress.final ? { final: course.progress.final } : {}),
+      };
       const keep = (old: { stars: number } | undefined) => ({ stars: Math.max(old?.stars ?? 0, stars), at });
       if (node.kind === 'lesson') p.lessons[lessonKey(node.unit, node.lesson)] = keep(p.lessons[lessonKey(node.unit, node.lesson)]);
       else if (node.kind === 'recap') p.recaps[String(node.unit)] = keep(p.recaps[String(node.unit)]);
@@ -186,6 +193,7 @@ export function CoursePanel({
         me={me}
         noteTitle={noteTitle}
         noteChars={noteChars}
+        keyPoints={keyPoints}
         level={level}
         onLevel={setLevel}
         creating={creating}
@@ -228,8 +236,18 @@ export function CoursePanel({
                 레슨 {stats.lessons}개 · 확인 문제 {stats.checks}개
               </span>
             </div>
-            <div className="h-2.5 overflow-hidden rounded-full bg-surface-3" role="progressbar" aria-valuemin={0} aria-valuemax={stats.total} aria-valuenow={stats.done} aria-label="학습 진도">
-              <div className="h-full origin-left rounded-full bg-accent transition-transform duration-300 ease-out" style={{ transform: `scaleX(${stats.total ? stats.done / stats.total : 0})` }} />
+            <div
+              className="h-2.5 overflow-hidden rounded-full bg-surface-3"
+              role="progressbar"
+              aria-valuemin={0}
+              aria-valuemax={stats.total}
+              aria-valuenow={stats.done}
+              aria-label="학습 진도"
+            >
+              <div
+                className="h-full origin-left rounded-full bg-accent transition-transform duration-300 ease-out"
+                style={{ transform: `scaleX(${stats.total ? stats.done / stats.total : 0})` }}
+              />
             </div>
           </div>
         ) : null}
@@ -296,7 +314,9 @@ export function CoursePanel({
       >
         <p className="text-[15px] leading-relaxed">
           <b>{skipTo ? (skipTo.kind === 'final' ? '총정리' : skipTo.title) : ''}</b>
-          {skipTo?.kind === 'lesson' ? '은 앞 레슨 다음에 하도록 되어 있어요. 앞 레슨 위에 쌓이는 내용이라 차례대로 하면 더 쉬워요.' : '은 앞 레슨들을 끝낸 뒤에 푸는 문제예요. 지금 바로 풀어 볼 수도 있어요.'}
+          {skipTo?.kind === 'lesson'
+            ? '은 앞 레슨 다음에 하도록 되어 있어요. 앞 레슨 위에 쌓이는 내용이라 차례대로 하면 더 쉬워요.'
+            : '은 앞 레슨들을 끝낸 뒤에 푸는 문제예요. 지금 바로 풀어 볼 수도 있어요.'}
         </p>
       </Sheet>
 
@@ -326,6 +346,7 @@ function CreateCourse({
   me,
   noteTitle,
   noteChars,
+  keyPoints,
   level,
   onLevel,
   creating,
@@ -336,6 +357,7 @@ function CreateCourse({
   me: MeResponse;
   noteTitle: string;
   noteChars: number;
+  keyPoints: number;
   level: CourseLevel;
   onLevel: (l: CourseLevel) => void;
   creating: boolean;
@@ -345,7 +367,7 @@ function CreateCourse({
   remake?: { current: CourseLevel | null; onCancel: () => void };
 }) {
   const model = clientModel(me, me.settings.models.organize);
-  const est = estimateSmallTask(model, me.usdPerEnergy, Math.min(26_000, 3000 + noteChars * 0.9), COURSE_OUT.estimate);
+  const est = estimateSmallTask(model, me.usdPerEnergy, Math.min(26_000, 3000 + noteChars * 0.9), courseOut(keyPoints).estimate);
   const idx = COURSE_LEVELS.indexOf(level);
   return (
     <div className="grid gap-4">
@@ -383,7 +405,13 @@ function CreateCourse({
                   on ? 'border-accent bg-accent-soft' : 'border-line bg-surface hover:border-accent/60',
                 )}
               >
-                <span className={cx('grid h-5 w-5 shrink-0 place-items-center rounded-full border-2', on ? 'border-accent bg-accent text-accent-ink' : 'border-line')} aria-hidden="true">
+                <span
+                  className={cx(
+                    'grid h-5 w-5 shrink-0 place-items-center rounded-full border-2',
+                    on ? 'border-accent bg-accent text-accent-ink' : 'border-line',
+                  )}
+                  aria-hidden="true"
+                >
                   {on ? <Icon d={ICONS.check} size={12} strokeWidth={3.5} /> : null}
                 </span>
                 <span className="min-w-0 flex-1">
@@ -483,9 +511,15 @@ function SamplePath({ muted }: { muted: boolean }) {
       </div>
       <ul className="grid justify-items-center gap-4 py-1" aria-hidden="true">
         {sample.map((n) => (
-          <li key={n.title} className={cx('relative grid justify-items-center gap-1.5', n.state === 'current' && 'mt-10')} style={{ transform: `translateX(${n.x}px)` }}>
+          <li
+            key={n.title}
+            className={cx('relative grid justify-items-center gap-1.5', n.state === 'current' && 'mt-10')}
+            style={{ transform: `translateX(${n.x}px)` }}
+          >
             {n.state === 'current' ? (
-              <span className="kok-bubble absolute -top-10 whitespace-nowrap rounded-xl border border-line bg-surface px-3 py-1.5 text-sm font-bold text-accent shadow-[0_6px_18px_var(--shadow-strong)]">시작</span>
+              <span className="kok-bubble absolute -top-10 whitespace-nowrap rounded-xl border border-line bg-surface px-3 py-1.5 text-sm font-bold text-accent shadow-[0_6px_18px_var(--shadow-strong)]">
+                시작
+              </span>
             ) : null}
             <span
               className={cx(

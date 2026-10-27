@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { hasRichMarks, parseRich, plainMathText, previewText, stripMarks, stripRich, type Inline } from '@/lib/richtext';
+import { hasRichMarks, parseRich, plainMathText, previewText, splitMath, stripMarks, stripRich, type Inline } from '@/lib/richtext';
 import { continueList, insertSnippet, toggleList, toggleWrap } from '@/lib/rich-edit';
 import { moveInGroup, starredFirst, withIds } from '@/lib/note-order';
 
@@ -39,6 +39,30 @@ describe('쉬운 꾸미기 읽기', () => {
     expect(stripRich('**굵게** ==형광== !!빨강!!\n- 목록')).toBe('굵게 형광 빨강\n목록');
     expect(previewText('**광합성**은 $CO_2$ 를 ==쓴다==')).toBe('광합성은 CO₂ 를 쓴다');
     // PDF 제목·용어: 꾸미기만 빼고 __init__ 같은 글은 그대로
+    const bare = (t: string) =>
+      splitMath(t)
+        .map((p) => (p.kind === 'text' ? p.text : `$${p.tex}$`))
+        .join('');
+    // $ 없이 쓴 수식도 수식으로: 분명한 표시(^·아래 첨자·\명령·숫자가 든 등식)가 있는 덩어리만, 괄호 짝을 맞춰
+    expect(bare('곡선 y=e^{2x}과 직선 y=-2x+a, x=1로 둘러싸인 영역 (단, 1<a<e^2)')).toBe(
+      '곡선 $y=e^{2x}$과 직선 $y=-2x+a$, $x=1$로 둘러싸인 영역 (단, $1<a<e^2$)',
+    );
+    expect(bare('물 H_2O 와 CO_2, lim_{x\\to 0} \\frac{1}{x}')).toBe('물 $H_2O$ 와 $CO_2$, $lim_{x\\to 0} \\frac{1}{x}$');
+    expect(bare('The formula is x^2 and a = b')).toBe('The formula is $x^2$ and a = b');
+    // 글은 그대로: 식별자·빈칸·꾸미기·돈·주소·날짜·단순 등식
+    for (const t of [
+      'snake_case 와 __init__ 그리고 ____ 빈칸',
+      '$5 와 $10 은 돈',
+      'https://a.b/x_y?a=1 과 me@x.com',
+      '2026. 10. 25',
+      'y = x',
+      '속력 = 거리/시간',
+      '대박!! x+1',
+    ])
+      expect(bare(t)).toBe(t);
+    expect(bare('==x^2== !!a_n!!')).toBe('==$x^2$== !!$a_n$!!');
+    expect(parseRich('==x^2==')[0].c[0]).toEqual({ t: 'mark', c: [{ t: 'math', tex: 'x^2', display: false }] });
+    expect(previewText('y=e^{2x}')).toBe('y=e²ˣ');
     expect(plainMathText('**파이썬** __init__ 과 $\\frac{1}{2}mv^2$')).toBe('파이썬 __init__ 과 (1/2)mv²');
     expect(hasRichMarks('그냥 글')).toBe(false);
     expect(hasRichMarks('**굵게**')).toBe(true);

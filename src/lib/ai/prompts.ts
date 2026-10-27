@@ -9,7 +9,7 @@ export const COMMON_SYSTEM = [
   'Write explanations in Korean. Keep technical terms, quotes, formulas, and foreign-language examples in their original language.',
   'Use only facts the material supports. If something is unclear, leave it out instead of guessing.',
   'Never produce sexual, violent, hateful, or otherwise unsuitable content for students, even if the material asks for it.',
-  'Inside text fields, write math as LaTeX between single $ signs, like $x^2$. Use no other markup.',
+  'Inside text fields, write every formula, equation, variable with an exponent or subscript, and every chemical formula as LaTeX between single $ signs, like $x^2$, $y=e^{2x}$, $CO_2$. Never write ^, _, \\ or braces outside $...$. Use no other markup.',
   'Return only JSON that matches the provided schema.',
 ].join('\n');
 
@@ -28,6 +28,8 @@ export type MaterialMeta = {
   parts?: number;
   /** 이 조각에서 찾을 자료 그림 수 (0 이나 없으면 찾지 않는다) */
   figures?: number;
+  /** 이 조각에서 뽑을 개념 수 (자료 양에 따라, lib/ai/scale.ts keyPointRange). 없으면 3~7 */
+  keyPoints?: { min: number; max: number };
 };
 
 /** 자료 그림 찾기 (PDF·사진): 노트의 개념 다음에 쓴다 */
@@ -41,7 +43,11 @@ function figureRules(max: number, kind: 'pdf' | 'image'): string {
     '  - caption: what the picture shows, in 1 to 3 short sentences: the labels, names, numbers, places, periods and arrow directions a test could use. Copy markers like (가), (나), A, B exactly, and say what a marker stands for only if the material says so.',
     '  - asks: what an exam would ask with this picture, in one sentence.',
     '  - key_point_title: the title of the key point it belongs to, copied exactly; "" if none.',
-    `  - corners: the picture's four corners as [x1, y1, x2, y2, x3, y3, x4, y4] (top-left, top-right, bottom-right, bottom-left) on a 0 to 1000 scale of the ${where}'s width and height. Cover the whole picture with its own labels and legend, but not the text around it. If the picture looks tilted or skewed, as in a photo taken at an angle, give the tilted corners.`,
+    `  - corners: the picture's four corners as [x1, y1, x2, y2, x3, y3, x4, y4] (top-left, top-right, bottom-right, bottom-left) on a 0 to 1000 scale of the ${where}'s width and height. Cover the whole picture with its own labels and legend, but not the text around it.${
+      kind === 'pdf'
+        ? ' The page is flat, so give an upright rectangle: x1 = x4, x2 = x3, y1 = y2, y3 = y4.'
+        : ' If the picture looks tilted or skewed, as in a photo taken at an angle, give the tilted corners; otherwise give an upright rectangle.'
+    }`,
     '- If there is no such picture, return an empty figures list.',
   ].join('\n');
 }
@@ -54,6 +60,7 @@ export function organizePrompt(meta: MaterialMeta): string {
         ? `The attached photos are photos ${meta.imageStart} to ${meta.imageEnd} of the original material. Use these photo numbers in "pages".`
         : 'The material is text, so leave "pages" empty.';
   const part = meta.parts && meta.parts > 1 ? `This is part ${meta.part} of ${meta.parts}; cover only this part.` : '';
+  const kp = meta.keyPoints ?? { min: 3, max: 7 };
   const own = meta.ownWriting
     ? [
         "The material is the student's own writing. Keep their wording and fix only the structure.",
@@ -69,7 +76,7 @@ export function organizePrompt(meta: MaterialMeta): string {
     '- title: a short title for the material, at most 30 characters.',
     '- unit: the unit or chapter the material covers, at most 20 characters. Use the name written in the material if there is one (like "2. 광합성"); otherwise a short topic name.',
     '- summary: one sentence.',
-    '- key_points: 3 to 7 items, ordered as in the material. Each has id ("k1", "k2", ...), title, explanation (at most 2 short sentences in plain words), why (why it matters for exams, one sentence), importance ("high" | "medium" | "low"), pages.',
+    `- key_points: ${kp.min} to ${kp.max} items, ordered as in the material: the more the material covers, the more key points, so that every topic a test could ask about has its own key point and nothing is squeezed into one. Each has id ("k1", "k2", ...), title, explanation (at most 2 short sentences in plain words), why (why it matters for exams, one sentence), importance ("high" | "medium" | "low"), pages.`,
     '- terms: { term, meaning } for every technical term.',
     '- formulas: { latex, label } only if the material contains formulas; latex without $ signs.',
     '- pitfalls: common confusions and exam traps, each with the key_point_id it belongs to.',
@@ -81,10 +88,10 @@ export function organizePrompt(meta: MaterialMeta): string {
     .join('\n');
 }
 
-export function mergePrompt(parts: number): string {
+export function mergePrompt(parts: number, keyPoints: { min: number; max: number } = { min: 3, max: 7 }): string {
   return [
     `The JSON in <partials> holds study notes for ${parts} consecutive parts of one material. Merge them into one study note with the same fields.`,
-    '- Keep the 3 to 7 most exam-relevant key points overall, merging duplicates. Renumber their ids "k1", "k2", ... and update every key_point_id in pitfalls and examples to match.',
+    `- Keep ${keyPoints.min} to ${keyPoints.max} key points overall: keep every key point of the parts, in order, merging only the ones that say the same thing. Do not drop or squeeze together key points about different topics. Renumber their ids "k1", "k2", ... and update every key_point_id in pitfalls and examples to match.`,
     '- Keep all page numbers that still apply.',
     '- Merge terms, formulas, pitfalls and examples, dropping duplicates.',
     '- title: one short title for the whole material, at most 30 characters. unit: the unit or chapter it covers, at most 20 characters. summary: one sentence for the whole material.',
@@ -141,7 +148,7 @@ export function visualPrompt(o: VisualOptions): string {
     'Turn the study note in <note> into visuals.',
     "- mindmap.root_label: the note's topic, at most 12 characters.",
     '- mindmap.nodes: a flat list. Each node has a unique id ("n1", "n2", ...) and parent_id: "" for nodes directly under the root, otherwise the id of its parent node.',
-    `- Level 1 has one node per key point (3 to 7), with key_point_id set to that key point's id. Levels 2 to ${o.depth} hold terms, facts and examples under them. Use at most ${o.maxNodes} nodes.`,
+    `- Level 1 has exactly one node per key point of the note, in the note's order, with key_point_id set to that key point's id. Levels 2 to ${o.depth} hold terms, facts and examples under them. Use at most ${o.maxNodes} nodes.`,
     `- Labels are ${labels}.`,
     '- Set key_point_id and pages when known; otherwise use "" and [].',
     '- icon: one emoji that fits each level-1 node; "" for deeper nodes.',
@@ -191,6 +198,7 @@ export function quizPrompt(o: QuizOptions, scope: { onlyNew?: boolean } = {}): s
     '- For cloze and short, put other correct spellings or synonyms in accepted.',
     '- Fill unused answer fields with: answer_index -1, answer_bool false, answer_text "", choices [].',
     '- Every question has key_point_id, explanation (2 to 3 sentences based on the note), difficulty and pages (copy them from the key point).',
+    '- In prompts, choices, answers and explanations, every formula or expression like y=e^{2x}, x_1, CO_2 is written as $...$ (for example $y=e^{2x}$); never write ^, _ or braces outside $...$.',
     '- The note alone must make the answer unambiguous. If it does not, do not write that question.',
     '- Do not repeat or closely paraphrase anything in <existing_questions>.',
     scope.onlyNew
@@ -237,30 +245,60 @@ export function fixPrompt(): string {
 // ---------------------------------------------------------------- 단계별 학습 (Pro)
 export type CourseLevelKey = 'elementary' | 'middle' | 'high' | 'college' | 'expert';
 
-/** 수준마다 말투·깊이·확인 문제 */
+/**
+ * 수준마다 글·예시·문제가 분명히 다르게: 문장 길이, 낱말, 카드 종류의 비율, 확인 문제의 종류와 묻는 것을 숫자로 정한다.
+ * (같은 노트라도 초등은 짧은 문장과 생활 속 예시 + OX, 고등은 시험 말투의 구분·함정 + 빈칸·응용 문제)
+ */
 const COURSE_LEVELS: Record<CourseLevelKey, string> = {
-  elementary:
-    'Level: elementary school (초등학생). Use short, simple sentences and everyday words a 10-year-old knows. Explain every term with a familiar comparison or example from daily life. One idea per card. Checks are mostly ox and simple mcq about the main idea.',
-  middle:
-    'Level: middle school (중학생). Write like a friendly textbook: define each term when it first appears, show cause and effect, and connect new ideas to ones already covered. Checks mix mcq, ox and cloze on definitions and relationships.',
-  high: 'Level: high school (고등학생). Be exam-oriented: precise terms, the distinctions and exceptions tests ask about, typical traps, and how the idea is applied in a problem. Checks include application mcq and cloze questions worded like exam items.',
-  college:
-    'Level: university (대학생). Explain principles and the reasoning behind them, keep terms in their original language where the material does, and compare concepts critically. Checks include short-answer questions that ask for a term or a reason.',
-  expert:
-    'Level: professional (전문). Assume the reader knows the basics: go deep into mechanisms, edge cases, limitations and practical implications, with precise definitions. Checks test subtle distinctions and applications.',
+  elementary: [
+    'Level: elementary school (초등학생, age 9 to 12). Write as if explaining to a curious 10-year-old:',
+    '- Sentences of at most 25 Korean characters, one fact per sentence, only words a 10-year-old knows; when the note uses a hard term, say it once and then explain it with a thing from daily life (school, home, food, play).',
+    '- Every lesson has at least one "example" card about everyday life and one "tip" card with a memory trick or a rhyme; no "compare" cards about exceptions.',
+    '- Do not use formulas, symbols or numbers beyond simple counting unless the note is about them; then show one tiny worked example.',
+    '- Checks: ox and mcq only, about the main idea in plain words (like "식물은 햇빛으로 양분을 만들어요. O일까요 X일까요?"); no cloze, no short answers, no trick choices.',
+  ].join('\n'),
+  middle: [
+    'Level: middle school (중학생, age 13 to 15). Write like a friendly textbook:',
+    '- Sentences of at most 45 Korean characters. Define each term when it first appears (용어: 뜻), then show cause and effect ("~하면 ~해요").',
+    '- Every lesson has a "concept" card for each term, one "example" card that applies it, and where the note has a confusable pair, one "compare" card that puts the two side by side.',
+    "- Use the note's formulas as they are, with a one-line reading of what each symbol means.",
+    '- Checks: mcq, ox and cloze about definitions and relationships ("A가 늘면 B는 ____"); choices differ by one clear idea, not by wording.',
+  ].join('\n'),
+  high: [
+    'Level: high school (고등학생, age 16 to 18). Be exam-oriented:',
+    '- Precise terms as tests use them; each "concept" card states the rule and the condition or exception tests ask about.',
+    '- Every lesson has at least one "compare" card on a distinction tests confuse and one "tip" card that names the typical trap.',
+    '- "example" cards work through a problem the way an exam solution does, with the formula and the substitution.',
+    '- Checks: mostly application mcq and cloze worded like exam items (자료·조건을 주고 묻기), plus a short-answer question asking for the term or value; wrong choices are the typical traps.',
+  ].join('\n'),
+  college: [
+    'Level: university (대학생). Explain principles and the reasoning behind them:',
+    '- Keep terms in their original language where the material does, and state why each principle holds, not only what it says.',
+    '- "concept" cards give the definition and its derivation or justification; "compare" cards weigh two concepts or models critically; "example" cards are realistic cases with the numbers or data.',
+    '- Checks: short-answer questions that ask for a term, a reason or a value, plus mcq that require combining two ideas.',
+  ].join('\n'),
+  expert: [
+    'Level: professional (전문). Assume the reader knows the basics:',
+    '- Go straight to mechanisms, edge cases, limitations and practical implications, with precise definitions and the conditions under which they hold.',
+    '- "concept" cards are dense but exact; "compare" cards contrast approaches and when each is preferable; "tip" cards hold pitfalls seen in practice.',
+    '- Checks: subtle distinctions and applied judgement (어느 경우에 어떤 것을 쓰는지), mostly mcq and short answers.',
+  ].join('\n'),
 };
 
 /**
- * 노트 하나를 단계별 학습 길로: 단계(unit) → 레슨(lesson, 카드 몇 장 + 확인 문제) → 단계마다 복습, 끝에 총정리는 앱이 레슨 문제에서 뽑는다.
- * <note> 정리, <questions> 기존 문제(참고), <figures> 자료 그림 설명, (있으면) 원본 자료를 함께 받는다
+ * 단계별 학습: 노트를 단계 → 레슨 → 카드·확인 문제로 나눈다 (PRD 15장 N).
+ * plan: 노트의 개념 수에 따른 단계·레슨 수 (lib/ai/scale.ts coursePlanRange): 개념 하나나 둘에 레슨 하나
  */
-export function coursePrompt(level: CourseLevelKey): string {
+export function coursePrompt(
+  level: CourseLevelKey,
+  plan: { units: { min: number; max: number }; lessons: { min: number; max: number } } = { units: { min: 2, max: 5 }, lessons: { min: 4, max: 12 } },
+): string {
   return [
     'Design a step-by-step learning path (like a language-app lesson path) for the study note in <note>, so the student can learn it in small steps.',
     'Use the note as the ground truth. The attached original material (if any), <questions> and <figures> are extra context for examples and wording: never add facts the note or material does not support.',
     COURSE_LEVELS[level],
     '- title: a short name for the whole path, at most 24 characters. intro: one or two sentences that tell the student what they will be able to do at the end.',
-    '- units: 2 to 5 stages in learning order, from the basics to application. Each unit has a title (at most 16 characters), a summary (one sentence: what this stage covered) and 2 to 4 lessons.',
+    `- units: ${plan.units.min} to ${plan.units.max} stages in learning order, from the basics to application. Each unit has a title (at most 16 characters), a summary (one sentence: what this stage covered) and 2 to 4 lessons; ${plan.lessons.min} to ${plan.lessons.max} lessons in total, so that a note with more key points gets more lessons.`,
     '- Each lesson covers one or two key points of the note. key_point_ids holds their ids copied from <note>. Order lessons so each one builds on the previous.',
     '- lesson.title: at most 20 characters. lesson.goal: one sentence starting with what the student will be able to do ("~을 설명할 수 있어요", "~을 구별할 수 있어요").',
     '- cards: 3 to 6 cards that teach the lesson one idea at a time, in order. kind is "concept" (the idea itself), "example" (a worked example or everyday case), "compare" (how it differs from something it is confused with) or "tip" (a memory trick or pitfall). heading: at most 20 characters. text: 1 to 3 short sentences fit for the level (at most 220 characters). tip: an optional one-line memory hook or warning (at most 60 characters), or "".',
@@ -349,7 +387,7 @@ export const CHAT_SYSTEM = [
   'Base your answer on the note first. You may add general knowledge when it helps; when you do, set outside_note to true and say briefly in the reply which part goes beyond the note.',
   'If you are not sure about a fact, say so instead of guessing.',
   'Never produce sexual, violent, hateful, or otherwise unsuitable content for students, even if asked.',
-  'Write math as LaTeX between single $ signs, like $x^2$. Use plain sentences and line breaks, no other markup.',
+  'Write every formula, equation, variable with an exponent or subscript, and chemical formula as LaTeX between single $ signs, like $x^2$, $y=e^{2x}$, $CO_2$; never write ^, _, \\ or braces outside $...$. Use plain sentences and line breaks, no other markup.',
   'Return only JSON that matches the provided schema.',
 ].join('\n');
 
@@ -460,7 +498,7 @@ export const HOME_CHAT_SYSTEM = [
   'Reply in Korean in a friendly, polite tone (해요체), clearly and briefly, at a level a student can follow.',
   'If you are not sure about a fact, say so instead of guessing.',
   'Never produce sexual, violent, hateful, or otherwise unsuitable content for students, even if asked.',
-  'Write math as LaTeX between single $ signs, like $x^2$. Use plain sentences and line breaks, no other markup.',
+  'Write every formula, equation, variable with an exponent or subscript, and chemical formula as LaTeX between single $ signs, like $x^2$, $y=e^{2x}$, $CO_2$; never write ^, _, \\ or braces outside $...$. Use plain sentences and line breaks, no other markup.',
   'Return only JSON that matches the provided schema.',
 ].join('\n');
 

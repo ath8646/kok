@@ -5,7 +5,8 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import type { SourceRowWithUnit } from '@/lib/data';
 import { fetchSources } from '@/lib/data';
 import { SOURCES_CHANGED } from '@/lib/events';
-import { dropView } from '@/lib/view-cache';
+import { activeViewKey, loadActive } from '@/lib/home-data';
+import { dropView, readView, viewStamp, writeView } from '@/lib/view-cache';
 import { Button, ICONS, Icon, ProgressRing, api, cx, useToast, DONE } from './ui';
 
 export function stepLabel(s: Pick<SourceRowWithUnit, 'status' | 'step' | 'chunk_index' | 'chunk_total' | 'progress'>): string {
@@ -34,27 +35,32 @@ export function stepLabel(s: Pick<SourceRowWithUnit, 'status' | 'step' | 'chunk_
 const KIND_LABEL = { text: '글', pdf: 'PDF', image: '사진' } as const;
 const KIND_ICON = { text: ICONS.pen, pdf: ICONS.file, image: ICONS.image } as const;
 
-export function useActiveSources(subjectId?: string) {
-  const [items, setItems] = useState<SourceRowWithUnit[] | null>(null);
+/** 처리 중인 자료 (4초마다 새로). owner: 기억해 둔 목록을 쓸 계정 (다시 들어오면 목록이 바로 보이고, 뒤늦게 나타나 아래를 밀지 않는다) */
+export function useActiveSources(owner: string | null | undefined, subjectId?: string) {
+  const [first] = useState(() => readView<SourceRowWithUnit[]>(activeViewKey(subjectId), owner) ?? null);
+  const [items, setItems] = useState<SourceRowWithUnit[] | null>(first);
   const [justDone, setJustDone] = useState<SourceRowWithUnit[]>([]);
   /** 정리가 끝난 자료 수 (화면이 다시 불러올 때 쓴다) */
   const [doneCount, setDoneCount] = useState(0);
-  const prev = useRef<Map<string, string>>(new Map());
+  // 기억해 둔 목록에 있던 자료가 그사이 끝났으면 처음 읽을 때 '끝났어요'로 알린다
+  const prev = useRef<Map<string, string>>(new Map((first ?? []).filter((r) => r.status !== 'error').map((r) => [r.id, r.status])));
   const nudged = useRef<Map<string, number>>(new Map());
 
   const load = useCallback(async () => {
     try {
-      const rows = await fetchSources({ subjectId, active: true, limit: 20 });
+      const stamp = viewStamp();
+      const rows = await loadActive(subjectId);
       // 방금 끝난 자료 찾기
       const nowIds = new Set(rows.map((r) => r.id));
       const finished = [...prev.current.keys()].filter((id) => !nowIds.has(id));
       if (finished.length) {
-        // 기억해 둔 자료함 목록은 이제 옛것이다 (정리 중으로 보이지 않게)
+        // 기억해 둔 화면(자료함 목록·홈)은 이제 옛것이다 (정리 중으로 보이지 않게)
         dropView();
         setDoneCount((c) => c + finished.length);
         const all = await fetchSources({ subjectId, limit: 30 });
         setJustDone((d) => [...all.filter((r) => finished.includes(r.id) && r.status === 'ready'), ...d].slice(0, 5));
       }
+      writeView(activeViewKey(subjectId), owner, rows, { stamp });
       prev.current = new Map(rows.filter((r) => r.status !== 'error').map((r) => [r.id, r.status]));
       setItems(rows);
       // 멈춘 처리 이어서 하기 (화면이 열려 있을 때)
@@ -71,7 +77,7 @@ export function useActiveSources(subjectId?: string) {
     } catch {
       setItems((x) => x ?? []);
     }
-  }, [subjectId]);
+  }, [subjectId, owner]);
 
   useEffect(() => {
     load();

@@ -111,6 +111,8 @@ function QuestionsView() {
         <div className="grid grid-cols-2 gap-2">
           <Select
             aria-label="과목"
+            // 주소로 고른 과목은 과목 목록을 읽기 전에는 빈칸 (읽기 전에 '모든 과목'이 잠깐 보였다가 바뀌지 않게)
+            placeholder={questions === null && subject ? '' : undefined}
             value={subject}
             onChange={(v) => {
               setSubject(v);
@@ -154,7 +156,8 @@ function QuestionsView() {
         <input aria-label="문제 찾기" className={inputClass} placeholder="문제 글자로 찾기" value={q} onChange={(e) => setQ(e.target.value)} />
       </div>
       {questions === null ? (
-        <div className="kok-card kok-shimmer h-40" />
+        // 읽는 동안의 자리: 조금 늦게 나타나 금방 읽히면 보이지 않는다
+        <div className="kok-card kok-shimmer kok-skel h-40" aria-hidden="true" />
       ) : (
         <>
           <QuestionList questions={filtered.slice(0, 300)} cards={cards} onChanged={load} emptyText="조건에 맞는 문제가 없어요." />

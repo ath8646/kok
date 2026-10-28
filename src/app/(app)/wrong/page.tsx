@@ -20,6 +20,7 @@ import {
   Menu,
   SectionTitle,
   Sheet,
+  Swap,
   buttonClass,
   cx,
   useToast,
@@ -27,6 +28,7 @@ import {
   type MenuItem,
 } from '@/components/ui';
 import { fetchPlanData, fetchQuestionsByIds, sb } from '@/lib/data';
+import { readView, viewStamp, writeView } from '@/lib/view-cache';
 import { weakConcepts, type WeakConcept } from '@/lib/review-plan';
 import type { QuestionRow } from '@/lib/types';
 
@@ -73,16 +75,25 @@ async function removeFromWrong(ids: string[]): Promise<number> {
   return done;
 }
 
+type WrongData = Awaited<ReturnType<typeof fetchWrong>>;
+/** 오답노트를 기억해 두는 이름 (다시 들어오면 바로 보이고 뒤에서 새로 읽는다: src/lib/view-cache.ts) */
+const WRONG_VIEW = 'wrong';
+
 export default function WrongPage() {
   const toast = useToast();
   const { me } = useMe();
+  const owner = me?.userId;
   const sourceFiguresOn = !!me?.features.sourceFigures;
-  const [loading, setLoading] = useState(true);
-  const [titles, setTitles] = useState<Map<string, Map<string, { title: string }>>>(new Map());
-  const [notes, setNotes] = useState<Map<string, NoteInfo>>(new Map());
-  const [items, setItems] = useState<Item[]>([]);
+  // 기억해 둔 오답노트가 있으면 처음부터 그것으로 그린다
+  const [first] = useState(() => readView<WrongData>(WRONG_VIEW, owner) ?? null);
+  const [loading, setLoading] = useState(!first);
+  const [titles, setTitles] = useState<Map<string, Map<string, { title: string }>>>(() => first?.titles ?? new Map());
+  const [notes, setNotes] = useState<Map<string, NoteInfo>>(() => first?.notes ?? new Map());
+  const [items, setItems] = useState<Item[]>(() => first?.items ?? []);
   /** 복습을 끈 노트라서 뺀 틀린 문제 수 */
-  const [hidden, setHidden] = useState(0);
+  const [hidden, setHidden] = useState(() => first?.hidden ?? 0);
+  /** 새로 읽은 것이 들어왔는지: 그 전에 기억해 둔 화면으로 그린 글은 번지지 않는다 */
+  const [fresh, setFresh] = useState(false);
   const [open, setOpen] = useState<string | null>(null);
   // 못 읽었을 때는 '비어 있어요' 대신 다시 불러오기를 보여 준다
   const [failed, setFailed] = useState(false);
@@ -94,6 +105,8 @@ export default function WrongPage() {
 
   useEffect(() => {
     let alive = true;
+    // 읽는 사이에 저장이 있었으면 기억하지 않는다
+    const stamp = viewStamp();
     fetchWrong(sourceFiguresOn)
       .then((r) => {
         if (!alive) return;
@@ -103,16 +116,19 @@ export default function WrongPage() {
         setHidden(r.hidden);
         setFailed(false);
         setLoading(false);
+        setFresh(true);
+        writeView(WRONG_VIEW, owner, r, { stamp });
       })
       .catch(() => {
         if (!alive) return;
-        setFailed(true);
+        // 기억해 둔 목록을 보이고 있으면 그대로 둔다 (못 읽었다고 지우지 않는다)
+        if (!first || attempt > 0) setFailed(true);
         setLoading(false);
       });
     return () => {
       alive = false;
     };
-  }, [attempt, sourceFiguresOn]);
+  }, [attempt, sourceFiguresOn, owner, first]);
 
   const retry = () => {
     setLoading(true);
@@ -132,7 +148,12 @@ export default function WrongPage() {
 
   /** 뺀 문제는 목록에서 지운다 */
   const dropItems = (ids: Set<string>) => {
-    setItems((xs) => xs.filter((x) => !ids.has(x.q.id)));
+    setItems((xs) => {
+      const next = xs.filter((x) => !ids.has(x.q.id));
+      // 저장이 끝난 뒤 바뀐 목록을 다시 기억해 둔다 (다시 들어오면 바로 보이게)
+      writeView(WRONG_VIEW, owner, { titles, notes, items: next, hidden });
+      return next;
+    });
     if (open && ids.has(open)) setOpen(null);
   };
 
@@ -203,9 +224,10 @@ export default function WrongPage() {
   ) : selecting ? (
     <span className="kok-swap">문제나 개념을 눌러 고르고, 아래에서 한꺼번에 빼요</span>
   ) : (
-    <span key={subtitleText} className="kok-swap">
+    // 기억해 둔 목록으로 처음 그린 부제는 번지지 않는다
+    <Swap key={subtitleText} still={!!first && !fresh}>
       {subtitleText}
-    </span>
+    </Swap>
   );
   // 틀린 문제 카드가 번지는 순서 (약점 개념 카드 다음)
   const itemsFrom = weak.length ? weak.length + 2 : 1;

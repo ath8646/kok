@@ -1,68 +1,29 @@
 'use client';
 // 홈 (오늘): AI에게 물어보기, 오늘 복습, 5분 KOK, 이번 주 공부한 날, 남은 에너지, 시험 D-day, 정리 중인 자료, 최근 노트
+// 다시 들어오면 기억해 둔 화면(src/lib/home-data.ts · view-cache.ts)을 바로 보여 주고 뒤에서 새로 읽는다.
+// 처음 읽는 동안에는 글 없이 회색 자리만 둔다: 임시 글('오늘'·'비어 있어요')이 잠깐 보였다가 바뀌지 않게.
+// 회색 자리는 조금 늦게 나타나서(.kok-skel) 금방 읽히면 보이지 않는다
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { useEffect, useState } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 import { EnergyPill, useMe } from '@/components/AppShell';
 import { HomeAsk } from '@/components/chat/HomeChat';
 import { ProcessingList, useActiveSources } from '@/components/ProcessingList';
 import { SOURCES_CHANGED, useQuickAdd } from '@/components/QuickAdd';
-import { Button, DONE, Energy, ICONS, Icon, LargeHeader, LinkButton, ProgressRing, SectionTitle, Sheet, cx, useToast } from '@/components/ui';
-import {
-  NOTE_PEEK,
-  deleteSession,
-  fetchPlanData,
-  fetchRecentPace,
-  fetchReviewedSince,
-  fetchSession,
-  fetchSources,
-  fetchStudyDays,
-  peekText,
-  reviewedAfter,
-  sb,
-  type NotePeek,
-  type PlanData,
-  type SourceRowWithUnit,
-} from '@/lib/data';
-import { continuePlan, paceFrom, pickToday, streakInfo } from '@/lib/review-plan';
-import { resumePlan, type SessionRow } from '@/lib/review-session';
+import { Button, DONE, Energy, ICONS, Icon, LargeHeader, LinkButton, ProgressRing, SectionTitle, Sheet, Swap, cx, useToast } from '@/components/ui';
+import { deleteSession, reviewedAfter } from '@/lib/data';
+import { homeViewKey, loadHome, type HomeData } from '@/lib/home-data';
+import { continuePlan, pickToday, streakInfo } from '@/lib/review-plan';
+import { resumePlan } from '@/lib/review-session';
 import { daysUntil, kstDateString } from '@/lib/time';
 import { subjectVar } from '@/lib/colors';
 import { dueLabel } from '@/lib/srs';
 import { previewText } from '@/lib/richtext';
 import { energyPeriodLabel } from '@/lib/plans';
+import { readView, viewStamp, writeView } from '@/lib/view-cache';
 import type { MeResponse } from '@/lib/types';
 
-/** manual: AI 없이 직접 만든 노트 */
-type Recent = SourceRowWithUnit & { summary: string | null; manual?: boolean };
-
-async function fetchRecent(): Promise<Recent[]> {
-  const rows = await fetchSources({ limit: 8 });
-  const ready = rows.filter((r) => r.status === 'ready').map((r) => r.id);
-  const sums = new Map<string, NotePeek>();
-  if (ready.length) {
-    const { data } = await sb().from('notes').select(NOTE_PEEK).in('source_id', ready);
-    for (const n of (data ?? []) as unknown as NotePeek[]) sums.set(n.source_id, n);
-  }
-  return rows.map((r) => {
-    const n = sums.get(r.id);
-    return { ...r, summary: n ? peekText(n) : null, manual: n?.manual === 'true' };
-  });
-}
-
 const WEEK = ['월', '화', '수', '목', '금', '토', '일'];
-
-/** 오늘의 KOK (features.sessions): 저장한 세션(그날 것)과 세션 밖에서 푼 문제, 내 빠르기 (새 계획을 고를 때) */
-type HomeSession = { row: SessionRow | null; reviewed: Map<string, string>; pace: number };
-
-async function fetchHomeSession(plan: PlanData): Promise<HomeSession> {
-  const [row, logs] = await Promise.all([fetchSession('home').catch(() => null), fetchRecentPace().catch(() => [])]);
-  const todayRow = row && row.day === kstDateString(new Date()) ? row : null;
-  const reviewed = todayRow ? await fetchReviewedSince(todayRow.created_at).catch(() => new Map<string, string>()) : new Map<string, string>();
-  const types = new Map(plan.cards.map((c) => [c.question_id, c.type]));
-  const pace = paceFrom(logs.map((l) => ({ ms: l.ms, type: l.question_id ? types.get(l.question_id) : null })));
-  return { row: todayRow, reviewed, pace };
-}
 
 /** 오늘의 KOK 카드에 보일 것: 전체·끝낸·남은 수, 저장한 세션이 있는지(started), 다 풀고도 더 풀 문제가 있는지(more) */
 type TodayView = { total: number; done: number; remaining: number; started: boolean; more: boolean };
@@ -92,39 +53,51 @@ function weekDots(days: string[]) {
   });
 }
 
+/** 글 한 줄 자리의 회색 줄 (읽는 동안, 조금 늦게 나타난다). className: 줄의 너비 */
+function Bone({ className }: { className: string }) {
+  return (
+    <span className="kok-skel inline-block h-[1em] align-[-0.1em]" aria-hidden="true">
+      <span className={cx('kok-bone mt-[0.25em] h-[0.55em]', className)} />
+    </span>
+  );
+}
+
 export default function HomePage() {
   const { me } = useMe();
+  const owner = me?.userId;
   const quick = useQuickAdd();
-  const active = useActiveSources();
+  const active = useActiveSources(owner);
   const router = useRouter();
   const toast = useToast();
-  const [plan, setPlan] = useState<PlanData | null>(null);
-  const [days, setDays] = useState<string[]>([]);
-  const [recent, setRecent] = useState<Recent[] | null>(null);
+  // 기억해 둔 홈이 있으면 처음부터 그것으로 그린다 (뒤에서 새로 읽어 덮는다)
+  const [first] = useState(() => readView<HomeData>(homeViewKey(), owner) ?? null);
+  const [data, setData] = useState<HomeData | null>(first);
+  /** 새로 읽은 것이 들어왔는지: 그 전에 기억해 둔 화면으로 그린 글은 번지지 않고 그대로 둔다 */
+  const [fresh, setFresh] = useState(false);
   const [err, setErr] = useState(false);
   const [version, setVersion] = useState(0);
-  /** 저장한 오늘의 KOK (features.sessions 일 때만 읽는다) */
-  const [home, setHome] = useState<HomeSession | null>(null);
   const [confirmRestart, setConfirmRestart] = useState(false);
   const [clearing, setClearing] = useState(false);
   const sessionsOn = !!me?.features.sessions;
 
   useEffect(() => {
     let alive = true;
-    Promise.all([fetchPlanData(), fetchStudyDays(120).catch(() => []), fetchRecent().catch(() => [])])
-      .then(async ([p, d, r]) => {
-        const h = sessionsOn ? await fetchHomeSession(p) : null;
+    const stamp = viewStamp();
+    loadHome(sessionsOn)
+      .then((d) => {
         if (!alive) return;
-        setPlan(p);
-        setHome(h);
-        setDays(d);
-        setRecent(r);
+        setData(d);
+        setFresh(true);
+        setErr(false);
+        writeView(homeViewKey(), owner, d, { stamp });
       })
-      .catch(() => alive && setErr(true));
+      .catch(() => {
+        if (alive) setErr(true);
+      });
     return () => {
       alive = false;
     };
-  }, [active.doneCount, version, sessionsOn]);
+  }, [active.doneCount, version, sessionsOn, owner]);
 
   const reloadActive = active.reload;
   useEffect(() => {
@@ -138,12 +111,19 @@ export default function HomePage() {
 
   if (!me) return null;
   const settings = me.settings.review;
+  const plan = data?.plan ?? null;
+  const days = data?.days ?? [];
+  /** 저장한 오늘의 KOK (features.sessions 일 때만 읽는다) */
+  const home = data?.home ?? null;
+  // 다 읽었는지: 복습 정보(또는 못 읽었다는 것)와 정리 중인 자료 목록이 모두 와야 한 번에 그린다 (따로 나타나 서로 밀지 않게).
+  // 기억해 둔 홈으로 열었으면 바로 그린다 (정리 중인 자료 목록은 대개 같이 기억해 두었고, 없으면 읽히는 대로 나타난다)
+  const ready = (!!data || err) && (active.items !== null || !!first);
+  // 기억해 둔 화면으로 처음 그린 글은 번지지 않는다 (새로 읽어 바뀐 글만 번진다)
+  const still = !!first && !fresh;
   // 자료함에서 복습을 끈 노트의 문제는 오늘 복습·오답 수에 넣지 않는다
   const live = plan ? plan.cards.filter((c) => c.in_review) : [];
   const today = plan ? pickToday(live, plan.planSubjects, { dailyMax: settings.dailyMax, doneToday: plan.doneToday, interleave: settings.interleave }) : [];
   const streak = streakInfo(days);
-  // 복습 정보를 다 읽었는지 (못 읽었어도 자리 표시는 거둔다)
-  const loaded = !!plan || err;
   const week = weekDots(days);
   const nextDue = live.length ? live.map((c) => c.due).sort()[0] : null;
   // 보관한 과목(과목 서랍)은 목록에서만 뺀다: 시험 날·최근 노트에 안 보인다 (복습은 그대로)
@@ -151,7 +131,7 @@ export default function HomePage() {
   const exams = (plan?.subjects ?? [])
     .filter((s) => !s.archived && s.exam_date && daysUntil(s.exam_date) >= 0)
     .sort((a, b) => (a.exam_date! < b.exam_date! ? -1 : 1));
-  const recentShown = recent ? recent.filter((s) => !archived.has(s.subject_id)) : null;
+  const recentShown = (data?.recent ?? []).filter((s) => !archived.has(s.subject_id));
   const wrongCount = live.filter((c) => c.in_wrong_note).length;
   const hasCards = !!plan?.cards.length;
   const doneToday = plan?.doneToday ?? 0;
@@ -171,7 +151,13 @@ export default function HomePage() {
         reviewedSince: reviewedAfter(home.reviewed, home.row.created_at),
       });
       const inPlan = new Set(res.plan);
-      view = { total: res.done.length + res.remaining.length, done: res.done.length, remaining: res.remaining.length, started: true, more: today.some((c) => !inPlan.has(c.question_id)) };
+      view = {
+        total: res.done.length + res.remaining.length,
+        done: res.done.length,
+        remaining: res.remaining.length,
+        started: true,
+        more: today.some((c) => !inPlan.has(c.question_id)),
+      };
     } else {
       const c = continuePlan(today, plan.planSubjects, settings.minutes, { now, pace: home.pace, interleave: settings.interleave });
       view = { total: c.cards.length, done: 0, remaining: c.cards.length, started: false, more: !c.all };
@@ -185,7 +171,7 @@ export default function HomePage() {
     try {
       await deleteSession('home');
       setConfirmRestart(false);
-      setHome(null);
+      setData((d) => (d ? { ...d, home: null } : d));
       setVersion((v) => v + 1);
       toast('오늘의 KOK을 새로 골랐어요.', 'ok', DONE);
     } catch {
@@ -205,19 +191,27 @@ export default function HomePage() {
       setClearing(false);
     }
   };
+  /** 처음 읽기를 못 했을 때 다시 읽기 (그동안은 다시 회색 자리) */
+  const retry = () => {
+    setErr(false);
+    setVersion((v) => v + 1);
+  };
 
-  const title = !plan ? '오늘' : view.remaining ? `오늘 복습 ${view.remaining}문제` : hasCards ? '오늘 할 일 끝!' : '첫 자료를 넣어 보세요';
-  const subtitleText = !plan
+  // 제목·부제: 다 읽기 전에는 글 대신 회색 줄 (못 읽었으면 '오늘'과 안내)
+  const title = !ready ? null : !plan ? '오늘' : view.remaining ? `오늘 복습 ${view.remaining}문제` : hasCards ? '오늘 할 일 끝!' : '첫 자료를 넣어 보세요';
+  const subtitleText = !ready
     ? null
-    : view.remaining
-      ? `${me.nickname ?? ''}님, 잊어버리기 직전인 문제가 기다려요`
-      : hasCards
-        ? nextDue
-          ? dueLabel(nextDue) === '곧'
-            ? '다음 복습이 곧 열려요'
-            : `다음 복습은 ${dueLabel(nextDue)} 열려요`
-          : '잘했어요!'
-        : '자료를 넣으면 AI가 정리하고 문제를 만들어요';
+    : !plan
+      ? '복습 정보를 불러오지 못했어요'
+      : view.remaining
+        ? `${me.nickname ?? ''}님, 잊어버리기 직전인 문제가 기다려요`
+        : hasCards
+          ? nextDue
+            ? dueLabel(nextDue) === '곧'
+              ? '다음 복습이 곧 열려요'
+              : `다음 복습은 ${dueLabel(nextDue)} 열려요`
+            : '잘했어요!'
+          : '자료를 넣으면 AI가 정리하고 문제를 만들어요';
 
   const recentLink = (
     // 화면 바탕 위 글자는 본문·흐린 글자만(화면 빛 위에서 읽히게, fx.ts): 포인트 글자는 연한 알약 안에
@@ -225,28 +219,36 @@ export default function HomePage() {
       자료함 →
     </Link>
   );
-  // 다 읽으면 제목·부제가 바뀐다: 새 글이 살짝 번지며 나타나고, 읽는 동안에도 부제 줄 높이를 지켜 제목이 튀지 않게 한다
-  const titleNode = (
-    <span key={title} className={plan ? 'kok-swap' : undefined}>
-      {title}
-    </span>
-  );
+  // 다 읽으면 제목·부제가 그 자리에 나타나고(새 글은 살짝 번진다), 읽는 동안에도 줄 높이를 지켜 아래가 튀지 않게 한다
+  const titleNode =
+    title === null ? (
+      <span className="kok-skel inline-block h-[1.25em] align-top">
+        <span className="sr-only">오늘</span>
+        <span className="kok-bone mt-[0.3em] h-[0.65em] w-48 max-w-full" aria-hidden="true" />
+      </span>
+    ) : (
+      <Swap key={title} still={still}>
+        {title}
+      </Swap>
+    );
   const subtitle =
     subtitleText === null ? (
       <span className="kok-skel inline-block h-6 align-top" aria-hidden="true">
         <span className="kok-bone mt-[7px] h-2.5 w-52 max-w-full" />
       </span>
     ) : (
-      <span key={subtitleText} className="kok-swap">
+      <Swap key={subtitleText} still={still}>
         {subtitleText}
-      </span>
+      </Swap>
     );
+  /** 읽은 뒤에만 보이는 글 (읽는 동안에는 회색 줄, 못 읽었으면 비움) */
+  const known = (node: ReactNode, bone: string) => (!ready ? <Bone className={bone} /> : plan ? node : null);
 
   return (
     <div className="grid gap-3">
       <LargeHeader
         title={titleNode}
-        compactTitle={title}
+        compactTitle={title ?? '오늘'}
         subtitle={subtitle}
         actions={
           <span className="md:hidden">
@@ -259,8 +261,16 @@ export default function HomePage() {
       <HomeAsk />
 
       {/* 5분 KOK */}
-      {!plan && !err ? (
+      {!ready ? (
         <TodaySkeleton />
+      ) : !plan ? (
+        <section className="kok-card kok-fill grid justify-items-center gap-3 px-5 py-8 text-center">
+          <Icon d={ICONS.retry} size={30} strokeWidth={2.2} className="text-muted" />
+          <p className="text-[15px] text-muted">인터넷 연결을 확인하고 다시 불러와 주세요.</p>
+          <Button variant="secondary" onClick={retry}>
+            다시 불러오기
+          </Button>
+        </section>
       ) : hasCards ? (
         // 자리 표시와 같은 크기의 카드는 그 자리에 두고, 안의 글만 번지며 나타난다. 화면의 핵심 카드라 테마 빛이 번진다(kok-hero)
         <section className="kok-card kok-hero grid gap-4 p-5">
@@ -328,11 +338,11 @@ export default function HomePage() {
           <div className="flex items-baseline justify-between gap-2">
             <span className="text-sm font-semibold text-muted">연속 공부</span>
             <span className="font-display text-2xl tabular-nums">
-              {loaded ? (
-                <span key="n" className="kok-swap">
-                  {streak.streak}
+              {ready ? (
+                <Swap key="n" still={still}>
+                  {plan ? streak.streak : '–'}
                   <span className="ml-0.5 text-sm text-muted">일</span>
-                </span>
+                </Swap>
               ) : (
                 <span className="kok-skel inline-block h-[1.25em] align-top" aria-hidden="true">
                   <span className="kok-bone mt-[0.35em] h-[0.6em] w-10" />
@@ -341,23 +351,27 @@ export default function HomePage() {
             </span>
           </div>
           <ol className="flex justify-between" aria-label="이번 주 공부한 날">
-            {week.map((d) => (
-              <li key={d.label} className="grid justify-items-center gap-1">
-                <span
-                  className={cx(
-                    'grid h-[18px] w-[18px] place-items-center rounded-full text-[11px] font-bold transition-colors duration-200',
-                    d.studied ? 'kok-dot-on bg-fab text-fab-ink' : d.future ? 'bg-surface-2 text-muted/60' : 'bg-surface-2 text-muted',
-                    d.today && !d.studied && 'ring-2 ring-fab ring-inset',
-                  )}
-                  aria-label={`${d.label}요일 ${d.studied ? '공부함' : d.future ? '' : '쉼'}`}
-                >
-                  {d.studied ? <Icon d={ICONS.check} size={11} strokeWidth={3.2} /> : null}
-                </span>
-                <span className={cx('text-[11px]', d.today ? 'font-bold text-ink' : 'text-muted')}>{d.label}</span>
-              </li>
-            ))}
+            {week.map((d) => {
+              // 읽기 전에는 공부한 날을 모른다: 모두 빈 칸으로 두고, 다 읽으면 그 자리에서 색이 번진다
+              const studied = ready && d.studied;
+              return (
+                <li key={d.label} className="grid justify-items-center gap-1">
+                  <span
+                    className={cx(
+                      'grid h-[18px] w-[18px] place-items-center rounded-full text-[11px] font-bold transition-[background-color,color,box-shadow] duration-200',
+                      studied ? 'kok-dot-on bg-fab text-fab-ink' : d.future ? 'bg-surface-2 text-muted/60' : 'bg-surface-2 text-muted',
+                      ready && d.today && !studied && 'ring-2 ring-fab ring-inset',
+                    )}
+                    aria-label={ready ? `${d.label}요일 ${studied ? '공부함' : d.future ? '' : '쉼'}` : `${d.label}요일`}
+                  >
+                    {studied ? <Icon d={ICONS.check} size={11} strokeWidth={3.2} /> : null}
+                  </span>
+                  <span className={cx('text-[11px]', d.today ? 'font-bold text-ink' : 'text-muted')}>{d.label}</span>
+                </li>
+              );
+            })}
           </ol>
-          <span className="text-xs text-muted">이번 주 쉬는 날 {loaded ? `${streak.restUsedThisWeek}/2` : '–'}</span>
+          <span className="text-xs text-muted">이번 주 쉬는 날 {known(`${streak.restUsedThisWeek}/2`, 'w-6')}</span>
         </section>
         <Link href="/settings#energy" className="kok-card kok-card-hover press kok-rise grid content-between gap-1 p-4" style={{ ['--i' as string]: 2 }}>
           <span className="text-sm font-semibold text-muted">{energyPeriodLabel(me.energy.period)} AI 에너지</span>
@@ -376,7 +390,7 @@ export default function HomePage() {
         </Link>
       </div>
 
-      {exams.length ? (
+      {ready && exams.length ? (
         <div className="no-scrollbar -mx-4 flex gap-2 overflow-x-auto px-4 md:-mx-6 md:px-6">
           {exams.map((s) => {
             const d = daysUntil(s.exam_date!);
@@ -397,13 +411,15 @@ export default function HomePage() {
       ) : null}
 
       {/* 정리 중인 자료는 복습 정보와 함께 나타난다 (따로 먼저 나타나 아래 자리 표시를 밀어내지 않게) */}
-      {loaded ? <ProcessingList {...active} /> : null}
+      {ready ? <ProcessingList {...active} /> : null}
 
-      {recent === null && !err ? (
-        // 최근 노트를 읽는 동안: 같은 크기의 자리를 먼저 두어 아래 '바로 가기'가 밀려 내려가지 않게 한다
-        <>
-          <SectionTitle action={recentLink}>최근 노트</SectionTitle>
-          <div className="kok-skel no-scrollbar -mx-4 flex gap-3 overflow-hidden px-4 pb-1 md:mx-0 md:grid md:grid-cols-4 md:px-0" aria-hidden="true">
+      {!ready ? (
+        // 최근 노트를 읽는 동안: 같은 크기의 자리를 먼저 두어 아래 '바로 가기'가 밀려 내려가지 않게 한다 (최근 노트가 있는지 모르니 제목도 회색 줄)
+        <div className="kok-skel grid gap-3" aria-hidden="true">
+          <div className="mb-1 mt-5 flex h-7 items-center px-1">
+            <span className="kok-bone h-3.5 w-20" />
+          </div>
+          <div className="no-scrollbar -mx-4 flex gap-3 overflow-hidden px-4 pb-1 md:mx-0 md:grid md:grid-cols-4 md:px-0">
             {[0, 1, 2, 3].map((i) => (
               <div key={i} className="kok-card kok-shimmer flex h-[150px] w-[150px] shrink-0 flex-col justify-between p-3.5 md:w-auto">
                 <div className="grid gap-1.5 pt-0.5">
@@ -418,8 +434,8 @@ export default function HomePage() {
               </div>
             ))}
           </div>
-        </>
-      ) : recentShown && recentShown.length ? (
+        </div>
+      ) : recentShown.length ? (
         <>
           <SectionTitle action={recentLink}>최근 노트</SectionTitle>
           <div className="no-scrollbar -mx-4 flex snap-x gap-3 overflow-x-auto px-4 pb-1 md:mx-0 md:grid md:grid-cols-4 md:overflow-visible md:px-0">
@@ -473,7 +489,7 @@ export default function HomePage() {
           </span>
           <span>
             <span className="block font-bold">오답노트</span>
-            <span className="text-sm text-muted">{wrongCount ? `${wrongCount}문제` : '비어 있어요'}</span>
+            <span className="block h-5 text-sm text-muted">{known(wrongCount ? `${wrongCount}문제` : '비어 있어요', 'w-12')}</span>
           </span>
         </Link>
         <Link href="/questions" className="kok-card kok-card-hover press hidden gap-2 p-4 sm:grid">
@@ -486,7 +502,7 @@ export default function HomePage() {
           </span>
         </Link>
       </div>
-      {err ? <p className="text-sm text-bad">복습 정보를 불러오지 못했어요. 새로 고침해 주세요.</p> : null}
+      {err && plan ? <p className="text-sm text-bad">새 복습 정보를 불러오지 못했어요. 새로 고침해 주세요.</p> : null}
 
       {/* 오늘의 KOK 처음부터: 저장한 진행을 지우고 새로 고른다 (빛나는 카드 밖에 둔다: 카드가 isolation 이라 안에 두면 아래 메뉴 밑에 깔린다) */}
       <Sheet

@@ -853,7 +853,8 @@ export default function NotePage() {
     return (
       <div className="grid gap-3">
         <LargeHeader size="compact" back={back} title=" " />
-        <div className="kok-card kok-shimmer h-48" />
+        {/* 읽는 동안의 자리: 조금 늦게 나타나 금방 읽히면 보이지 않는다 */}
+        <div className="kok-card kok-shimmer kok-skel h-48" aria-hidden="true" />
       </div>
     );
   if (source === null)

@@ -10,7 +10,7 @@ import { MindMap } from '@/components/MindMap';
 import { QuestionCard, type GradeOutcome, type ReviewQuestion } from '@/components/QuestionCard';
 import { ReportSheet } from '@/components/QuestionList';
 import { ReviewStart, StartSkeleton, type StartChoice, type StartPick } from '@/components/review/ReviewStart';
-import { Button, Card, EmptyState, ICONS, Icon, LargeHeader, LinkButton, Sheet, api, cx, useToast } from '@/components/ui';
+import { Button, Card, EmptyState, ICONS, Icon, LargeHeader, LinkButton, Sheet, Swap, api, cx, useToast } from '@/components/ui';
 import {
   deleteSession,
   fetchPlanData,
@@ -28,7 +28,9 @@ import {
 } from '@/lib/data';
 import { autoGrade, autoRating, type Rating } from '@/lib/grading';
 import { PERIOD_LABEL, REVIEW_MINUTES, continuePlan, paceFrom, periodCounts, periodPool, pickToday, secondsFor, streakInfo, type ReviewMinutes, type ReviewPeriod } from '@/lib/review-plan';
-import { practiceFrom, type ReviewMode } from '@/lib/review-mode';
+import { practiceFrom, reviewModeKey, type ReviewMode } from '@/lib/review-mode';
+import { warmHome } from '@/lib/home-data';
+import { readView, viewStamp, writeView } from '@/lib/view-cache';
 import { resumePlan, type ResumeResult, type SessionKey, type SessionRow } from '@/lib/review-session';
 import { kstDateString } from '@/lib/time';
 import { reviewCard, type StoredCard } from '@/lib/srs';
@@ -55,6 +57,8 @@ type SaveState = {
   failedCards: Map<string, { seq: number; patch: Record<string, unknown> }>;
   /** 넣지 못한 푼 기록 */
   failedLogs: Array<Record<string, unknown>>;
+  /** 아직 넣는 중인 푼 기록 (끝 화면에서 기다린다: 못 넣은 것을 한 번 더 넣고, 홈을 미리 읽기 전에) */
+  logs: Set<Promise<void>>;
 };
 
 async function saveCard(st: SaveState, qid: string, seq: number, patch: Record<string, unknown>): Promise<void> {
@@ -168,6 +172,13 @@ function resolveSaved(key: SessionKey, row: SessionRow, m: ReviewMode, p: PlanDa
 function pickOf(saved: Saved): StartPick {
   const cards = saved.res.remaining;
   return { cards, seconds: Math.round(cards.reduce((t, c) => t + secondsFor(c, saved.row.pace), 0)), all: false, timed: true };
+}
+
+/** 시작 화면의 '하던 복습 이어서 하기': 이 방법(복습 탭·오답)의 저장한 세션에 남은 문제가 있을 때 */
+function keptResume(m: ReviewMode, saved: Saved[]): Saved | null {
+  const pickerKey: SessionKey = m.kind === 'wrong' ? 'wrong' : 'review';
+  const kept = saved.find((x) => x.key === pickerKey);
+  return kept && kept.res.remaining.length ? kept : null;
 }
 
 /** 저장한 세션이 고른 기간·과목·시간 */
@@ -286,12 +297,21 @@ export function ReviewSession({
   const [note, setNote] = useState<{ title: string; sourceId: string } | null | undefined>(() =>
     origin && mode.kind === 'practice' ? { title: origin.title, sourceId: mode.id } : undefined,
   );
-  const [phase, setPhase] = useState<Phase>('loading');
-  const [plan, setPlan] = useState<PlanData | null>(null);
+  const owner = me?.userId;
+  /** 시작 화면을 기억해 두는 이름: 복습 탭·과목 복습·오답 다시 풀기·약점 개념 (노트 문제 풀기와 홈의 바로 시작은 늘 새로 읽는다) */
+  const viewKey = practice || autoStart ? null : `review:${reviewModeKey(mode)}`;
+  // 기억해 둔 시작 화면이 있으면 처음부터 그것으로 그린다 (뒤에서 새로 읽어 덮고, 고른 기간·시간은 그대로 둔다)
+  const [cached] = useState(() => (viewKey && me ? (readView<Loaded>(viewKey, me.userId) ?? null) : null));
+  const [phase, setPhase] = useState<Phase>(cached ? 'start' : 'loading');
+  const [plan, setPlan] = useState<PlanData | null>(cached?.plan ?? null);
   /** 내 빠르기 (복습 시간마다 문제 수) */
-  const [pace, setPace] = useState(1);
+  const [pace, setPace] = useState(cached?.pace ?? 1);
   /** 시작 화면에서 고른 기간·과목·시간 ('조금 더 하기'로 돌아와도 그대로) */
-  const [choice, setChoice] = useState<StartChoice | null>(null);
+  const [choice, setChoice] = useState<StartChoice | null>(() => (cached && me ? firstChoice(mode, cached.plan, me.settings.review) : null));
+  /** 새로 읽은 것이 들어왔는지: 그 전에 기억해 둔 화면으로 그린 글은 번지지 않는다 */
+  const [fresh, setFresh] = useState(false);
+  /** 시작을 눌렀는지: 기억해 둔 시작 화면에서 시작했으면 늦게 온 첫 읽기로 화면을 되돌리지 않는다 */
+  const begun = useRef(false);
   const [starting, setStarting] = useState(false);
   const [queue, setQueue] = useState<Item[]>([]);
   const [idx, setIdx] = useState(0);
@@ -308,7 +328,7 @@ export function ReviewSession({
   const [streak, setStreak] = useState(0);
   // 끝 화면에서 '조금 더 하기'·'한 번 더 풀기'로 돌아온 횟수: 그때는 탭을 바꿀 때처럼 화면이 살짝 떠오른다
   const [round, setRound] = useState(0);
-  const saves = useRef<SaveState>({ seq: 0, chains: new Map(), failedCards: new Map(), failedLogs: [] });
+  const saves = useRef<SaveState>({ seq: 0, chains: new Map(), failedCards: new Map(), failedLogs: [], logs: new Set() });
   /** 이번 화면에서 푼 카드의 가장 새 상태 (다시 읽을 때 덮는다, withLatest) */
   const latest = useRef<Map<string, CardRow>>(new Map());
   /** 노트로 돌아가는 중 (두 번 눌러 두 번 뒤로 가지 않게) */
@@ -325,7 +345,7 @@ export function ReviewSession({
   const sessionsOn = !!me?.features.sessions;
   const keys = useMemo(() => (sessionsOn ? sessionKeys(mode, autoStart) : []), [sessionsOn, mode, autoStart]);
   /** 시작 화면에 보일 '하던 복습 이어서 하기' (남은 문제가 있는 저장한 세션) */
-  const [resume, setResume] = useState<Saved | null>(null);
+  const [resume, setResume] = useState<Saved | null>(() => (cached ? keptResume(mode, cached.saved) : null));
   /** 푸는 중인 세션: 푼 문제를 DB 에 적는다 (한 번에 하나씩, 다시 나온 문제는 한 번만) */
   const session = useRef<{ key: SessionKey; pace: number; secOf: Map<string, number>; recorded: Set<string>; chain: Promise<void>; failed: number } | null>(null);
   /** 마지막으로 푼 세션의 열쇠 (끝 화면의 '조금 더 하기') */
@@ -375,9 +395,7 @@ export function ReviewSession({
         const first = firstChoice(mode, r.plan, reviewSettings);
         setChoice((c) => c ?? first);
         // 시작 화면의 '하던 복습 이어서 하기' (남은 문제가 있을 때만)
-        const pickerKey: SessionKey = mode.kind === 'wrong' ? 'wrong' : 'review';
-        const kept = r.saved.find((x) => x.key === pickerKey);
-        setResume(kept && kept.res.remaining.length ? kept : null);
+        setResume(keptResume(mode, r.saved));
         // 홈의 'N분 KOK 시작': 저장한 오늘 KOK 이 있으면 남은 문제로, 없으면 고르는 화면과 같은 계산으로 N분 분량을 뽑아 바로 시작한다
         // (다 풀었거나 풀 문제가 없으면 고르는 화면)
         if (autoStart && !autoStarted.current && choosesPeriod(mode)) {
@@ -415,7 +433,13 @@ export function ReviewSession({
     if (!reviewSettings) return;
     if (phase === 'end') setRound((r) => r + 1);
     setPhase('loading');
-    load(mode, reviewSettings, latest.current, qcols, keys).then(applyLoaded).catch(loadFailed);
+    const stamp = viewStamp();
+    load(mode, reviewSettings, latest.current, qcols, keys)
+      .then((r) => {
+        applyLoaded(r);
+        if (viewKey) writeView(viewKey, owner, r, { stamp });
+      })
+      .catch(loadFailed);
   };
 
   /**
@@ -434,12 +458,20 @@ export function ReviewSession({
   useEffect(() => {
     if (!reviewSettings) return;
     let alive = true;
+    // 읽는 사이에 저장이 있었으면 기억하지 않는다 (src/lib/view-cache.ts)
+    const stamp = viewStamp();
     load(mode, reviewSettings, latest.current, qcols, keys)
       .then((r) => {
-        if (alive) applyLoaded(r);
+        if (!alive) return;
+        if (viewKey) writeView(viewKey, owner, r, { stamp });
+        // 기억해 둔 시작 화면에서 벌써 시작했으면 푸는 화면을 되돌리지 않는다
+        if (begun.current) return;
+        applyLoaded(r);
+        setFresh(true);
       })
       .catch(() => {
-        if (alive) loadFailed();
+        // 기억해 둔 시작 화면을 보이고 있으면 그대로 둔다 (못 읽었다고 지우지 않는다)
+        if (alive && !cached) loadFailed();
       });
     return () => {
       alive = false;
@@ -477,9 +509,9 @@ export function ReviewSession({
       }
       setRemaining(more);
       setPhase('end');
-      // 진행 중인 저장을 기다리고, 저장 못 한 것을 한 번 더 저장해 본다
+      // 진행 중인 저장(카드·푼 기록)을 기다리고, 저장 못 한 것을 한 번 더 저장해 본다
       const st = saves.current;
-      await Promise.all([...st.chains.values()]);
+      await Promise.all([...st.chains.values(), ...st.logs]);
       for (const [qid, f] of [...st.failedCards.entries()]) await saveCard(st, qid, f.seq, f.patch);
       for (const log of st.failedLogs.splice(0)) await saveLog(st, log);
       const left = st.failedCards.size + st.failedLogs.length;
@@ -497,8 +529,10 @@ export function ReviewSession({
         .then((d) => setStreak(streakInfo(d).streak))
         .catch(() => {});
       refresh();
+      // 끝 화면 다음에는 대개 홈으로 간다: 저장이 다 끝난 지금 홈을 미리 읽어 두면 홈이 바로 (바뀐 진행으로) 보인다
+      if (!practice) warmHome(owner, sessionsOn);
     },
-    [practice, setFocus, toast, refresh, plan, choice, reviewSettings, mode],
+    [practice, setFocus, toast, refresh, plan, choice, reviewSettings, mode, owner, sessionsOn],
   );
 
   /** 지난번에 고른 시간·기간을 기억한다 (다음에 그대로 고른 채 연다) */
@@ -529,6 +563,7 @@ export function ReviewSession({
       const p = ctx?.plan ?? plan;
       const c = ctx?.choice ?? choice;
       if (!p || !c || starting || !me) return;
+      begun.current = true;
       setStarting(true);
       try {
         const items = await buildItems(
@@ -679,7 +714,7 @@ export function ReviewSession({
       q.id,
       prev.then(() => saveCard(st, q.id, mySeq, patch)),
     );
-    void saveLog(st, {
+    const logged = saveLog(st, {
       question_id: q.id,
       subject_id: q.subject_id,
       rating: r.rating,
@@ -688,6 +723,8 @@ export function ReviewSession({
       ms: Math.min(r.ms, 3_600_000),
       reviewed_at: at.toISOString(),
     });
+    st.logs.add(logged);
+    void logged.finally(() => st.logs.delete(logged));
     if (graduated) toast('오답노트 졸업! 3번 연속 맞혔어요', 'ok');
     // 저장한 세션에 푼 문제를 적는다 (다시 나온 문제는 처음 답만, 한 번에 하나씩)
     const ss = session.current;
@@ -819,9 +856,10 @@ export function ReviewSession({
               : '오늘 복습은 다 했어요';
     const subtitle =
       ready || failed ? (
-        <span key={subtitleText} className="kok-swap">
+        // 기억해 둔 시작 화면으로 처음 그린 부제는 번지지 않는다
+        <Swap key={subtitleText} still={!!cached && !fresh}>
           {subtitleText}
-        </span>
+        </Swap>
       ) : (
         // 읽는 동안에도 부제 줄 높이를 지켜서, 다 읽었을 때 제목이 위로 튀지 않게 한다
         <span className="kok-skel inline-block h-6 align-top" aria-hidden="true">

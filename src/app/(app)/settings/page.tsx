@@ -32,7 +32,11 @@ import { energyPeriodLabel, planLabel } from '@/lib/plans';
 import { accountLabel } from '@/lib/login';
 import { applyTheme, clearTheme, loadThemeFont } from '@/lib/theme';
 import { ThemeSettings } from '@/components/ThemeSettings';
-import { dropView } from '@/lib/view-cache';
+import { dropView, readView, viewStamp, writeView } from '@/lib/view-cache';
+
+/** 설정 화면의 과목(과목별 기본 표현)·에너지 사용 기록을 기억해 두는 이름 */
+const SETTINGS_VIEW = 'settings';
+type SettingsLists = { subjects: SubjectRow[]; ledger: Ledger[] };
 
 const TASKS: Array<{ key: keyof UserSettings['models']; label: string; hint: string }> = [
   { key: 'organize', label: '정리', hint: '자료를 읽고 정리 노트로 바꿔요' },
@@ -69,28 +73,42 @@ export default function SettingsPage() {
   const [draft, setDraft] = useState<UserSettings | null>(me?.settings ?? null);
   const [nickname, setNickname] = useState(me?.nickname ?? '');
   const [saved, setSaved] = useState<'idle' | 'saving' | 'saved'>('idle');
-  const [subjects, setSubjects] = useState<SubjectRow[]>([]);
-  const [ledger, setLedger] = useState<Ledger[]>([]);
+  // 과목·에너지 기록: 기억해 둔 것이 있으면 처음부터 보여 준다 (뒤늦게 나타나 아래를 밀지 않게, src/lib/view-cache.ts)
+  const [kept] = useState(() => readView<SettingsLists>(SETTINGS_VIEW, me?.userId) ?? null);
+  const [subjects, setSubjects] = useState<SubjectRow[]>(() => kept?.subjects ?? []);
+  const [ledger, setLedger] = useState<Ledger[]>(() => kept?.ledger ?? []);
   const [confirmText, setConfirmText] = useState('');
   const [deleting, setDeleting] = useState(false);
   const first = useRef(true);
+  const owner = me?.userId;
 
   useEffect(() => {
-    fetchSubjects()
-      .then(setSubjects)
+    let alive = true;
+    // 읽는 사이에 저장이 있었으면 기억하지 않는다
+    const stamp = viewStamp();
+    const subjectsRead = fetchSubjects();
+    const ledgerRead = Promise.resolve(
+      sb().from('energy_ledger').select('task, model, energy, created_at').order('created_at', { ascending: false }).limit(20),
+    ).then(({ data, error }) => {
+      if (error) throw error;
+      return (data ?? []) as Ledger[];
+    });
+    subjectsRead.then((s) => alive && setSubjects(s)).catch(() => {});
+    ledgerRead.then((l) => alive && setLedger(l)).catch(() => {});
+    Promise.all([subjectsRead, ledgerRead])
+      .then(([s, l]) => {
+        if (alive) writeView(SETTINGS_VIEW, owner, { subjects: s, ledger: l }, { stamp });
+      })
       .catch(() => {});
-    sb()
-      .from('energy_ledger')
-      .select('task, model, energy, created_at')
-      .order('created_at', { ascending: false })
-      .limit(20)
-      .then(({ data }) => setLedger((data ?? []) as Ledger[]));
     // 다른 화면에서 #energy·#chat·#theme 로 들어오면 그 칸으로
     const hash = window.location.hash.slice(1);
     if (/^[a-z]+$/.test(hash)) setTimeout(() => document.getElementById(hash)?.scrollIntoView({ behavior: 'smooth' }), 300);
     // 글꼴 고르기 미리보기
     for (const f of THEME_FONTS) loadThemeFont(f);
-  }, []);
+    return () => {
+      alive = false;
+    };
+  }, [owner]);
 
   // 바꾸면 0.6초 뒤 저장
   useEffect(() => {

@@ -24,6 +24,7 @@ import {
   Menu,
   ProgressRing,
   Sheet,
+  Swap,
   api,
   cx,
   inputClass,
@@ -48,7 +49,7 @@ import type { SubjectRow } from '@/lib/types';
 import { subjectVar } from '@/lib/colors';
 import { previewText } from '@/lib/richtext';
 import { daysUntil } from '@/lib/time';
-import { dropView, readView, writeView } from '@/lib/view-cache';
+import { dropView, readView, viewStamp, writeView } from '@/lib/view-cache';
 import { QUICK_MAX, byPosition, quickSubjects } from '@/lib/subject-order';
 import { SubjectDrawer, type DrawerManage } from './SubjectDrawer';
 import { SubjectPickSheet } from './SubjectPick';
@@ -126,9 +127,9 @@ export function LibraryView() {
   const pathname = usePathname();
   const toast = useToast();
   const quick = useQuickAdd();
-  const active = useActiveSources();
-  const reloadActive = active.reload;
   const owner = me?.userId;
+  const active = useActiveSources(owner);
+  const reloadActive = active.reload;
   // 방금 본 목록이 있으면 바로 보여 주고(빈 자리 없이), 뒤에서 새로 읽어 덮는다
   const [data, setData] = useState<LibData | null>(() => readView<LibData>(LIBRARY_VIEW, owner) ?? null);
   // 처음 새로 읽은 목록이 들어온 뒤부터는 새로 생기는 카드가 자리에서 번지며 나타난다
@@ -163,6 +164,11 @@ export function LibraryView() {
 
   // 화면에서 바로 고친 것(별표·복습·순서)이 읽는 사이에 생겼으면, 읽은 목록은 옛것이라 버리고 저장이 끝난 뒤 다시 읽는다
   const edits = useRef({ seq: 0, saving: 0, stale: false });
+  // 지금 화면의 목록 (저장이 끝난 뒤 기억해 둘 때 쓴다)
+  const latestData = useRef(data);
+  useEffect(() => {
+    latestData.current = data;
+  }, [data]);
 
   // 카드에서 별표를 누르면: 별이 튀고 빛이 번지는 동안 자리를 그대로 두었다가 맨 위로 미끄러진다
   const [hold, setHold] = useState<string[] | null>(null);
@@ -179,6 +185,8 @@ export function LibraryView() {
   useEffect(() => {
     let alive = true;
     const seq = edits.current.seq;
+    // 읽는 사이에 저장이 있었으면 이 목록은 기억하지 않는다 (view-cache)
+    const stamp = viewStamp();
     fetchLibrary(organize)
       .then((r) => {
         if (!alive) return;
@@ -188,7 +196,7 @@ export function LibraryView() {
           if (!e.saving) reload();
           return;
         }
-        writeView(LIBRARY_VIEW, owner, r);
+        writeView(LIBRARY_VIEW, owner, r, { stamp });
         setData(r);
         setPainted(true);
       })
@@ -328,18 +336,25 @@ export function LibraryView() {
   const pickedRows = shown.filter((s) => picked.has(s.id));
   const labels = bulkLabels(pickedRows);
 
-  /** 화면에서 바로 고친 것을 저장하는 동안 (그사이에 읽은 목록은 버리고, 다 저장한 뒤 다시 읽는다) */
-  const keepWhileSaving = async (work: () => Promise<void>) => {
+  /**
+   * 화면에서 바로 고친 것을 저장하는 동안 (그사이에 읽은 목록은 버리고, 다 저장한 뒤 다시 읽는다).
+   * work 가 false 를 돌려주면 저장하지 못한 것 (부른 쪽이 다시 읽는다)
+   */
+  const keepWhileSaving = async (work: () => Promise<boolean | void>) => {
     const e = edits.current;
     e.seq += 1;
     e.saving += 1;
+    let ok = false;
     try {
-      await work();
+      ok = (await work()) !== false;
     } finally {
       e.saving -= 1;
       if (!e.saving && e.stale) {
         e.stale = false;
         reload();
+      } else if (!e.saving && ok && latestData.current) {
+        // 저장 요청이 기억해 둔 목록을 옛것으로 만들었으니, 다 저장한 지금 화면의 목록을 다시 기억해 둔다 (다시 들어오면 바로 보이게)
+        writeView(LIBRARY_VIEW, owner, latestData.current);
       }
     }
   };
@@ -376,6 +391,7 @@ export function LibraryView() {
         const { error } = await sb().from('subjects').update(p.patch).eq('id', p.id);
         if (error) failed = true;
       }
+      return !failed;
     });
     if (failed) {
       toast('저장하지 못했어요. 다시 해 주세요.', 'bad');
@@ -579,6 +595,7 @@ export function LibraryView() {
           .in('id', ids.slice(i, i + BULK_MAX));
         if (error) failed = true;
       }
+      return !failed;
     });
     if (failed) {
       toast('저장하지 못했어요. 다시 해 주세요.', 'bad');
@@ -685,8 +702,9 @@ export function LibraryView() {
   const exam = subject?.exam_date ? daysUntil(subject.exam_date) : null;
   const total = selected ? (counts.get(selected) ?? 0) : (allCount ?? 0);
   // 읽는 동안에도 줄 높이를 지켜서, 다 읽었을 때 제목이 위로 튀지 않게 한다
+  // 기억해 둔 목록으로 처음 그린 부제는 번지지 않는다 (새로 읽어 바뀌면 번진다)
   const subtitle = data ? (
-    <span key={`${total}:${exam ?? ''}`} className="kok-swap flex flex-wrap items-center gap-x-2">
+    <Swap key={`${total}:${exam ?? ''}`} still={!painted} className="flex flex-wrap items-center gap-x-2">
       <span>자료 {total}개</span>
       {exam !== null && exam >= 0 ? (
         // 큰 제목 아래(화면 위 빛 위)라 색 글자는 연한 알약 안에
@@ -695,7 +713,7 @@ export function LibraryView() {
         </span>
       ) : null}
       {subject?.archived ? <span>· 보관한 과목</span> : null}
-    </span>
+    </Swap>
   ) : (
     <span className="kok-skel inline-block h-6 align-top" aria-hidden="true">
       <span className="kok-bone mt-[7px] h-2.5 w-16" />
@@ -841,7 +859,7 @@ export function LibraryView() {
 
       {/* 과목 칩 (폴더) */}
       <div ref={chipsRef} className="no-scrollbar relative -mx-4 mb-3 flex gap-2 overflow-x-auto px-4 pb-1 md:-mx-6 md:px-6" role="tablist" aria-label="과목">
-        <FolderChip id="all" on={!selected} onClick={() => select(null)} label="전체" count={allCount} loading={!data} />
+        <FolderChip id="all" on={!selected} onClick={() => select(null)} label="전체" count={allCount} loading={!data} still={!painted} />
         {/* 과목을 읽는 동안: 과목 칩 자리 */}
         {!data ? [0, 1].map((i) => <span key={i} className="kok-skel kok-bone h-10 w-20 shrink-0" aria-hidden="true" />) : null}
         {chipSubjects.map((s) => {
@@ -1159,6 +1177,7 @@ function FolderChip({
   label,
   count,
   loading,
+  still = false,
   color,
   badge,
   enter = 'none',
@@ -1168,8 +1187,10 @@ function FolderChip({
   onClick: () => void;
   label: string;
   count?: number;
-  /** 수를 읽는 중이면 그 자리를 남겨 둔다 (다 읽었을 때 옆 칩이 밀리지 않게) */
+  /** 수를 읽는 중이면 그 자리를 남겨 둔다 (다 읽었을 때 옆 칩이 밀리지 않고, 수가 그 자리에서 번진다) */
   loading?: boolean;
+  /** 기억해 둔 목록으로 처음 그린 칩: 수가 번지지 않는다 */
+  still?: boolean;
   color?: string;
   badge?: string;
   enter?: Enter;
@@ -1193,9 +1214,9 @@ function FolderChip({
       {color ? <span className="h-2.5 w-2.5 rounded-full" style={{ background: color }} aria-hidden="true" /> : null}
       <span className="max-w-[9rem] truncate">{label}</span>
       {typeof count === 'number' ? (
-        <span key="n" className={cx('tabular-nums', !on && 'text-muted', loading === false && 'kok-swap')}>
+        <Swap key="n" still={loading !== false || still} className={cx('tabular-nums', !on && 'text-muted')}>
           {count}
-        </span>
+        </Swap>
       ) : loading ? (
         <span className="inline-block h-2 w-3 rounded-full bg-current opacity-20" aria-hidden="true" />
       ) : null}

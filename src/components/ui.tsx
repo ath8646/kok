@@ -3,6 +3,7 @@
 import Link from 'next/link';
 import { createContext, useCallback, useContext, useEffect, useId, useRef, useState, type ReactNode } from 'react';
 import { ICONS } from '@/lib/icons';
+import { trackedFetch } from '@/lib/view-cache';
 
 export function cx(...parts: Array<string | false | null | undefined>): string {
   return parts.filter(Boolean).join(' ');
@@ -323,6 +324,16 @@ export function LargeHeader({
   );
 }
 
+/**
+ * 바뀌는 글(제목·부제·숫자): key 를 글로 주면 바뀔 때 새 글이 살짝 번지며 나타난다 (.kok-swap).
+ * still: 기억해 둔 화면으로 처음 그린 글은 번지지 않고 그대로 (다시 들어올 때 글이 깜빡이지 않게).
+ * 처음 그릴 때 정한 대로 둔다: 같은 글에 나중에 번짐을 붙이면 그 자리에서 다시 번지기 때문이다
+ */
+export function Swap({ still = false, className, children }: { still?: boolean; className?: string; children: ReactNode }) {
+  const [animate] = useState(!still);
+  return <span className={cx(animate && 'kok-swap', className) || undefined}>{children}</span>;
+}
+
 // ------------------------------------------------------------- 메뉴 (⋮ 를 누르면 펼쳐지는 작은 목록)
 export type MenuItem = { label: string; onSelect: () => void; danger?: boolean; icon?: string };
 
@@ -525,7 +536,8 @@ export class ApiError extends Error {
 
 /** fetch + JSON + 한국어 오류 메시지 */
 export async function api<T = unknown>(url: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(url, {
+  // 쓰기 요청이면 기억해 둔 화면을 옛것으로 센다 (src/lib/view-cache.ts)
+  const res = await trackedFetch(url, {
     ...init,
     headers: { 'content-type': 'application/json', ...(init?.headers ?? {}) },
   });

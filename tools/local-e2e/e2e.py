@@ -559,6 +559,202 @@ async def figure_steps(browser):
     await octx.close()
 
 
+# 화면이 바뀔 때마다(그리기 전에) 큰 제목·부제·오답노트 바로 가기의 보이는 글과 '불러오는 중' 자리(aria-busy)를 적어 둔다.
+# 가려진 글(sr-only)·회색 줄(aria-hidden)은 보이는 글이 아니라 뺀다. 같은 모습이 이어지면 한 번만
+TRACE_JS = r"""
+(() => {
+  const seen = (el) => {
+    if (!el) return '';
+    const walk = (n) => {
+      if (n.nodeType === 3) return n.textContent;
+      if (n.nodeType !== 1) return '';
+      if (n.classList.contains('sr-only') || n.getAttribute('aria-hidden') === 'true') return '';
+      return [...n.childNodes].map(walk).join('');
+    };
+    return walk(el).replace(/\s+/g, ' ').trim();
+  };
+  const log = (window.__kokTrace = []);
+  let last = '';
+  const take = () => {
+    const h1 = document.querySelector('main h1');
+    const row = {
+      h1: seen(h1),
+      sub: seen(h1 && h1.nextElementSibling),
+      wrong: seen(document.querySelector('main a[href="/wrong"]')),
+      busy: !!document.querySelector('main [aria-busy="true"]'),
+    };
+    const key = JSON.stringify(row);
+    if (key !== last) {
+      last = key;
+      log.push(row);
+    }
+  };
+  new MutationObserver(take).observe(document, { subtree: true, childList: true, characterData: true, attributes: true });
+  take();
+})();
+"""
+
+
+async def answer_any(page):
+    """지금 문제에 아무 답이나 하고 다음으로 (유형마다)"""
+    if await page.get_by_role("button", name="O 맞다").count():
+        await page.get_by_role("button", name="X 틀리다").click()
+    elif await page.get_by_label("답").count():
+        await page.get_by_label("답").fill("모르겠다")
+        await page.get_by_role("button", name="확인").click()
+    else:
+        await page.locator("main button:has-text('1')").first.click()
+    await expect(page.get_by_role("button", name="다음")).to_be_visible(timeout=15000)
+    await page.get_by_role("button", name="다음").click()
+
+
+async def tab_steps(browser):
+    """탭을 오갈 때 (src/lib/view-cache.ts): 다시 들어온 화면은 처음부터 그대로 보이고, 처음 읽는 동안에도 임시 글이 보였다가 바뀌지 않는다.
+    데이터를 바꾼 뒤에는 기억해 둔 옛 화면을 보이지 않는다. 복습을 끝낸 뒤 '홈으로'는 미리 읽어 둔 홈이 바로 보인다"""
+    student = USERS["student"][0]
+    step("switching tabs: a screen comes back as it was at once, and no placeholder words show and change a moment later")
+    # 오답노트에 두 문제, 복습할 차례인 문제 셋 (홈의 바로 가기 '오답노트 N문제'·오늘의 KOK 이 바뀌는 것을 본다)
+    live_q = (
+        f"select c.question_id from public.cards c join public.questions q on q.id = c.question_id join public.notes n on n.id = q.note_id "
+        f"join public.sources s on s.id = n.source_id where c.user_id = '{student}' and q.status = 'active' and s.in_review"
+    )
+    db(f"update public.cards set in_wrong_note = true, wrong_count = greatest(wrong_count, 1) where question_id in ({live_q} and not c.in_wrong_note order by c.question_id limit 2)")
+    db(f"update public.cards set due = now() - interval '1 hour' where question_id in ({live_q} order by c.question_id desc limit 3)")
+    db(f"delete from public.review_sessions where user_id = '{student}'")
+
+    ctx, page = await new_ctx(browser, "student")
+    await ctx.add_init_script(TRACE_JS)
+    nav = page.get_by_role("navigation", name="주 메뉴")
+
+    async def mark():
+        return await page.evaluate("(window.__kokTrace || []).length")
+
+    async def rows_since(i, leave=()):
+        """i 번째부터 적은 모습 (떠나는 화면의 모습은 빼고)"""
+        rows = (await page.evaluate("window.__kokTrace || []"))[i:]
+        return [r for r in rows if r["h1"] not in leave]
+
+    def seq(rows, key):
+        """보인 글의 차례 (빈 글은 빼고, 같은 글이 이어지면 한 번)"""
+        out = []
+        for r in rows:
+            v = r[key]
+            if v and (not out or out[-1] != v):
+                out.append(v)
+        return out
+
+    async def settle(check):
+        await expect(check).to_be_visible(timeout=15000)
+        await page.wait_for_timeout(800)  # 뒤에서 새로 읽기가 끝날 때까지
+
+    today_ring = page.get_by_role("progressbar", name="오늘 복습 진행")
+
+    # 1) 처음 여는 홈 (기억 없음): 읽는 동안 제목은 '오늘' 같은 임시 글 없이 비어 있고(회색 줄), 다 읽은 글이 한 번만 나타난다
+    await page.goto(BASE + "/home")
+    await settle(today_ring)
+    rows = await rows_since(0)
+    home_h1, home_sub, home_wrong = seq(rows, "h1"), seq(rows, "sub"), seq(rows, "wrong")
+    assert len(home_h1) == 1 and home_h1[0] != "오늘", f"home title changed while loading: {home_h1}"
+    assert len(home_sub) == 1, f"home subtitle changed while loading: {home_sub}"
+    m = re.fullmatch(r"오답노트(\d+)문제", home_wrong[-1])
+    assert m and set(home_wrong) <= {"오답노트", home_wrong[-1]}, f"wrong-note shortcut showed other words while loading: {home_wrong}"
+    n_wrong = int(m.group(1))
+    assert n_wrong >= 2, n_wrong
+    home_h1, home_sub, home_wrong = home_h1[0], home_sub[0], home_wrong[-1]
+    print("   home:", home_h1, "/", home_sub, "/", home_wrong)
+
+    # 2) 홈 → 자료함 → 홈: 다시 들어온 홈은 처음 그린 모습부터 다 읽은 글 그대로 ('불러오는 중' 자리 없이)
+    await nav.get_by_role("link", name="자료함").first.click()
+    await page.wait_for_url(re.compile(r"/library$"))
+    await settle(page.locator("main a[href^='/notes/']").first)
+    lib_sub = seq(await rows_since(0), "sub")
+    i = await mark()
+    await nav.get_by_role("link", name="홈").first.click()
+    await page.wait_for_url(re.compile(r"/home$"))
+    await settle(today_ring)
+    rows = await rows_since(i, leave=("자료함",))
+    assert rows and (rows[0]["h1"], rows[0]["sub"], rows[0]["wrong"]) == (home_h1, home_sub, home_wrong), f"home did not come back as it was: {rows[:3]}"
+    assert seq(rows, "h1") == [home_h1] and seq(rows, "sub") == [home_sub] and seq(rows, "wrong") == [home_wrong], rows
+    assert not any(r["busy"] for r in rows), "home showed a loading placeholder when coming back"
+    await shot(page, "120-home-back", full=False)
+
+    # 3) 홈 → 자료함: 자료함도 처음 그린 모습부터 그대로 (부제 '자료 N개'까지)
+    i = await mark()
+    await nav.get_by_role("link", name="자료함").first.click()
+    await page.wait_for_url(re.compile(r"/library$"))
+    await settle(page.locator("main a[href^='/notes/']").first)
+    rows = await rows_since(i, leave=(home_h1,))
+    assert rows and rows[0]["h1"] == "자료함" and rows[0]["sub"] == lib_sub[-1], f"library did not come back as it was: {rows[:3]}, {lib_sub}"
+    assert seq(rows, "sub") == [lib_sub[-1]] and not any(r["busy"] for r in rows), rows
+
+    # 4) 복습 탭·오답 탭: 처음 열 때도 부제는 다 읽은 글 하나만, 다시 들어오면 처음부터 그대로
+    tabs = (
+        ("복습", r"/review$", "복습", page.get_by_role("radiogroup", name="언제 공부한 문제를 풀까요?")),
+        ("오답", r"/wrong$", "오답노트", page.get_by_text(f"틀린 문제 {n_wrong}개 · 3번 연속 맞히면 졸업해요")),
+    )
+    for tab, url, title, ready in tabs:
+        here = (await page.evaluate("document.querySelector('main h1')?.textContent || ''")).strip()
+        i = await mark()
+        await nav.get_by_role("link", name=tab).first.click()
+        await page.wait_for_url(re.compile(url))
+        await settle(ready)
+        first_sub = seq(await rows_since(i, leave=(here,)), "sub")
+        assert len(first_sub) == 1, f"{tab}: subtitle changed while loading: {first_sub}"
+        await nav.get_by_role("link", name="홈").first.click()
+        await page.wait_for_url(re.compile(r"/home$"))
+        await settle(today_ring)
+        i = await mark()
+        await nav.get_by_role("link", name=tab).first.click()
+        await page.wait_for_url(re.compile(url))
+        await settle(ready)
+        rows = await rows_since(i, leave=(home_h1,))
+        assert rows and (rows[0]["h1"], rows[0]["sub"]) == (title, first_sub[0]), f"{tab} did not come back as it was: {rows[:3]}"
+        assert seq(rows, "sub") == first_sub and not any(r["busy"] for r in rows), (tab, rows)
+
+    # 5) 오답노트에서 한 문제를 빼면(저장) 기억해 둔 홈은 쓰지 않는다: 빼기 전 수가 잠깐 보였다가 바뀌지 않고, 바뀐 수만 나타난다
+    await page.get_by_role("button", name="다 외웠어요 · 빼기").first.click()
+    await expect(page.get_by_text("다 외운 문제로 뺐어요.")).to_be_visible()
+    await expect(page.get_by_text(f"틀린 문제 {n_wrong - 1}개 · 3번 연속 맞히면 졸업해요")).to_be_visible()
+    i = await mark()
+    await nav.get_by_role("link", name="홈").first.click()
+    await page.wait_for_url(re.compile(r"/home$"))
+    await expect(page.locator("main a[href='/wrong']")).to_contain_text(f"{n_wrong - 1}문제")
+    await page.wait_for_timeout(800)
+    rows = await rows_since(i, leave=("오답노트",))
+    assert seq(rows, "wrong") in ([f"오답노트{n_wrong - 1}문제"], ["오답노트", f"오답노트{n_wrong - 1}문제"]), f"stale count shown after a change: {seq(rows, 'wrong')}"
+    assert len(seq(rows, "h1")) == 1 and len(seq(rows, "sub")) == 1, rows
+    # 돌아간 오답노트는 뺀 뒤의 목록 그대로 (화면에서 바로 고친 목록을 저장한 뒤 다시 기억해 둔다)
+    i = await mark()
+    await nav.get_by_role("link", name="오답").first.click()
+    await page.wait_for_url(re.compile(r"/wrong$"))
+    await settle(page.get_by_text(f"틀린 문제 {n_wrong - 1}개 · 3번 연속 맞히면 졸업해요"))
+    rows = await rows_since(i, leave=(seq(rows, "h1")[0],))
+    assert rows and rows[0]["sub"] == f"틀린 문제 {n_wrong - 1}개 · 3번 연속 맞히면 졸업해요" and not any(r["busy"] for r in rows), rows[:3]
+
+    # 6) 복습을 끝내고 '홈으로': 저장을 마친 뒤 미리 읽어 둔 홈이 바로, 바뀐 진행으로 보인다
+    await nav.get_by_role("link", name="홈").first.click()
+    await page.wait_for_url(re.compile(r"/home$"))
+    start = page.get_by_role("link", name=re.compile(r"^\d+분 KOK 시작$"))
+    await expect(start).to_be_visible()
+    await start.click()
+    await expect(page.get_by_role("button", name="그만하기")).to_be_visible(timeout=15000)
+    await answer_any(page)
+    await page.get_by_role("button", name="그만하기").click()
+    await expect(page.get_by_role("heading", name="여기까지 풀었어요")).to_be_visible(timeout=10000)
+    await page.wait_for_timeout(2500)
+    i = await mark()
+    await page.get_by_role("link", name="홈으로").click()
+    await page.wait_for_url(re.compile(r"/home$"))
+    await expect(page.get_by_text("오늘 1문제 풀었어요")).to_be_visible()
+    await page.wait_for_timeout(800)
+    rows = await rows_since(i, leave=("여기까지 풀었어요",))
+    assert rows and not any(r["busy"] for r in rows), f"home after a review was not ready at once: {rows[:3]}"
+    assert len(seq(rows, "h1")) == 1 and len(seq(rows, "sub")) == 1, rows
+    assert rows[0]["h1"] == seq(rows, "h1")[0] and rows[0]["sub"] == seq(rows, "sub")[0], rows[:3]
+    await shot(page, "121-home-after-review", full=False)
+    await ctx.close()
+
+
 async def main():
     import subprocess
     subprocess.run(["bash", str(pathlib.Path(__file__).parent / "db.sh"), "reset"], check=True)
@@ -3808,6 +4004,7 @@ async def main():
         db(f"delete from public.subjects where user_id = '{me_id}' and name in ({', '.join(repr(x) for x in extra)})")
 
         await figure_steps(browser)
+        await tab_steps(browser)
         await browser.close()
 
     # 실제 Claude 처럼 가짜 서버도 속성이 42개를 넘는 답 모양은 거절한다: 시험 내내 한 번도 없어야 하고, 채팅 풀이 그림은 두 번째 호출로 받았다

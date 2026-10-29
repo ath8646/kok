@@ -3121,6 +3121,21 @@ async def main():
         assert look["art"] == "block" and "Orbit" in look["title"] and look["radius"] == "18px", look
         # 움직임: 가끔 깜빡이는 네온관 (움직임 줄이기가 아니면)
         assert look["anim"] == "kok-sk-flicker", look
+        # 설정에서 글꼴을 고르면 시그니처 테마에서도 제목까지 그 글꼴 (기본 글꼴이면 위처럼 테마 글꼴)
+        await page.goto(BASE + "/settings#theme")
+        await page.get_by_role("radiogroup", name="테마 글꼴").get_by_role("radio", name=re.compile("둥근 글씨$")).click()
+        await expect(page.locator("html")).to_have_attribute("data-font", "round")
+        await wait_saved({"font": "round"})
+        await page.goto(BASE + "/home")
+        await expect(page.locator(".kok-card").first).to_be_visible()
+        fonts = await page.evaluate("() => [...document.querySelectorAll('h1.kok-title, .font-display')].map((e) => getComputedStyle(e).fontFamily)")
+        assert len(fonts) >= 2 and all("Gowun Dodum" in f for f in fonts), fonts
+        await page.goto(BASE + "/settings#theme")
+        await page.get_by_role("radiogroup", name="테마 글꼴").get_by_role("radio", name=re.compile("기본$")).click()
+        await wait_js(page, "!document.documentElement.hasAttribute('data-font')")
+        await wait_saved({"font": "default"})
+        await page.goto(BASE + "/home")
+        await expect(page.locator(".kok-card").first).to_be_visible()
         await no_hscroll(page, "home with the neon theme")
         await shot(page, "53-skin-neon-home", full=False)
         # 다음에 열 때도 앱이 실리기 전에 시그니처 모양으로 (THEME_BOOT)
@@ -3148,6 +3163,13 @@ async def main():
         await page.get_by_role("radiogroup", name="시그니처 테마").get_by_role("radio", name="터미널", exact=True).click()
         await page.locator("nav.kok-tabbar").get_by_role("link", name="홈").click()
         await wait_saved({"light": "skin:terminal", "dark": "skin:terminal"})
+        # 터미널 커서는 실제 터미널처럼 계속 깜빡인다 (몇 번 깜빡이고 멈추지 않는다. 움직임을 끄면 멈춘다)
+        await expect(page.locator("h1.kok-title").first).to_be_visible()
+        await wait_js(page, "document.documentElement.dataset.skin === 'terminal'")
+        cursor = await page.evaluate(
+            "(() => { const s = getComputedStyle(document.querySelector('.kok-title-text'), '::after'); return [s.animationName, s.animationIterationCount]; })()"
+        )
+        assert cursor == ["kok-sk-blink", "infinite"], cursor
         await page.goto(BASE + "/settings#theme")
         await skins.get_by_role("radio", name="브루탈", exact=True).click()
         await wait_saved({"light": "skin:brutal", "dark": "skin:brutal"})

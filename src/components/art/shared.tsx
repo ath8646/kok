@@ -2,7 +2,8 @@
 import type { CSSProperties, ReactNode } from 'react';
 import type { ArtTone, LegendItem } from '@/lib/art/spec';
 
-export const FONT = 'Pretendard, "Apple SD Gothic Neo", "Malgun Gothic", "Noto Sans KR", sans-serif';
+/** 그림 글도 설정의 글꼴을 따른다 (글 자리는 textWidth 가 한글을 1em 으로 넉넉히 잡아서 다른 글꼴도 넘치지 않는다. 변수가 없는 곳 = 그림 파일로 저장할 때는 뒤의 글꼴) */
+export const FONT = 'var(--font-sans, Pretendard, "Apple SD Gothic Neo", "Malgun Gothic", "Noto Sans KR", sans-serif)';
 
 /**
  * 그림(SVG) 크기: 폭에 맞추되 넓은 화면에서는 460px 까지만 (360px 기준으로 그려서, 너무 키우면 글이 커진다).

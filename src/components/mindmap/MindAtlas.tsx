@@ -94,7 +94,7 @@ export function MindAtlas({
       className={cx('block h-auto w-full', className)}
       role="group"
       aria-label={`한눈 지도: ${rootLabel}, 가지 ${n}개`}
-      style={{ fontFamily: 'Pretendard, "Apple SD Gothic Neo", "Malgun Gothic", "Noto Sans KR", sans-serif', maxHeight: 340 }}
+      style={{ fontFamily: 'var(--font-sans, Pretendard, "Apple SD Gothic Neo", "Malgun Gothic", "Noto Sans KR", sans-serif)', maxHeight: 340 }}
     >
       {/* 궤도 */}
       <ellipse

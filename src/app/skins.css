@@ -76,18 +76,19 @@
 :root[data-skin='sketch'] {
   --skin-font: 'Nanum Pen Script', var(--font-sans);
 }
-:root[data-skin] :is(.font-display, .kok-title) {
+/* 설정에서 글꼴을 고른 사람은 제목도 그 글꼴 (globals.css 의 :root[data-font] .font-display) */
+:root[data-skin]:not([data-font]) :is(.font-display, .kok-title) {
   font-family: var(--skin-font);
   font-weight: 400;
   font-synthesis: none;
   letter-spacing: 0;
 }
-:root[data-skin='terminal'] :is(.font-display, .kok-title) {
+:root[data-skin='terminal']:not([data-font]) :is(.font-display, .kok-title) {
   font-weight: 700;
   letter-spacing: -0.01em;
 }
 /* 손글씨 펜은 글자가 작아서 키운다 (글자 칸 크기는 그대로) */
-:root[data-skin='sketch'] :is(.font-display, .kok-title) {
+:root[data-skin='sketch']:not([data-font]) :is(.font-display, .kok-title) {
   font-size-adjust: 0.76;
   line-height: 1.1;
 }
@@ -447,7 +448,7 @@
   content: '> ';
   color: var(--skin-b-text);
 }
-/* 커서: 처음에 세 번 깜빡이고 켜진 채로 */
+/* 커서: 실제 터미널처럼 계속 깜빡인다 (아래 움직임 구역) */
 :root[data-skin='terminal'] .kok-title-text::after {
   content: '';
   display: inline-block;
@@ -997,7 +998,7 @@
     transform: translate(-50%, 22%);
   }
 }
-/* 터미널 커서: 세 번 깜빡이고 켜진 채로 */
+/* 터미널 커서: 실제 터미널처럼 0.53초씩 켜졌다 꺼졌다 (1초에 한 번 남짓, 움직임을 끄거나 동작 줄이기면 켜진 채로) */
 @keyframes kok-sk-blink {
   0%,
   49% {
@@ -1057,7 +1058,7 @@
     animation: kok-sk-sunrise 1.6s var(--ease-out) backwards;
   }
   :root[data-skin='terminal']:not([data-motion='off']) .kok-title-text::after {
-    animation: kok-sk-blink 1s steps(1, end) 3;
+    animation: kok-sk-blink 1.06s steps(1, end) infinite;
   }
   :root[data-skin='terminal']:not([data-motion='off']) .kok-skin-fx::before {
     animation: kok-sk-roll 9s linear 2s infinite;

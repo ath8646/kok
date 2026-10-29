@@ -23,7 +23,8 @@ import {
 } from '@/lib/figure/layout';
 import { previewText } from '@/lib/richtext';
 
-const FONT = 'Pretendard, "Apple SD Gothic Neo", "Malgun Gothic", "Noto Sans KR", sans-serif';
+/** 그림 글도 설정의 글꼴을 따른다 (글 자리는 textWidth 가 한글을 1em 으로 넉넉히 잡아서 다른 글꼴도 넘치지 않는다. 변수가 없는 곳 = 그림 파일로 저장할 때는 뒤의 글꼴) */
+const FONT = 'var(--font-sans, Pretendard, "Apple SD Gothic Neo", "Malgun Gothic", "Noto Sans KR", sans-serif)';
 /** 여러 함수 그래프의 색 (가지 색에서 고른다) */
 const CURVE = ['var(--b1)', 'var(--b3)', 'var(--b5)', 'var(--b2)', 'var(--b6)'];
 

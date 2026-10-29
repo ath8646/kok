@@ -359,7 +359,7 @@ export function MindMap({
               display: 'block',
               margin: 'auto',
               flexShrink: 0,
-              fontFamily: 'Pretendard, "Apple SD Gothic Neo", "Malgun Gothic", "Noto Sans KR", sans-serif',
+              fontFamily: 'var(--font-sans, Pretendard, "Apple SD Gothic Neo", "Malgun Gothic", "Noto Sans KR", sans-serif)',
             }}
           >
             {/* 가지: 뿌리에서 굵게 나와 끝으로 갈수록 가늘어진다 */}

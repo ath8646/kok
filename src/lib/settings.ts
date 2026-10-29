@@ -5,9 +5,10 @@ import { REVIEW_PERIODS } from './review-plan';
 export type Effort = 'low' | 'medium' | 'high';
 /**
  * solve: 문제 그림·단계 풀이, 사진·파일로 보낸 문제 풀기 (홈 채팅). redraw: 자료 그림을 KOK 스타일로 다시 그리기 (Pro).
- * locate: 자료 그림의 자리 찾기 (쪽을 그림으로 그려 보여 주고 픽셀 상자를 받는다, 정리 모델)
+ * locate: 자료 그림의 자리 찾기 (쪽을 그림으로 그려 보여 주고 픽셀 상자를 받는다, 정리 모델).
+ * cover: 자료함 카드의 표지 그림 (Pro, 그림 모델)
  */
-export type AiTask = 'organize' | 'merge' | 'visual' | 'quiz' | 'check' | 'grade' | 'chat' | 'theme' | 'solve' | 'redraw' | 'locate';
+export type AiTask = 'organize' | 'merge' | 'visual' | 'quiz' | 'check' | 'grade' | 'chat' | 'theme' | 'solve' | 'redraw' | 'locate' | 'cover';
 
 // ------------------------------------------------------------- 운영 설정 (app_settings)
 /**
@@ -54,6 +55,7 @@ export const zModelsConfig = z.object({
       solve: zEffort.catch('medium'),
       redraw: zEffort.catch('medium'),
       locate: zEffort.catch('low'),
+      cover: zEffort.catch('low'),
     })
     .catch({
       organize: 'medium',
@@ -67,6 +69,7 @@ export const zModelsConfig = z.object({
       solve: 'medium',
       redraw: 'medium',
       locate: 'low',
+      cover: 'low',
     }),
 });
 export type ModelsConfig = z.infer<typeof zModelsConfig>;
@@ -183,6 +186,8 @@ export const zUserSettings = z.object({
       fontSize: z.enum(['sm', 'md', 'lg']).catch('md'),
       /** 자료 그림을 원본(자른 그림)으로 먼저 보기. 끄면 KOK 스타일로 다시 그린 그림이 있을 때 그것부터 (Pro) */
       originalFirst: z.boolean().catch(false),
+      /** 자료를 넣으면 자료함 카드의 표지 그림을 AI 가 그린다 (Pro, 문제 그림체) */
+      autoCover: z.boolean().catch(true),
     })
     .catch({
       defaultType: 'auto',
@@ -196,6 +201,7 @@ export const zUserSettings = z.object({
       hideMode: 'off',
       fontSize: 'md',
       originalFirst: false,
+      autoCover: true,
     }),
   review: z
     .preprocess(

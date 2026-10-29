@@ -199,13 +199,43 @@ export function diagramLayout(figure: Figure, labelOf: (i: FigItem) => string, w
   return { m, boxes };
 }
 
+/** 정해진 크기의 틀 (표지 그림: 카드 위 칸에 맞춘 가로로 긴 틀) */
+export type Frame = { w: number; h: number; pad: number };
+
+/**
+ * 틀에 그대로 담기: AI 가 정한 보이는 범위(view)를 줄이지 않고(fitView 없이: 구도와 비워 둔 모서리를 지킨다)
+ * 가로세로 같은 비율로 틀 가운데에
+ */
+export function frameMapper(figure: Figure, f: Frame): Mapper {
+  const v = figure.view;
+  const dx = Math.max(v.x_max - v.x_min, 1e-6);
+  const dy = Math.max(v.y_max - v.y_min, 1e-6);
+  const s = Math.min((f.w - f.pad * 2) / dx, (f.h - f.pad * 2) / dy);
+  const ox = (f.w - dx * s) / 2;
+  const oy = (f.h - dy * s) / 2;
+  return {
+    W: f.w,
+    H: f.h,
+    left: ox,
+    top: oy,
+    right: ox + dx * s,
+    bottom: oy + dy * s,
+    sx: s,
+    sy: s,
+    uniform: true,
+    px: (x) => ox + (x - v.x_min) * s,
+    py: (y) => oy + (v.y_max - y) * s,
+  };
+}
+
 /**
  * 그림 전체의 자리: 상자 그림이면 diagramLayout, 아니면 좌표 비율대로 (상자는 글에 맞는 크기, w·h 를 정했으면 그 크기).
- * labelOf: 상자·글에 보일 글 (수식 기호를 읽기 쉬운 글로 바꾼 것)
+ * labelOf: 상자·글에 보일 글 (수식 기호를 읽기 쉬운 글로 바꾼 것). frame: 정해진 틀에 담을 때 (표지 그림)
  */
-export function figureLayout(figure: Figure, labelOf: (i: FigItem) => string): { m: Mapper; boxes: Map<string, BoxGeom> } {
-  if (isDiagram(figure)) return diagramLayout(figure, labelOf);
-  const m = makeMapper(figure);
+export function figureLayout(figure: Figure, labelOf: (i: FigItem) => string, frame?: Frame): { m: Mapper; boxes: Map<string, BoxGeom> } {
+  // 틀에 담는 그림(표지)은 상자 그림도 AI 가 놓은 자리 그대로 (칸·줄로 다시 벌리면 틀보다 넓어져 작게 보인다)
+  if (isDiagram(figure) && !frame) return diagramLayout(figure, labelOf);
+  const m = frame ? frameMapper(figure, frame) : makeMapper(figure);
   const boxes = new Map<string, BoxGeom>();
   for (const i of figure.items) {
     if (i.type !== 'box' && i.type !== 'text') continue;

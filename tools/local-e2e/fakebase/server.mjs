@@ -1145,6 +1145,67 @@ function fakeArt(props) {
 const TINY_JPEG = '/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAAoHBwgHBgoICAgLCgoLDhgQDg0NDh0VFhEYIx8lJCIfIiEmKzcvJik0KSEiMEExNDk7Pj4+JS5ESUM8SDc9Pjv/2wBDAQoLCw4NDhwQEBw7KCIoOzs7Ozs7Ozs7Ozs7Ozs7Ozs7Ozs7Ozs7Ozs7Ozs7Ozs7Ozs7Ozs7Ozs7Ozs7Ozs7Ozv/wAARCABgAGADASIAAhEBAxEB/8QAHwAAAQUBAQEBAQEAAAAAAAAAAAECAwQFBgcICQoL/8QAtRAAAgEDAwIEAwUFBAQAAAF9AQIDAAQRBRIhMUEGE1FhByJxFDKBkaEII0KxwRVS0fAkM2JyggkKFhcYGRolJicoKSo0NTY3ODk6Q0RFRkdISUpTVFVWV1hZWmNkZWZnaGlqc3R1dnd4eXqDhIWGh4iJipKTlJWWl5iZmqKjpKWmp6ipqrKztLW2t7i5usLDxMXGx8jJytLT1NXW19jZ2uHi4+Tl5ufo6erx8vP09fb3+Pn6/8QAHwEAAwEBAQEBAQEBAQAAAAAAAAECAwQFBgcICQoL/8QAtREAAgECBAQDBAcFBAQAAQJ3AAECAxEEBSExBhJBUQdhcRMiMoEIFEKRobHBCSMzUvAVYnLRChYkNOEl8RcYGRomJygpKjU2Nzg5OkNERUZHSElKU1RVVldYWVpjZGVmZ2hpanN0dXZ3eHl6goOEhYaHiImKkpOUlZaXmJmaoqOkpaanqKmqsrO0tba3uLm6wsPExcbHyMnK0tPU1dbX2Nna4uPk5ebn6Onq8vP09fb3+Pn6/9oADAMBAAIRAxEAPwDVApcUuKdivSbPOixuKdilxSgVk2axYmKUClApcVk2bRYgFLinAUuKybNosTFLilxSgVk2bRYgFLilApwFYtm0WVAKUClApcV67Z89FiYpcUoFOArJs2ixAKXFLilxWTZtFiYpcUuKdismzaLG4p2KUClArJs2ixMUuKXFLismzaLKmKdilApQK9ds+eixAKUClxSgVk2bRYmKXFOApcVk2bRYgFKBSgUuKxbNYsQClxSgU7FZNm0WNxTsUuKXFZNm0WVAKXFKBTgK9ds+eixAKUClApcVk2bRYmKXFLinYrJs2ixuKdilApQKybNosQClApcUuKybNosTFKBTgKXFZNm0WVAKUClApQK9Zs+eixAKXFOxS4rJs2ixMUoFLilArJs2ixAKXFKBTgKybNosbinAUoFKBWTZtFiYpcUuKUCsmzWLKmKdilApcV67Z8/FiYpcUuKUCsmzaLEAp2KXFKBWTZtFiAUoFLilxWLZrFiYpcU7FKBWTZtFiYpQKXFLismzaLP/2Q==';
 let cfMode = 'ok';
 
+/**
+ * 표지 그림 (task cover): 부를 때마다 두 그림을 번갈아 (다시 그리기 시험에서 그림이 바뀌는지 본다).
+ * 모든 칸이 있는 납작한 모양 (실제 AI 답처럼). 오른쪽 위(x 11 넘고 y 7.5 넘는 곳)는 비워 둔다
+ */
+function fakeCover() {
+  const it = (o) => ({ id: '', type: 'point', refs: [], x: 0, y: 0, w: 0, h: 0, r: 0, expr: '', from: 0, to: 0, label: '', style: 'given', marks: 0, tone: 'ink', ...o });
+  const pt = (id, x, y) => it({ id, x, y, style: 'muted' });
+  stats.covers = (stats.covers || 0) + 1;
+  if (stats.covers % 2 === 1) {
+    const rays = [];
+    [30, 120, 210, 300].forEach((deg, k) => {
+      const a = (deg * Math.PI) / 180;
+      rays.push(pt(`ri${k}`, 3.2 + 1.6 * Math.cos(a), 7.2 + 1.6 * Math.sin(a)), pt(`ro${k}`, 3.2 + 2.3 * Math.cos(a), 7.2 + 2.3 * Math.sin(a)));
+      rays.push(it({ id: `ray${k}`, type: 'segment', refs: [`ri${k}`, `ro${k}`], tone: 'orange' }));
+    });
+    return {
+      alt: '해와 잎, 이산화탄소와 산소 화살표',
+      view: { x_min: 0, x_max: 15, y_min: 0, y_max: 10 },
+      axes: false,
+      grid: false,
+      items: [
+        pt('S', 3.2, 7.2),
+        it({ id: 'sun', type: 'circle', refs: ['S'], r: 1.2, tone: 'orange' }),
+        ...rays,
+        pt('B', 7.2, 2.4),
+        pt('U', 9.2, 6.2),
+        pt('T', 12.6, 6.4),
+        pt('D', 11.0, 2.6),
+        it({ id: 'leaf', type: 'polygon', refs: ['B', 'U', 'T', 'D'], tone: 'green' }),
+        it({ id: 'rib', type: 'segment', refs: ['B', 'T'], tone: 'green' }),
+        pt('P1', 4.8, 6.2),
+        pt('P2', 8.4, 5.0),
+        it({ id: 'light', type: 'arrow', refs: ['P1', 'P2'], style: 'aux', tone: 'yellow' }),
+        it({ id: 'co2', type: 'text', x: 4.4, y: 2.0, label: '$CO_2$', tone: 'navy' }),
+        it({ id: 'in', type: 'arrow', refs: ['co2', 'B'], tone: 'navy' }),
+        it({ id: 'o2', type: 'text', x: 13.4, y: 1.6, label: '$O_2$', tone: 'teal' }),
+        it({ id: 'out', type: 'arrow', refs: ['D', 'o2'], tone: 'teal' }),
+      ],
+    };
+  }
+  return {
+    alt: '빛이 잎을 지나 포도당이 되는 화살표',
+    view: { x_min: 0, x_max: 15, y_min: 0, y_max: 10 },
+    axes: false,
+    grid: false,
+    items: [
+      it({ id: 'b1', type: 'box', x: 2.4, y: 5, label: '빛', tone: 'yellow' }),
+      pt('L1', 5.8, 4.0),
+      pt('L2', 7.0, 6.6),
+      pt('L3', 9.6, 6.2),
+      pt('L4', 8.6, 3.4),
+      it({ id: 'leaf', type: 'polygon', refs: ['L1', 'L2', 'L3', 'L4'], tone: 'green', style: 'answer' }),
+      it({ id: 'b3', type: 'box', x: 12.4, y: 4.6, label: '포도당', tone: 'orange' }),
+      pt('in', 5.6, 5.0),
+      pt('out', 9.8, 4.8),
+      it({ id: 'a1', type: 'arrow', refs: ['b1', 'in'], tone: 'yellow' }),
+      it({ id: 'a2', type: 'arrow', refs: ['out', 'b3'], tone: 'orange' }),
+    ],
+  };
+}
+
 function fakeTheme(text) {
   const req = (text.match(/<request>\n([\s\S]*?)\n<\/request>/) || [])[1] || '테마';
   const wantPattern = /pattern_svg: a soft, repeating/.test(text);
@@ -1209,6 +1270,9 @@ async function handleClaude(req, res) {
   if (/^The attached picture is a figure cut out of a study material/.test(textOf.trim()) && images === 1) {
     task = 'redraw';
     out = fakeArt(props);
+  } else if (props.alt && props.items) {
+    task = 'cover';
+    out = fakeCover();
   } else if (props.figure && props.steps && !props.reply) {
     task = 'chat_figure';
     out = fakeChatFigure(textOf);

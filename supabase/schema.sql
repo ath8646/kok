@@ -698,6 +698,10 @@ alter table public.sources add column if not exists in_review boolean not null d
 alter table public.sources add column if not exists starred boolean not null default false;
 alter table public.sources add column if not exists position int;
 
+-- 자료함 카드의 표지 그림 (Pro): 노트 내용에 맞게 AI 가 문제 그림체로 그린 그림 설계도 (src/lib/cover.ts).
+-- 자료를 넣을 때(설정에서 켜 두면)나 카드 메뉴에서 그린다. 서버만 쓰고 학생은 읽기만 한다
+alter table public.sources add column if not exists cover jsonb;
+
 -- ---------------------------------------------------------------------
 -- 과목 서랍 (과목이 많을 때): 위에 고정(pinned), 보관(archived: 자료함 '전체'·과목 칩·자료 넣기·복습 고르기 목록에서만 뺀다.
 -- 그 과목의 복습 카드는 그대로 나온다), 최근 쓴 때(used_at: 자료를 넣으면 지금으로. 보관한 과목에 자료를 넣으면 보관도 푼다).
@@ -861,7 +865,7 @@ grant select (
   id, user_id, subject_id, kind, title, unit, text_content, file_paths, page_count,
   status, step, progress, chunk_index, chunk_total, model, plan_at_start, energy_estimate,
   error, locked_until, files_expire_at, created_at, updated_at, parent_id,
-  in_review, starred, position
+  in_review, starred, position, cover
 ) on public.sources to authenticated;
 -- 자료함 정리(복습에 넣기·별표·순서)도 학생이 직접 고친다
 grant update (title, unit, in_review, starred, position) on public.sources to authenticated;

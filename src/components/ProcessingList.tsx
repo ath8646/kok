@@ -25,7 +25,9 @@ export function stepLabel(s: Pick<SourceRowWithUnit, 'status' | 'step' | 'chunk_
     case 'quiz':
       return '마인드맵·문제 만드는 중';
     case 'check':
-      // 검사가 끝나면(91%~) Pro 는 문제 그림·단계 풀이를 만든다
+      // 검사가 끝나면(91%~) Pro 는 문제 그림·단계 풀이(91~95), 표지 그림(96)을 만든다 (서버 pipeline 의 진행 값)
+      if (s.progress === 96) return '표지 그림 그리는 중';
+      if (s.progress >= 97 && s.progress < 100) return '마무리하는 중';
       return s.progress >= 91 && s.progress < 100 ? '문제 그림·풀이 만드는 중' : '마인드맵·문제 만드는 중';
     default:
       return '처리 중';

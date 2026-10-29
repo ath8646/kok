@@ -365,6 +365,13 @@ do $$ begin
     raise exception 'partials should not be readable';
   exception when insufficient_privilege then null;
   end;
+  -- 표지 그림: 읽기만 (그리기·빼기는 서버)
+  perform cover from public.sources;
+  begin
+    update public.sources set cover = '{"v":1}'::jsonb;
+    raise exception 'cover should not be writable';
+  exception when insufficient_privilege then null;
+  end;
   begin
     delete from public.sources;
     raise exception 'source delete should be denied';

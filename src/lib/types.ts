@@ -48,6 +48,8 @@ export type MeResponse = {
     pdfs: boolean;
     /** 저장한 복습 세션 (review_sessions): 홈의 N분 KOK·복습 탭 이어서 하기 */
     sessions: boolean;
+    /** 자료함 카드의 표지 그림 (sources.cover, Pro) */
+    covers: boolean;
   };
   consented: boolean;
   settings: UserSettings;

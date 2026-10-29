@@ -2394,6 +2394,88 @@ async def main():
         await dlg.get_by_role("button", name="저장", exact=True).click()
         await poll_db(f"select (steps is null)::text || (figure is null)::text from public.questions where id = '{own_qid}'", "truetrue")
 
+        step("Pro: a new note gets a cover picture on its library card — redraw it, take it out; the setting turns it off; a failed cover never stops the note")
+        psql(f"delete from public.rate_hits where user_id = '{student_id}'")
+        cover_of = lambda sid: psql(f"select coalesce(cover::text, '') from public.sources where id = '{sid}'")  # noqa: E731
+        cover_calls = lambda sid: int(psql(f"select count(*) from public.energy_ledger where source_id = '{sid}' and task = 'cover'"))  # noqa: E731
+        # 자료를 넣을 때 그렸다 (설정 기본: 켬). 저장은 작은 모양 (빈 칸 없이)
+        assert cover_of(fig_sid).startswith('{"v": 1') and '"expr": ""' not in cover_of(fig_sid), cover_of(fig_sid)[:200]
+        assert cover_calls(fig_sid) == 1
+        await page.goto(BASE + "/library")
+        fig_card = page.locator(f"[data-flip='{fig_sid}']")
+        await expect(fig_card.locator(".kok-cover svg")).to_be_visible()
+        # 한 줄 요약 대신 그림: 요소마다 색 (선과 옅은 칠), 글자는 화면 글꼴로
+        drawn = await fig_card.evaluate(
+            """(c) => { const s = c.querySelector('.kok-cover svg'); return { paths: s.querySelectorAll('path, ellipse').length, texts: [...s.querySelectorAll('text')].map((t) => t.textContent),
+              summary: !!c.querySelector('p.line-clamp-5'), font: getComputedStyle(s).fontFamily } }"""
+        )
+        assert drawn["paths"] >= 6 and not drawn["summary"] and "Pretendard" in drawn["font"], drawn
+        await shot(page, "57-library-cover", full=False)
+        await no_hscroll(page, "library with a cover")
+        # 카드 메뉴 → 표지 그림 → 다시 그리기 (번개를 쓰고 그림이 바뀐다)
+        await fig_card.get_by_role("button", name=re.compile("메뉴$")).click()
+        # 열린 메뉴 위로 옆·아래 카드의 별·⋯ 단추가 올라오지 않는다 (메뉴가 든 카드를 위로 올린다. 둥근 모서리 밖은 빼고 본다)
+        covered = await page.evaluate(
+            """() => { const m = document.querySelector('[role=menu]'); const r = m.getBoundingClientRect(); const bad = [];
+              for (let x = r.left + 16; x < r.right - 16; x += 9) for (let y = r.top + 16; y < r.bottom - 16; y += 9) {
+                const el = document.elementFromPoint(x, y); if (el && !m.contains(el)) bad.push(el.closest('button')?.getAttribute('aria-label') ?? el.tagName); }
+              return bad.slice(0, 5); }"""
+        )
+        assert covered == [], covered
+        await page.get_by_role("menuitem", name="표지 그림").click()
+        cover_sheet = page.get_by_role("dialog", name="표지 그림")
+        preview = cover_sheet.get_by_role("img", name=re.compile("^표지 그림: "))
+        alt1 = await preview.get_attribute("aria-label")
+        await cover_sheet.get_by_role("button", name=re.compile("^다시 그리기")).click()
+        await expect(page.get_by_text("표지를 새로 그렸어요.")).to_be_visible(timeout=30000)
+        assert await preview.get_attribute("aria-label") != alt1
+        assert cover_calls(fig_sid) == 2
+        await shot(page, "58-cover-sheet", full=False)
+        # 빼기: 카드에 다시 한 줄 요약
+        await cover_sheet.get_by_role("button", name="표지 빼기").click()
+        await expect(cover_sheet).to_be_hidden()
+        assert cover_of(fig_sid) == ""
+        await expect(fig_card.locator("p.line-clamp-5")).to_be_visible()
+        # 다시 그리기 (창에서 '그리기')
+        await fig_card.get_by_role("button", name=re.compile("메뉴$")).click()
+        await page.get_by_role("menuitem", name="표지 그림").click()
+        await expect(cover_sheet.get_by_text("아직 표지가 없어요.", exact=False)).to_be_visible()
+        await cover_sheet.get_by_role("button", name=re.compile("^그리기")).click()
+        await expect(page.get_by_text("표지를 그렸어요.")).to_be_visible(timeout=30000)
+        assert cover_of(fig_sid) != ""
+        await cover_sheet.get_by_role("button", name="닫기").last.click()
+        # 표지를 그리다 실패해도 노트는 그대로 만든다 (표지만 없이)
+        urllib.request.urlopen("http://localhost:54321/__fail?task=cover")
+        try:
+            await page.get_by_role("button", name="자료 넣기", exact=True).click()
+            composer = page.get_by_role("dialog", name="자료 넣기")
+            await composer.get_by_label("공부한 내용").fill("표지 실패 시험 자료. 광합성은 빛 에너지로 포도당을 만든다. 산소가 나온다.")
+            await composer.get_by_label("공부한 내용").press("Enter")
+            assert await wait_db(page, "select status from public.sources where text_content like '표지 실패 시험 자료%'", "ready", timeout=120)
+        finally:
+            urllib.request.urlopen("http://localhost:54321/__fail?task=")
+        fail_sid = psql("select id from public.sources where text_content like '표지 실패 시험 자료%'")
+        assert cover_of(fail_sid) == "" and psql(f"select count(*) from public.questions q join public.notes n on n.id = q.note_id where n.source_id = '{fail_sid}'") != "0"
+        # 설정에서 끄면 자료를 넣어도 그리지 않는다
+        await page.goto(BASE + "/settings")
+        await page.get_by_text("자료를 넣으면 표지 그림 그리기", exact=True).click()
+        await poll_db(f"select settings->'visual'->>'autoCover' from public.profiles where id = '{student_id}'", "false")
+        await page.goto(BASE + "/library")
+        await page.get_by_role("button", name="자료 넣기", exact=True).click()
+        composer = page.get_by_role("dialog", name="자료 넣기")
+        await composer.get_by_label("공부한 내용").fill("표지 끔 시험 자료. 광합성은 빛 에너지로 포도당을 만든다. 엽록체에서 일어난다.")
+        await composer.get_by_label("공부한 내용").press("Enter")
+        assert await wait_db(page, "select status from public.sources where text_content like '표지 끔 시험 자료%'", "ready", timeout=120)
+        off_sid = psql("select id from public.sources where text_content like '표지 끔 시험 자료%'")
+        assert cover_of(off_sid) == "" and cover_calls(off_sid) == 0
+        await page.goto(BASE + "/settings")
+        await page.get_by_text("자료를 넣으면 표지 그림 그리기", exact=True).click()
+        await poll_db(f"select settings->'visual'->>'autoCover' from public.profiles where id = '{student_id}'", "true")
+        # 시험으로 넣은 두 자료는 지운다 (다음 단계의 자료·문제 수가 그대로이게)
+        for test_sid in (fail_sid, off_sid):
+            r = await page.request.delete(BASE + f"/api/sources/{test_sid}", headers={"origin": BASE})
+            assert r.ok, (r.status, await r.text())
+
         # ---------------- 단계별 학습 (Pro) · PDF 요약 정리 · 오답노트 여러 개 빼기
         step("course (Pro): pick a level, a lesson path is made from the note, finish a lesson, the progress is saved")
         psql(f"delete from public.rate_hits where user_id = '{student_id}'")
@@ -2477,6 +2559,13 @@ async def main():
         await no_hscroll(opage, "course free")
         r = await opage.request.post(BASE + f"/api/notes/{fig_nid}/course", headers={"origin": BASE}, data={"level": "middle"})
         assert r.status == 403 and (await r.json())["error"] == "pro_only", (r.status, await r.text())
+        # 표지 그림도 Pro: 무료 계정은 카드 메뉴에 없고, 서버도 그리지 않는다 (에너지를 쓰기 전에)
+        r = await opage.request.post(BASE + f"/api/sources/{sid}/cover", headers={"origin": BASE}, data={})
+        assert r.status == 403 and (await r.json())["error"] == "pro_only", (r.status, await r.text())
+        await opage.goto(BASE + "/library")
+        await opage.get_by_role("button", name=re.compile("메뉴$")).nth(1).click()
+        await expect(opage.get_by_role("menu")).to_be_visible()
+        assert await opage.get_by_role("menuitem", name="표지 그림").count() == 0
         await octx.close()
 
         step("pdf summary: made without AI, listed in the visual tab, opened in the app, renamed, deleted with its file")

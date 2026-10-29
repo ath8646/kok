@@ -143,6 +143,19 @@ export function estimateRedraws(model: ModelId, usdPerEnergy: number): number {
   return Math.max(1, Math.ceil(usdToEnergy(usd, usdPerEnergy)));
 }
 
+/**
+ * Pro 표지 그림 한 장의 예상 에너지: 노트 줄임(약 1500토큰) + 지시·스키마를 보내고 그림 설계도(요소 20개쯤)를 받는다.
+ * 자료를 넣을 때 자동으로 그리면 노트 만들기 예상에 더하고, 다시 그리기 화면에도 보인다 (model: 그림 모델)
+ */
+export function estimateCover(model: ModelId, usdPerEnergy: number): number {
+  return estimateSmallTask(model, usdPerEnergy, 4000, 2200);
+}
+
+/** 자료를 넣을 때 표지 그림을 그리는지 (Pro 혜택, 설정에서 켜 둠, DB 칸이 있음. 노트에 더하는 자료는 그리지 않는다) */
+export function coverWanted(o: { canFigures: boolean; autoCover: boolean; featureOn: boolean; append?: boolean }): boolean {
+  return o.canFigures && o.autoCover && o.featureOn && !o.append;
+}
+
 /** 자료를 넣을 때 자료 그림을 KOK 스타일로 다시 그리는지 (PDF·사진, Pro 혜택, 설정에서 켜 둠, DB 칸이 있음) */
 export function redrawsWanted(o: { kind: 'text' | 'pdf' | 'image'; canFigures: boolean; sourceFiguresSetting: boolean; featureOn: boolean }): boolean {
   return o.kind !== 'text' && o.canFigures && o.sourceFiguresSetting && o.featureOn;

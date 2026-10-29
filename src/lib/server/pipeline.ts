@@ -36,6 +36,8 @@ import {
   type MaterialMeta,
 } from '@/lib/ai/prompts';
 import { artJsonSchema, normalizeArt } from '@/lib/art/spec';
+import { COVER_OUT_TOKENS, coverJsonSchema, coverNoteExcerpt } from '@/lib/cover';
+import { coverWanted } from '@/lib/ai/models';
 import {
   canRedraw,
   figurePath,
@@ -61,6 +63,7 @@ import { UserFacingError } from './errors';
 import { adminDetail } from './tasks';
 import { removePaths } from './files';
 import { noteForPrompt } from './notes';
+import { coverContent, settleCover } from './cover';
 import { cutOnPage, openFigurePage, openPdfPages, pdfPrintedNumbers } from './figure-image';
 import { locateOnPages, type FindPage } from './figure-find';
 import { nextPages, SEARCH_BATCH, SEARCH_CALLS_MAX } from '@/lib/figure-locate';
@@ -110,6 +113,8 @@ export type SourceRow = {
   updated_at: string;
   /** 노트에 더하는 자료면 그 노트의 자료 (끝나면 노트의 새 버전이 된다) */
   parent_id?: string | null;
+  /** 자료함 카드의 표지 그림 (Pro, features.covers: 칸이 있을 때만 적는다) */
+  cover?: Record<string, unknown> | null;
 };
 
 export function chunkCount(kind: SourceRow['kind'], pages: number, images: number, text: string): number {
@@ -159,7 +164,7 @@ type Ctx = {
 
 function modelFor(ctx: Ctx, task: AiTask): string {
   const tier =
-    task === 'visual' || task === 'redraw'
+    task === 'visual' || task === 'redraw' || task === 'cover'
       ? ctx.settings.models.visual
       : task === 'quiz' || task === 'check' || task === 'solve'
         ? ctx.settings.models.quiz
@@ -1036,8 +1041,29 @@ async function finalizeAppend(ctx: Ctx, args: { p_note: unknown; p_visuals: unkn
   return 'ok';
 }
 
+/** 표지 그림을 그릴 차례인지: 새 노트(더한 자료는 지금 노트의 표지를 그대로), Pro 혜택, 설정에서 켬, DB 칸이 있음, 아직 안 그림 */
+async function coverPending(ctx: Ctx): Promise<boolean> {
+  if (ctx.src.draft.coverDone === true) return false;
+  if (!coverWanted({ canFigures: ctx.acc.canFigures, autoCover: ctx.settings.visual.autoCover, featureOn: true, append: !!parentNoteId(ctx) })) return false;
+  return (await getFeatures(ctx.admin)).covers;
+}
+
+/** 표지 그림 (AI 한 번). 못 그려도 노트는 그대로 만든다 (표지는 꾸미는 것일 뿐): 오류는 남기고 넘어간다 */
+async function stepCover(ctx: Ctx, note: Note): Promise<Partial<SourceRow>> {
+  let cover: Record<string, unknown> | null = null;
+  try {
+    const { data: subj } = await ctx.admin.from('subjects').select('name').eq('id', ctx.src.subject_id).maybeSingle();
+    const excerpt = coverNoteExcerpt(note, typeof subj?.name === 'string' ? subj.name : '');
+    cover = settleCover(await ai(ctx, 'cover', coverContent(excerpt), coverJsonSchema, COVER_OUT_TOKENS));
+    if (!cover) console.warn('[kok] cover: nothing drawable', ctx.src.id);
+  } catch (e) {
+    console.warn('[kok] cover failed, the note goes on without it', ctx.src.id, e);
+  }
+  return { progress: 98, ...(cover ? { cover } : {}), draft: { ...ctx.src.draft, coverDone: true, attempts: 0 } };
+}
+
 /**
- * 검사 → (Pro: 그림 풀이 몇 번) → 저장. 한 번 부를 때 AI 는 한 번만 부른다:
+ * 검사 → (Pro: 그림 풀이 몇 번) → (Pro: 표지 그림) → 저장. 한 번 부를 때 AI 는 한 번만 부른다:
  * 검사가 끝나면 draft.checked, 그림 풀이는 draft.solveRound 로 어디까지 했는지 남기고, 마지막 저장은 AI 없이 한다
  */
 async function stepCheckAndFinish(ctx: Ctx): Promise<'done' | Partial<SourceRow>> {
@@ -1070,9 +1096,11 @@ async function stepCheckAndFinish(ctx: Ctx): Promise<'done' | Partial<SourceRow>
         console.warn('[kok] check step failed, keeping questions', e);
       }
     }
-    // 그림 풀이를 만들면 검사 결과를 남기고 다음 번에 (한 번에 AI 한 번)
-    if (kept.length && (await figuresOn(ctx))) {
-      return { progress: 91, draft: { ...ctx.src.draft, questions: kept, checked: true, solveRound: 0, attempts: 0 } };
+    // 그림 풀이나 표지 그림을 만들면 검사 결과를 남기고 다음 번에 (한 번에 AI 한 번)
+    // (진행 91: 그림 풀이 차례, 96: 표지 그림 차례 — 화면의 단계 이름이 이 값을 본다)
+    const solve = kept.length > 0 && (await figuresOn(ctx));
+    if (solve || (await coverPending(ctx))) {
+      return { progress: solve ? 91 : 96, draft: { ...ctx.src.draft, questions: kept, checked: true, solveRound: solve ? 0 : SOLVE_ROUNDS, attempts: 0 } };
     }
   } else {
     const round = Number(ctx.src.draft.solveRound ?? SOLVE_ROUNDS);
@@ -1087,10 +1115,12 @@ async function stepCheckAndFinish(ctx: Ctx): Promise<'done' | Partial<SourceRow>
       }
       const done = !next.more || round + 1 >= SOLVE_ROUNDS;
       return {
-        progress: done ? 97 : 94,
+        progress: done ? ((await coverPending(ctx)) ? 96 : 97) : 94,
         draft: { ...ctx.src.draft, questions: next.questions, solveRound: done ? SOLVE_ROUNDS : round + 1, attempts: 0 },
       };
     }
+    // 표지 그림 (저장은 다음 번에)
+    if (await coverPending(ctx)) return await stepCover(ctx, note);
   }
 
   const visuals: Array<{ type: string; spec: unknown }> = [{ type: 'mindmap', spec: visual.mindmap }];

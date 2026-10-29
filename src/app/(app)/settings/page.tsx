@@ -40,7 +40,7 @@ type SettingsLists = { subjects: SubjectRow[]; ledger: Ledger[] };
 
 const TASKS: Array<{ key: keyof UserSettings['models']; label: string; hint: string }> = [
   { key: 'organize', label: '정리', hint: '자료를 읽고 정리 노트로 바꿔요' },
-  { key: 'visual', label: '그림', hint: '마인드맵·표·연표를 그려요' },
+  { key: 'visual', label: '그림', hint: '마인드맵·표·연표·표지 그림을 그려요' },
   { key: 'quiz', label: '문제', hint: '핵심 문제를 만들고 검사해요' },
   { key: 'grade', label: '채점', hint: '단답형 답을 같은 뜻까지 인정해요' },
 ];
@@ -58,6 +58,7 @@ const TASK_NAME: Record<string, string> = {
   solve: '그림 풀이',
   redraw: '자료 그림 다시 그리기',
   locate: '자료 그림 자리 찾기',
+  cover: '표지 그림',
   reorganize: '합친 노트 다시 정리',
   course: '단계별 학습 만들기',
   theme: '테마 만들기',
@@ -497,6 +498,22 @@ export default function SettingsPage() {
               {me.canFigures
                 ? '끄면 개념 카드에서 KOK 스타일로 다시 그린 그림부터 보여 줘요. 문제 위에서는 풀 때 빠진 것이 없게 늘 원본이 먼저예요. 그림마다 바꿔 볼 수 있어요.'
                 : '자료 그림은 원본에서 잘라 보여 줘요. Pro는 지도·그래프·표·연표·도식을 KOK 스타일로 다시 그려 줘요.'}
+            </p>
+          </div>
+        ) : null}
+        {me.features.covers ? (
+          <div className="grid gap-1.5">
+            <Toggle
+              id="set-auto-cover"
+              label={`자료를 넣으면 표지 그림 그리기${me.canFigures ? '' : ' (Pro)'}`}
+              checked={me.canFigures && draft.visual.autoCover}
+              disabled={!me.canFigures}
+              onChange={(v) => set('visual', { autoCover: v })}
+            />
+            <p className="text-xs text-muted">
+              {me.canFigures
+                ? "자료함 카드에 한 줄 요약 대신, 노트 내용으로 AI가 문제 그림처럼 그린 표지가 보여요. 에너지가 조금 더 들어요. 카드 메뉴의 '표지 그림'에서 다시 그리거나 뺄 수 있어요."
+                : 'Pro는 자료함 카드에 노트 내용으로 AI가 그린 표지 그림이 보여요.'}
             </p>
           </div>
         ) : null}

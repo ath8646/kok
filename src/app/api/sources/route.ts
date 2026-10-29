@@ -16,7 +16,7 @@ import { UserFacingError, errorResponse } from '@/lib/server/errors';
 import { assertOwnPath, downloadOwn, extOk, removePaths, sniff } from '@/lib/server/files';
 import { chunkCount } from '@/lib/server/pipeline';
 import { driveSource } from '@/lib/server/drive';
-import { estimateEnergy, estimateFigures, estimateRedraws, estimateSmallTask, figuresWanted, redrawsWanted } from '@/lib/ai/models';
+import { coverWanted, estimateCover, estimateEnergy, estimateFigures, estimateRedraws, estimateSmallTask, figuresWanted, redrawsWanted } from '@/lib/ai/models';
 import { zNote } from '@/lib/ai/schemas';
 import { estimateTokens, mergeFits, noteForMerge, MERGE_GROWTH_MAX, NOTE_TOO_LONG } from '@/lib/append-merge';
 import { modelForTier } from '@/lib/settings';
@@ -133,12 +133,14 @@ export async function POST(req: NextRequest) {
       featureOn: feats.sourceFigures,
     });
     const visualModel = modelForTier(app.models, acc.settings.models.visual, acc.canCareful, acc.isAdmin);
-    // 노트에 더할 때는 지금 노트와 합치는 단계가 하나 더 있다. Pro 그림 풀이·자료 그림 다시 그리기를 하면 그 값도 (화면 계산과 같게)
+    const cover = coverWanted({ canFigures: acc.canFigures, autoCover: acc.settings.visual.autoCover, featureOn: feats.covers, append: !!parentId });
+    // 노트에 더할 때는 지금 노트와 합치는 단계가 하나 더 있다. Pro 그림 풀이·자료 그림 다시 그리기·표지 그림을 하면 그 값도 (화면 계산과 같게)
     const estimate =
       estimateEnergy({ kind: b.kind, pages, images, chars: text?.length ?? 0 }, model, L.usdPerEnergy) +
       (parentId ? Math.ceil(estimateSmallTask(model, L.usdPerEnergy, 9000, 3000)) : 0) +
       (figures ? estimateFigures(quizModel, L.usdPerEnergy) : 0) +
-      (redraws ? estimateRedraws(visualModel, L.usdPerEnergy) : 0);
+      (redraws ? estimateRedraws(visualModel, L.usdPerEnergy) : 0) +
+      (cover ? estimateCover(visualModel, L.usdPerEnergy) : 0);
 
     // 먼저 빠르게 검사하고(정지·무료 전체 한도·요청 속도·에너지), 마지막 검사와 행 만들기는 DB 가 한 번에 한다:
     // 정리 중인 자료가 쓸 에너지까지 미리 빼고, 같은 사람의 요청은 한 줄로 세운다 (동시에 여러 개 보내도 한도를 넘지 않게)

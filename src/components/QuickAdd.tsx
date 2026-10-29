@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation';
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import type { MeResponse, SubjectRow } from '@/lib/types';
 import { fetchSources, fetchSubjects, sb } from '@/lib/data';
-import { estimateEnergy, estimateFigures, estimateRedraws, estimateSmallTask, figuresWanted, redrawsWanted } from '@/lib/ai/models';
+import { coverWanted, estimateCover, estimateEnergy, estimateFigures, estimateRedraws, estimateSmallTask, figuresWanted, redrawsWanted } from '@/lib/ai/models';
 import { clientModel } from '@/lib/client-model';
 import { energyWindow, refillText } from '@/lib/plans';
 import { shrinkImage } from '@/lib/image';
@@ -431,11 +431,13 @@ export function QuickAddProvider({
             sourceFiguresSetting: m.settings.quiz.sourceFigures,
             featureOn: m.features.sourceFigures,
           });
+          const cover = coverWanted({ canFigures: m.canFigures, autoCover: m.settings.visual.autoCover, featureOn: m.features.covers, append: !!it.parentId });
           const est =
             estimateEnergy({ kind: prep.kind, pages: prep.pages, images: prep.blobs.length, chars: prep.text.length }, model, m.usdPerEnergy) +
             (it.parentId ? Math.ceil(estimateSmallTask(model, m.usdPerEnergy, 9000, 3000)) : 0) +
             (figures ? estimateFigures(clientModel(m, m.settings.models.quiz), m.usdPerEnergy) : 0) +
-            (redraws ? estimateRedraws(clientModel(m, m.settings.models.visual), m.usdPerEnergy) : 0);
+            (redraws ? estimateRedraws(clientModel(m, m.settings.models.visual), m.usdPerEnergy) : 0) +
+            (cover ? estimateCover(clientModel(m, m.settings.models.visual), m.usdPerEnergy) : 0);
           const left = m.energy.unlimited ? Infinity : (m.energy.remaining ?? 0);
           if (est > left) {
             throw new Error(`에너지가 부족해요. 필요: 약 ${est}, 남음: ${Math.floor(left)}. ${refillText(m.planInfo, energyWindow(m.energy))}`);

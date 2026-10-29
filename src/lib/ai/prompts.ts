@@ -2,6 +2,7 @@
 // 한국어판은 "KOK PRD" 15장에 있다. 한쪽을 고치면 다른 쪽도 같이 고친다.
 
 import type { ArtKind } from '@/lib/art/spec';
+import { COVER_VIEW } from '@/lib/cover';
 
 export const COMMON_SYSTEM = [
   'You are KOK, a study assistant in a Korean learning app for students.',
@@ -655,6 +656,27 @@ export function redrawPrompt(o: { kind: ArtKind }): string {
     'The attached picture is a figure cut out of a study material. Describe it as data so the app can redraw it as a clean, faithful study figure that a student can compare with the original.',
     ...REDRAW_BY_KIND[o.kind],
     ...REDRAW_COMMON,
+  ].join('\n');
+}
+
+/**
+ * 자료함 카드의 표지 그림 (Pro): 노트의 핵심을 문제 그림과 같은 설계도로 그린 작은 그림 (카드에서 한 줄 요약 대신 보인다).
+ * 틀은 lib/cover.ts 의 COVER_VIEW (가로 15 × 세로 10), 오른쪽 위는 카드의 별·⋯ 단추 자리라 비운다
+ */
+export function coverPrompt(): string {
+  return [
+    "Draw a small cover picture for the study note in <note>. The app shows it on the note's card in the student's library, in place of a one-line summary, so the student can recognize the note at a glance.",
+    '- Make one simple, creative picture of the core idea of the note, like a clean textbook illustration built from geometric shapes. Show the idea itself, not a list of facts. For example: a sun, a leaf and arrows for photosynthesis; a parabola with its vertex for quadratic functions; a few dated points on a line for a period of history; boxes and arrows in a loop for a cycle; a right triangle with a marked angle for trigonometry; a wave for sound; a nucleus with orbits for atomic structure.',
+    '- The picture should read without words: at most 4 labels in total, each a short keyword (at most 8 characters) or a formula as $...$. No sentences.',
+    `- Frame: view is x_min ${COVER_VIEW.x_min}, x_max ${COVER_VIEW.x_max}, y_min ${COVER_VIEW.y_min}, y_max ${COVER_VIEW.y_max}. Keep everything inside it with a margin of about 1, and fill the frame: the main shape is large and near the middle. Leave the top-right corner (x above 11 and y above 7.5) empty: the card's buttons sit there.`,
+    '- axes and grid: false, unless the note is about graphs of functions and the axes are part of the idea.',
+    '- items: 8 to 24. Build shapes from points, segments, polygons, circles, arcs and functions. Corners and centers you do not want to show are points with style "muted" and label "". Every item has every field; fill the fields its type does not use with 0, "" or [].',
+    '  - id: short and unique. point: x, y. segment, line, ray, vector: refs [start, end] (point ids). polygon: refs are its corners in order. circle: refs [center] with radius r. arc: refs [center, start, end], drawn counterclockwise. angle: refs [a point on one arm, the vertex, a point on the other arm]. function: expr in x, like "sin(x)" or "x^2/4", drawn from "from" to "to". box: a rounded box with one short word (at most 3 characters) centered at x, y, w and h 0; use at most 2 boxes and keep them at least 6 apart, because the card is small. arrow: refs [from, to] (ids of points, boxes or texts). text: a short word at x, y.',
+    '  - style: "given" for the main lines and shapes, "aux" for dashed lines (motion, light rays, helper lines), "answer" for the one thing that should stand out (drawn thicker), "muted" for faint background details.',
+    '  - marks: 0, or 1 to 3 small ticks that show equal lengths or equal angles.',
+    '  - tone: the color of the item: ink (the normal text color) or red, orange, yellow, green, teal, blue, navy, purple, pink, gray. Use 2 to 4 tones that suit the topic (green for plants, blue for water, orange or yellow for the sun, gray for metal). Polygons, circles and boxes get a light fill of their tone.',
+    '- Do not draw people or logos, and do not copy a figure or a question from the material: make your own picture of the idea.',
+    '- alt: one short Korean phrase that describes the picture for screen readers, like "해와 잎, 이산화탄소와 산소 화살표".',
   ].join('\n');
 }
 

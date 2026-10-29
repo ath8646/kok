@@ -2,6 +2,7 @@
 // 그림 설계도(Figure)를 SVG 로 그린다. 색은 화면 색(밝은·어두운, 테마)을 따른다.
 // visible: 보이는 요소 (없으면 모두), focus: 이 단계에서 형광펜으로 칠할 요소, fresh: 방금 나타난 요소(살짝 나타난다)
 // 글자는 다른 글자·점·상자와 겹치지 않는 자리를 골라 둔다 (placeLabels).
+// 표지 그림(lib/cover.ts)은 같은 그림체에 요소마다 색(tones: 선·글·옅은 칠)을 더하고, 정해진 틀(frame)에 꽉 차게(fill) 그린다.
 import { memo, useId, useMemo, type CSSProperties, type ReactNode } from 'react';
 import { pruneFigure, type FigItem, type Figure } from '@/lib/figure/spec';
 import {
@@ -17,11 +18,15 @@ import {
   textWidth,
   tickLabel,
   ticks,
+  type Frame,
   type LabelReq,
   type Pt,
   type Rect,
 } from '@/lib/figure/layout';
 import { previewText } from '@/lib/richtext';
+import type { CoverTone } from '@/lib/cover';
+import type { ArtTone } from '@/lib/art/spec';
+import { TONE_VAR } from '@/components/art/shared';
 
 /** 그림 글도 설정의 글꼴을 따른다 (글 자리는 textWidth 가 한글을 1em 으로 넉넉히 잡아서 다른 글꼴도 넘치지 않는다. 변수가 없는 곳 = 그림 파일로 저장할 때는 뒤의 글꼴) */
 const FONT = 'var(--font-sans, Pretendard, "Apple SD Gothic Neo", "Malgun Gothic", "Noto Sans KR", sans-serif)';
@@ -29,6 +34,30 @@ const FONT = 'var(--font-sans, Pretendard, "Apple SD Gothic Neo", "Malgun Gothic
 const CURVE = ['var(--b1)', 'var(--b3)', 'var(--b5)', 'var(--b2)', 'var(--b6)'];
 
 type LabelDraw = LabelReq & { text: string; size: number; color: string; bold: boolean; cls?: string };
+
+/**
+ * 표지 그림의 또렷한 색 (꾸미는 그림: 선과 옅은 칠에 쓴다). 글자는 테마의 글자용 색(TONE_VAR)이라 어떤 테마에서도 읽힌다.
+ * 밝은 화면의 글자용 노랑·주황은 갈색에 가까워서, 선은 글자용 색과 이 색을 반씩 섞는다
+ */
+const VIVID: Record<ArtTone, string> = {
+  red: '#ff3b30',
+  orange: '#ff9500',
+  yellow: '#ffcc00',
+  green: '#34c759',
+  teal: '#30b0c7',
+  blue: '#0a84ff',
+  navy: '#5e5ce6',
+  purple: '#bf5af2',
+  pink: '#ff375f',
+  gray: '#8e8e93',
+};
+/** 표지 그림 요소 하나의 색: 글자(text), 선(line), 칠(fill) */
+type ToneColors = { text: string; line: string; fill: string };
+function toneColors(t: ArtTone): ToneColors {
+  // 글자용 노랑(--b8)은 갈색이라 해·빛 같은 노랑의 글자·테두리는 주황 글자색(--b2)으로
+  const text = t === 'yellow' ? 'var(--b2)' : TONE_VAR[t];
+  return { text, line: `color-mix(in oklab, ${text} 50%, ${VIVID[t]})`, fill: VIVID[t] };
+}
 
 function strokeOf(i: FigItem, curveIndex: number): string {
   if (i.style === 'answer') return 'var(--accent)';
@@ -52,6 +81,10 @@ export const FigureView = memo(function FigureView({
   fresh,
   className,
   title,
+  frame,
+  tones,
+  fill,
+  decorative,
 }: {
   figure: Figure;
   visible?: Set<string>;
@@ -60,12 +93,20 @@ export const FigureView = memo(function FigureView({
   className?: string;
   /** 화면 읽기용 설명 */
   title?: string;
+  /** 정해진 틀에 담기 (표지 그림). 없으면 그림에 맞는 크기 */
+  frame?: Frame;
+  /** 요소 번호 → 색 (표지 그림). 없거나 ink 면 보통 색 */
+  tones?: Record<string, CoverTone>;
+  /** 담는 칸을 가로세로 모두 채운다 (가운데 맞춤) */
+  fill?: boolean;
+  /** 꾸미는 그림: 화면 읽기 프로그램이 건너뛴다 (옆에 같은 뜻의 글이 있을 때) */
+  decorative?: boolean;
 }) {
   const uid = useId().replace(/:/g, '');
   // 없는 점을 가리키는 선 같은 것은 그리지 않는다 (그리다가 멈추지 않게)
   const figure = useMemo(() => pruneFigure(given), [given]);
   // 자리 잡기: 상자 그림은 칸·줄로 고르게 벌리고, 나머지는 좌표 비율대로 (상자·글 크기도 같이)
-  const layout = useMemo(() => figureLayout(figure, (i) => previewText(i.label)), [figure]);
+  const layout = useMemo(() => figureLayout(figure, (i) => previewText(i.label), frame), [figure, frame]);
   const m = layout.m;
   const boxes = layout.boxes;
   const byId = useMemo(() => new Map(figure.items.map((i) => [i.id, i])), [figure]);
@@ -114,10 +155,18 @@ export const FigureView = memo(function FigureView({
     });
   };
 
+  /** 표지 그림의 요소 색 (흐린 요소는 늘 흐린 색) */
+  const toneOf = (i: FigItem): ToneColors | null => {
+    const t = tones?.[i.id];
+    return t && t !== 'ink' && i.style !== 'muted' ? toneColors(t) : null;
+  };
+
   let curve = 0;
   for (const i of figure.items) {
     if (!shown(i)) continue;
-    const color = strokeOf(i, i.type === 'function' ? curve : 0);
+    const tone = toneOf(i);
+    const color = tone?.line ?? strokeOf(i, i.type === 'function' ? curve : 0);
+    const ink = tone?.text ?? textColor(i);
     const w = widthOf(i);
     const dash = i.style === 'aux' ? '6 5' : undefined;
     const cls = anim(i);
@@ -171,7 +220,7 @@ export const FigureView = memo(function FigureView({
         if (i.label) {
           if (i.type === 'vector') {
             // 힘·벡터 이름은 화살표 끝에
-            label(i.id, b, i.label, { dir: { x: ux, y: uy }, dist: 6, color: textColor(i), bold: i.style === 'answer', cls });
+            label(i.id, b, i.label, { dir: { x: ux, y: uy }, dist: 6, color: ink, bold: i.style === 'answer', cls });
           } else {
             const mid = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
             // 선분 가운데에서 그림 가운데의 반대쪽으로
@@ -181,7 +230,7 @@ export const FigureView = memo(function FigureView({
               nx = -nx;
               ny = -ny;
             }
-            label(i.id, mid, i.label, { dir: { x: nx, y: ny }, dist: 5, color: textColor(i), bold: i.style === 'answer', cls });
+            label(i.id, mid, i.label, { dir: { x: nx, y: ny }, dist: 5, color: ink, bold: i.style === 'answer', cls });
           }
         }
         break;
@@ -195,14 +244,18 @@ export const FigureView = memo(function FigureView({
           <path
             key={`${i.id}-f`}
             d={d}
-            style={{ fill: i.style === 'answer' ? 'var(--accent)' : 'var(--ink)', fillOpacity: i.style === 'answer' ? 0.12 : 0.045, stroke: 'none' }}
+            style={
+              tone
+                ? { fill: tone.fill, fillOpacity: i.style === 'answer' ? 0.38 : 0.26, stroke: 'none' }
+                : { fill: i.style === 'answer' ? 'var(--accent)' : 'var(--ink)', fillOpacity: i.style === 'answer' ? 0.12 : 0.045, stroke: 'none' }
+            }
             className={cls}
           />,
         );
         strokes.push(<path key={i.id} d={d} style={lineStyle} className={cls} />);
         if (i.label) {
           const c = { x: pts.reduce((a, p) => a + p.x, 0) / pts.length, y: pts.reduce((a, p) => a + p.y, 0) / pts.length };
-          label(i.id, c, i.label, { color: textColor(i), bold: true, cls });
+          label(i.id, c, i.label, { color: ink, bold: true, cls });
         }
         break;
       }
@@ -222,12 +275,16 @@ export const FigureView = memo(function FigureView({
             cy={f2(c.y)}
             rx={f2(rx)}
             ry={f2(ry)}
-            style={{ fill: i.style === 'answer' ? 'var(--accent)' : 'var(--ink)', fillOpacity: i.style === 'answer' ? 0.1 : 0.03 }}
+            style={
+              tone
+                ? { fill: tone.fill, fillOpacity: i.style === 'answer' ? 0.34 : 0.24 }
+                : { fill: i.style === 'answer' ? 'var(--accent)' : 'var(--ink)', fillOpacity: i.style === 'answer' ? 0.1 : 0.03 }
+            }
             className={cls}
           />,
         );
         strokes.push(<ellipse key={i.id} cx={f2(c.x)} cy={f2(c.y)} rx={f2(rx)} ry={f2(ry)} style={lineStyle} className={cls} />);
-        if (i.label) label(i.id, { x: c.x + rx * 0.71, y: c.y - ry * 0.71 }, i.label, { dir: { x: 0.7, y: -0.7 }, dist: 4, color: textColor(i), cls });
+        if (i.label) label(i.id, { x: c.x + rx * 0.71, y: c.y - ry * 0.71 }, i.label, { dir: { x: 0.7, y: -0.7 }, dist: 4, color: ink, cls });
         break;
       }
       case 'arc': {
@@ -250,7 +307,7 @@ export const FigureView = memo(function FigureView({
         if (i.label) {
           const t = t1 + d / 2;
           const at = { x: m.px(o.x + Math.cos(t) * r), y: m.py(o.y + Math.sin(t) * r) };
-          label(i.id, at, i.label, { dir: { x: Math.cos(t), y: -Math.sin(t) }, dist: 5, color: textColor(i), cls });
+          label(i.id, at, i.label, { dir: { x: Math.cos(t), y: -Math.sin(t) }, dist: 5, color: ink, cls });
         }
         break;
       }
@@ -260,7 +317,7 @@ export const FigureView = memo(function FigureView({
         const is90 = /^90\s*°?$/.test(previewText(i.label));
         // 그림이 정확히 직각이 아니어도 '90°' 라고 적었으면 네모로
         const a = angleMark(v, p, q, radius, is90);
-        const color2 = i.style === 'answer' ? 'var(--accent)' : 'var(--ink)';
+        const color2 = tone?.line ?? (i.style === 'answer' ? 'var(--accent)' : 'var(--ink)');
         if (focused) hl(i.id, <path d={a.path} style={{ ...HL, strokeWidth: 9 }} />);
         marks.push(
           <path
@@ -321,9 +378,9 @@ export const FigureView = memo(function FigureView({
               height={f2(b.hh * 2)}
               rx={12}
               style={{
-                fill: answer ? 'var(--accent-soft)' : 'var(--surface)',
-                stroke: answer ? 'var(--accent)' : i.style === 'muted' ? 'var(--line)' : 'var(--ink)',
-                strokeOpacity: answer ? 1 : 0.5,
+                fill: tone ? `color-mix(in srgb, ${tone.fill} 20%, var(--surface))` : answer ? 'var(--accent-soft)' : 'var(--surface)',
+                stroke: tone?.line ?? (answer ? 'var(--accent)' : i.style === 'muted' ? 'var(--line)' : 'var(--ink)'),
+                strokeOpacity: answer || tone ? 1 : 0.5,
                 strokeWidth: answer ? 2 : 1.4,
                 strokeDasharray: i.style === 'aux' ? '5 4' : undefined,
               }}
@@ -379,7 +436,7 @@ export const FigureView = memo(function FigureView({
       }
       case 'text': {
         const b = boxes.get(i.id)!;
-        label(i.id, b.c, i.label, { color: textColor(i), bold: i.style === 'answer', cls });
+        label(i.id, b.c, i.label, { color: ink, bold: i.style === 'answer', cls });
         if (focused)
           hl(i.id, <rect x={f2(b.c.x - b.hw)} y={f2(b.c.y - 11)} width={f2(b.hw * 2)} height={22} rx={6} style={{ fill: 'var(--hl)', fillOpacity: 0.45 }} />);
         break;
@@ -396,7 +453,7 @@ export const FigureView = memo(function FigureView({
               cx={f2(pt.x)}
               cy={f2(pt.y)}
               r={i.style === 'answer' ? 4.6 : 3.8}
-              style={{ fill: i.style === 'answer' ? 'var(--accent)' : 'var(--ink)', stroke: 'var(--surface)', strokeWidth: 1.6 }}
+              style={{ fill: tone?.text ?? (i.style === 'answer' ? 'var(--accent)' : 'var(--ink)'), stroke: 'var(--surface)', strokeWidth: 1.6 }}
               className={cls ? `${cls} kok-fig-pop` : undefined}
             />,
           );
@@ -404,7 +461,7 @@ export const FigureView = memo(function FigureView({
         if (i.label) {
           let dir = { x: pt.x - center.x, y: pt.y - center.y };
           if (Math.hypot(dir.x, dir.y) < 1) dir = { x: 0.7, y: -0.7 };
-          label(i.id, pt, i.label, { dir, dist: 5, size: 14, color: textColor(i), bold: true, cls });
+          label(i.id, pt, i.label, { dir, dist: 5, size: 14, color: ink, bold: true, cls });
         }
         break;
       }
@@ -521,9 +578,14 @@ export const FigureView = memo(function FigureView({
     <svg
       viewBox={`0 0 ${f2(m.W)} ${f2(m.H)}`}
       className={className}
-      role="img"
-      aria-label={title ?? (names.length ? `그림: ${names.slice(0, 8).join(', ')}` : '그림')}
-      style={{ display: 'block', width: '100%', height: 'auto', maxHeight: 380, fontFamily: FONT }}
+      role={decorative ? undefined : 'img'}
+      aria-hidden={decorative || undefined}
+      aria-label={decorative ? undefined : (title ?? (names.length ? `그림: ${names.slice(0, 8).join(', ')}` : '그림'))}
+      style={
+        fill
+          ? { display: 'block', width: '100%', height: '100%', fontFamily: FONT }
+          : { display: 'block', width: '100%', height: 'auto', maxHeight: 380, fontFamily: FONT }
+      }
     >
       <defs>
         <clipPath id={`${uid}-clip`}>

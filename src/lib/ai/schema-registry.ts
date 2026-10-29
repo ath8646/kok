@@ -22,6 +22,7 @@ import {
   visualJsonSchema,
 } from './schemas';
 import { ART_KINDS, artJsonSchema } from '@/lib/art/spec';
+import { coverJsonSchema } from '@/lib/cover';
 
 type JsonSchema = Record<string, unknown>;
 
@@ -66,6 +67,7 @@ export function aiSchemas(): Array<{ name: string; schema: JsonSchema }> {
     { name: 'AI에게 물어보기 (Pro)', schema: homeChatJsonSchema(true) },
     { name: '채팅 풀이 그림 (Pro)', schema: chatFigureJsonSchema },
     { name: '단계별 학습 (Pro)', schema: courseJsonSchema },
+    { name: '표지 그림 (Pro)', schema: coverJsonSchema },
     { name: '테마 만들기', schema: themeJsonSchema },
     { name: '테마 그림 다시 그리기', schema: themeImageJsonSchema },
     ...ART_KINDS.map((k) => ({ name: `자료 그림 다시 그리기 (${k})`, schema: artJsonSchema(k) })),

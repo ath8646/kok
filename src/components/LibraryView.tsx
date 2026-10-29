@@ -54,9 +54,12 @@ import { QUICK_MAX, byPosition, quickSubjects } from '@/lib/subject-order';
 import { SubjectDrawer, type DrawerManage } from './SubjectDrawer';
 import { SubjectPickSheet } from './SubjectPick';
 import { MergeNotesSheet } from './MergeNotesSheet';
+import { CoverArt } from './CoverArt';
+import { CoverSheet } from './CoverSheet';
+import { coverCornerBusy, readCover } from '@/lib/cover';
 
-/** manual: AI 없이 직접 만든 노트 */
-type LibSource = SourceRowWithUnit & { summary: string | null; manual?: boolean };
+/** manual: AI 없이 직접 만든 노트. cover: 표지 그림 (features.covers 일 때만 읽는다, lib/cover.ts) */
+type LibSource = SourceRowWithUnit & { summary: string | null; manual?: boolean; cover?: unknown };
 type LibData = { subjects: SubjectRow[]; sources: LibSource[] };
 
 /** 자료함 목록을 기억해 두는 이름 (다시 들어오면 바로 보이고, 뒤에서 새로 읽는다) */
@@ -65,15 +68,16 @@ export const LIBRARY_VIEW = 'library';
 /** 카드가 나타나는 방법: 기억해 둔 목록이면 그대로(none), 그 밖에는 카드 자리에서 글만 번진다(fill) */
 type Enter = 'none' | 'fill';
 
-/** organize: 자료함 정리 칸(복습에 넣기·별표·순서)이 DB 에 있을 때만 읽는다 */
-async function fetchLibrary(organize: boolean): Promise<LibData> {
+/** organize: 자료함 정리 칸(복습에 넣기·별표·순서), covers: 표지 그림 칸이 DB 에 있을 때만 읽는다 */
+async function fetchLibrary(organize: boolean, covers: boolean): Promise<LibData> {
+  const cols = [SOURCE_COLS, organize ? ORGANIZE_COLS : '', covers ? 'cover' : ''].filter(Boolean).join(', ');
   const [subjects, sources, notes] = await Promise.all([
     fetchSubjects(),
     fetchAll<SourceRowWithUnit>((a, b) =>
       topLevelSources<SourceRowWithUnit[]>((onlyTop) => {
         let q = sb()
           .from('sources')
-          .select(organize ? `${SOURCE_COLS}, ${ORGANIZE_COLS}` : SOURCE_COLS);
+          .select(cols);
         if (onlyTop) q = q.is('parent_id', null);
         return q.order('created_at', { ascending: false }).order('id').range(a, b) as unknown as PromiseLike<{
           data: SourceRowWithUnit[] | null;
@@ -152,6 +156,8 @@ export function LibraryView() {
   const [mergingSubject, setMergingSubject] = useState<SubjectRow | null>(null);
   const [mergingNotes, setMergingNotes] = useState(false);
   const [renaming, setRenaming] = useState<LibSource | null>(null);
+  // 표지 그림 창 (Pro): 연 자료의 번호 (목록이 바뀌어도 그 자료의 지금 표지를 보여 준다)
+  const [coverId, setCoverId] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [version, setVersion] = useState(0);
   const reload = useCallback(() => setVersion((v) => v + 1), []);
@@ -182,12 +188,13 @@ export function LibraryView() {
 
   // 불러오기 (처음, 새 자료가 들어왔을 때, 정리가 끝났을 때)
   const organize = !!me?.features.organize;
+  const coversOn = !!me?.features.covers;
   useEffect(() => {
     let alive = true;
     const seq = edits.current.seq;
     // 읽는 사이에 저장이 있었으면 이 목록은 기억하지 않는다 (view-cache)
     const stamp = viewStamp();
-    fetchLibrary(organize)
+    fetchLibrary(organize, coversOn)
       .then((r) => {
         if (!alive) return;
         const e = edits.current;
@@ -209,7 +216,7 @@ export function LibraryView() {
     return () => {
       alive = false;
     };
-  }, [version, active.doneCount, toast, owner, organize, reload]);
+  }, [version, active.doneCount, toast, owner, organize, coversOn, reload]);
 
   // 새로 넣은 자료는 카드가 반짝이며 나타난다
   useEffect(() => {
@@ -358,6 +365,25 @@ export function LibraryView() {
       }
     }
   };
+
+  /** 표지 그림을 바꾼 목록 (그리기·빼기 뒤): 지금 화면의 목록에서 그 자료만 바꾸고 기억해 둘 목록도 같이 */
+  const setCover = (id: string, cover: unknown) => {
+    const cur = latestData.current;
+    if (!cur) return;
+    const next = { ...cur, sources: cur.sources.map((x) => (x.id === id ? { ...x, cover } : x)) };
+    latestData.current = next;
+    setData(next);
+  };
+  const drawCover = (id: string) =>
+    keepWhileSaving(async () => {
+      const r = await api<{ ok: true; cover: unknown }>(`/api/sources/${id}/cover`, { method: 'POST', body: '{}' });
+      setCover(id, r.cover);
+    });
+  const removeCover = (id: string) =>
+    keepWhileSaving(async () => {
+      await api(`/api/sources/${id}/cover`, { method: 'DELETE' });
+      setCover(id, null);
+    });
 
   /**
    * 과목 위에 고정·보관 (과목 서랍, 여러 과목 한꺼번에도). 화면은 바로 바꾸고, 저장하지 못하면 다시 읽는다.
@@ -964,6 +990,8 @@ export function LibraryView() {
                     onSelectMode={() => startSelect(s.id)}
                     onRename={() => setRenaming(s)}
                     onMove={mergeOn ? () => setMoving([s.id]) : undefined}
+                    onCover={coversOn && me?.canFigures ? () => setCoverId(s.id) : undefined}
+                    tint={subjects.find((x) => x.id === s.subject_id)?.color ?? null}
                     onDelete={async () => {
                       if (!confirm(`'${s.title || '이 자료'}'와 노트·문제를 지울까요? 되돌릴 수 없어요.`)) return;
                       try {
@@ -1152,6 +1180,22 @@ export function LibraryView() {
         ) : null}
       </Sheet>
 
+      {/* 표지 그림 (Pro): 카드 밖에 둔다 (빛나는 카드 안의 시트는 아래 메뉴 밑에 깔린다) */}
+      {(() => {
+        const s = coverId ? data?.sources.find((x) => x.id === coverId) : null;
+        return (
+          <CoverSheet
+            open={!!s}
+            onClose={() => setCoverId(null)}
+            name={s?.title || '이 노트'}
+            cover={s ? readCover(s.cover) : null}
+            tint={s ? (subjects.find((x) => x.id === s.subject_id)?.color ?? null) : null}
+            onDraw={() => drawCover(s!.id)}
+            onRemove={() => removeCover(s!.id)}
+          />
+        );
+      })()}
+
       {/* 자료 이름·단원 */}
       <Sheet open={!!renaming} onClose={() => setRenaming(null)} title="자료 이름·단원">
         {renaming ? (
@@ -1245,6 +1289,8 @@ function NoteCard({
   onDelete,
   onRetry,
   onMove,
+  onCover,
+  tint,
 }: {
   s: LibSource;
   index: number;
@@ -1267,6 +1313,10 @@ function NoteCard({
   onRetry: () => void;
   /** 다른 과목으로 옮기기 (없으면 메뉴에 안 보인다) */
   onMove?: () => void;
+  /** 표지 그림 창 열기 (Pro, 없으면 메뉴에 안 보인다) */
+  onCover?: () => void;
+  /** 과목 색 (표지 그림 바탕을 옅게 물들인다) */
+  tint?: string | null;
 }) {
   const processing = s.status === 'queued' || s.status === 'processing';
   const failed = s.status === 'error';
@@ -1289,8 +1339,12 @@ function NoteCard({
     { label: '여러 개 고르기', icon: ICONS.select, onSelect: onSelectMode },
     { label: '이름·단원 바꾸기', icon: ICONS.edit, onSelect: onRename },
     ...(onMove ? [{ label: '다른 과목으로 옮기기', icon: ICONS.move, onSelect: onMove }] : []),
+    ...(onCover && s.status === 'ready' ? [{ label: '표지 그림', icon: ICONS.image, onSelect: onCover }] : []),
     { label: '지우기', icon: ICONS.trash, onSelect: onDelete, danger: true },
   ];
+  // 표지 그림 (없거나 예전 모양이면 한 줄 요약). 그림이 오른쪽 위 단추 자리까지 닿으면 단추 뒤에 옅은 바탕
+  const cover = useMemo(() => (s.status === 'ready' ? readCover(s.cover) : null), [s.status, s.cover]);
+  const coverBusy = useMemo(() => (cover ? coverCornerBusy(cover) : false), [cover]);
   const href = `/notes/${s.id}`;
   const name = s.title || (processing ? '정리하는 중…' : '제목 없는 자료');
   // 화면 읽기 이름: 제목(없으면 '제목 없는 자료') + 진행·별표·복습 끔
@@ -1382,9 +1436,13 @@ function NoteCard({
           aria-label={`${label}${processing ? ` (${stepLabel(s)})` : ''}${marks}`}
           {...selectProps}
         >
-          {/* 아래 끝은 바탕(별표 빛·테마)과 상관없이 흐려지게 mask 로 */}
+          {/* 아래 끝은 바탕(별표 빛·테마)과 상관없이 흐려지게 mask 로 (표지 그림은 틀 안에 다 들어가서 그대로) */}
           <div
-            className={cx('relative min-h-0 flex-1 overflow-hidden px-4 pt-4 [mask-image:linear-gradient(to_bottom,#000_calc(100%-2rem),transparent)]', fill)}
+            className={cx(
+              'relative min-h-0 flex-1 overflow-hidden',
+              !cover || processing ? 'px-4 pt-4 [mask-image:linear-gradient(to_bottom,#000_calc(100%-2rem),transparent)]' : 'rounded-t-[inherit]',
+              fill,
+            )}
           >
             {processing ? (
               <div className="grid gap-2">
@@ -1396,6 +1454,15 @@ function NoteCard({
                 <div className="kok-shimmer h-2.5 w-[70%] rounded-full bg-surface-2" />
                 <div className="kok-shimmer h-2.5 w-[80%] rounded-full bg-surface-2" />
               </div>
+            ) : cover ? (
+              // 표지 그림: 카드 위 칸을 꽉 채운다. 바탕은 과목 색으로 옅게 (같은 과목 카드끼리 알아보게, 별표 빛이 비치게 반투명).
+              // 정리 중이던 카드가 끝나면 번지며 나타난다
+              <div
+                className={cx('kok-cover absolute inset-0 px-1.5 pt-1.5', startedBusy && 'kok-fade')}
+                style={{ background: `color-mix(in srgb, ${subjectVar(tint)} 8%, transparent)` }}
+              >
+                <CoverArt cover={cover} className="h-full w-full" />
+              </div>
             ) : (
               // 정리 중이던 카드가 끝나면 미리보기가 번지며 나타난다
               <p className={cx('line-clamp-5 text-[13px] leading-relaxed text-muted', startedBusy && 'kok-fade')}>
@@ -1404,7 +1471,7 @@ function NoteCard({
               </p>
             )}
           </div>
-          <div className={cx('px-4 pb-3.5 pt-1.5', fill)}>{footer}</div>
+          <div className={cx('px-4 pb-3.5', cover && !processing ? 'pt-2.5' : 'pt-1.5', fill)}>{footer}</div>
         </Link>
       )}
       {selecting ? (
@@ -1419,8 +1486,13 @@ function NoteCard({
           {picked ? <Icon key="on" d={ICONS.check} size={14} strokeWidth={3} className="kok-check-in" /> : null}
         </span>
       ) : (
-        // 오른쪽 위: 별표(한 번 누르면 별이 튀고 카드가 맨 위로) + 메뉴
-        <div className="absolute right-1.5 top-1.5 z-10 flex items-center">
+        // 오른쪽 위: 별표(한 번 누르면 별이 튀고 카드가 맨 위로) + 메뉴. 표지 그림이 이 자리까지 닿으면 단추 뒤에 옅은 바탕
+        <div
+          className={cx(
+            'absolute right-1.5 top-1.5 z-10 flex items-center',
+            coverBusy && 'rounded-full bg-surface/90 shadow-[0_1px_6px_var(--shadow-strong)]',
+          )}
+        >
           {organize ? <StarButton small starFor={s.id} on={!!s.starred} label={`${label} 별표`} onToggle={onStar} /> : null}
           <Menu label={`${s.title || '자료'} 메뉴`} items={items} small />
         </div>

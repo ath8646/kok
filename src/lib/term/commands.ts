@@ -1463,4 +1463,3 @@ export const NOT_INSTALLED: Record<string, string> = {
   cowsay: 'cowsay',
   sl: 'sl',
 };
-

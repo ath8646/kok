@@ -110,7 +110,24 @@ export default function SettingsPage() {
     };
   }, [owner]);
 
-  // 바꾸면 0.6초 뒤 저장
+  // 바꾸면 0.6초 뒤 저장. 그 사이에 다른 화면으로 가도 기다리던 저장은 보낸다 (테마를 고르고 바로 홈으로 가도 남게)
+  const pending = useRef<UserSettings | null>(null);
+  const saver = useRef({ userId: me?.userId, refresh });
+  useEffect(() => {
+    saver.current = { userId: me?.userId, refresh };
+  });
+  useEffect(
+    () => () => {
+      const d = pending.current;
+      const { userId, refresh: refreshMe } = saver.current;
+      pending.current = null;
+      if (!d || !userId) return;
+      void Promise.resolve(sb().from('profiles').update({ settings: d }).eq('id', userId)).then(({ error }) => {
+        if (!error) void refreshMe();
+      });
+    },
+    [],
+  );
   useEffect(() => {
     if (!draft || !me) return;
     if (first.current) {
@@ -118,7 +135,9 @@ export default function SettingsPage() {
       return;
     }
     setSaved('saving');
+    pending.current = draft;
     const t = setTimeout(async () => {
+      pending.current = null;
       const { error } = await sb().from('profiles').update({ settings: draft }).eq('id', me.userId);
       if (error) {
         setSaved('idle');

@@ -1,17 +1,21 @@
 'use client';
-// 설정 > 테마 (Pro): 화면 밝기, 밝을 때·어두울 때 테마(작은 화면 미리보기로 고른다), 별표 빛(색·세기, 밝을 때·어두울 때 미리보기), 글꼴, 종이 무늬.
-// 내가 만든 테마는 테마 칸에 같이 있다: 마지막 '+' 칸 → 새 테마(AI로 만들기 / 기본 테마에서 시작해 직접 만들기),
-// 고른 내 테마 칸의 연필 → 그 테마 고치기(색·배경 그림·꾸미기, 지우기). 기본 테마는 고칠 수 없다.
-import { useEffect, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties } from 'react';
+// 설정 > 테마 (Pro).
+// - 지금 테마: 큰 미리보기와 이름, 그 테마를 고치거나 그 테마로 내 테마를 만드는 단추
+// - 화면 밝기 (시그니처 테마는 그 테마가 정한다)
+// - 시그니처 테마 6가지 (모양까지 바뀐다: themes/skins.ts·skins.css), 움직임 스위치
+// - 기본 테마 9가지·내 테마 (밝을 때·어두울 때 따로 고를 수도 있다). 내 테마의 '+' → 새 테마, 고른 내 테마의 연필 → 테마 만들기 화면(ThemeStudio)
+// - 별표 빛, 글꼴, 노트 종이
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import type { MeResponse } from '@/lib/types';
 import {
   DEFAULT_GLOW,
-  GLOW_TONES,
+  SKIN_IDS,
   THEME_COLORS,
   THEME_FONTS,
   THEME_MODES,
   THEME_PAPERS,
   type Glow,
+  type SkinId,
   type ThemeColor,
   type ThemeFont,
   type ThemeMode,
@@ -22,6 +26,7 @@ import {
   THEME_FONT_INFO,
   THEME_MODE_INFO,
   THEME_PAPER_INFO,
+  activeSkin,
   applyTheme,
   currentMode,
   customId,
@@ -31,43 +36,31 @@ import {
   lookFor,
   presetLookFx,
   rememberCustomThemes,
+  skinPickLook,
   specLookFx,
-  subscribeTheme,
   themeRef,
-  themeSnapshot,
   type CustomTheme,
   type Theme,
 } from '@/lib/theme';
-import { contrast, fitPalette, mix, type Mode, type Palette } from '@/lib/themes/colors';
-import { BASE_TOKENS, presetTokens } from '@/lib/themes/presets';
-import { readSpec, MAX_THEMES, THEME_NAME_MAX, type ThemeImage, type ThemeSpec } from '@/lib/themes/spec';
-import { haloShadow, imageCss, type ModeLook } from '@/lib/themes/css';
-import { minDimFor } from '@/lib/themes/backdrop';
-import { GLOW_TONE_INFO, glowPair, glowTokens } from '@/lib/themes/glow';
-import { DEFAULT_FX, isDefaultFx, type ThemeFx } from '@/lib/themes/fx';
-import { StarButton } from './note/StarButton';
-import { CODE_PATTERNS, PATTERN_SIZE, codePatternSvg, svgDataUrl, type CodePattern } from '@/lib/themes/pattern';
+import type { Mode } from '@/lib/themes/colors';
+import type { ModeLook } from '@/lib/themes/css';
+import { ACCENT_SWATCHES } from '@/lib/themes/palette-from';
+import { SKINS, skinDefaults, topic } from '@/lib/themes/skins';
+import { readSpec, MAX_THEMES, type ThemeSpec } from '@/lib/themes/spec';
 import { estimateSmallTask } from '@/lib/ai/models';
 import { clientModel } from '@/lib/client-model';
-import { shrinkImage } from '@/lib/image';
 import { sb } from '@/lib/data';
 import { ApiError, Button, Chip, Energy, Field, ICONS, Icon, LinkButton, Segmented, Sheet, Toggle, api, cx, inputClass, radioKeys, useToast, DONE } from './ui';
-
-/** user_themes 행 (updated_at: 고칠 때 '읽은 그대로인지' 확인한다) */
-type ThemeRow = CustomTheme & { updated_at?: string | null };
-type Ready = { id: string; name: string; spec: ThemeSpec; updatedAt: string | null };
+import { MiniTile, SkinMini, ThemeThumb } from './theme/minis';
+import { GlowSettings, GroupHead, type GlowLook } from './theme/GlowSettings';
+import { ThemeStudio, type Ready, type StudioStart, type ThemeRow } from './theme/ThemeStudio';
 
 const MODES: Mode[] = ['light', 'dark'];
 const MODE_LABEL: Record<Mode, string> = { light: '밝을 때', dark: '어두울 때' };
-const basePalette = (m: Mode): Palette => ({ bg: BASE_TOKENS[m]['--bg'], surface: BASE_TOKENS[m]['--surface'], accent: BASE_TOKENS[m]['--accent'] });
-// 덮는 정도 기본값 (서버 DIM_IMAGE·DIM_PATTERN 과 같게). 사진은 무엇이 그려졌는지 몰라서 진하게 덮는다
-const DIM_IMAGE = 0.8;
-const DIM_PATTERN = 0.3;
-const PATTERN_LABEL: Record<CodePattern, string> = { dots: '물방울', grid: '모눈', waves: '물결', diagonal: '빗금', confetti: '색종이', petals: '꽃잎' };
 const EXAMPLES = ['비 오는 날 카페', '벚꽃 핀 봄 교정', '밤하늘 별빛', '민트 초코', '바닷가 여름 방학'];
 
 /** 고를 수 있는 테마 하나 (기본 테마·내가 만든 테마): 밝을 때·어두울 때 실제 화면 색으로 작은 화면을 그린다 */
-type Option = { ref: string; label: string; looks: Record<Mode, ModeLook>; image: boolean };
+type Option = { ref: string; label: string; looks: Record<Mode, ModeLook>; image: boolean; spec?: ThemeSpec };
 
 function presetOptions(): Option[] {
   return THEME_COLORS.map((c) => ({
@@ -79,21 +72,14 @@ function presetOptions(): Option[] {
 }
 
 function customOption(t: Ready): Option {
-  return { ref: `custom:${t.id}`, label: t.name, looks: { light: specLookFx(t.spec, 'light'), dark: specLookFx(t.spec, 'dark') }, image: !!t.spec.image };
-}
-
-/** 기본 테마에서 시작하는 새 테마 (색은 그 테마의 바탕·카드·+ 버튼 색, 꾸미기는 기본) */
-function specFromPreset(c: ThemeColor): ThemeSpec {
-  const pal = (m: Mode): Palette => {
-    const t = presetTokens(c, m);
-    return { bg: t['--bg'], surface: t['--surface'], accent: t['--fab'] };
+  return {
+    ref: `custom:${t.id}`,
+    label: t.name,
+    looks: { light: specLookFx(t.spec, 'light'), dark: specLookFx(t.spec, 'dark') },
+    image: !!t.spec.image,
+    spec: t.spec,
   };
-  return { light: pal('light'), dark: pal('dark'), image: null, dim: 0.6, font: null, paper: null, fx: { ...DEFAULT_FX } };
 }
-
-/** 고치기 창이 여는 것: 내 테마 하나, 또는 기본 테마에서 시작하는 새 테마 */
-type EditTarget = Ready | { template: ThemeColor };
-const isTemplate = (t: EditTarget | null): t is { template: ThemeColor } => !!t && 'template' in t;
 
 function toReady(rows: ThemeRow[]): Ready[] {
   const out: Ready[] = [];
@@ -120,7 +106,7 @@ export function ThemeSettings({ me, theme, onChange }: { me: MeResponse; theme: 
   };
   const lookChain = useRef<Promise<void>>(Promise.resolve());
   const [separate, setSeparate] = useState(() => themeRef(theme, 'light') !== themeRef(theme, 'dark'));
-  const [editing, setEditing] = useState<EditTarget | null>(null);
+  const [studio, setStudio] = useState<StudioStart | null>(null);
   // 새 테마 고르는 창 ('+' 칸). 따로 고르는 중이면 누른 쪽(밝을 때·어두울 때)에 새 테마를 쓴다
   const [adding, setAdding] = useState(false);
   const [useFor, setUseFor] = useState<Mode | 'both'>('both');
@@ -147,7 +133,7 @@ export function ThemeSettings({ me, theme, onChange }: { me: MeResponse; theme: 
           return;
         }
         const rows = (data ?? []) as ThemeRow[];
-        rememberCustomThemes(rows);
+        rememberCustomThemes(rows as CustomTheme[]);
         setCustoms(toReady(rows));
       });
     return () => {
@@ -155,9 +141,12 @@ export function ThemeSettings({ me, theme, onChange }: { me: MeResponse; theme: 
     };
   }, [themesOn]);
 
-  const options = useMemo(() => [...presetOptions(), ...(customs ?? []).map(customOption)], [customs]);
+  const presets = useMemo(() => presetOptions(), []);
+  const mine = useMemo(() => (customs ?? []).map(customOption), [customs]);
   const lightRef = themeRef(theme, 'light');
   const darkRef = themeRef(theme, 'dark');
+  // 지금 쓰는 시그니처 테마 (두 모드에 같이 쓸 때만). customs 가 바뀌면 다시 본다 (내 테마를 읽은 뒤)
+  const skinNow = useMemo(() => activeSkin(theme), [theme, customs]); // eslint-disable-line react-hooks/exhaustive-deps
 
   /** 테마 고르기: 둘 다 같게 또는 한 모드만. 내가 만든 테마를 새로 고르면 그 테마의 글꼴·종이로도 바꾼다 */
   const pick = (which: Mode | 'both', ref: string) => {
@@ -166,8 +155,9 @@ export function ThemeSettings({ me, theme, onChange }: { me: MeResponse; theme: 
     const now = { light: themeRef(t, 'light'), dark: themeRef(t, 'dark') };
     const fresh = which === 'both' ? now.light !== ref || now.dark !== ref : now[which] !== ref;
     const patch: Partial<Theme> = which === 'both' ? { light: ref, dark: ref } : { [which]: ref };
-    // 예전 한 가지 테마 색도 맞춰 둔다 (예전 화면이 읽어도 비슷하게)
+    // 예전 한 가지 테마 색도 맞춰 둔다 (예전 화면이 읽어도 비슷하게: 시그니처 테마는 비슷한 기본 테마)
     if (which === 'both' && ref.startsWith('preset:')) patch.color = ref.slice('preset:'.length) as ThemeColor;
+    if (which === 'both' && ref.startsWith('skin:')) patch.color = SKINS[ref.slice('skin:'.length) as SkinId].legacy;
     // 이미 쓰는 테마를 다시 고를 때는 내가 따로 고른 글꼴·종이를 되돌리지 않는다
     if (fresh) {
       const id = customId(ref);
@@ -178,15 +168,28 @@ export function ThemeSettings({ me, theme, onChange }: { me: MeResponse; theme: 
     latest.current.onChange(patch);
   };
 
+  /** 시그니처 테마 고르기: 두 모드에 같이 (따로 고르던 중이면 같게로) */
+  const pickSkin = (id: SkinId) => {
+    if (!canTheme) return toast(PRO_ONLY);
+    setSeparate(false);
+    pick('both', `skin:${id}`);
+  };
+
   const setSeparateMode = (on: boolean) => {
     setSeparate(on);
+    // 따로 고르기로 바꾸면 시그니처 테마는 비슷한 기본 테마로 (시그니처 테마는 두 모드에 같이 쓴다)
+    if (on && skinNow) {
+      const legacy = `preset:${SKINS[skinNow.id].legacy}`;
+      if (lightRef.startsWith('skin:')) pick('both', legacy);
+      return;
+    }
     // 같게 쓰기로 바꾸면 어두울 때도 밝을 때 테마로
     if (!on && lightRef !== darkRef) pick('both', lightRef);
   };
 
   /** 만들거나 고친 테마를 목록·화면에 반영 (지금 쓰는 테마면 바로 다시 붙인다) */
   const saved = (row: ThemeRow) => {
-    rememberCustomThemes([row]);
+    rememberCustomThemes([row as CustomTheme]);
     const ready = toReady([row])[0];
     if (!ready) return;
     setCustoms((list) => (list.some((t) => t.id === ready.id) ? list.map((t) => (t.id === ready.id ? ready : t)) : [...list, ready]));
@@ -301,11 +304,17 @@ export function ThemeSettings({ me, theme, onChange }: { me: MeResponse; theme: 
     if (!canTheme) return toast(PRO_ONLY);
     latest.current.onChange({ glow: { ...(latest.current.theme.glow ?? DEFAULT_GLOW), ...patch } });
   };
+  const glowLooks: GlowLook[] = skinNow
+    ? [{ key: 'skin', label: SKINS[skinNow.id].label, mode: SKINS[skinNow.id].mode, look: skinPickLook(skinNow) }]
+    : MODES.map((m) => ({ key: m, label: MODE_LABEL[m], mode: m, look: lookFor(m === 'light' ? lightRef : darkRef, m) }));
 
   const est = Math.round(estimateSmallTask(clientModel(me, 'fast'), me.usdPerEnergy, 900, 900) * 10) / 10;
   // Pro 가 끝났으면 내 테마는 지우기만 (목록으로)
   const leftovers = themesOn && !canTheme && (customs?.length ?? 0) > 0;
-  const nameOf = (ref: string) => options.find((o) => o.ref === ref)?.label ?? THEME_COLOR_INFO.default.label;
+  const nameOf = (ref: string) => {
+    if (ref.startsWith('skin:')) return SKINS[ref.slice(5) as SkinId]?.label ?? THEME_COLOR_INFO.default.label;
+    return [...presets, ...mine].find((o) => o.ref === ref)?.label ?? THEME_COLOR_INFO.default.label;
+  };
   const full = (customs?.length ?? 0) >= MAX_THEMES;
   const mineOn = canTheme && themesOn && customs !== null;
   /** 고른 내 테마의 연필 → 그 테마 고치기 */
@@ -313,7 +322,7 @@ export function ThemeSettings({ me, theme, onChange }: { me: MeResponse; theme: 
     const t = customs?.find((x) => `custom:${x.id}` === ref);
     if (!t) return;
     setUseFor(which);
-    setEditing(t);
+    setStudio({ kind: 'edit', theme: t });
   };
   /** '+' 칸 → 새 테마 고르는 창 */
   const addFrom = (which: Mode | 'both') => () => {
@@ -321,71 +330,179 @@ export function ThemeSettings({ me, theme, onChange }: { me: MeResponse; theme: 
     setUseFor(which);
     setAdding(true);
   };
+  /** 지금 테마 카드에서 테마 만들기 열기 */
+  const openStudio = (s: StudioStart) => {
+    if (!canTheme) return toast(PRO_ONLY);
+    if (!mineOn) return toast('내 테마를 읽는 중이에요. 잠깐 뒤에 다시 눌러 주세요.');
+    if (s.kind !== 'edit' && full) return toast(`테마는 ${MAX_THEMES}개까지 만들 수 있어요. 안 쓰는 테마를 골라 연필을 누르면 지울 수 있어요.`);
+    setUseFor('both');
+    setStudio(s);
+  };
   /** 새로 만든 테마를 쓴다: 같게 쓰는 중이면 둘 다, 따로 고르는 중이면 '+'를 누른 쪽에 */
   const applyNew = (ref: string) => pick(latest.current.separate && useFor !== 'both' ? useFor : 'both', ref);
 
+  // 지금 테마 카드
+  const nowCustom = customs?.find((x) => `custom:${x.id}` === lightRef) ?? null;
+  const now = (() => {
+    if (separate) return null;
+    if (skinNow && lightRef.startsWith('skin:')) {
+      const info = SKINS[skinNow.id];
+      return {
+        name: info.label,
+        kind: `시그니처 테마 · 늘 ${info.mode === 'dark' ? '어두운' : '밝은'} 화면`,
+        desc: info.tagline,
+        art: <SkinMini id={skinNow.id} colors={skinNow.colors} />,
+        action: { label: '색 바꿔 내 테마로', start: { kind: 'skin', id: skinNow.id } as StudioStart },
+      };
+    }
+    if (nowCustom) {
+      const sk = nowCustom.spec.skin;
+      return {
+        name: nowCustom.name,
+        kind: sk ? `내 테마 · ${SKINS[sk.id].label} 스타일` : '내 테마',
+        desc: sk
+          ? SKINS[sk.id].tagline
+          : nowCustom.spec.image
+            ? nowCustom.spec.image.kind === 'pattern'
+              ? '무늬가 깔린 테마'
+              : '배경 그림이 있는 테마'
+            : '색으로 만든 테마',
+        art: sk ? <SkinMini id={sk.id} colors={sk} /> : <MiniTile looks={customOption(nowCustom).looks} mode="both" />,
+        action: { label: '고치기', start: { kind: 'edit', theme: nowCustom } as StudioStart },
+      };
+    }
+    const color = (lightRef.startsWith('preset:') ? lightRef.slice(7) : 'default') as ThemeColor;
+    const opt = presets.find((o) => o.ref === `preset:${color}`) ?? presets[0];
+    return {
+      name: opt.label,
+      kind: '기본 테마',
+      desc: '밝을 때·어두울 때 모두 맞춘 색',
+      art: <MiniTile looks={opt.looks} mode="both" />,
+      action: { label: '이 테마로 내 테마 만들기', start: { kind: 'preset', color } as StudioStart },
+    };
+  })();
+
   return (
-    <div className="grid gap-6">
+    <div className="grid gap-7">
       {!canTheme ? (
         <div className="flex flex-wrap items-center justify-between gap-2 rounded-2xl bg-surface-2 px-3.5 py-3">
-          <p className="min-w-0 flex-1 text-sm">테마는 Pro에서 쓸 수 있어요. 밝게·어둡게, 색, 별표 빛, 배경 그림, 글꼴을 내 마음대로 바꿔요.</p>
+          <p className="min-w-0 flex-1 text-sm">
+            테마는 Pro에서 쓸 수 있어요. 네온·글리치 같은 시그니처 테마, 색, 별표 빛, 배경 그림, 글꼴을 내 마음대로 바꿔요.
+          </p>
           <LinkButton href="/plan" size="sm" variant="secondary">
             요금제 보기
           </LinkButton>
         </div>
       ) : null}
 
+      {/* 지금 테마 */}
+      {now ? (
+        <section className="flex items-center gap-4" aria-labelledby="theme-now-title">
+          <span
+            className="relative block aspect-[3/4] w-[92px] shrink-0 overflow-hidden rounded-[18px] shadow-[0_0_0_1px_var(--line),0_10px_24px_-14px_var(--shadow-strong)]"
+            aria-hidden="true"
+          >
+            {now.art}
+          </span>
+          <div className="grid min-w-0 gap-1">
+            <p className="text-xs font-semibold text-muted">지금 테마</p>
+            <h3 id="theme-now-title" className="truncate font-display text-xl leading-tight">
+              {now.name}
+            </h3>
+            <p className="text-xs text-muted">
+              {now.kind} · {now.desc}
+            </p>
+            {mineOn ? (
+              <Button size="sm" variant="secondary" className="mt-1 justify-self-start" onClick={() => openStudio(now.action.start)}>
+                <Icon d={now.action.start.kind === 'edit' ? ICONS.pen : ICONS.sparkle} size={15} />
+                {now.action.label}
+              </Button>
+            ) : null}
+          </div>
+        </section>
+      ) : null}
+
       <Field label="화면 밝기">
-        <div>
-          <Segmented<ThemeMode>
-            label="화면 밝기"
-            value={theme.mode}
-            disabled={!canTheme}
-            options={THEME_MODES.map((m) => ({ value: m, label: THEME_MODE_INFO[m].label }))}
-            onChange={(m) => (canTheme ? latest.current.onChange({ mode: m }) : toast(PRO_ONLY))}
-          />
+        <div className="grid gap-1.5">
+          <div>
+            <Segmented<ThemeMode>
+              label="화면 밝기"
+              value={skinNow ? SKINS[skinNow.id].mode : theme.mode}
+              disabled={!canTheme || !!skinNow}
+              options={THEME_MODES.map((m) => ({ value: m, label: THEME_MODE_INFO[m].label }))}
+              onChange={(m) => (canTheme ? latest.current.onChange({ mode: m }) : toast(PRO_ONLY))}
+            />
+          </div>
+          {skinNow ? (
+            <p className="text-xs text-muted">
+              {topic(SKINS[skinNow.id].label)} 늘 {SKINS[skinNow.id].mode === 'dark' ? '어두운' : '밝은'} 화면이에요. 다른 테마를 고르면 다시 고를 수 있어요.
+            </p>
+          ) : null}
         </div>
       </Field>
 
-      {/* 테마: 작은 화면으로 바탕·카드·글자·버튼 색을 한눈에 보고 고른다 */}
+      {/* 시그니처 테마 */}
+      <section className="grid gap-3" aria-labelledby="theme-skin-title">
+        <GroupHead id="theme-skin-title" title="시그니처 테마" value={skinNow && lightRef.startsWith('skin:') ? SKINS[skinNow.id].label : undefined} />
+        <p className="-mt-1.5 text-xs text-muted">색만이 아니라 카드·버튼·글꼴·바탕 그림까지 통째로 바뀌는 테마예요. 밝기는 테마가 정해요.</p>
+        <SkinGrid
+          selected={!separate && lightRef === darkRef && lightRef.startsWith('skin:') ? (lightRef.slice(5) as SkinId) : null}
+          disabled={!canTheme}
+          onPick={pickSkin}
+        />
+        {SKIN_IDS.some((id) => SKINS[id].motion) ? (
+          <Toggle
+            label="시그니처 테마 움직임"
+            hint="네온관 깜빡임·글리치 지직거림·터미널 커서처럼 가끔 살짝 움직여요. 기기에서 ‘동작 줄이기’를 켜면 늘 멈춰요."
+            checked={theme.motion !== false}
+            disabled={!canTheme}
+            onChange={(v) => (canTheme ? latest.current.onChange({ motion: v }) : toast(PRO_ONLY))}
+          />
+        ) : null}
+      </section>
+
+      {/* 기본 테마·내 테마 */}
       <section className="grid gap-3" aria-labelledby="theme-pick-title">
-        <GroupHead id="theme-pick-title" title="테마" value={separate ? `${nameOf(lightRef)} · ${nameOf(darkRef)}` : nameOf(lightRef)} />
-        {separate ? (
-          MODES.map((m) => (
-            <div key={m} className="grid gap-2">
-              <p className="text-xs font-bold text-muted">{MODE_LABEL[m]}</p>
-              <OptionGrid
-                label={`${MODE_LABEL[m]} 테마`}
-                options={options}
+        <GroupHead id="theme-pick-title" title="기본 테마·내 테마" value={separate ? `${nameOf(lightRef)} · ${nameOf(darkRef)}` : undefined} />
+        {(separate ? MODES : (['both'] as const)).map((m) => (
+          <div key={m} className="grid gap-4">
+            {m !== 'both' ? <p className="-mb-2 text-xs font-bold text-muted">{MODE_LABEL[m]}</p> : null}
+            <OptionGroup
+              title="기본 테마"
+              label={m === 'both' ? '기본 테마' : `${MODE_LABEL[m]} 기본 테마`}
+              options={presets}
+              mode={m}
+              selected={m === 'dark' ? darkRef : lightRef}
+              disabled={!canTheme}
+              onPick={(ref) => pick(m, ref)}
+            />
+            {themesOn ? (
+              <OptionGroup
+                title={`내 테마 ${customs?.length ?? 0}/${MAX_THEMES}`}
+                label={m === 'both' ? '내 테마' : `${MODE_LABEL[m]} 내 테마`}
+                options={mine}
                 mode={m}
-                selected={m === 'light' ? lightRef : darkRef}
+                selected={m === 'dark' ? darkRef : lightRef}
                 disabled={!canTheme}
                 onPick={(ref) => pick(m, ref)}
                 onEdit={mineOn ? editRef(m) : undefined}
                 onAdd={mineOn ? addFrom(m) : undefined}
               />
-            </div>
-          ))
-        ) : (
-          <OptionGrid
-            label="테마"
-            options={options}
-            mode="both"
-            selected={lightRef}
-            disabled={!canTheme}
-            onPick={(ref) => pick('both', ref)}
-            onEdit={mineOn ? editRef('both') : undefined}
-            onAdd={mineOn ? addFrom('both') : undefined}
-          />
-        )}
-        {mineOn ? (
+            ) : null}
+          </div>
+        ))}
+        {mineOn && !customs?.length ? (
           <p className="text-xs text-muted">
-            {customs?.length
-              ? `내 테마 ${customs.length}/${MAX_THEMES} · 고른 내 테마의 연필을 누르면 색·그림·꾸미기를 고쳐요.`
-              : '+를 눌러 나만의 테마를 만들어 보세요. AI가 만들어 주거나, 기본 테마에서 시작해 직접 바꿀 수 있어요.'}
+            +를 눌러 나만의 테마를 만들어 보세요. AI가 만들어 주거나, 시그니처 테마·기본 테마·색 하나에서 시작해 직접 바꿀 수 있어요.
           </p>
         ) : null}
-        <Toggle label="밝을 때와 어두울 때 테마를 따로 고르기" checked={separate} onChange={setSeparateMode} disabled={!canTheme} />
+        <Toggle
+          label="밝을 때와 어두울 때 테마를 따로 고르기"
+          hint={skinNow ? '시그니처 테마는 밝을 때·어두울 때 같이 써요.' : undefined}
+          checked={separate}
+          onChange={setSeparateMode}
+          disabled={!canTheme}
+        />
       </section>
 
       {leftovers ? (
@@ -398,7 +515,9 @@ export function ThemeSettings({ me, theme, onChange }: { me: MeResponse; theme: 
                 <ThemeThumb spec={t.spec} />
                 <span className="min-w-0 flex-1">
                   <span className="block truncate font-semibold">{t.name}</span>
-                  <span className="text-xs text-muted">{t.spec.image ? (t.spec.image.kind === 'pattern' ? '무늬' : '배경 그림') : '색만'}</span>
+                  <span className="text-xs text-muted">
+                    {t.spec.skin ? `${SKINS[t.spec.skin.id].label} 스타일` : t.spec.image ? (t.spec.image.kind === 'pattern' ? '무늬' : '배경 그림') : '색만'}
+                  </span>
                 </span>
                 <Button size="sm" variant="ghost" className="text-bad" onClick={() => removeTheme(t)}>
                   지우기
@@ -411,7 +530,7 @@ export function ThemeSettings({ me, theme, onChange }: { me: MeResponse; theme: 
         <p className="text-xs text-muted">Supabase에서 schema.sql을 다시 실행하면 내 테마(AI 테마·배경 그림)를 만들 수 있어요.</p>
       ) : null}
 
-      <GlowSettings glow={glow} refs={{ light: lightRef, dark: darkRef }} disabled={!canTheme} onChange={changeGlow} />
+      <GlowSettings glow={glow} looks={glowLooks} disabled={!canTheme} onChange={changeGlow} />
 
       <Field label="글꼴">
         <div className="grid grid-cols-2 gap-2 sm:grid-cols-4" role="radiogroup" aria-label="테마 글꼴">
@@ -441,6 +560,11 @@ export function ThemeSettings({ me, theme, onChange }: { me: MeResponse; theme: 
             );
           })}
         </div>
+        {skinNow ? (
+          <p className="text-xs text-muted">
+            큰 제목은 {SKINS[skinNow.id].label}에 맞춘 {SKINS[skinNow.id].font} 글꼴이에요. 여기서는 본문 글꼴을 골라요.
+          </p>
+        ) : null}
       </Field>
       <Field label="노트 종이 무늬">
         <div className="grid grid-cols-4 gap-2" role="radiogroup" aria-label="노트 종이 무늬">
@@ -482,9 +606,9 @@ export function ThemeSettings({ me, theme, onChange }: { me: MeResponse; theme: 
           setAdding(false);
           setMaking(true);
         }}
-        onTemplate={(c) => {
+        onStart={(s) => {
           setAdding(false);
-          setEditing({ template: c });
+          setStudio(s);
         }}
       />
       <ThemeMaker
@@ -500,117 +624,99 @@ export function ThemeSettings({ me, theme, onChange }: { me: MeResponse; theme: 
           toast(message, 'ok', notice ? undefined : DONE);
         }}
       />
-      <ThemeEditor
-        key={isTemplate(editing) ? `new-${editing.template}` : (editing?.id ?? 'none')}
-        me={me}
-        target={editing}
-        onClose={() => setEditing(null)}
-        onSaved={(row, apply) => {
-          saved(row);
-          if (!apply) return;
-          const ref = `custom:${row.id}`;
-          const t = latest.current.theme;
-          // 이미 쓰는 테마면 밝을 때·어두울 때 자리는 그대로 (saved 가 새 색을 바로 붙였다)
-          if (themeRef(t, 'light') === ref || themeRef(t, 'dark') === ref) return;
-          // 따로 고르는 중이면 '+'·연필을 누른 쪽에 (모르면 지금 보이는 쪽)
-          pick(latest.current.separate ? (useFor !== 'both' ? useFor : currentMode()) : 'both', ref);
-        }}
-        onDeleted={(id) => {
-          setEditing(null);
-          removed(id);
-        }}
-      />
-    </div>
-  );
-}
-
-/** 묶음 제목: 왼쪽 이름, 오른쪽 지금 고른 것 (긴 이름은 말줄임) */
-function GroupHead({ id, title, value }: { id: string; title: string; value?: string }) {
-  return (
-    <div className="flex min-w-0 items-baseline justify-between gap-3">
-      <h3 id={id} className="shrink-0 text-sm font-semibold">
-        {title}
-      </h3>
-      {value ? <span className="min-w-0 truncate text-xs font-semibold text-muted">{value}</span> : null}
-    </div>
-  );
-}
-
-/** 작은 화면의 화면 빛 (globals.css .kok-aura 를 작은 화면 크기로: 위 두 개·아래 두 개) */
-const MINI_AURA = [
-  'radial-gradient(85% 42% at 12% -11%, var(--aura-1), transparent)',
-  'radial-gradient(75% 42% at 94% -8%, var(--aura-2), transparent)',
-  'radial-gradient(85% 47% at 0% 111%, var(--aura-3), transparent)',
-  'radial-gradient(75% 47% at 100% 111%, var(--aura-4), transparent)',
-].join(', ');
-
-/** 한 모드 모습의 색 칸(+ 꾸미기 칸)을 CSS 변수로: 미리보기 안에서만 그 테마 색을 쓴다 */
-function lookVars(look: ModeLook): CSSProperties {
-  return { ...look.tokens, ...(look.fx ?? {}) } as unknown as CSSProperties;
-}
-
-/** 작은 화면: 바탕(그림)·화면 빛, 큰 제목, 카드(흐린 글자 두 줄 + 포인트 버튼), + 버튼. 실제 화면과 같은 색 칸으로 그린다 */
-function MiniScreen({ look }: { look: ModeLook }) {
-  const t = look.tokens;
-  return (
-    <span className="absolute inset-0 block" style={{ ...lookVars(look), background: t['--bg'] }} aria-hidden="true">
-      {look.image ? (
-        <>
-          <span
-            className="absolute inset-0"
-            style={{
-              backgroundImage: imageCss(look.image),
-              backgroundSize: look.image.kind === 'pattern' ? `${PATTERN_SIZE / 5}px` : 'cover',
-              backgroundRepeat: look.image.kind === 'pattern' ? 'repeat' : 'no-repeat',
-              backgroundPosition: 'center',
-            }}
-          />
-          <span className="absolute inset-0" style={{ background: t['--bg'], opacity: look.dim }} />
-        </>
-      ) : null}
-      {look.fx ? <span className="absolute inset-0" style={{ background: MINI_AURA }} /> : null}
-      <span className="absolute left-[11%] top-[9%] h-[6%] w-[44%] rounded-full" style={{ background: t['--ink'] }} />
-      <span className="absolute inset-x-[9%] top-[22%] h-[48%] rounded-[12px]" style={{ background: t['--surface'] }}>
-        <span className="absolute left-[12%] top-[16%] h-[9%] w-[70%] rounded-full opacity-45" style={{ background: t['--muted'] }} />
-        <span className="absolute left-[12%] top-[34%] h-[9%] w-[48%] rounded-full opacity-45" style={{ background: t['--muted'] }} />
-        <span
-          className="absolute bottom-[13%] left-[12%] h-[22%] w-[58%] rounded-full"
-          style={{ background: t['--accent'], backgroundImage: look.fx ? 'linear-gradient(135deg, var(--accent), var(--btn-2))' : undefined }}
+      {studio ? (
+        <ThemeStudio
+          key={studio.kind === 'edit' ? studio.theme.id : `${studio.kind}-${JSON.stringify(studio)}`}
+          me={me}
+          start={studio}
+          glow={glow}
+          userFont={theme.font}
+          userPaper={theme.paper}
+          motion={theme.motion !== false}
+          onClose={() => setStudio(null)}
+          onSaved={(row, apply) => {
+            saved(row);
+            if (!apply) return;
+            const ref = `custom:${row.id}`;
+            const t = latest.current.theme;
+            // 이미 쓰는 테마면 밝을 때·어두울 때 자리는 그대로 (saved 가 새 색을 바로 붙였다)
+            if (themeRef(t, 'light') === ref || themeRef(t, 'dark') === ref) return;
+            // 시그니처 스타일로 만든 테마는 두 모드에 같이. 따로 고르는 중이면 '+'·연필을 누른 쪽에 (모르면 지금 보이는 쪽)
+            const skinTheme = !!readSpec(row.spec)?.skin;
+            if (skinTheme) {
+              setSeparate(false);
+              pick('both', ref);
+              return;
+            }
+            pick(latest.current.separate ? (useFor !== 'both' ? useFor : currentMode()) : 'both', ref);
+          }}
+          onDeleted={(id) => {
+            setStudio(null);
+            removed(id);
+          }}
         />
-      </span>
-      <span
-        className="absolute bottom-[6%] right-[8%] grid aspect-square w-[28%] place-items-center rounded-full"
-        style={{ background: t['--fab'], backgroundImage: look.fx ? 'linear-gradient(140deg, var(--fab), var(--fab-2))' : undefined }}
-      >
-        <svg viewBox="0 0 24 24" className="h-[56%] w-[56%]" fill="none" stroke={t['--fab-ink']} strokeWidth={3.2} strokeLinecap="round">
-          <path d="M12 6v12M6 12h12" />
-        </svg>
-      </span>
-    </span>
+      ) : null}
+    </div>
   );
 }
 
-/** 작은 화면 한 칸 (같게 쓸 때는 대각선으로 나눠 밝을 때·어두울 때를 같이) */
-function MiniTile({ looks, mode }: { looks: Record<Mode, ModeLook>; mode: Mode | 'both' }) {
+/** 시그니처 테마 고르는 칸: 그 모양을 줄여 그린 그림 + 이름 + 한 줄 설명 */
+function SkinGrid({ selected, disabled, onPick }: { selected: SkinId | null; disabled: boolean; onPick: (id: SkinId) => void }) {
+  const index = Math.max(0, selected ? SKIN_IDS.indexOf(selected) : 0);
   return (
-    <>
-      <MiniScreen look={looks[mode === 'dark' ? 'dark' : 'light']} />
-      {mode === 'both' ? (
-        // 오른쪽 아래 반은 어두울 때 모습
-        <span className="absolute inset-0 [clip-path:polygon(100%_0,100%_100%,0_100%)]" aria-hidden="true">
-          <MiniScreen look={looks.dark} />
-        </span>
-      ) : null}
-    </>
+    <div className="grid grid-cols-2 gap-x-3 gap-y-4 sm:grid-cols-3" role="radiogroup" aria-label="시그니처 테마">
+      {SKIN_IDS.map((id, i) => {
+        const on = selected === id;
+        const info = SKINS[id];
+        return (
+          <button
+            key={id}
+            type="button"
+            role="radio"
+            aria-checked={on}
+            aria-label={info.label}
+            aria-describedby={`skin-tag-${id}`}
+            disabled={disabled}
+            tabIndex={i === index ? 0 : -1}
+            onKeyDown={(e) => radioKeys(e, i, SKIN_IDS.length, (n) => onPick(SKIN_IDS[n]))}
+            onClick={() => onPick(id)}
+            className="press group grid min-w-0 gap-1.5 rounded-[20px] text-left disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            <span
+              className={cx(
+                'relative block aspect-[4/3] w-full overflow-hidden rounded-[18px] transition-shadow duration-200',
+                on
+                  ? 'shadow-[0_0_0_2px_var(--surface),0_0_0_4px_var(--ink)]'
+                  : 'shadow-[0_0_0_1px_var(--line)] group-hover:shadow-[0_0_0_1px_var(--line),0_8px_20px_var(--shadow-strong)]',
+              )}
+            >
+              <SkinMini id={id} colors={skinDefaults(id)} />
+              {on ? (
+                <span className="kok-check-in absolute right-1.5 top-1.5 grid h-6 w-6 place-items-center rounded-full bg-ink text-surface" aria-hidden="true">
+                  <Icon d={ICONS.check} size={13} strokeWidth={3.2} />
+                </span>
+              ) : null}
+            </span>
+            <span className="px-0.5">
+              <span className={cx('block truncate text-sm font-bold', on ? 'text-ink' : 'text-ink/90')}>{info.label}</span>
+              <span id={`skin-tag-${id}`} className="line-clamp-2 text-[11px] leading-snug text-muted">
+                {info.tagline}
+              </span>
+            </span>
+          </button>
+        );
+      })}
+    </div>
   );
 }
 
 /**
- * 테마 고르는 칸 (기본 테마 + 내가 만든 테마). 같게 쓸 때는 작은 화면을 대각선으로 나눠 밝을 때·어두울 때를 같이 보여 준다. 화살표로도 고른다.
+ * 테마 고르는 칸 (기본 테마 또는 내 테마). 같게 쓸 때는 작은 화면을 대각선으로 나눠 밝을 때·어두울 때를 같이 보여 준다. 화살표로도 고른다.
  * 고르기 칸(radiogroup)은 display: contents 라서 칸만 격자에 놓이고, 그 뒤에 '+'(새 테마) 칸이 이어진다.
  * 고른 칸이 내 테마면 그 칸 왼쪽 위에 연필(고치기)을 겹쳐 둔다: 고르기 칸 밖의 버튼이라 격자 칸 자리(grid-area)에 absolute 로 놓는다.
  */
-function OptionGrid({
+function OptionGroup({
+  title,
   label,
   options,
   mode,
@@ -620,6 +726,7 @@ function OptionGrid({
   onEdit,
   onAdd,
 }: {
+  title: string;
   label: string;
   options: Option[];
   mode: Mode | 'both';
@@ -633,102 +740,109 @@ function OptionGrid({
 }) {
   const sel = options.findIndex((o) => o.ref === selected);
   const index = Math.max(0, sel);
-  const editable = !!onEdit && sel >= 0 && options[sel].ref.startsWith('custom:');
+  const editable = !!onEdit && sel >= 0;
   // 연필 자리: 폰은 4칸, 넓은 화면은 6칸 격자
-  const at = { '--c4': (sel % 4) + 1, '--r4': Math.floor(sel / 4) + 1, '--c6': (sel % 6) + 1, '--r6': Math.floor(sel / 6) + 1 } as CSSProperties;
+  const at = { '--c4': (sel % 4) + 1, '--r4': Math.floor(sel / 4) + 1, '--c6': (sel % 6) + 1, '--r6': Math.floor(sel / 6) + 1 } as React.CSSProperties;
+  if (!options.length && !onAdd) return null;
   return (
-    <div className="relative grid grid-cols-4 gap-x-2 gap-y-3 sm:grid-cols-6">
-      <div className="contents" role="radiogroup" aria-label={label}>
-        {options.map((o, i) => {
-          const on = o.ref === selected;
-          return (
-            <button
-              key={o.ref}
-              type="button"
-              role="radio"
-              aria-checked={on}
-              disabled={disabled}
-              tabIndex={i === index ? 0 : -1}
-              onKeyDown={(e) => radioKeys(e, i, options.length, (n) => onPick(options[n].ref))}
-              onClick={() => onPick(o.ref)}
-              className="press group grid min-w-0 gap-1.5 rounded-[18px] text-xs font-semibold disabled:cursor-not-allowed disabled:opacity-50"
-            >
-              <span
-                className={cx(
-                  'relative block aspect-[3/4] w-full overflow-hidden rounded-[16px] transition-shadow duration-200',
-                  on
-                    ? 'shadow-[0_0_0_2px_var(--surface),0_0_0_4px_var(--ink)]'
-                    : 'shadow-[0_0_0_1px_var(--line)] group-hover:shadow-[0_0_0_1px_var(--line),0_6px_16px_var(--shadow-strong)]',
-                )}
+    <div className="grid gap-2">
+      <p className="text-xs font-semibold text-muted">{title}</p>
+      <div className="relative grid grid-cols-4 gap-x-2 gap-y-3 sm:grid-cols-6">
+        <div className="contents" role="radiogroup" aria-label={label}>
+          {options.map((o, i) => {
+            const on = o.ref === selected;
+            return (
+              <button
+                key={o.ref}
+                type="button"
+                role="radio"
+                aria-checked={on}
+                disabled={disabled}
+                tabIndex={i === index ? 0 : -1}
+                onKeyDown={(e) => radioKeys(e, i, options.length, (n) => onPick(options[n].ref))}
+                onClick={() => onPick(o.ref)}
+                className="press group grid min-w-0 gap-1.5 rounded-[18px] text-xs font-semibold disabled:cursor-not-allowed disabled:opacity-50"
               >
-                <MiniTile looks={o.looks} mode={mode} />
-                {o.image ? (
-                  <span className="absolute bottom-1.5 left-1.5 grid h-5 w-5 place-items-center rounded-full bg-surface text-ink shadow" aria-hidden="true">
-                    <Icon d={ICONS.image} size={11} strokeWidth={2.4} />
-                  </span>
-                ) : null}
-                {on ? (
-                  <span className="kok-check-in absolute right-1.5 top-1.5 grid h-5 w-5 place-items-center rounded-full bg-ink text-surface" aria-hidden="true">
-                    <Icon d={ICONS.check} size={12} strokeWidth={3.2} />
-                  </span>
-                ) : null}
-              </span>
-              <span className={cx('w-full truncate text-center', on ? 'text-ink' : 'text-muted group-hover:text-ink')}>{o.label}</span>
-            </button>
-          );
-        })}
+                <span
+                  className={cx(
+                    'relative block aspect-[3/4] w-full overflow-hidden rounded-[16px] transition-shadow duration-200',
+                    on
+                      ? 'shadow-[0_0_0_2px_var(--surface),0_0_0_4px_var(--ink)]'
+                      : 'shadow-[0_0_0_1px_var(--line)] group-hover:shadow-[0_0_0_1px_var(--line),0_6px_16px_var(--shadow-strong)]',
+                  )}
+                >
+                  {o.spec?.skin ? <SkinMini id={o.spec.skin.id} colors={o.spec.skin} /> : <MiniTile looks={o.looks} mode={mode} />}
+                  {o.image ? (
+                    <span className="absolute bottom-1.5 left-1.5 grid h-5 w-5 place-items-center rounded-full bg-surface text-ink shadow" aria-hidden="true">
+                      <Icon d={ICONS.image} size={11} strokeWidth={2.4} />
+                    </span>
+                  ) : null}
+                  {on ? (
+                    <span
+                      className="kok-check-in absolute right-1.5 top-1.5 grid h-5 w-5 place-items-center rounded-full bg-ink text-surface"
+                      aria-hidden="true"
+                    >
+                      <Icon d={ICONS.check} size={12} strokeWidth={3.2} />
+                    </span>
+                  ) : null}
+                </span>
+                <span className={cx('w-full truncate text-center', on ? 'text-ink' : 'text-muted group-hover:text-ink')}>{o.label}</span>
+              </button>
+            );
+          })}
+        </div>
+        {editable ? (
+          <button
+            key={`edit-${options[sel].ref}`}
+            type="button"
+            aria-label={`'${options[sel].label}' 테마 고치기`}
+            title="테마 고치기"
+            onClick={() => onEdit(options[sel].ref)}
+            style={at}
+            className="press kok-check-in absolute left-1 top-1 z-10 grid h-8 w-8 place-items-center rounded-full bg-surface text-ink shadow-[0_2px_10px_var(--shadow-strong)] ring-1 ring-line [grid-column:var(--c4)] [grid-row:var(--r4)] hover:bg-surface-2 sm:[grid-column:var(--c6)] sm:[grid-row:var(--r6)]"
+          >
+            <Icon d={ICONS.pen} size={15} strokeWidth={2.2} />
+          </button>
+        ) : null}
+        {onAdd ? (
+          <button
+            type="button"
+            onClick={onAdd}
+            disabled={disabled}
+            aria-label="새 테마 만들기"
+            className="press group grid min-w-0 gap-1.5 rounded-[18px] text-xs font-semibold disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            <span className="grid aspect-[3/4] w-full place-items-center rounded-[16px] border-2 border-dashed border-line text-muted transition-colors duration-200 group-hover:border-accent group-hover:text-accent">
+              <Icon d={ICONS.plus} size={24} strokeWidth={2.2} />
+            </span>
+            <span className="w-full truncate text-center text-muted group-hover:text-ink">새 테마</span>
+          </button>
+        ) : null}
       </div>
-      {editable ? (
-        <button
-          key={`edit-${options[sel].ref}`}
-          type="button"
-          aria-label={`'${options[sel].label}' 테마 고치기`}
-          title="테마 고치기"
-          onClick={() => onEdit(options[sel].ref)}
-          style={at}
-          className="press kok-check-in absolute left-1 top-1 z-10 grid h-8 w-8 place-items-center rounded-full bg-surface text-ink shadow-[0_2px_10px_var(--shadow-strong)] ring-1 ring-line [grid-column:var(--c4)] [grid-row:var(--r4)] hover:bg-surface-2 sm:[grid-column:var(--c6)] sm:[grid-row:var(--r6)]"
-        >
-          <Icon d={ICONS.pen} size={15} strokeWidth={2.2} />
-        </button>
-      ) : null}
-      {onAdd ? (
-        <button
-          type="button"
-          onClick={onAdd}
-          disabled={disabled}
-          aria-label="새 테마 만들기"
-          className="press group grid min-w-0 gap-1.5 rounded-[18px] text-xs font-semibold disabled:cursor-not-allowed disabled:opacity-50"
-        >
-          <span className="grid aspect-[3/4] w-full place-items-center rounded-[16px] border-2 border-dashed border-line text-muted transition-colors duration-200 group-hover:border-accent group-hover:text-accent">
-            <Icon d={ICONS.plus} size={24} strokeWidth={2.2} />
-          </span>
-          <span className="w-full truncate text-center text-muted group-hover:text-ink">새 테마</span>
-        </button>
-      ) : null}
     </div>
   );
 }
 
-/** '+' 칸: 새 테마를 AI로 만들거나, 기본 테마 하나에서 시작해 직접 만든다 */
+/** '+' 칸: 새 테마를 AI로 만들거나, 시그니처 테마·색 하나·기본 테마에서 시작해 직접 만든다 */
 function NewThemeSheet({
   open,
   est,
   aiEnabled,
   onClose,
   onAi,
-  onTemplate,
+  onStart,
 }: {
   open: boolean;
   est: number;
   aiEnabled: boolean;
   onClose: () => void;
   onAi: () => void;
-  onTemplate: (c: ThemeColor) => void;
+  onStart: (s: StudioStart) => void;
 }) {
   const looks = useMemo(() => THEME_COLORS.map((c) => ({ c, looks: { light: presetLookFx(c, 'light'), dark: presetLookFx(c, 'dark') } })), []);
   return (
     <Sheet open={open} onClose={onClose} title="새 테마 만들기">
-      <div className="grid gap-5">
+      <div className="grid gap-6">
         <button
           type="button"
           disabled={!aiEnabled}
@@ -749,17 +863,45 @@ function NewThemeSheet({
               : '지금은 AI 기능을 잠깐 쉬고 있어요. 직접 만들기는 할 수 있어요.'}
           </span>
         </button>
-        <section className="grid gap-2" aria-labelledby="new-theme-base">
-          <h3 id="new-theme-base" className="text-sm font-semibold">
-            직접 만들기
-          </h3>
-          <p className="-mt-1 text-xs text-muted">시작할 테마를 골라요. 색·배경 그림·꾸미기는 다음 화면에서 바꿔요.</p>
+        <StartGroup id="new-theme-skin" title="시그니처 테마에서 시작" hint="모양은 그대로, 두 가지 색만 내 마음대로 바꿔요.">
+          <div className="grid grid-cols-3 gap-x-2 gap-y-3">
+            {SKIN_IDS.map((id) => (
+              <button
+                key={id}
+                type="button"
+                onClick={() => onStart({ kind: 'skin', id })}
+                aria-label={`${SKINS[id].label}에서 시작하기`}
+                className="press group grid min-w-0 gap-1.5 rounded-[18px] text-xs font-semibold"
+              >
+                <span className="relative block aspect-[4/3] w-full overflow-hidden rounded-[14px] shadow-[0_0_0_1px_var(--line)] transition-shadow duration-200 group-hover:shadow-[0_0_0_1px_var(--line),0_6px_16px_var(--shadow-strong)]">
+                  <SkinMini id={id} colors={skinDefaults(id)} />
+                </span>
+                <span className="w-full truncate text-center text-muted group-hover:text-ink">{SKINS[id].label}</span>
+              </button>
+            ))}
+          </div>
+        </StartGroup>
+        <StartGroup id="new-theme-color" title="색 하나로 시작" hint="좋아하는 색을 고르면 밝을 때·어두울 때 색을 모두 맞춰 줘요.">
+          <div className="flex flex-wrap gap-2">
+            {ACCENT_SWATCHES.map((c) => (
+              <button
+                key={c}
+                type="button"
+                aria-label={`${c} 색으로 시작하기`}
+                onClick={() => onStart({ kind: 'color', color: c })}
+                className="press h-9 w-9 rounded-full shadow-[0_0_0_1px_var(--line)] hover:shadow-[0_0_0_2px_var(--surface),0_0_0_4px_var(--ink)]"
+                style={{ background: c }}
+              />
+            ))}
+          </div>
+        </StartGroup>
+        <StartGroup id="new-theme-base" title="기본 테마에서 시작" hint="시작할 테마를 골라요. 색·배경 그림·꾸미기는 다음 화면에서 바꿔요.">
           <div className="grid grid-cols-3 gap-x-2 gap-y-3 sm:grid-cols-5">
             {looks.map(({ c, looks: l }) => (
               <button
                 key={c}
                 type="button"
-                onClick={() => onTemplate(c)}
+                onClick={() => onStart({ kind: 'preset', color: c })}
                 aria-label={`${THEME_COLOR_INFO[c].label}에서 시작하기`}
                 className="press group grid min-w-0 gap-1.5 rounded-[18px] text-xs font-semibold"
               >
@@ -770,760 +912,21 @@ function NewThemeSheet({
               </button>
             ))}
           </div>
-        </section>
+        </StartGroup>
       </div>
     </Sheet>
   );
 }
 
-/**
- * 별표 빛 (Pro): 색 6가지와 세기. 밝을 때·어두울 때 작은 카드로 바로 보여 주고, 미리보기의 별을 눌러 켜고 끄는 움직임도 볼 수 있다.
- * 카드 안 빛은 글자가 읽히는 만큼만 옅게(themes/glow.ts), 테두리와 카드 밖 빛은 고른 세기 그대로.
- */
-function GlowSettings({
-  glow,
-  refs,
-  disabled,
-  onChange,
-}: {
-  glow: Glow;
-  refs: Record<Mode, string>;
-  disabled: boolean;
-  onChange: (patch: Partial<Glow>) => void;
-}) {
-  const looks = { light: lookFor(refs.light, 'light'), dark: lookFor(refs.dark, 'dark') };
-  const index = Math.max(0, GLOW_TONES.indexOf(glow.tone));
-  // 색 동그라미는 지금 화면 밝기의 테마 색으로 ('테마 색' 빛은 모드마다 다르다)
-  const scheme = useSyncExternalStore(subscribeTheme, themeSnapshot, () => 'light:0');
-  const nowMode: Mode = scheme.startsWith('dark') ? 'dark' : 'light';
-  // 세기: 끄는 동안에는 미리보기만 바꾸고(설정 화면 전체를 다시 그리지 않게) 손을 떼면 한 번 저장한다. 키보드로 바꾸면 바로 저장
-  const [dragging, setDragging] = useState<number | null>(null);
-  const drag = useRef<{ value: number; start: number } | null>(null);
-  const startDrag = () => {
-    if (disabled || drag.current) return;
-    drag.current = { value: glow.strength, start: glow.strength };
-    const stop = new AbortController();
-    const done = () => {
-      stop.abort();
-      const d = drag.current;
-      drag.current = null;
-      setDragging(null);
-      if (d && d.value !== d.start) onChange({ strength: d.value });
-    };
-    window.addEventListener('pointerup', done, { signal: stop.signal });
-    window.addEventListener('pointercancel', done, { signal: stop.signal });
-  };
-  const strength = dragging ?? glow.strength;
-  const shown = { ...glow, strength };
+function StartGroup({ id, title, hint, children }: { id: string; title: string; hint: string; children: ReactNode }) {
   return (
-    <section className="grid gap-3" aria-labelledby="glow-title">
-      <GroupHead id="glow-title" title="별표 빛" value={`${GLOW_TONE_INFO[glow.tone].label} · ${strength === 0 ? '빛 끔' : `${strength}%`}`} />
-      <p className="-mt-1.5 text-xs text-muted">별표한 개념과 자료가 이 빛으로 물들어요. 미리보기의 별을 눌러 보세요.</p>
-      <div className="grid grid-cols-2 gap-2">
-        {MODES.map((m) => (
-          <GlowPreview key={m} mode={m} look={looks[m]} glow={shown} />
-        ))}
-      </div>
-      <div className="grid grid-cols-6 gap-1" role="radiogroup" aria-label="별표 빛 색">
-        {GLOW_TONES.map((tone, i) => {
-          const on = glow.tone === tone;
-          const [c1, c2] = glowPair(tone, looks[nowMode].tokens);
-          return (
-            <button
-              key={tone}
-              type="button"
-              role="radio"
-              aria-checked={on}
-              disabled={disabled}
-              tabIndex={i === index ? 0 : -1}
-              onKeyDown={(e) => radioKeys(e, i, GLOW_TONES.length, (n) => onChange({ tone: GLOW_TONES[n] }))}
-              onClick={() => onChange({ tone })}
-              className="press group grid min-w-0 justify-items-center gap-1.5 rounded-2xl py-1 text-[11px] font-semibold disabled:cursor-not-allowed disabled:opacity-50"
-            >
-              <span
-                className={cx(
-                  'grid h-9 w-9 place-items-center rounded-full transition-shadow duration-200',
-                  on ? 'shadow-[0_0_0_2px_var(--surface),0_0_0_4px_var(--ink)]' : 'shadow-[0_0_0_1px_var(--line)]',
-                )}
-                style={{ background: `linear-gradient(135deg, ${c1}, ${c2})` }}
-                aria-hidden="true"
-              >
-                {on ? (
-                  <span className="kok-check-in grid place-items-center" style={{ color: onTone(c1, c2) }}>
-                    <Icon d={ICONS.check} size={15} strokeWidth={3} />
-                  </span>
-                ) : null}
-              </span>
-              <span className={cx('w-full truncate text-center', on ? 'text-ink' : 'text-muted group-hover:text-ink')}>{GLOW_TONE_INFO[tone].label}</span>
-            </button>
-          );
-        })}
-      </div>
-      <label className="grid gap-1.5">
-        <span className="flex items-baseline justify-between gap-2 text-sm">
-          <span className="font-semibold">세기</span>
-          <span className="text-xs font-semibold tabular-nums text-muted">{strength === 0 ? '빛 없이 별만' : `${strength}%`}</span>
-        </span>
-        <input
-          type="range"
-          min={0}
-          max={100}
-          step={5}
-          value={strength}
-          disabled={disabled}
-          aria-label="별표 빛 세기"
-          aria-valuetext={strength === 0 ? '빛 없이 별만' : `${strength}퍼센트`}
-          className="w-full accent-[var(--accent)] disabled:cursor-not-allowed disabled:opacity-50"
-          onPointerDown={startDrag}
-          onChange={(e) => {
-            const v = Number(e.target.value);
-            if (drag.current) {
-              drag.current.value = v;
-              setDragging(v);
-            } else onChange({ strength: v });
-          }}
-        />
-        <span className="flex justify-between text-xs text-muted" aria-hidden="true">
-          <span>은은하게</span>
-          <span>선명하게</span>
-        </span>
-      </label>
+    <section className="grid gap-2" aria-labelledby={id}>
+      <h3 id={id} className="text-sm font-semibold">
+        {title}
+      </h3>
+      <p className="-mt-1 text-xs text-muted">{hint}</p>
+      {children}
     </section>
-  );
-}
-
-/** 그라데이션 동그라미 위 체크 색: 두 색 모두에서 더 잘 보이는 쪽 */
-function onTone(c1: string, c2: string): string {
-  const dark = Math.min(contrast('#111111', c1), contrast('#111111', c2));
-  const light = Math.min(contrast('#ffffff', c1), contrast('#ffffff', c2));
-  return dark >= light ? '#111111' : '#ffffff';
-}
-
-/** 별표 빛 미리보기: 그 모드의 바탕 위 작은 카드. 별을 누르면 빛이 번지고 오므라드는 것을 볼 수 있다 */
-function GlowPreview({ mode, look, glow }: { mode: Mode; look: ModeLook; glow: Glow }) {
-  const [on, setOn] = useState(true);
-  const t = look.tokens;
-  // 이 미리보기 안에서만 그 모드의 색 칸을 쓴다 (화면 밝기와 상관없이 두 모드를 같이 보여 준다)
-  const vars = { ...t, ...glowTokens(t, glow, mode) } as unknown as CSSProperties;
-  return (
-    <div
-      className="relative grid gap-2 overflow-hidden rounded-2xl p-2.5 pb-3.5 ring-1 ring-line"
-      style={{ ...vars, background: t['--bg'], color: t['--ink'] }}
-    >
-      <p className="text-[11px] font-semibold" style={{ color: t['--muted'] }}>
-        {MODE_LABEL[mode]}
-      </p>
-      <div className={cx('kok-card kok-glow grid gap-0.5 py-2.5 pl-3 pr-9', on && 'is-starred')} style={{ background: t['--surface'] }}>
-        <p className="truncate text-[13px] font-bold leading-snug">광합성</p>
-        <p className="line-clamp-2 text-[11px] leading-snug break-keep" style={{ color: t['--muted'] }}>
-          빛 에너지로 포도당을 만들어요
-        </p>
-        <StarButton small className="absolute right-0.5 top-0.5" on={on} label={`${MODE_LABEL[mode]} 미리보기 별표`} onToggle={() => setOn((v) => !v)} />
-      </div>
-    </div>
-  );
-}
-
-/** 작은 미리보기 (밝을 때 | 어두울 때) */
-function ThemeThumb({ spec }: { spec: ThemeSpec }) {
-  return (
-    <span className="grid h-12 w-16 shrink-0 grid-cols-2 overflow-hidden rounded-xl ring-1 ring-line" aria-hidden="true">
-      {MODES.map((m) => (
-        <span key={m} className="relative grid place-items-center" style={{ background: spec[m].bg }}>
-          {spec.image ? (
-            <span
-              className="absolute inset-0"
-              style={{
-                backgroundImage: imageCss(spec.image),
-                backgroundSize: spec.image.kind === 'pattern' ? `${PATTERN_SIZE / 4}px` : 'cover',
-                backgroundPosition: 'center',
-                opacity: 1 - spec.dim * 0.7,
-              }}
-            />
-          ) : null}
-          <span className="relative h-3.5 w-3.5 rounded-full" style={{ background: spec[m].accent }} />
-        </span>
-      ))}
-    </span>
-  );
-}
-
-/**
- * 테마 고치기 미리보기: 작은 폰 화면 (바탕·그림·화면 위·아래 빛, 큰 제목, 빛나는 핵심 카드와 두 색 버튼, 고른 칩, 작은 카드,
- * 아래 메뉴(비치는 정도·떠 있기)와 + 버튼). 실제 화면과 같은 계산(specLookFx)과 같은 CSS(.kok-hero·.kok-tabbar …)로 그린다
- */
-function ThemeScreen({ look, mode, fx }: { look: ModeLook; mode: Mode; fx: ThemeFx }) {
-  const t = look.tokens;
-  const float = fx.floatTab;
-  return (
-    <div className="grid gap-1">
-      <p className="text-center text-[11px] font-semibold text-muted">{MODE_LABEL[mode]}</p>
-      <div
-        className="relative aspect-[9/13] overflow-hidden rounded-[18px] ring-1 ring-line [isolation:isolate]"
-        style={{ ...lookVars(look), background: t['--bg'], color: t['--ink'] }}
-        aria-hidden="true"
-      >
-        {look.image ? (
-          <>
-            <div
-              className="absolute inset-0 -z-10"
-              style={{
-                backgroundImage: imageCss(look.image),
-                backgroundSize: look.image.kind === 'pattern' ? `${PATTERN_SIZE / 2}px` : 'cover',
-                backgroundRepeat: look.image.kind === 'pattern' ? 'repeat' : 'no-repeat',
-                backgroundPosition: 'center',
-              }}
-            />
-            <div className="absolute inset-0 -z-10" style={{ background: t['--bg'], opacity: look.dim }} />
-          </>
-        ) : null}
-        <div className="absolute inset-0 -z-10" style={{ background: MINI_AURA }} />
-        <div className="absolute inset-x-[7%] top-[9%] grid gap-0.5" style={{ textShadow: look.halo ? haloShadow(0.35) : undefined }}>
-          <p className="truncate font-display text-[11px] leading-tight">오늘 복습 6문제</p>
-          <p className="truncate text-[7px]" style={{ color: t['--muted'] }}>
-            잊어버리기 직전이에요
-          </p>
-        </div>
-        <div className="kok-card kok-hero absolute inset-x-[7%] top-[24%] grid gap-1 rounded-[11px] p-1.5" style={{ background: t['--surface'] }}>
-          <span className="h-[3px] w-3/4 rounded-full opacity-45" style={{ background: t['--muted'] }} />
-          <span className="h-[3px] w-1/2 rounded-full opacity-45" style={{ background: t['--muted'] }} />
-          <span
-            className="mt-0.5 rounded-full py-[3px] text-center text-[6.5px] font-bold"
-            style={{
-              background: t['--accent'],
-              backgroundImage: 'linear-gradient(135deg, var(--accent), var(--btn-2))',
-              color: t['--accent-ink'],
-              boxShadow: '0 6px 12px -8px var(--btn-glow)',
-            }}
-          >
-            5분 KOK 시작
-          </span>
-        </div>
-        <div className="absolute inset-x-[7%] top-[51%] flex gap-1">
-          <span className="kok-chip-on rounded-full px-1.5 py-[2px] text-[6.5px] font-semibold">전체</span>
-          <span className="rounded-full px-1.5 py-[2px] text-[6.5px] font-semibold" style={{ background: t['--surface'] }}>
-            과학
-          </span>
-        </div>
-        <div className="kok-card absolute inset-x-[7%] top-[61%] grid gap-1 rounded-[9px] p-1.5" style={{ background: t['--surface'] }}>
-          <span className="flex gap-[3px]">
-            {[1, 1, 0, 1, 0].map((on, k) => (
-              <span
-                key={k}
-                className={cx('h-[6px] w-[6px] rounded-full', on === 1 && 'kok-dot-on')}
-                style={{ backgroundColor: on ? t['--fab'] : t['--surface-2'] }}
-              />
-            ))}
-          </span>
-          <span className="block h-[3px] overflow-hidden rounded-full" style={{ background: t['--surface-2'] }}>
-            {/* background 를 한꺼번에 적으면 꾸미기 그라데이션(.kok-bar 등)이 지워져서 색만 적는다 */}
-            <span className="kok-bar block h-full w-2/3 rounded-full" style={{ backgroundColor: t['--fab'] }} />
-          </span>
-        </div>
-        <div className="absolute inset-x-[7%] top-[75%] grid grid-cols-2 gap-1">
-          {[0, 1].map((k) => (
-            <span key={k} className="kok-card kok-detail-card h-[34px] rounded-[9px]" style={{ backgroundColor: t['--surface'] }} />
-          ))}
-        </div>
-        <div
-          className="kok-tabbar absolute flex h-[11%] items-center justify-around px-1"
-          style={{
-            left: float ? '5%' : 0,
-            right: float ? '5%' : 0,
-            bottom: float ? '3%' : 0,
-            paddingBottom: 0,
-            borderRadius: float ? 14 : 0,
-          }}
-        >
-          {[0, 1, 2, 3, 4].map((k) => (
-            <span key={k} className={cx('kok-tab-pill grid h-[58%] w-[17%] place-items-center rounded-full', k === 0 && 'is-on')}>
-              <span className="h-[5px] w-[5px] rounded-[2px]" style={{ background: k === 0 ? t['--accent'] : t['--muted'] }} />
-            </span>
-          ))}
-        </div>
-        <span
-          // 진짜 + 버튼 클래스(.kok-fab)를 쓰면 알림 자리 규칙(body:has(.kok-fab))이 움직여서 모양만 따라 그린다
-          className="absolute right-[6%] grid aspect-square w-[15%] place-items-center rounded-full"
-          style={{
-            bottom: float ? '17%' : '14%',
-            backgroundColor: t['--fab'],
-            backgroundImage: 'linear-gradient(140deg, var(--fab), var(--fab-2))',
-            boxShadow: '0 6px 14px -6px var(--fab-glow)',
-          }}
-        >
-          <svg viewBox="0 0 24 24" className="h-[56%] w-[56%]" fill="none" stroke={t['--fab-ink']} strokeWidth={3.2} strokeLinecap="round">
-            <path d="M12 6v12M6 12h12" />
-          </svg>
-        </span>
-      </div>
-    </div>
-  );
-}
-
-/** 화면 꾸미기 스위치 (12살도 알아듣게: 무엇이 어디서 바뀌는지) */
-const FX_SWITCHES: Array<{ key: 'top' | 'hero' | 'buttons' | 'bottom' | 'details' | 'floatTab'; label: string; hint: string }> = [
-  { key: 'top', label: '화면 위에 은은한 빛', hint: '큰 제목 뒤가 테마 색으로 은은하게 빛나요.' },
-  { key: 'hero', label: '중요한 카드가 빛나요', hint: '오늘의 KOK·복습 시작 카드에 빛 테두리가 생겨요.' },
-  { key: 'buttons', label: '버튼을 두 가지 색으로', hint: '시작 버튼·고른 칩·+ 버튼이 두 색으로 섞여요.' },
-  { key: 'bottom', label: '화면 아래에도 은은한 빛', hint: '아래 메뉴 쪽에서도 빛이 올라와요.' },
-  { key: 'details', label: '작은 카드에도 반짝이는 포인트', hint: '에너지 막대·공부한 날·바로 가기에 작은 빛이 생겨요.' },
-  { key: 'floatTab', label: '아래 메뉴를 띄우기', hint: '폰에서 아래 메뉴가 화면 끝에서 살짝 떠 있어요.' },
-];
-
-/** rgba(…, a) 의 a */
-const alphaOf = (v: string | undefined) => Number(/,\s*([\d.]+)\)$/.exec(v ?? '')?.[1] ?? 0);
-
-/**
- * 꾸미기 (테마마다): 스위치 여섯, 아래 메뉴가 비치는 정도, 빛 색. 바꾸면 위 미리보기에 바로 보인다.
- * 글자가 잘 보이게 빛을 옅게 한 경우(진한 바탕·그림)는 알려 준다.
- */
-function FxControls({ spec, looks, onChange }: { spec: ThemeSpec; looks: Record<Mode, ModeLook>; onChange: (fx: ThemeFx) => void }) {
-  const fx = spec.fx;
-  const set = (patch: Partial<ThemeFx>) => onChange({ ...fx, ...patch });
-  const index = Math.max(0, GLOW_TONES.indexOf(fx.aura));
-  const see = fx.tabSeeThrough;
-  // 화면 위 빛을 켰는데 글자 때문에 거의 안 보이게 줄인 모드
-  const faint = fx.top || fx.bottom ? MODES.filter((m) => Math.max(alphaOf(looks[m].fx?.['--aura-1']), alphaOf(looks[m].fx?.['--aura-3'])) < 0.03) : [];
-  return (
-    <section className="grid gap-3" aria-labelledby="theme-fx-title">
-      <div className="flex items-baseline justify-between gap-3">
-        <h3 id="theme-fx-title" className="text-sm font-semibold">
-          꾸미기
-        </h3>
-        {!isDefaultFx(fx) ? (
-          <button
-            type="button"
-            className="press rounded-full px-2.5 py-1 text-xs font-semibold text-accent hover:bg-accent-soft"
-            onClick={() => onChange({ ...DEFAULT_FX })}
-          >
-            처음대로
-          </button>
-        ) : null}
-      </div>
-      <p className="-mt-1.5 text-xs text-muted">별표 빛처럼 화면 곳곳에 은은한 빛을 넣어요. 바꾸면 위 미리보기에 바로 보여요.</p>
-      <div className="grid gap-1.5">
-        {FX_SWITCHES.map((sw) => (
-          <Toggle key={sw.key} label={sw.label} hint={sw.hint} checked={fx[sw.key]} onChange={(v) => set({ [sw.key]: v })} />
-        ))}
-      </div>
-      {faint.length ? (
-        <p className="rounded-2xl bg-surface-2 px-3 py-2 text-xs text-muted">
-          {faint.map((m) => MODE_LABEL[m]).join('·')}는 바탕{spec.image ? '·배경 그림' : ''} 때문에 글자가 잘 보이게 화면 빛을 아주 옅게 했어요.
-        </p>
-      ) : null}
-      <label className="grid gap-1.5">
-        <span className="flex items-baseline justify-between gap-2 text-sm">
-          <span className="font-semibold">아래 메뉴가 비치는 정도</span>
-          <span className="text-xs font-semibold tabular-nums text-muted">{see === 0 ? '안 비침' : `${see}%`}</span>
-        </span>
-        <input
-          type="range"
-          min={0}
-          max={60}
-          step={4}
-          value={see}
-          aria-label="아래 메뉴가 비치는 정도"
-          aria-valuetext={see === 0 ? '안 비침' : `${see}퍼센트 비침`}
-          className="w-full accent-[var(--accent)]"
-          onChange={(e) => set({ tabSeeThrough: Number(e.target.value) })}
-        />
-        <span className="flex justify-between text-xs text-muted" aria-hidden="true">
-          <span>안 비침</span>
-          <span>유리처럼</span>
-        </span>
-        {see > 30 ? <span className="text-xs text-muted">유리처럼 할수록 뒤 화면이 비쳐서 메뉴 글자가 조금 흐려 보일 수 있어요.</span> : null}
-      </label>
-      <div className="grid gap-1.5">
-        <p className="text-sm font-semibold">빛 색</p>
-        <div className="grid grid-cols-6 gap-1" role="radiogroup" aria-label="꾸미기 빛 색">
-          {GLOW_TONES.map((tone, i) => {
-            const on = fx.aura === tone;
-            const [c1, c2] = glowPair(tone, looks.light.tokens);
-            return (
-              <button
-                key={tone}
-                type="button"
-                role="radio"
-                aria-checked={on}
-                tabIndex={i === index ? 0 : -1}
-                onKeyDown={(e) => radioKeys(e, i, GLOW_TONES.length, (n) => set({ aura: GLOW_TONES[n] }))}
-                onClick={() => set({ aura: tone })}
-                className="press group grid min-w-0 justify-items-center gap-1.5 rounded-2xl py-1 text-[11px] font-semibold"
-              >
-                <span
-                  className={cx(
-                    'grid h-9 w-9 place-items-center rounded-full transition-shadow duration-200',
-                    on ? 'shadow-[0_0_0_2px_var(--surface),0_0_0_4px_var(--ink)]' : 'shadow-[0_0_0_1px_var(--line)]',
-                  )}
-                  style={{ background: `linear-gradient(135deg, ${c1}, ${c2})` }}
-                  aria-hidden="true"
-                >
-                  {on ? (
-                    <span className="kok-check-in grid place-items-center" style={{ color: onTone(c1, c2) }}>
-                      <Icon d={ICONS.check} size={15} strokeWidth={3} />
-                    </span>
-                  ) : null}
-                </span>
-                <span className={cx('w-full truncate text-center', on ? 'text-ink' : 'text-muted group-hover:text-ink')}>{GLOW_TONE_INFO[tone].label}</span>
-              </button>
-            );
-          })}
-        </div>
-      </div>
-    </section>
-  );
-}
-
-const newSpec = (): ThemeSpec => ({
-  light: basePalette('light'),
-  dark: basePalette('dark'),
-  image: null,
-  dim: 0.6,
-  font: null,
-  paper: null,
-  fx: { ...DEFAULT_FX },
-});
-
-/** 내가 만든 테마 만들기(기본 테마에서 시작)·고치기 */
-function ThemeEditor({
-  me,
-  target,
-  onClose,
-  onSaved,
-  onDeleted,
-}: {
-  me: MeResponse;
-  target: EditTarget | null;
-  onClose: () => void;
-  onSaved: (row: ThemeRow, apply: boolean) => void;
-  onDeleted: (id: string) => void;
-}) {
-  const toast = useToast();
-  const own = target && !isTemplate(target) ? target : null;
-  const [id, setId] = useState<string | null>(own?.id ?? null);
-  const [name, setName] = useState(own?.name ?? '');
-  const [spec, setSpec] = useState<ThemeSpec>(() => (own ? own.spec : isTemplate(target) ? specFromPreset(target.template) : newSpec()));
-  // 마지막으로 읽거나 저장한 테마의 updated_at (다른 곳에서 바뀌었으면 덮어쓰지 않게 서버가 확인한다)
-  const [updatedAt, setUpdatedAt] = useState<string | null>(own?.updatedAt ?? null);
-  const [kind, setKind] = useState<'none' | 'file' | 'ai' | 'pattern'>(() => {
-    const img = own?.spec.image ?? null;
-    return !img ? 'none' : img.kind === 'pattern' ? 'pattern' : 'file';
-  });
-  // 미리보기와 꾸미기 안내: 실제 화면과 같은 계산 (그림이 있으면 덮는 정도·글자 색·빛까지)
-  const looks = { light: specLookFx(spec, 'light'), dark: specLookFx(spec, 'dark') };
-  const [busy, setBusy] = useState<string | null>(null);
-  const [aiText, setAiText] = useState('');
-  const aiEst = Math.round(estimateSmallTask(clientModel(me, 'fast'), me.usdPerEnergy, 500, 150) * 10) / 10;
-  // 설명 없이 '다시 그리기'는 AI 가 그린 그림일 때만 (그 그림의 설명으로 다시 그린다)
-  const canRedraw = spec.image?.kind === 'file' && spec.image.ai === true;
-  // 실제 화면에서 덮는 정도 (직접 고르지 않은 테마는 글자가 잘 보이게 고른 값보다 올라갈 수 있다)
-  const realDims = MODES.map((m) => looks[m].dim);
-  const raised = !!spec.image && realDims.some((d) => d > spec.dim + 0.005);
-  // 직접 고른 값이 글자가 잘 보이는 정도보다 낮은 모드: 글자 뒤 바탕색 번짐(꾸미기 textHalo)을 고를 수 있다
-  const readDims = MODES.map((m) => looks[m].readDim ?? looks[m].dim);
-  const belowModes = spec.image ? MODES.filter((m, i) => readDims[i] > looks[m].dim + 0.005) : [];
-
-  const setColor = (m: Mode, k: keyof Palette, v: string) => setSpec((s) => ({ ...s, [m]: fitPalette({ ...s[m], [k]: v }, m, basePalette(m)) }));
-  // 그림을 바꾸면 덮는 정도는 그 그림의 처음 값부터 (직접 고른 값은 지운다)
-  const setImage = (image: ThemeImage | null, dim?: number) =>
-    setSpec((s) => ({ ...s, image, dim: dim ?? s.dim, dimExact: dim === undefined ? s.dimExact : undefined }));
-
-  /** 저장 (새 테마면 만든다). 저장한 행 */
-  const save = async (next: ThemeSpec = spec): Promise<ThemeRow | null> => {
-    const label = name.trim() || '내 테마';
-    try {
-      const r = id
-        ? await api<{ theme: ThemeRow }>(`/api/themes/${id}`, {
-            method: 'PATCH',
-            body: JSON.stringify({ name: label, spec: next, ...(updatedAt ? { updatedAt } : {}) }),
-          })
-        : await api<{ theme: ThemeRow }>('/api/themes', { method: 'POST', body: JSON.stringify({ name: label, spec: next }) });
-      setId(r.theme.id);
-      setName(r.theme.name);
-      setUpdatedAt(r.theme.updated_at ?? null);
-      return r.theme;
-    } catch (e) {
-      toast((e as Error).message, 'bad');
-      return null;
-    }
-  };
-
-  const upload = async (file: File | undefined) => {
-    if (!file) return;
-    setBusy('사진을 올리는 중…');
-    try {
-      const blob = await shrinkImage(file, 1600, 0.85);
-      const res = await fetch('/api/themes/images', { method: 'POST', headers: { 'content-type': 'image/jpeg' }, body: blob });
-      const body = (await res.json().catch(() => null)) as { id?: string; message?: string } | null;
-      if (!res.ok || !body?.id) throw new Error(body?.message ?? '사진을 올리지 못했어요.');
-      setImage({ kind: 'file', id: body.id }, Math.max(spec.dim, DIM_IMAGE));
-      setKind('file');
-    } catch (e) {
-      toast((e as Error).message, 'bad');
-    } finally {
-      setBusy(null);
-    }
-  };
-
-  const drawAi = async () => {
-    setBusy('AI가 그림을 그리는 중… (30초쯤)');
-    try {
-      // 그림은 저장한 테마에 그린다 (새 테마면 먼저 저장하고 목록에도 바로 넣는다: 그리기가 실패해도 테마가 보이게)
-      const row = await save();
-      if (!row) return;
-      onSaved(row, false);
-      const r = await api<{ theme: ThemeRow; note: string | null }>(`/api/themes/${row.id}/image`, {
-        method: 'POST',
-        body: JSON.stringify(aiText.trim() ? { prompt: aiText.trim() } : {}),
-      });
-      const ready = toReady([r.theme])[0];
-      if (ready) {
-        setSpec(ready.spec);
-        setUpdatedAt(ready.updatedAt);
-        setKind(ready.spec.image?.kind === 'pattern' ? 'pattern' : 'file');
-      }
-      onSaved(r.theme, false);
-      toast(r.note ?? '그림을 그렸어요.', r.note ? 'bad' : 'ok', r.note ? undefined : DONE);
-    } catch (e) {
-      toast((e as Error).message, 'bad');
-      if (e instanceof ApiError && e.code === 'need_prompt') setKind('ai');
-    } finally {
-      setBusy(null);
-    }
-  };
-
-  const open = target !== null;
-  const kinds: Array<{ value: 'none' | 'file' | 'ai' | 'pattern'; label: string }> = [
-    { value: 'none', label: '없음' },
-    { value: 'file', label: '사진' },
-    ...(me.themePictures ? [{ value: 'ai' as const, label: 'AI 그림' }] : []),
-    { value: 'pattern', label: '무늬' },
-  ];
-  return (
-    <Sheet
-      open={open}
-      // 그리거나 올리는 중에는 닫지 않는다 (끝난 뒤 옛 화면 값으로 테마를 다시 붙이지 않게)
-      onClose={busy ? () => {} : onClose}
-      title={id ? '테마 고치기' : isTemplate(target) ? `새 테마 · ${THEME_COLOR_INFO[target.template].label}에서 시작` : '새 테마'}
-      footer={
-        <div className="flex flex-wrap gap-2">
-          <Button
-            busy={busy === '저장하는 중…'}
-            disabled={!!busy && busy !== '저장하는 중…'}
-            onClick={async () => {
-              setBusy('저장하는 중…');
-              const row = await save();
-              setBusy(null);
-              if (!row) return;
-              onSaved(row, true);
-              toast('테마를 저장하고 썼어요.', 'ok', DONE);
-              onClose();
-            }}
-          >
-            저장하고 쓰기
-          </Button>
-          <Button variant="ghost" disabled={!!busy} onClick={onClose}>
-            닫기
-          </Button>
-          {id ? (
-            <Button
-              variant="ghost"
-              className="ml-auto text-bad"
-              disabled={!!busy}
-              onClick={async () => {
-                if (!confirm(`'${name || '이 테마'}'를 지울까요?`)) return;
-                try {
-                  await api(`/api/themes/${id}`, { method: 'DELETE' });
-                  toast('테마를 지웠어요.', 'plain', DONE);
-                  onDeleted(id);
-                } catch (e) {
-                  toast((e as Error).message, 'bad');
-                }
-              }}
-            >
-              지우기
-            </Button>
-          ) : null}
-        </div>
-      }
-    >
-      {open ? (
-        <div className="grid gap-5">
-          {/* 미리보기는 위에 붙어 있어서, 아래 색·그림·꾸미기를 바꾸면 바로 보인다 */}
-          {/* 작은 폰에서도 아래 칸이 보이게 미리보기는 좁게, 화면이 아주 낮으면 붙이지 않는다 */}
-          <div className="sticky top-0 z-10 -mx-6 border-b border-line bg-surface px-14 pb-3 [@media(max-height:640px)]:static sm:px-16">
-            <div className="mx-auto grid max-w-[300px] grid-cols-2 gap-3">
-              {MODES.map((m) => (
-                <ThemeScreen key={m} look={looks[m]} mode={m} fx={spec.fx} />
-              ))}
-            </div>
-          </div>
-          <Field label="이름" htmlFor="theme-name">
-            <input
-              id="theme-name"
-              className={inputClass}
-              value={name}
-              maxLength={THEME_NAME_MAX}
-              placeholder="내 테마"
-              onChange={(e) => setName(e.target.value)}
-            />
-          </Field>
-
-          {MODES.map((m) => (
-            <Field key={m} label={`${MODE_LABEL[m]} 색`} hint={m === 'dark' ? '글자가 잘 보이게 색을 조금 바꿀 수 있어요.' : undefined}>
-              <div className="grid grid-cols-3 gap-2">
-                {(
-                  [
-                    ['bg', '바탕'],
-                    ['surface', '카드'],
-                    ['accent', '포인트'],
-                  ] as Array<[keyof Palette, string]>
-                ).map(([k, label]) => (
-                  <label key={k} className="grid gap-1 text-xs font-semibold text-muted">
-                    <input
-                      type="color"
-                      aria-label={`${MODE_LABEL[m]} ${label} 색`}
-                      className="h-10 w-full cursor-pointer rounded-xl border border-line bg-surface p-1"
-                      value={spec[m][k]}
-                      onChange={(e) => setColor(m, k, e.target.value)}
-                    />
-                    {label}
-                  </label>
-                ))}
-              </div>
-            </Field>
-          ))}
-
-          <Field label="배경 그림">
-            <div className="grid gap-3">
-              <Segmented<'none' | 'file' | 'ai' | 'pattern'>
-                label="배경 그림"
-                value={kind}
-                options={kinds}
-                onChange={(k) => {
-                  setKind(k);
-                  if (k === 'none') setImage(null);
-                }}
-              />
-              {kind === 'file' ? (
-                <label className="grid gap-1.5 text-sm">
-                  <span className="text-muted">사진을 고르면 줄여서 올려요 (3MB 안).</span>
-                  <input
-                    type="file"
-                    accept="image/jpeg,image/png,image/webp,image/heic,image/heif"
-                    aria-label="배경 사진 고르기"
-                    disabled={!!busy}
-                    onChange={(e) => upload(e.target.files?.[0])}
-                  />
-                </label>
-              ) : null}
-              {kind === 'ai' ? (
-                <div className="grid gap-2">
-                  <textarea
-                    className={cx(inputClass, 'min-h-20')}
-                    maxLength={200}
-                    value={aiText}
-                    placeholder={canRedraw ? '비우고 누르면 지금 그림을 다시 그려요' : '예: 창밖에 비가 내리는 조용한 카페'}
-                    aria-label="AI 그림 설명"
-                    onChange={(e) => setAiText(e.target.value)}
-                  />
-                  <Button
-                    size="sm"
-                    variant="secondary"
-                    className="justify-self-start"
-                    busy={busy?.startsWith('AI') ?? false}
-                    disabled={!!busy || !me.aiEnabled || (!aiText.trim() && !canRedraw)}
-                    onClick={drawAi}
-                  >
-                    {aiText.trim() || !canRedraw ? (
-                      <>
-                        그리기 <Energy n={aiEst} />
-                      </>
-                    ) : (
-                      '다시 그리기'
-                    )}
-                  </Button>
-                  <p className="text-xs text-muted">사람·글자·캐릭터 없이 풍경·무늬로 그려요. 하루에 몇 번까지만 그릴 수 있어요.</p>
-                </div>
-              ) : null}
-              {kind === 'pattern' ? (
-                <div className="grid grid-cols-3 gap-2 sm:grid-cols-6" role="radiogroup" aria-label="무늬">
-                  {CODE_PATTERNS.map((p, i) => {
-                    const svg = codePatternSvg(p, spec.light.accent, mix(spec.light.accent, '#ffffff', 0.45), i + 1);
-                    const on = spec.image?.kind === 'pattern' && spec.image.svg === svg;
-                    return (
-                      <button
-                        key={p}
-                        type="button"
-                        role="radio"
-                        aria-checked={on}
-                        onClick={() => setImage({ kind: 'pattern', svg }, DIM_PATTERN)}
-                        className={cx('press grid gap-1 rounded-xl p-1 text-xs font-semibold', on ? 'bg-surface-2 text-ink' : 'text-muted hover:bg-surface-2')}
-                      >
-                        <span
-                          className={cx('block h-12 rounded-lg ring-1 ring-line', on && 'ring-2 ring-accent')}
-                          style={{ background: `${svgDataUrl(svg)} center / ${PATTERN_SIZE / 3}px repeat, ${spec.light.bg}` }}
-                          aria-hidden="true"
-                        />
-                        {PATTERN_LABEL[p]}
-                      </button>
-                    );
-                  })}
-                </div>
-              ) : null}
-              {busy && busy !== '저장하는 중…' ? (
-                <p className="text-sm text-muted" role="status" aria-live="polite">
-                  {busy}
-                </p>
-              ) : null}
-              {spec.image ? (
-                <label className="grid gap-1 text-sm">
-                  <span className="flex justify-between text-muted">
-                    <span>그림 위를 덮는 정도 (글자가 잘 보이게)</span>
-                    <span className="tabular-nums">{Math.round(spec.dim * 100)}%</span>
-                  </span>
-                  <input
-                    type="range"
-                    min={Math.round(minDimFor(spec.image) * 100)}
-                    max={92}
-                    step={1}
-                    value={Math.round(spec.dim * 100)}
-                    aria-label="그림 위를 덮는 정도"
-                    onChange={(e) => setSpec((s) => ({ ...s, dim: Number(e.target.value) / 100, dimExact: true }))}
-                  />
-                  {belowModes.length ? (
-                    <span className="text-xs text-muted">
-                      글자가 잘 보이는 정도({belowModes.map((m) => `${MODE_LABEL[m]} ${Math.round(readDims[MODES.indexOf(m)] * 100)}%`).join(', ')})보다 낮아요.
-                      {spec.fx.textHalo ? ' 그림 위 글자 둘레에 바탕색을 둘러 읽기 쉽게 해요.' : ' 글자가 그림에 묻히면 아래 스위치를 켜 보세요.'}
-                    </span>
-                  ) : raised ? (
-                    <span className="text-xs text-muted">
-                      글자가 잘 보이게 {MODES.map((m, i) => `${MODE_LABEL[m]} ${Math.round(realDims[i] * 100)}%`).join(', ')}로 덮어요.
-                    </span>
-                  ) : null}
-                </label>
-              ) : null}
-              {belowModes.length ? (
-                <Toggle
-                  label="글자 뒤에 바탕색 번짐"
-                  hint="그림 위에 바로 놓인 큰 제목·설명 글자 둘레에 바탕색을 둘러요. 기본은 없음이에요."
-                  checked={spec.fx.textHalo}
-                  onChange={(v) => setSpec((s) => ({ ...s, fx: { ...s.fx, textHalo: v } }))}
-                />
-              ) : null}
-            </div>
-          </Field>
-          <FxControls spec={spec} looks={looks} onChange={(fx) => setSpec((s) => ({ ...s, fx }))} />
-          {spec.font || spec.paper ? (
-            <p className="text-xs text-muted">
-              이 테마를 고르면 {spec.font ? `글꼴 '${THEME_FONT_INFO[spec.font].label}'` : ''}
-              {spec.font && spec.paper ? '과 ' : ''}
-              {spec.paper ? `종이 '${THEME_PAPER_INFO[spec.paper].label}'` : ''}도 같이 바뀌어요.
-            </p>
-          ) : null}
-        </div>
-      ) : null}
-    </Sheet>
   );
 }
 

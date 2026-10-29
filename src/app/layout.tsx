@@ -2,6 +2,8 @@ import type { Metadata, Viewport } from 'next';
 import 'pretendard/dist/web/variable/pretendardvariable-dynamic-subset.css';
 import 'katex/dist/katex.min.css';
 import './globals.css';
+// 시그니처 테마의 모양 (<html data-skin>): globals.css 뒤에 실어서 같은 세기의 규칙이면 이쪽이 이긴다
+import './skins.css';
 import { Providers } from '@/components/Providers';
 import { THEME_BOOT } from '@/lib/theme';
 

@@ -98,8 +98,19 @@ export type ThemePaper = (typeof THEME_PAPERS)[number];
 /** 화면 밝기: 기기 설정 따르기·늘 밝게·늘 어둡게 */
 export const THEME_MODES = ['system', 'light', 'dark'] as const;
 export type ThemeMode = (typeof THEME_MODES)[number];
-/** 밝을 때·어두울 때 쓸 테마: 기본 테마('preset:ocean') 또는 내가 만든 테마('custom:<번호>') */
-export const THEME_REF = new RegExp(`^(preset:(${THEME_COLORS.join('|')})|custom:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$`);
+/**
+ * 시그니처 테마 (Pro): 색만이 아니라 모양(카드·버튼·칩·아래 메뉴·제목 글꼴·바탕 그림·움직임)까지 다른 테마.
+ * 밝기가 정해져 있다 (src/lib/themes/skins.ts). 차례는 고르는 화면의 차례
+ */
+export const SKIN_IDS = ['neon', 'glitch', 'synthwave', 'terminal', 'brutal', 'sketch'] as const;
+export type SkinId = (typeof SKIN_IDS)[number];
+/**
+ * 밝을 때·어두울 때 쓸 테마: 기본 테마('preset:ocean'), 시그니처 테마('skin:neon') 또는 내가 만든 테마('custom:<번호>').
+ * 시그니처 테마는 두 모드에 같이 쓴다 (따로 고를 수 없다)
+ */
+export const THEME_REF = new RegExp(
+  `^(preset:(${THEME_COLORS.join('|')})|skin:(${SKIN_IDS.join('|')})|custom:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$`,
+);
 export type ThemeRef = string;
 export const DEFAULT_THEME = {
   color: 'default',
@@ -109,7 +120,17 @@ export const DEFAULT_THEME = {
   light: null,
   dark: null,
   glow: DEFAULT_GLOW,
-} as const satisfies { color: ThemeColor; font: ThemeFont; paper: ThemePaper; mode: ThemeMode; light: ThemeRef | null; dark: ThemeRef | null; glow: Glow };
+  motion: true,
+} as const satisfies {
+  color: ThemeColor;
+  font: ThemeFont;
+  paper: ThemePaper;
+  mode: ThemeMode;
+  light: ThemeRef | null;
+  dark: ThemeRef | null;
+  glow: Glow;
+  motion: boolean;
+};
 
 export const zUserSettings = z.object({
   models: z
@@ -144,6 +165,8 @@ export const zUserSettings = z.object({
           strength: z.number().int().min(0).max(100).catch(DEFAULT_GLOW.strength),
         })
         .catch({ ...DEFAULT_GLOW }),
+      // 시그니처 테마의 움직임 (네온 빛 숨쉬기·글리치 지직거림·터미널 커서 …). 기기의 '동작 줄이기'를 켜면 늘 멈춘다
+      motion: z.boolean().catch(true),
     })
     .catch({ ...DEFAULT_THEME, glow: { ...DEFAULT_GLOW } }),
   visual: z

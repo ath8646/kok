@@ -3,6 +3,7 @@
 import { CORE_TOKENS, isHex, type TokenMap } from './colors';
 import { FX_NUMBER_TOKENS, FX_TOKENS, type FxMap } from './fx';
 import { GLOW_TOKENS, type GlowMap } from './glow';
+import { SKIN_VARS, isSkinValue, type SkinId, type SkinVarMap } from './skins';
 import { UUID, type ThemeImage } from './spec';
 import { PATTERN_SIZE, svgDataUrl } from './pattern';
 
@@ -20,6 +21,8 @@ export type ModeLook = {
   glow?: GlowMap;
   /** 화면 꾸미기 색 (themes/fx.ts). 없으면 globals.css 의 기본 꾸미기 */
   fx?: FxMap;
+  /** 시그니처 테마 (themes/skins.ts): 모양은 skins.css 가 <html data-skin> 으로, 색은 이 칸들로 */
+  skin?: { id: SkinId; vars: SkinVarMap };
 };
 
 const RGBA = /^rgba\(\d{1,3}, \d{1,3}, \d{1,3}, (0|1|0?\.\d{1,3})\)$/;
@@ -52,6 +55,12 @@ function block(look: ModeLook): string {
     for (const k of FX_TOKENS) {
       const v = look.fx[k];
       if (FX_NUMBER_TOKENS.includes(k) ? v === '0' || v === '1' : isHex(v) || RGBA.test(v)) parts.push(`${k}:${v}`);
+    }
+  }
+  if (look.skin) {
+    for (const k of SKIN_VARS) {
+      const v = look.skin.vars[k];
+      if (v && isSkinValue(v)) parts.push(`${k}:${v}`);
     }
   }
   const dim = Number.isFinite(look.dim) ? Math.min(0.92, Math.max(0.2, look.dim)) : 0.6;

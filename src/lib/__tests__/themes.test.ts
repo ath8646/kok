@@ -9,7 +9,7 @@ import { backdropColors, imageInks, specLook } from '@/lib/themes/backdrop';
 import { classifyCfError } from '@/lib/themes/cf-errors';
 import { sniffImage } from '@/lib/themes/image-sniff';
 import { DEFAULT_GLOW, GLOW_TONES, THEME_COLORS, zUserSettings } from '@/lib/settings';
-import { GLOW_TOKENS, SEMANTIC_TEXT, glowPair, glowTokens, type GlowMap } from '@/lib/themes/glow';
+import { BRANCH_TEXT, GLOW_TOKENS, SEMANTIC_TEXT, glowPair, glowTokens, type GlowMap } from '@/lib/themes/glow';
 import { customIds, lookFor, rememberCustomThemes, resolveTheme, themeRef, type Theme } from '@/lib/theme';
 
 const MODES: Mode[] = ['light', 'dark'];
@@ -147,6 +147,10 @@ describe('globals.css 의 기본 색 = 기본 테마(KOK) + 기본 별표 빛', 
 
   it('초록·빨강·주황 글자가 glow.ts 의 SEMANTIC_TEXT 와 같다', () => {
     for (const mode of MODES) expect([both[mode]['--ok'], both[mode]['--bad'], both[mode]['--warn']]).toEqual([...SEMANTIC_TEXT[mode]]);
+  });
+
+  it('가지·과목 색이 glow.ts 의 BRANCH_TEXT 와 같다 (시그니처 테마가 이 색으로 바탕을 맞춘다)', () => {
+    for (const mode of MODES) expect([1, 2, 3, 4, 5, 6, 7, 8].map((i) => both[mode][`--b${i}`])).toEqual([...BRANCH_TEXT[mode]]);
   });
 });
 
@@ -379,7 +383,7 @@ describe('그림 파일 확인 (앞부분 바이트)', () => {
 });
 
 describe('밝을 때·어두울 때 테마 고르기', () => {
-  const base: Theme = { color: 'ocean', font: 'default', paper: 'none', mode: 'system', light: null, dark: null, glow: { ...DEFAULT_GLOW } };
+  const base: Theme = { color: 'ocean', font: 'default', paper: 'none', mode: 'system', light: null, dark: null, glow: { ...DEFAULT_GLOW }, motion: true };
   const id = '0b1c2d3e-4f50-4a61-8b72-9c8d7e6f5a4b';
 
   it('따로 고르지 않았으면 예전 한 가지 테마를 두 모드에 쓴다', () => {
@@ -402,6 +406,37 @@ describe('밝을 때·어두울 때 테마 고르기', () => {
     const glowOnly = resolveTheme({ ...base, color: 'default', glow: { tone: 'ocean', strength: 40 } });
     expect(glowOnly.plain).toBe(false);
     expect(glowOnly.dark.glow?.['--glow-star-2']).toBe('#4a86ff');
+  });
+
+  it('시그니처 테마: 두 모드에 같게 쓰면 그 테마의 밝기·모양, 따로 고르면 비슷한 기본 테마 색', () => {
+    const neon = resolveTheme({ ...base, mode: 'light', light: 'skin:neon', dark: 'skin:neon' });
+    expect(neon.skin).toBe('neon');
+    expect(neon.mode).toBe('dark');
+    expect(neon.light).toBe(neon.dark);
+    expect(neon.dark.skin?.id).toBe('neon');
+    expect(neon.dark.glow).toBeDefined();
+    const brutal = resolveTheme({ ...base, mode: 'dark', light: 'skin:brutal', dark: 'skin:brutal' });
+    expect(brutal.mode).toBe('light');
+    // 따로 고르면 시그니처 모습은 그 테마의 밝기 쪽에서도 쓰지 않는다 (모양은 한 가지라서)
+    const mixed = resolveTheme({ ...base, light: 'preset:mint', dark: 'skin:neon' });
+    expect(mixed.skin).toBeNull();
+    expect(mixed.mode).toBe('system');
+    // 다른 밝기 쪽은 비슷한 기본 테마 (네온 → 핑크)
+    expect(lookFor('skin:neon', 'light').tokens['--accent']).toBe(presetTokens('cherry', 'light')['--accent']);
+    // 움직임을 끈 설정
+    expect(resolveTheme({ ...base, motion: false }).motion).toBe(false);
+  });
+
+  it('시그니처 테마로 만든 내 테마는 그 색으로, 예전 설정(움직임 없음)은 움직임 켬', () => {
+    const sid = '1b1c2d3e-4f50-4a61-8b72-9c8d7e6f5a4b';
+    rememberCustomThemes([{ id: sid, name: '내 네온', spec: { ...goodSpec, skin: { id: 'glitch', a: '#ffe600', b: '#9b4dff' } } }]);
+    const r = resolveTheme({ ...base, light: `custom:${sid}`, dark: `custom:${sid}` });
+    expect(r.skin).toBe('glitch');
+    expect(r.dark.skin?.vars['--skin-a']).toBe('#ffe600');
+    const old = zUserSettings.parse({ theme: { color: 'mint', light: 'skin:terminal', dark: 'skin:nope' } }).theme;
+    expect(old.motion).toBe(true);
+    expect(old.light).toBe('skin:terminal');
+    expect(old.dark).toBeNull();
   });
 });
 
@@ -540,5 +575,27 @@ describe('Cloudflare 오류 나누기', () => {
     expect(classifyCfError({ errors: [{ code: 3040, message: 'Capacity temporarily exceeded, please try again.' }] })).toBe('failed');
     expect(classifyCfError({ errors: [{ code: 3007, message: 'Timeout' }] })).toBe('failed');
     expect(classifyCfError(null)).toBe('failed');
+  });
+});
+
+describe('색 하나로 만드는 테마 (테마 만들기의 포인트 색·바탕 느낌)', () => {
+  it('포인트 색과 바탕 느낌으로 두 모드의 색을 만들고, 지금 색이 어느 느낌인지 알아본다', async () => {
+    const { ACCENT_SWATCHES, BASE_TONES, paletteFromColor, toneOf } = await import('@/lib/themes/palette-from');
+    for (const c of [...ACCENT_SWATCHES, '#111111', '#ffffff', randomHex(7)])
+      for (const tone of BASE_TONES) {
+        const p = paletteFromColor(c, tone);
+        // 밝을 때는 밝은 바탕, 어두울 때는 어두운 바탕 (fitPalette)
+        expect(contrast(p.light.bg, '#ffffff')).toBeLessThan(1.3);
+        expect(contrast(p.dark.bg, '#000000')).toBeLessThan(1.6);
+        expect(toneOf(p), `${c} ${tone}`).toBe(tone);
+        for (const mode of MODES) {
+          const t = deriveTokens(p[mode], mode);
+          expect(contrast(t['--ink'], t['--bg'])).toBeGreaterThanOrEqual(7);
+          expect(contrast(t['--accent-ink'], t['--accent'])).toBeGreaterThanOrEqual(4.5);
+        }
+      }
+    // 직접 고른 바탕이면 느낌이 없다
+    const p = paletteFromColor('#635aea', 'gray');
+    expect(toneOf({ ...p, light: { ...p.light, bg: '#e9f0ff' } })).toBeNull();
   });
 });

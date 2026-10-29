@@ -3,7 +3,7 @@ import type { NextRequest } from 'next/server';
 import { assertSameOrigin, readJson, requireAccount } from '@/lib/server/auth';
 import { UserFacingError, errorResponse } from '@/lib/server/errors';
 import { assertOwnImage, assertThemeRoom, hitThemeWrites, requireThemes, themeInsertError } from '@/lib/server/themes';
-import { zThemeInput } from '@/lib/themes/spec';
+import { withSkinPalettes, zThemeInput } from '@/lib/themes/spec';
 
 export async function POST(req: NextRequest) {
   try {
@@ -12,7 +12,9 @@ export async function POST(req: NextRequest) {
     await requireThemes(admin, acc);
     const parsed = zThemeInput.safeParse(await readJson(req, 40_000));
     if (!parsed.success) throw new UserFacingError('bad_theme', '테마 이름이나 색이 올바르지 않아요.', 400);
-    const { name, spec } = parsed.data;
+    const { name } = parsed.data;
+    // 시그니처 테마로 만든 테마는 예전 화면이 쓸 색을 그 테마의 색으로
+    const spec = withSkinPalettes(parsed.data.spec);
     await hitThemeWrites(admin, acc.userId);
     // 20개 한도는 DB 도 지킨다 (동시에 여러 번 보내도: user_themes_guard)
     await assertThemeRoom(admin, acc.userId);

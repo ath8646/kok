@@ -1,11 +1,12 @@
 // 내가 만든 테마(user_themes.spec)의 모양. 서버가 저장할 때와 화면이 읽을 때 같이 쓴다.
 // 화면은 이 값을 CSS 로 바꾸므로, 읽을 때도 늘 여기를 거쳐 색은 #rrggbb, 그림은 번호나 깨끗한 무늬만 남긴다.
 import { z } from 'zod';
-import { THEME_FONTS, THEME_PAPERS } from '../settings';
+import { SKIN_IDS, THEME_FONTS, THEME_PAPERS } from '../settings';
 import { fitPalette, normalizeHex, type Mode, type Palette } from './colors';
 import { DEFAULT_FX, zThemeFx } from './fx';
 import { BASE_TOKENS } from './presets';
 import { sanitizePatternSvg } from './pattern';
+import { skinPalettes } from './skins';
 
 export const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 
@@ -49,6 +50,9 @@ export const zThemeImage = z.discriminatedUnion('kind', [
 ]);
 export type ThemeImage = z.infer<typeof zThemeImage>;
 
+/** 시그니처 테마로 만든 내 테마: 모양은 그 시그니처 테마, 색은 두 가지 (themes/skins.ts) */
+export const zSkinSpec = z.object({ id: z.enum(SKIN_IDS), a: zColor, b: zColor });
+
 export const zThemeSpec = z.object({
   light: zPalette,
   dark: zPalette,
@@ -65,6 +69,11 @@ export const zThemeSpec = z.object({
   paper: z.enum(THEME_PAPERS).nullable().default(null),
   /** 화면 꾸미기 (themes/fx.ts). 예전 테마에는 없어서 기본값 (A·B·C·D1 켬) */
   fx: zThemeFx.catch({ ...DEFAULT_FX }),
+  /**
+   * 시그니처 테마로 만든 테마 (없으면 보통 테마). 이때 light·dark 는 시그니처 테마를 모르는 예전 화면이 쓸 색이라
+   * 저장할 때 skinPalettes 로 다시 적는다 (withSkinPalettes). 배경 그림·빛 꾸미기는 쓰지 않는다 (아래 메뉴 띄우기만)
+   */
+  skin: zSkinSpec.nullable().optional(),
 });
 export type ThemeSpec = z.infer<typeof zThemeSpec>;
 
@@ -77,8 +86,15 @@ export const zThemeInput = z.object({
 export function readSpec(raw: unknown): ThemeSpec | null {
   const r = zThemeSpec.safeParse(raw);
   if (!r.success) return null;
-  const s = r.data;
+  const s = withSkinPalettes(r.data);
   return { ...s, light: fitMode(s.light, 'light'), dark: fitMode(s.dark, 'dark') };
+}
+
+/** 시그니처 테마로 만든 테마면 예전 화면이 쓸 밝을 때·어두울 때 색을 그 테마의 색으로 다시 적는다 */
+export function withSkinPalettes<T extends ThemeSpec>(spec: T): T {
+  if (!spec.skin) return spec;
+  const p = skinPalettes(spec.skin.id, spec.skin);
+  return { ...spec, light: p.light, dark: p.dark };
 }
 
 function fitMode(p: Palette, mode: Mode): Palette {

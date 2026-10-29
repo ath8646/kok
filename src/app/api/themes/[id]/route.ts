@@ -4,7 +4,7 @@ import { z } from 'zod';
 import { assertSameOrigin, assertUuid, readJson, requireAccount } from '@/lib/server/auth';
 import { UserFacingError, errorResponse } from '@/lib/server/errors';
 import { assertOwnImage, hitThemeWrites, loadOwnTheme, requireThemes } from '@/lib/server/themes';
-import { THEME_NAME_MAX, zThemeSpec } from '@/lib/themes/spec';
+import { THEME_NAME_MAX, withSkinPalettes, zThemeSpec } from '@/lib/themes/spec';
 
 const Patch = z.object({
   name: z.string().trim().min(1).max(THEME_NAME_MAX).optional(),
@@ -23,11 +23,15 @@ export async function PATCH(req: NextRequest, ctx: RouteContext<'/api/themes/[id
     const parsed = Patch.safeParse(await readJson(req, 40_000));
     if (!parsed.success || (!parsed.data.name && !parsed.data.spec)) throw new UserFacingError('bad_theme', '테마 이름이나 색이 올바르지 않아요.', 400);
     await hitThemeWrites(admin, acc.userId);
-    await loadOwnTheme(admin, acc.userId, id);
+    const cur = await loadOwnTheme(admin, acc.userId, id);
     if (parsed.data.spec) await assertOwnImage(admin, acc.userId, parsed.data.spec.image);
     const patch: Record<string, unknown> = {};
     if (parsed.data.name) patch.name = parsed.data.name;
-    if (parsed.data.spec) patch.spec = parsed.data.spec;
+    if (parsed.data.spec) {
+      // 시그니처 테마를 모르는 예전 화면이 글꼴·종이만 바꿔 보낸 spec 에는 skin 칸이 없다: 지우지 않고 그대로 둔다 (null 은 '보통 테마로')
+      const next = parsed.data.spec.skin === undefined && cur.spec.skin ? { ...parsed.data.spec, skin: cur.spec.skin } : parsed.data.spec;
+      patch.spec = withSkinPalettes(next);
+    }
     let q = admin.from('user_themes').update(patch).eq('id', id).eq('user_id', acc.userId);
     if (parsed.data.updatedAt) q = q.eq('updated_at', parsed.data.updatedAt);
     const { data, error } = await q.select('id, name, spec, created_at, updated_at').maybeSingle();

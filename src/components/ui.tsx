@@ -18,12 +18,13 @@ type BtnProps = React.ButtonHTMLAttributes<HTMLButtonElement> & {
 const BTN_BASE =
   'press inline-flex items-center justify-center gap-2 rounded-full font-semibold transition-[transform,background-color,opacity] disabled:cursor-not-allowed disabled:opacity-45 select-none whitespace-nowrap';
 const BTN_SIZES = { sm: 'px-3.5 py-1.5 text-sm', md: 'px-5 py-2.5 text-[15px]', lg: 'px-6 py-3.5 text-base' };
+// kok-btn-*: 시그니처 테마(skins.css)가 버튼 모양을 바꾸는 이름 (카카오 버튼은 안내대로 그대로 둔다)
 const BTN_VARIANTS = {
-  primary: 'bg-accent text-accent-ink hover:brightness-110',
-  ink: 'bg-ink text-surface hover:opacity-90',
-  secondary: 'bg-surface-2 text-ink hover:bg-surface-3',
-  ghost: 'text-ink hover:bg-surface-2',
-  danger: 'bg-bad text-white hover:brightness-110',
+  primary: 'kok-btn kok-btn-primary bg-accent text-accent-ink hover:brightness-110',
+  ink: 'kok-btn kok-btn-ink bg-ink text-surface hover:opacity-90',
+  secondary: 'kok-btn kok-btn-secondary bg-surface-2 text-ink hover:bg-surface-3',
+  ghost: 'kok-btn kok-btn-ghost text-ink hover:bg-surface-2',
+  danger: 'kok-btn kok-btn-danger bg-bad text-white hover:brightness-110',
   // 카카오 로그인 버튼: 카카오 안내대로 노란 바탕(#FEE500)에 검은 글자(85%). 어두운 화면에서도 같은 색
   kakao: 'bg-[#FEE500] text-black/85 hover:brightness-95',
 };
@@ -175,7 +176,9 @@ export function Chip({
     warn: 'bg-warn-soft text-warn',
     hl: 'bg-hl text-hl-ink',
   };
-  return <span className={cx('inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-xs font-semibold', tones[tone], className)}>{children}</span>;
+  return (
+    <span className={cx('kok-chip inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-xs font-semibold', tones[tone], className)}>{children}</span>
+  );
 }
 
 /** 동그란 진행 고리 */
@@ -207,7 +210,7 @@ export function ProgressRing({
       aria-valuemax={100}
       aria-label={label}
     >
-      <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke="var(--surface-3)" strokeWidth={stroke} />
+      <circle className="kok-ring-track" cx={size / 2} cy={size / 2} r={r} fill="none" stroke="var(--surface-3)" strokeWidth={stroke} />
       <circle
         className="kok-ring-progress"
         cx={size / 2}
@@ -236,7 +239,7 @@ export function ProgressRing({
 export function SectionTitle({ children, action }: { children: ReactNode; action?: ReactNode }) {
   return (
     <div className="mb-1 mt-5 flex items-center justify-between gap-3 px-1">
-      <h2 className="font-display text-lg">{children}</h2>
+      <h2 className="kok-section-title font-display text-lg">{children}</h2>
       {action}
     </div>
   );
@@ -315,8 +318,11 @@ export function LargeHeader({
         ref={bigRef}
         className={cx('flex flex-col justify-end px-1', size === 'large' ? 'min-h-[18vh] pb-5 pt-2 md:min-h-0 md:pb-6 md:pt-1' : 'pb-4 pt-1 md:pb-5')}
       >
-        <h1 className={cx('font-display leading-tight', size === 'large' ? 'text-[30px] md:text-[34px]' : 'line-clamp-3 text-[26px] md:text-[30px]')}>
-          {title}
+        <h1 className={cx('kok-title font-display leading-tight', size === 'large' ? 'text-[30px] md:text-[34px]' : 'line-clamp-3 text-[26px] md:text-[30px]')}>
+          {/* 시그니처 테마가 제목을 꾸미는 칸 (형광펜 밑줄·커서·어긋난 색: skins.css). data-text 는 글자를 겹쳐 그릴 때 */}
+          <span className="kok-title-text" data-text={typeof title === 'string' ? title : undefined}>
+            {title}
+          </span>
         </h1>
         {subtitle ? <div className="mt-1 text-[15px] text-muted">{subtitle}</div> : null}
       </div>
@@ -567,7 +573,7 @@ export function Field({ label, hint, children, htmlFor }: { label: string; hint?
 }
 
 export const inputClass =
-  'w-full min-w-0 rounded-2xl border-2 border-transparent bg-surface-2 px-4 py-2.5 text-[15px] text-ink placeholder:text-muted/80 transition-colors focus:border-accent focus:bg-surface focus:outline-none';
+  'kok-input w-full min-w-0 rounded-2xl border-2 border-transparent bg-surface-2 px-4 py-2.5 text-[15px] text-ink placeholder:text-muted/80 transition-colors focus:border-accent focus:bg-surface focus:outline-none';
 
 /**
  * 라디오 묶음의 키보드: ←↑ 앞, →↓ 다음, Home 처음, End 끝. 고르고 그 칸으로 초점을 옮긴다.
@@ -604,7 +610,7 @@ export function Segmented<T extends string | number>({
   );
   return (
     <div
-      className={cx('inline-flex flex-wrap gap-1 rounded-full bg-surface-2 p-1', disabled && 'opacity-50')}
+      className={cx('kok-seg inline-flex flex-wrap gap-1 rounded-full bg-surface-2 p-1', disabled && 'opacity-50')}
       role="radiogroup"
       aria-label={label}
       aria-disabled={disabled || undefined}
@@ -622,7 +628,7 @@ export function Segmented<T extends string | number>({
           onClick={() => onChange(o.value)}
           className={cx(
             'press rounded-full px-3.5 py-1.5 text-sm font-semibold transition-colors disabled:cursor-not-allowed',
-            o.value === value ? 'bg-raised text-ink shadow-sm' : 'text-muted hover:text-ink',
+            o.value === value ? 'kok-seg-on bg-raised text-ink shadow-sm' : 'text-muted hover:text-ink',
           )}
         >
           {o.label}
@@ -671,8 +677,8 @@ export function Toggle({
           aria-describedby={hint ? hintId : undefined}
           onChange={(e) => onChange(e.target.checked)}
         />
-        <span className="h-7 w-12 rounded-full bg-surface-3 transition-colors peer-checked:bg-fab peer-focus-visible:outline peer-focus-visible:outline-3 peer-focus-visible:outline-accent" />
-        <span className="absolute left-1 top-1 h-5 w-5 rounded-full bg-white shadow transition-transform duration-200 peer-checked:translate-x-5" />
+        <span className="kok-switch h-7 w-12 rounded-full bg-surface-3 transition-colors peer-checked:bg-fab peer-focus-visible:outline peer-focus-visible:outline-3 peer-focus-visible:outline-accent" />
+        <span className="kok-switch-knob absolute left-1 top-1 h-5 w-5 rounded-full bg-white shadow transition-transform duration-200 peer-checked:translate-x-5" />
       </span>
     </label>
   );

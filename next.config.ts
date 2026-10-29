@@ -79,6 +79,14 @@ const nextConfig: NextConfig = {
   async headers() {
     return [
       { source: '/:path*', headers: securityHeaders },
+      // 테마 만들기의 미리보기는 같은 앱의 설정 화면만 iframe 으로 띄운다 (뒤에 적은 것이 같은 이름의 머리를 덮는다)
+      {
+        source: '/theme-preview',
+        headers: [
+          { key: 'X-Frame-Options', value: 'SAMEORIGIN' },
+          { key: 'Content-Security-Policy', value: "frame-ancestors 'self'" },
+        ],
+      },
       // 다시 그린 지도의 바탕 지도 (Natural Earth): 내용을 바꾸면 파일 이름도 바꾼다 (오래 기억해 두어서)
       { source: '/maps/:file*', headers: [{ key: 'Cache-Control', value: 'public, max-age=604800, stale-while-revalidate=86400' }] },
       {

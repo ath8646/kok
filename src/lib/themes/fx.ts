@@ -139,8 +139,11 @@ export const AURA_TEXT_SHARE = {
 
 const floor3 = (v: number) => Math.floor(Math.max(0, v) * 1000) / 1000;
 
-/** 빛 두 색: 기본 테마는 맞춘 짝, 내가 만든 테마는 고른 빛 색(테마 색이면 + 버튼 색에서 만든 짝) */
-export function auraPair(t: TokenMap, fx: ThemeFx, mode: Mode, preset: ThemeColor | null): [string, string] {
+/**
+ * 빛 두 색: 기본 테마는 맞춘 짝, 시그니처 테마는 그 테마의 두 색(pair), 내가 만든 테마는 고른 빛 색(테마 색이면 + 버튼 색에서 만든 짝)
+ */
+export function auraPair(t: TokenMap, fx: ThemeFx, mode: Mode, preset: ThemeColor | null, pair?: readonly [string, string]): [string, string] {
+  if (pair) return [pair[0], pair[1]];
   if (preset && PRESET_AURA[preset]) {
     const p = PRESET_AURA[preset][mode];
     return [p[0], p[1]];
@@ -208,10 +211,18 @@ function gradientEnd(a: string, b: string, ink: string, min: number): string {
 /**
  * 화면 꾸미기 색 칸.
  * t: 테마 색 칸, fx: 꾸미기, preset: 기본 테마면 그 이름(빛 색을 맞춘 짝으로),
- * pageBases: 화면 바탕 위 글자 밑에 올 수 있는 색 (기본은 바탕색 하나, 배경 그림이 있으면 그림이 비친 색들도)
+ * pageBases: 화면 바탕 위 글자 밑에 올 수 있는 색 (기본은 바탕색 하나, 배경 그림이 있으면 그림이 비친 색들도),
+ * pair: 시그니처 테마의 빛 두 색 (없으면 auraPair 가 고른다)
  */
-export function fxTokens(t: TokenMap, fx: ThemeFx, mode: Mode, preset: ThemeColor | null = null, pageBases: string[] = []): FxMap {
-  const [c1, c2] = auraPair(t, fx, mode, preset);
+export function fxTokens(
+  t: TokenMap,
+  fx: ThemeFx,
+  mode: Mode,
+  preset: ThemeColor | null = null,
+  pageBases: string[] = [],
+  pair?: readonly [string, string],
+): FxMap {
+  const [c1, c2] = auraPair(t, fx, mode, preset, pair);
   const bg = t['--bg'];
   const surface = t['--surface'];
   const ink = t['--ink'];

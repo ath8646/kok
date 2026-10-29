@@ -264,6 +264,21 @@ async def wait_js(page, script, timeout=6000):
     raise AssertionError(f"timed out: {script}")
 
 
+async def wait_frame_js(page, script, timeout=6000):
+    """테마 만들기 미리보기(iframe) 안에서 script 가 참이 될 때까지"""
+    t0 = time.time()
+    while time.time() - t0 < timeout / 1000:
+        for f in page.frames:
+            if "/theme-preview" in f.url:
+                try:
+                    if await f.evaluate(script):
+                        return
+                except Exception:
+                    pass
+        await asyncio.sleep(0.15)
+    raise AssertionError(f"preview never satisfied: {script}")
+
+
 def db(q):
     """로컬 앱 DB 에 한 줄 묻기 (글로 돌려준다)"""
     import subprocess
@@ -2790,7 +2805,7 @@ async def main():
         ctx, page = await new_ctx(browser, "student")
         await page.goto(BASE + "/settings#theme")
         brightness = page.get_by_role("radiogroup", name="화면 밝기")
-        await page.get_by_role("radiogroup", name="테마", exact=True).get_by_role("radio", name="블루", exact=True).click()
+        await page.get_by_role("radiogroup", name="기본 테마", exact=True).get_by_role("radio", name="블루", exact=True).click()
         await wait_css(page, "--accent", "#0168db")
         await brightness.get_by_role("radio", name="어둡게").click()
         await expect(page.locator("html")).to_have_attribute("data-mode", "dark")
@@ -2801,13 +2816,13 @@ async def main():
         await page.locator("#theme").scroll_into_view_if_needed()
         await shot(page, "48-settings-theme-dark", full=False)
         await page.get_by_text("밝을 때와 어두울 때 테마를 따로 고르기").click()
-        await page.get_by_role("radiogroup", name="어두울 때 테마").get_by_role("radio", name="미드나잇", exact=True).click()
+        await page.get_by_role("radiogroup", name="어두울 때 기본 테마").get_by_role("radio", name="미드나잇", exact=True).click()
         await wait_css(page, "--accent", "#90aff8")
         await wait_css(page, "--bg", "#05070f")
         await brightness.get_by_role("radio", name="밝게").click()
         await expect(page.locator("html")).to_have_attribute("data-mode", "light")
         await wait_css(page, "--accent", "#0168db")
-        await page.get_by_role("radiogroup", name="밝을 때 테마").get_by_role("radio", name="핑크", exact=True).click()
+        await page.get_by_role("radiogroup", name="밝을 때 기본 테마").get_by_role("radio", name="핑크", exact=True).click()
         await wait_css(page, "--accent", "#d5005b")
         await brightness.get_by_role("radio", name="기기 설정").click()
         await wait_js(page, "!document.documentElement.hasAttribute('data-mode')")
@@ -2909,7 +2924,7 @@ async def main():
         assert sql(f"select spec->'image'->>'ai' from public.user_themes where id = '{ai_theme}'") == "true"
         assert float(await css_var(page, "--theme-dim")) >= 0.7, await css_var(page, "--theme-dim")
         # 화살표로 테마 고르기 (지금 고른 칸만 Tab 으로 들어가고, → 로 다음 칸)
-        ai_radio = page.get_by_role("radiogroup", name="테마", exact=True).get_by_role("radio", checked=True)
+        ai_radio = page.get_by_role("radiogroup", name="내 테마", exact=True).get_by_role("radio", checked=True)
         assert await ai_radio.get_attribute("tabindex") == "0"
         # 내가 만든 테마에서 바꾼 글꼴은 그 테마에 남는다 (다른 테마에 갔다가 돌아와도)
         ai_name = sql(f"select name from public.user_themes where id = '{ai_theme}'")
@@ -2917,11 +2932,10 @@ async def main():
         await fonts.get_by_role("radio", name=re.compile("손글씨")).click()
         await expect(page.locator("html")).to_have_attribute("data-font", "hand")
         await poll_db(f"select spec->>'font' from public.user_themes where id = '{ai_theme}'", "hand")
-        theme_radios = page.get_by_role("radiogroup", name="테마", exact=True)
-        await theme_radios.get_by_role("radio", name="블루", exact=True).click()
+        await page.get_by_role("radiogroup", name="기본 테마", exact=True).get_by_role("radio", name="블루", exact=True).click()
         await fonts.get_by_role("radio", name=re.compile("기본$")).click()
         await wait_js(page, "!document.documentElement.hasAttribute('data-font')")
-        await theme_radios.get_by_role("radio", name=ai_name, exact=True).click()
+        await page.get_by_role("radiogroup", name="내 테마", exact=True).get_by_role("radio", name=ai_name, exact=True).click()
         await expect(page.locator("html")).to_have_attribute("data-font", "hand")
         await wait_saved({"light": f"custom:{ai_theme}", "dark": f"custom:{ai_theme}", "font": "hand"})
         # 어두울 때 바탕: AI 가 밝은 색을 보내도 서버가 어둡게 맞춘다
@@ -2970,20 +2984,25 @@ async def main():
         await pencil.click()
         await expect(editor).to_be_visible()
         await editor.locator("#theme-name").fill("물결 테마")
+        # 테마 만들기 화면: 미리보기가 실리고, 칸(스타일·색·배경·효과·글자)을 골라 고친다
+        await expect(page.frame_locator("iframe[title^='테마 미리보기']").locator("[data-part='hero']")).to_be_visible(timeout=60000)
+        await editor.get_by_role("tab", name="배경").click()
         await editor.get_by_role("radiogroup", name="배경 그림").get_by_role("radio", name="무늬").click()
         await editor.get_by_role("radiogroup", name="무늬", exact=True).get_by_role("radio", name="물결").click()
         await editor.get_by_role("button", name="저장하고 쓰기").click()
         await expect(editor).to_be_hidden()
-        await expect(page.get_by_role("radiogroup", name="테마", exact=True).get_by_role("radio", name="물결 테마", exact=True)).to_be_visible()
+        await expect(page.get_by_role("radiogroup", name="내 테마", exact=True).get_by_role("radio", name="물결 테마", exact=True)).to_be_visible()
         wave_svg = sql(f"select spec->'image'->>'svg' from public.user_themes where user_id = '{student_id}' and name = '물결 테마'")
         assert wave_svg.startswith("<svg"), wave_svg[:80]
         want = ('url("data:image/svg+xml,' + urllib.parse.quote(wave_svg, safe="-_.!~*'()") + '")').lower()
         await wait_js(page, f"getComputedStyle(document.documentElement).getPropertyValue('--theme-image').trim().toLowerCase() === {json.dumps(want)}")
         await page.get_by_role("button", name="'물결 테마' 테마 고치기").click()
         await expect(editor).to_be_visible()
+        await editor.get_by_role("tab", name="배경").click()
         await editor.get_by_role("radiogroup", name="배경 그림").get_by_role("radio", name="사진").click()
         await editor.get_by_label("배경 사진 고르기").set_input_files(files=[{"name": "bg.png", "mimeType": "image/png", "buffer": make_png()}])
-        await expect(editor.locator('[style*="/api/themes/images/"]').first).to_be_attached(timeout=15000)
+        # 올린 사진이 미리보기(iframe)의 배경 그림이 된다
+        await wait_frame_js(page, "getComputedStyle(document.documentElement).getPropertyValue('--theme-image').includes('/api/themes/images/')", timeout=15000)
         # 사진은 덮는 정도를 50%까지 직접 낮출 수 있다: 고른 값 그대로 덮고, 글자가 잘 보이는 정도보다 낮으면 바탕 위 글자 둘레에 바탕색
         dim_slider = editor.get_by_label("그림 위를 덮는 정도")
         await expect(dim_slider).to_have_attribute("min", "50")
@@ -3017,7 +3036,8 @@ async def main():
         await page.get_by_role("button", name="'물결 테마' 테마 고치기").click()
         await expect(editor).to_be_visible()
         page.once("dialog", lambda d: asyncio.ensure_future(d.accept()))
-        await editor.get_by_role("button", name="지우기").click()
+        await editor.get_by_role("button", name="테마 메뉴").click()
+        await editor.get_by_role("menuitem", name="지우기").click()
         await expect(editor).to_be_hidden()
         await wait_js(page, "!document.documentElement.hasAttribute('data-bg') && !document.getElementById('kok-theme')")
         await wait_css(page, "--accent", "#6057e7")
@@ -3026,7 +3046,7 @@ async def main():
 
         step("themes (Pro): a new theme from a preset with its own decorations (floating menu, small-card sparkle, glass)")
         await page.goto(BASE + "/settings#theme")
-        grid = page.get_by_role("radiogroup", name="테마", exact=True)
+        grid = page.get_by_role("radiogroup", name="기본 테마", exact=True)
         # 기본 테마는 고칠 수 없다 (연필 없음)
         await grid.get_by_role("radio", name="블루", exact=True).click()
         await expect(page.get_by_role("button", name=re.compile("' 테마 고치기$"))).to_have_count(0)
@@ -3035,6 +3055,7 @@ async def main():
         fx_editor = page.get_by_role("dialog", name="새 테마 · 민트에서 시작")
         await expect(fx_editor).to_be_visible()
         await fx_editor.locator("#theme-name").fill("떠 있는 민트")
+        await fx_editor.get_by_role("tab", name="효과").click()
         # 처음에는 A·B·C·D1 만 켜져 있다
         for label, on in (("화면 위에 은은한 빛", True), ("중요한 카드가 빛나요", True), ("버튼을 두 가지 색으로", True), ("화면 아래에도 은은한 빛", True), ("작은 카드에도 반짝이는 포인트", False), ("아래 메뉴를 띄우기", False)):
             if on:
@@ -3069,10 +3090,142 @@ async def main():
         await page.get_by_role("button", name="'떠 있는 민트' 테마 고치기").click()
         await expect(editor).to_be_visible()
         page.once("dialog", lambda d: asyncio.ensure_future(d.accept()))
-        await editor.get_by_role("button", name="지우기").click()
+        await editor.get_by_role("button", name="테마 메뉴").click()
+        await editor.get_by_role("menuitem", name="지우기").click()
         await expect(editor).to_be_hidden()
         await wait_saved({"light": "preset:default", "dark": "preset:default"})
         await wait_css(page, "--tab-float", "0")
+
+        step("themes (Pro): signature themes — the whole look changes, the theme sets the brightness, motion can be turned off")
+        await page.goto(BASE + "/settings#theme")
+        skins = page.get_by_role("radiogroup", name="시그니처 테마")
+        await skins.get_by_role("radio", name="네온", exact=True).click()
+        await expect(page.locator("html")).to_have_attribute("data-skin", "neon")
+        # 네온은 늘 어두운 화면 (설정의 화면 밝기는 그대로 두고, 고르는 칸은 막는다)
+        await expect(page.locator("html")).to_have_attribute("data-mode", "dark")
+        await wait_css(page, "--skin-a", "#ff3ad7")
+        await expect(page.get_by_role("radiogroup", name="화면 밝기").get_by_role("radio", name="밝게")).to_be_disabled()
+        await expect(page.get_by_text(re.compile("네온은 늘 어두운 화면이에요"))).to_be_visible()
+        # 예전 화면이 읽어도 비슷하게: 한 가지 테마 색은 비슷한 기본 테마(핑크)
+        await wait_saved({"light": "skin:neon", "dark": "skin:neon", "color": "cherry", "mode": "system"})
+        await page.goto(BASE + "/home")
+        await expect(page.locator(".kok-card").first).to_be_visible()
+        look = await page.evaluate(
+            """() => ({
+              art: getComputedStyle(document.querySelector('.kok-skin-art')).display,
+              title: getComputedStyle(document.querySelector('h1.kok-title')).fontFamily,
+              radius: getComputedStyle(document.querySelector('.kok-card')).borderTopLeftRadius,
+              anim: getComputedStyle(document.querySelector('.kok-title-text')).animationName,
+            })"""
+        )
+        assert look["art"] == "block" and "Orbit" in look["title"] and look["radius"] == "18px", look
+        # 움직임: 가끔 깜빡이는 네온관 (움직임 줄이기가 아니면)
+        assert look["anim"] == "kok-sk-flicker", look
+        await no_hscroll(page, "home with the neon theme")
+        await shot(page, "53-skin-neon-home", full=False)
+        # 다음에 열 때도 앱이 실리기 전에 시그니처 모양으로 (THEME_BOOT)
+        await page.route("**/api/me", slow_me)
+        await page.goto(BASE + "/library", wait_until="domcontentloaded")
+        assert await page.evaluate("document.documentElement.dataset.skin") == "neon"
+        assert await page.evaluate("document.documentElement.dataset.mode") == "dark"
+        # 늦춘 /api/me 가 끝나 화면이 다 그려진 뒤에 늦추기를 푼다 (끝나지 않은 요청을 두고 다른 화면으로 가지 않게)
+        await expect(page.locator("main h1").first).to_be_visible(timeout=15000)
+        await page.unroute("**/api/me", slow_me)
+        await page.goto(BASE + "/settings#theme")
+        await page.get_by_text("시그니처 테마 움직임", exact=True).click()
+        await expect(page.locator("html")).to_have_attribute("data-motion", "off")
+        await wait_saved({"motion": False})
+        assert await page.evaluate("getComputedStyle(document.querySelector('.kok-title-text')).animationName") == "none"
+        await page.get_by_text("시그니처 테마 움직임", exact=True).click()
+        await wait_js(page, "!document.documentElement.hasAttribute('data-motion')")
+        await wait_saved({"motion": True})
+        # 밝은 시그니처 테마 (브루탈): 굵은 테두리·딱딱한 그림자, 늘 밝은 화면
+        await skins.get_by_role("radio", name="브루탈", exact=True).click()
+        await expect(page.locator("html")).to_have_attribute("data-skin", "brutal")
+        await expect(page.locator("html")).to_have_attribute("data-mode", "light")
+        await wait_saved({"light": "skin:brutal", "dark": "skin:brutal", "color": "default"})
+        # 바꾸고 바로 다른 탭으로 가도 (0.6초 뒤 저장을 기다리지 않고) 고른 테마가 남는다
+        await page.get_by_role("radiogroup", name="시그니처 테마").get_by_role("radio", name="터미널", exact=True).click()
+        await page.locator("nav.kok-tabbar").get_by_role("link", name="홈").click()
+        await wait_saved({"light": "skin:terminal", "dark": "skin:terminal"})
+        await page.goto(BASE + "/settings#theme")
+        await skins.get_by_role("radio", name="브루탈", exact=True).click()
+        await wait_saved({"light": "skin:brutal", "dark": "skin:brutal"})
+        await page.goto(BASE + "/review")
+        await page.wait_for_timeout(800)
+        # 카드는 굵은 테두리(안쪽 그림자) + 번지지 않는 딱딱한 그림자 (큰 카드는 7px, 다른 카드는 4px)
+        card = await page.evaluate("getComputedStyle(document.querySelector('.kok-card')).boxShadow")
+        assert "inset" in card and re.search(r"\b[47]px [47]px 0px", card), card
+        await shot(page, "53-skin-brutal-review", full=False)
+        # 따로 고르기를 켜면 시그니처 테마 대신 비슷한 기본 테마 (시그니처 테마는 두 모드에 같이 쓴다)
+        await page.goto(BASE + "/settings#theme")
+        await page.get_by_text("밝을 때와 어두울 때 테마를 따로 고르기", exact=True).click()
+        await wait_js(page, "!document.documentElement.hasAttribute('data-skin')")
+        await wait_saved({"light": "preset:default", "dark": "preset:default"})
+        await page.get_by_text("밝을 때와 어두울 때 테마를 따로 고르기", exact=True).click()
+
+        step("themes (Pro): theme studio — a signature style with my colours, tap the preview to find a setting, undo, unsaved changes")
+        await page.get_by_role("button", name="새 테마 만들기").click()
+        await chooser.get_by_role("button", name="글리치에서 시작하기").click()
+        studio = page.get_by_role("dialog", name="새 테마 · 글리치")
+        await expect(studio).to_be_visible()
+        frame = page.frame_locator("iframe[title^='테마 미리보기']")
+        await expect(frame.locator("[data-part='hero']")).to_be_visible(timeout=60000)
+        await wait_frame_js(page, "document.documentElement.dataset.skin === 'glitch' && document.documentElement.dataset.mode === 'dark'")
+        # 색 짝 고르기 → 미리보기에 바로, 되돌리기·다시 하기
+        await studio.get_by_role("radiogroup", name="색 짝").get_by_role("radio", name="노랑·보라").click()
+        await wait_frame_js(page, "getComputedStyle(document.documentElement).getPropertyValue('--skin-a').trim() === '#ffe600'")
+        await studio.get_by_role("button", name="되돌리기").click()
+        await wait_frame_js(page, "getComputedStyle(document.documentElement).getPropertyValue('--skin-a').trim() === '#ff2e63'")
+        await studio.get_by_role("button", name="다시 하기").click()
+        await wait_frame_js(page, "getComputedStyle(document.documentElement).getPropertyValue('--skin-a').trim() === '#ffe600'")
+        # 미리보기의 아래 메뉴를 누르면 그 부분을 바꾸는 칸(효과)으로 간다
+        await frame.locator("[data-part='tabbar']").click()
+        await expect(studio.get_by_role("tab", name="효과")).to_have_attribute("aria-selected", "true")
+        await expect(studio.get_by_label("아래 메뉴를 띄우기", exact=True)).to_be_visible()
+        # 칸에 손을 올리면 미리보기에 그 부분 이름표
+        await studio.get_by_text("아래 메뉴를 띄우기", exact=True).hover()
+        await expect(frame.get_by_text("아래 메뉴", exact=True).last).to_be_visible()
+        await shot(page, "54-theme-studio", full=False)
+        await studio.locator("#theme-name").fill("내 글리치")
+        await studio.get_by_role("button", name="저장하고 쓰기").click()
+        await expect(studio).to_be_hidden()
+        mine = sql(f"select id from public.user_themes where user_id = '{student_id}' and name = '내 글리치'")
+        assert sql(f"select concat_ws(' ', spec->'skin'->>'id', spec->'skin'->>'a', spec->'skin'->>'b') from public.user_themes where id = '{mine}'") == "glitch #ffe600 #9b4dff"
+        # 예전 화면이 쓸 색도 같이 저장한다 (어두울 때는 그 테마의 바탕)
+        assert luminance(sql(f"select spec->'dark'->>'bg' from public.user_themes where id = '{mine}'")) < 0.02
+        await wait_saved({"light": f"custom:{mine}", "dark": f"custom:{mine}"})
+        await expect(page.locator("html")).to_have_attribute("data-skin", "glitch")
+        await wait_css(page, "--skin-a", "#ffe600")
+        await expect(page.get_by_role("radiogroup", name="내 테마", exact=True).get_by_role("radio", name="내 글리치", exact=True)).to_be_checked()
+        # 시그니처 테마를 모르는 예전 화면이 글꼴만 바꿔 보내도 (skin 칸 없이) 시그니처 모양은 남는다
+        row = json.loads(sql(f"select json_build_object('spec', spec, 'at', updated_at) from public.user_themes where id = '{mine}'"))
+        old_spec = {k: v for k, v in row["spec"].items() if k != "skin"}
+        r = await page.request.patch(BASE + f"/api/themes/{mine}", headers={"origin": BASE}, data={"spec": {**old_spec, "font": "round"}, "updatedAt": row["at"]})
+        assert r.ok, (r.status, await r.text())
+        assert sql(f"select concat_ws(' ', spec->'skin'->>'id', spec->>'font') from public.user_themes where id = '{mine}'") == "glitch round"
+        # 저장하지 않고 닫으려 하면 묻는다
+        await page.reload()
+        await page.get_by_role("button", name="'내 글리치' 테마 고치기").click()
+        editor2 = page.get_by_role("dialog", name="테마 고치기")
+        await expect(editor2).to_be_visible()
+        await editor2.get_by_role("tab", name="색").click()
+        await editor2.get_by_role("radiogroup", name="색 짝").get_by_role("radio", name="초록·핑크").click()
+        await editor2.get_by_role("button", name="닫기", exact=True).first.click()
+        ask = page.get_by_role("dialog", name="저장하지 않고 닫을까요?")
+        await expect(ask).to_be_visible()
+        await ask.get_by_role("button", name="저장하지 않고 닫기").click()
+        await expect(editor2).to_be_hidden()
+        assert sql(f"select spec->'skin'->>'a' from public.user_themes where id = '{mine}'") == "#ffe600"
+        # 지우면 기본 모양으로
+        await page.get_by_role("button", name="'내 글리치' 테마 고치기").click()
+        await expect(editor2).to_be_visible()
+        page.once("dialog", lambda d: asyncio.ensure_future(d.accept()))
+        await editor2.get_by_role("button", name="테마 메뉴").click()
+        await editor2.get_by_role("menuitem", name="지우기").click()
+        await expect(editor2).to_be_hidden()
+        await wait_js(page, "!document.documentElement.hasAttribute('data-skin')")
+        await wait_saved({"light": "preset:default", "dark": "preset:default"})
 
         step("themes (Pro): unused pictures are cleaned up after a day")
         sql(f"update public.theme_images set created_at = now() - interval '2 days' where user_id = '{student_id}'")
@@ -3138,7 +3291,8 @@ async def main():
         sql(f"insert into public.user_themes (user_id, name, spec) values ('{other_id}', 'Pro 때 테마', '{json.dumps(spec)}'::jsonb)")
         octx, opage = await new_ctx(browser, "other")
         await opage.goto(BASE + "/settings#theme")
-        await expect(opage.get_by_role("radiogroup", name="테마", exact=True).get_by_role("radio", name="블루", exact=True)).to_be_disabled()
+        await expect(opage.get_by_role("radiogroup", name="기본 테마", exact=True).get_by_role("radio", name="블루", exact=True)).to_be_disabled()
+        await expect(opage.get_by_role("radiogroup", name="시그니처 테마").get_by_role("radio", name="네온", exact=True)).to_be_disabled()
         await expect(opage.get_by_role("slider", name="별표 빛 세기")).to_be_disabled()
         await expect(opage.get_by_role("radiogroup", name="화면 밝기").get_by_role("radio", name="어둡게")).to_be_disabled()
         assert await opage.evaluate("document.documentElement.hasAttribute('data-mode') || !!document.getElementById('kok-theme')") is False

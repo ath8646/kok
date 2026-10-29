@@ -211,8 +211,12 @@ export function AppShell({ children }: { children: ReactNode }) {
   return (
     <Ctx.Provider value={{ me, refresh, focus, setFocus }}>
       <QuickAddProvider me={me} refreshMe={refresh} enabled={quickAdd}>
+        {/* 시그니처 테마의 바탕 그림 (벽돌 벽·주사선·노을과 격자·망점·줄 노트: skins.css). 시그니처 테마가 아니면 보이지 않는다 */}
+        <div className="kok-skin-art" aria-hidden="true" />
         {/* 화면 위·아래 은은한 빛 (테마의 화면 꾸미기, globals.css .kok-aura). 집중 모드·첫 화면에서는 없다 */}
         {!bare ? <div className="kok-aura" aria-hidden="true" /> : null}
+        {/* 시그니처 테마의 가끔 지나가는 움직임 (지직거리는 띠·훑고 지나가는 빛). 집중 모드에서는 없다 */}
+        {!bare ? <div className="kok-skin-fx" aria-hidden="true" /> : null}
         <div className={bare ? '' : 'md:flex'}>
           {!bare ? (
             <nav className="sticky top-0 hidden h-dvh w-60 shrink-0 flex-col gap-1 px-4 pb-6 pt-7 md:flex" aria-label="주 메뉴">
@@ -227,8 +231,8 @@ export function AppShell({ children }: { children: ReactNode }) {
                     href={t.href}
                     aria-current={on ? 'page' : undefined}
                     className={cx(
-                      'press flex items-center gap-3 rounded-full px-4 py-3 text-[15px] font-semibold transition-colors',
-                      on ? 'bg-surface text-ink shadow-[0_1px_2px_var(--shadow)]' : 'text-muted hover:bg-surface-2 hover:text-ink',
+                      'kok-nav-link press flex items-center gap-3 rounded-full px-4 py-3 text-[15px] font-semibold transition-colors',
+                      on ? 'is-on bg-surface text-ink shadow-[0_1px_2px_var(--shadow)]' : 'text-muted hover:bg-surface-2 hover:text-ink',
                     )}
                   >
                     <Icon d={t.icon} size={21} className={on ? 'text-accent' : undefined} />

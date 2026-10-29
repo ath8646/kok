@@ -48,6 +48,12 @@ export const SEMANTIC_TEXT: Record<Mode, readonly string[]> = {
   dark: ['#30d158', '#fe5c4e', '#ff9f0a'],
 };
 
+/** 가지·과목 색 --b1~8 (globals.css 와 같다: themes.test.ts 가 확인). 글자로도 써서 바탕·카드·회색 칸에서 4.5 이상이어야 한다 */
+export const BRANCH_TEXT: Record<Mode, readonly string[]> = {
+  light: ['#0361cd', '#985700', '#03772b', '#5856d6', '#c50539', '#9536c2', '#067182', '#7f623d'],
+  dark: ['#3e95ff', '#ff9f0a', '#30d158', '#838afe', '#ff566e', '#cb68ff', '#40c8e0', '#ae9069'],
+};
+
 /** 카드 안 빛의 가장 진한 정도 (세기 100 이면서 글자가 다 읽힐 때) */
 const TINT_MAX: Record<Mode, number> = { light: 0.5, dark: 0.4 };
 /** 카드 밖으로 번지는 빛의 진하기 (세기 100 일 때) */

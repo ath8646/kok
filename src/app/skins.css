@@ -1,0 +1,1068 @@
+/* =====================================================================================
+   시그니처 테마 (Pro): <html data-skin="neon | glitch | synthwave | terminal | brutal | sketch">
+   색은 src/lib/themes/skins.ts 가 고른 두 색으로 만든 테마 색 칸(--bg, --surface, --ink …)과 --skin-* 칸이다.
+   글자 명암비는 거기서 맞추고(skins.test.ts), 여기서는 모양만 바꾼다:
+   제목 글꼴, 카드·큰 카드·버튼·칩·입력 칸·스위치·아래 메뉴·+ 버튼·시트·메뉴의 모양, 바탕 그림(.kok-skin-art),
+   가끔 지나가는 움직임(.kok-skin-fx).
+   - 이 파일은 층(@layer) 밖이라 Tailwind 유틸리티(rounded-*, shadow-*, bg-* …)보다 늘 이긴다: 바꿀 칸만 적는다.
+   - 화면 바탕 위에 바로 놓이는 글자는 본문·흐린 글자뿐이라, 바탕 그림은 skins.ts 의 pageBases 만큼만 진하다
+     (그림의 색·진하기를 바꾸면 skins.ts 도 같이).
+   - 움직임은 transform·opacity 만. 기기의 '동작 줄이기'나 설정의 '시그니처 테마 움직임'을 끄면(data-motion="off") 멈춘다.
+     가끔(몇 초에 한 번) 짧게만 움직이고, 한 번에 세 번 넘게 깜빡이지 않는다.
+   - 카카오 로그인 버튼(kok-btn 이 없다)은 카카오 안내대로 그대로 둔다.
+   ===================================================================================== */
+
+/* ------------------------------------------------------------ 바탕 그림·지나가는 움직임 칸 (AppShell) */
+.kok-skin-art,
+.kok-skin-fx {
+  display: none;
+}
+:root[data-skin] .kok-skin-art,
+:root[data-skin] .kok-skin-fx {
+  display: block;
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  /* 폰 주소창이 숨었다 나타나도 크기가 바뀌지 않게 (globals.css 배경 그림과 같은 까닭) */
+  height: 100lvh;
+  min-height: 100vh;
+  pointer-events: none;
+  overflow: hidden;
+}
+:root[data-skin] .kok-skin-art {
+  /* 화면 빛(.kok-aura, -1) 아래 */
+  z-index: -2;
+}
+:root[data-skin] .kok-skin-fx {
+  /* 글 위·아래 메뉴(40)와 시트(50) 아래 */
+  z-index: 35;
+}
+:root[data-skin] .kok-skin-art::before,
+:root[data-skin] .kok-skin-art::after,
+:root[data-skin] .kok-skin-fx::before,
+:root[data-skin] .kok-skin-fx::after {
+  content: '';
+  position: absolute;
+  pointer-events: none;
+}
+@media (pointer: coarse) {
+  :root[data-skin] .kok-skin-art::before,
+  :root[data-skin] .kok-skin-art::after {
+    will-change: transform;
+  }
+}
+
+/* ------------------------------------------------------------ 제목 글꼴 (한 굵기 글꼴이라 굵게 흉내 내지 않는다) */
+:root[data-skin='neon'] {
+  --skin-font: 'Orbit', var(--font-sans);
+}
+:root[data-skin='glitch'] {
+  --skin-font: 'Do Hyeon', var(--font-sans);
+}
+:root[data-skin='synthwave'] {
+  --skin-font: 'Gugi', var(--font-sans);
+}
+:root[data-skin='terminal'] {
+  --skin-font: 'Nanum Gothic Coding', ui-monospace, 'SFMono-Regular', Menlo, monospace;
+}
+/* 터미널: 글꼴을 기본으로 둔 사람은 본문도 고정폭 글꼴 */
+:root[data-skin='terminal']:not([data-font]) {
+  --font-sans: 'Nanum Gothic Coding', ui-monospace, 'SFMono-Regular', Menlo, 'Apple SD Gothic Neo', monospace;
+}
+:root[data-skin='brutal'] {
+  --skin-font: 'Black Han Sans', var(--font-sans);
+}
+:root[data-skin='sketch'] {
+  --skin-font: 'Nanum Pen Script', var(--font-sans);
+}
+:root[data-skin] :is(.font-display, .kok-title) {
+  font-family: var(--skin-font);
+  font-weight: 400;
+  font-synthesis: none;
+  letter-spacing: 0;
+}
+:root[data-skin='terminal'] :is(.font-display, .kok-title) {
+  font-weight: 700;
+  letter-spacing: -0.01em;
+}
+/* 손글씨 펜은 글자가 작아서 키운다 (글자 칸 크기는 그대로) */
+:root[data-skin='sketch'] :is(.font-display, .kok-title) {
+  font-size-adjust: 0.76;
+  line-height: 1.1;
+}
+
+/* =====================================================================================
+   네온: 어두운 벽돌 벽, 흰빛 도는 네온관 제목, 두 색 네온관 테두리
+   ===================================================================================== */
+:root[data-skin='neon'] .kok-skin-art::before {
+  inset: 0;
+  background: var(--skin-art-1);
+  -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='46' height='36'%3E%3Cpath d='M0 .5h46M0 18.5h46M.5 0v18M23.5 18v18' stroke='%23000' stroke-width='1.2' fill='none'/%3E%3C/svg%3E")
+    0 0 / 46px 36px repeat;
+  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='46' height='36'%3E%3Cpath d='M0 .5h46M0 18.5h46M.5 0v18M23.5 18v18' stroke='%23000' stroke-width='1.2' fill='none'/%3E%3C/svg%3E")
+    0 0 / 46px 36px repeat;
+}
+/* 바닥에서 올라오는 둘째 색 빛 + 가장자리 어둡게 */
+:root[data-skin='neon'] .kok-skin-art::after {
+  inset: 0;
+  background:
+    radial-gradient(80% 42% at 50% 104%, var(--skin-art-2), transparent 72%), radial-gradient(130% 90% at 50% 40%, transparent 55%, rgba(0, 0, 0, 0.55));
+}
+:root[data-skin='neon'] .kok-title {
+  color: var(--skin-title);
+  text-shadow:
+    0 0 4px var(--skin-glow-a),
+    0 0 14px var(--skin-glow-a),
+    0 0 32px var(--skin-title-2);
+}
+:root[data-skin='neon'] .kok-section-title {
+  text-shadow: 0 0 12px var(--skin-glow-a);
+}
+:root[data-skin='neon'] .kok-card {
+  border-radius: 18px;
+  box-shadow:
+    inset 0 0 0 1px var(--skin-line),
+    0 0 22px -12px var(--skin-glow-a);
+}
+/* 큰 카드: 두 색 네온관 테두리 (숨 쉬듯 밝아졌다 어두워진다) + 바깥으로 번지는 빛 */
+:root[data-skin='neon'] .kok-hero {
+  box-shadow:
+    0 0 28px -6px var(--skin-glow-a),
+    0 0 60px -18px var(--skin-glow-b);
+}
+:root[data-skin='neon'] .kok-hero::after {
+  padding: 2px;
+  background: linear-gradient(115deg, var(--skin-a), var(--skin-b));
+}
+:root[data-skin='neon'] :is(.kok-btn-primary, :is(a, button).bg-accent) {
+  box-shadow:
+    0 0 18px -3px var(--skin-glow-a),
+    inset 0 0 0 1px rgba(255, 255, 255, 0.35);
+}
+:root[data-skin='neon'] .kok-btn-secondary {
+  background: transparent;
+  box-shadow: inset 0 0 0 1.5px var(--skin-line);
+}
+:root[data-skin='neon'] .kok-btn-secondary:hover {
+  box-shadow:
+    inset 0 0 0 1.5px var(--skin-a),
+    0 0 14px -4px var(--skin-glow-a);
+}
+:root[data-skin='neon'] .kok-chip-on {
+  box-shadow: 0 0 16px -2px var(--skin-glow-b);
+}
+:root[data-skin='neon'] .kok-input:focus {
+  border-color: var(--skin-a);
+  box-shadow: 0 0 16px -4px var(--skin-glow-a);
+}
+:root[data-skin='neon'] input:checked + .kok-switch {
+  box-shadow: 0 0 14px -2px var(--skin-glow-a);
+}
+:root[data-skin='neon'] .kok-seg-on {
+  box-shadow: inset 0 0 0 1px var(--skin-line);
+}
+:root[data-skin='neon'] .kok-fab {
+  box-shadow:
+    0 0 0 2px rgba(255, 255, 255, 0.18),
+    0 0 26px -2px var(--skin-glow-a),
+    0 0 40px -10px var(--skin-glow-b);
+}
+:root[data-skin='neon'] .kok-tab-pill.is-on {
+  box-shadow: 0 0 14px -4px var(--skin-glow-a);
+}
+:root[data-skin='neon'] .kok-sheet {
+  box-shadow:
+    0 -1px 0 var(--skin-line),
+    0 -18px 50px -20px var(--skin-glow-a);
+}
+:root[data-skin='neon'] .kok-pop {
+  box-shadow:
+    0 0 0 1px var(--skin-line),
+    0 12px 36px -8px var(--skin-glow-a);
+}
+:root[data-skin='neon'] .kok-nav-link.is-on {
+  box-shadow: inset 0 0 0 1px var(--skin-line);
+}
+:root[data-skin='neon'] ::selection {
+  background: var(--skin-a);
+  color: var(--skin-a-ink);
+}
+
+/* =====================================================================================
+   글리치: 주사선이 흐르는 푸른 검정, 두 색이 어긋난 테두리·제목, 가끔 지직
+   ===================================================================================== */
+:root[data-skin='glitch'] .kok-skin-art::before {
+  inset: 0;
+  background: repeating-linear-gradient(to bottom, var(--skin-art-1) 0 1px, transparent 1px 3px);
+}
+:root[data-skin='glitch'] .kok-skin-art::after {
+  inset: 0;
+  background: radial-gradient(70% 50% at 0% 0%, var(--skin-art-3), transparent 70%), radial-gradient(70% 50% at 100% 100%, var(--skin-art-2), transparent 70%);
+}
+:root[data-skin='glitch'] .kok-title {
+  color: var(--skin-title);
+  text-shadow:
+    -2px 0 var(--skin-glow-a),
+    2px 0 var(--skin-glow-b);
+}
+:root[data-skin='glitch'] .kok-title-text {
+  display: inline-block;
+}
+:root[data-skin='glitch'] .kok-card {
+  border-radius: 4px;
+  box-shadow:
+    inset 0 0 0 1px var(--line),
+    -1.5px 0 0 color-mix(in srgb, var(--skin-a) 55%, transparent),
+    1.5px 0 0 color-mix(in srgb, var(--skin-b) 55%, transparent);
+}
+/* 큰 카드: 두 색 테두리가 어긋나 겹친다 */
+:root[data-skin='glitch'] .kok-hero {
+  border-radius: 4px;
+  box-shadow: inset 0 0 0 1px var(--line);
+}
+:root[data-skin='glitch'] .kok-hero::before,
+:root[data-skin='glitch'] .kok-hero::after {
+  border-radius: 4px;
+  background: none;
+  padding: 0;
+  -webkit-mask: none;
+  mask: none;
+}
+:root[data-skin='glitch'] .kok-hero::before {
+  inset: -1px;
+  border: 2px solid var(--skin-a);
+  transform: translate(-4px, -3px);
+}
+:root[data-skin='glitch'] .kok-hero::after {
+  inset: -1px;
+  border: 2px solid var(--skin-b);
+  transform: translate(4px, 3px);
+}
+:root[data-skin='glitch'] :is(.kok-btn, :is(a, button).bg-accent):not(.kok-btn-ghost) {
+  border-radius: 3px;
+}
+:root[data-skin='glitch'] :is(.kok-btn-primary, :is(a, button).bg-accent) {
+  background-image: none;
+  box-shadow: 3px 3px 0 var(--skin-b);
+}
+:root[data-skin='glitch'] :is(.kok-btn-primary, :is(a, button).bg-accent):active:not(:disabled) {
+  transform: translate(2px, 2px);
+  box-shadow: 1px 1px 0 var(--skin-b);
+}
+:root[data-skin='glitch'] .kok-btn-secondary {
+  background: transparent;
+  box-shadow: inset 0 0 0 1px var(--skin-line);
+}
+:root[data-skin='glitch'] :is(.kok-chip, .kok-chip-on, .kok-seg, .kok-seg-on, .kok-tab-pill, .kok-input, .kok-switch, .kok-switch-knob) {
+  border-radius: 3px;
+}
+:root[data-skin='glitch'] .kok-chip-on {
+  background: var(--skin-a);
+  color: var(--skin-a-ink);
+  box-shadow: 2px 2px 0 var(--skin-b);
+}
+:root[data-skin='glitch'] .kok-tabbar {
+  border-radius: 0;
+  box-shadow: 0 -1px 0 var(--skin-line);
+}
+:root[data-skin='glitch'] .kok-tab-pill.is-on {
+  background: var(--skin-a);
+  color: var(--skin-a-ink);
+  box-shadow: 2px 2px 0 var(--skin-b);
+}
+:root[data-skin='glitch'] .kok-fab {
+  border-radius: 6px;
+  background-image: none;
+  box-shadow:
+    4px 4px 0 var(--skin-b),
+    0 10px 24px -10px rgba(0, 0, 0, 0.8);
+}
+:root[data-skin='glitch'] :is(.kok-sheet, .kok-pop, .kok-toast, .kok-selbar, .kok-composer) {
+  border-radius: 6px;
+}
+:root[data-skin='glitch'] .kok-sheet {
+  box-shadow:
+    0 -2px 0 var(--skin-b),
+    -3px -2px 0 color-mix(in srgb, var(--skin-a) 60%, transparent);
+}
+:root[data-skin='glitch'] .kok-nav-link {
+  border-radius: 3px;
+}
+:root[data-skin='glitch'] .kok-nav-link.is-on {
+  box-shadow: 3px 0 0 var(--skin-a) inset;
+}
+:root[data-skin='glitch'] ::selection {
+  background: var(--skin-b);
+  color: var(--skin-b-ink);
+}
+/* 지나가는 띠: 가끔 화면 가로로 어긋난 줄이 번쩍 */
+:root[data-skin='glitch'] .kok-skin-fx::before {
+  left: -10px;
+  right: -10px;
+  top: 0;
+  height: 14px;
+  opacity: 0;
+  background: linear-gradient(90deg, transparent, var(--skin-glow-a) 18%, transparent 40%, var(--skin-glow-b) 72%, transparent);
+  mix-blend-mode: screen;
+}
+:root[data-skin='glitch'] .kok-skin-fx::after {
+  left: -10px;
+  right: -10px;
+  top: 0;
+  height: 6px;
+  opacity: 0;
+  background: linear-gradient(90deg, var(--skin-glow-b), transparent 30%, var(--skin-glow-a) 80%);
+  mix-blend-mode: screen;
+}
+
+/* =====================================================================================
+   신스웨이브: 보랏빛 밤하늘, 줄무늬 해, 지평선 너머로 끝없는 격자, 노을빛 제목
+   ===================================================================================== */
+:root[data-skin='synthwave'] .kok-skin-art {
+  /* 지평선(위에서 42%) 쪽이 노을빛으로 밝다 */
+  background: linear-gradient(to bottom, var(--bg) 0%, var(--bg) 16%, var(--skin-bg-2) 42%, var(--bg) 78%);
+}
+/* 해: 위는 둘째 색, 아래는 첫째 색, 아래쪽 반은 줄무늬. 바닥이 지평선에 닿는다 (큰 제목 뒤에서 떠오른다) */
+:root[data-skin='synthwave'] .kok-skin-art::before {
+  left: 50%;
+  bottom: 58%;
+  width: min(72vw, 330px);
+  aspect-ratio: 1;
+  border-radius: 50%;
+  transform: translateX(-50%);
+  background: linear-gradient(to bottom, var(--skin-art-1) 8%, var(--skin-art-2) 82%);
+  -webkit-mask: linear-gradient(
+    to bottom,
+    #000 50%,
+    transparent 50% 55%,
+    #000 55% 63%,
+    transparent 63% 68%,
+    #000 68% 75%,
+    transparent 75% 81%,
+    #000 81% 87%,
+    transparent 87% 94%,
+    #000 94%
+  );
+  mask: linear-gradient(
+    to bottom,
+    #000 50%,
+    transparent 50% 55%,
+    #000 55% 63%,
+    transparent 63% 68%,
+    #000 68% 75%,
+    transparent 75% 81%,
+    #000 81% 87%,
+    transparent 87% 94%,
+    #000 94%
+  );
+}
+/* 격자 바닥: 지평선에서 앞으로 눕힌 판 (먼 곳은 촘촘, 가까운 곳은 넓게) */
+:root[data-skin='synthwave'] .kok-skin-art::after {
+  left: -70%;
+  right: -70%;
+  top: 42%;
+  height: 360px;
+  transform-origin: 50% 0;
+  transform: perspective(400px) rotateX(66deg);
+  background:
+    linear-gradient(var(--skin-art-3) 1.5px, transparent 1.5px) 0 0 / 100% 22px,
+    linear-gradient(90deg, var(--skin-art-3) 1.5px, transparent 1.5px) 50% 0 / 34px 100%;
+  -webkit-mask: linear-gradient(to bottom, transparent, #000 22%);
+  mask: linear-gradient(to bottom, transparent, #000 22%);
+}
+:root[data-skin='synthwave'] .kok-title-text {
+  /* 노을 그라데이션 글자 (두 끝 모두 바탕에서 4.5 이상: skins.ts) */
+  background: linear-gradient(to bottom, var(--skin-title) 18%, var(--skin-title-2) 92%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  filter: drop-shadow(0 0 10px var(--skin-glow-a));
+}
+:root[data-skin='synthwave'] .kok-section-title {
+  color: var(--skin-b-text);
+}
+:root[data-skin='synthwave'] .kok-card {
+  border-radius: 16px;
+  box-shadow:
+    inset 0 1px 0 color-mix(in srgb, var(--skin-b) 45%, transparent),
+    inset 0 0 0 1px color-mix(in srgb, var(--skin-a) 22%, transparent),
+    0 12px 30px -16px var(--skin-shadow);
+}
+:root[data-skin='synthwave'] .kok-hero {
+  box-shadow:
+    0 0 36px -10px var(--skin-glow-a),
+    0 18px 40px -20px var(--skin-shadow);
+}
+:root[data-skin='synthwave'] .kok-hero::after {
+  padding: 1.5px;
+  background: linear-gradient(180deg, var(--skin-b), var(--skin-a) 70%, color-mix(in srgb, var(--skin-a) 30%, transparent));
+}
+:root[data-skin='synthwave'] :is(.kok-btn-primary, :is(a, button).bg-accent) {
+  box-shadow:
+    0 0 22px -6px var(--skin-glow-a),
+    inset 0 1px 0 rgba(255, 255, 255, 0.4);
+}
+:root[data-skin='synthwave'] .kok-btn-secondary {
+  background: color-mix(in srgb, var(--surface-2) 70%, transparent);
+  box-shadow: inset 0 0 0 1px var(--skin-line);
+}
+:root[data-skin='synthwave'] .kok-fab {
+  box-shadow:
+    0 0 0 2px color-mix(in srgb, var(--skin-b) 50%, transparent),
+    0 0 30px -4px var(--skin-glow-a);
+}
+:root[data-skin='synthwave'] .kok-chip-on {
+  box-shadow: 0 0 18px -4px var(--skin-glow-a);
+}
+:root[data-skin='synthwave'] .kok-sheet {
+  box-shadow:
+    0 -1.5px 0 color-mix(in srgb, var(--skin-b) 60%, transparent),
+    0 -20px 50px -24px var(--skin-glow-a);
+}
+:root[data-skin='synthwave'] ::selection {
+  background: var(--skin-b);
+  color: var(--skin-b-ink);
+}
+
+/* =====================================================================================
+   터미널: 형광 글자가 물든 검정 화면, 주사선·가장자리 어둡게, 네모난 칸, '>' 와 깜빡이는 커서
+   ===================================================================================== */
+/* 형광 글자가 살짝 번진다 (제목만: 긴 글 전체에 번짐을 그리면 폰에서 스크롤이 무거워진다) */
+:root[data-skin='terminal'] :is(.kok-title, .font-display) {
+  text-shadow: 0 0 7px var(--skin-shadow);
+}
+:root[data-skin='terminal'] .kok-skin-art::before {
+  inset: 0;
+  background: repeating-linear-gradient(to bottom, var(--skin-art-1) 0 1px, transparent 1px 3px);
+}
+:root[data-skin='terminal'] .kok-skin-art::after {
+  inset: 0;
+  background: radial-gradient(120% 85% at 50% 45%, transparent 58%, var(--skin-art-2));
+}
+:root[data-skin='terminal'] .kok-title {
+  color: var(--skin-title);
+}
+:root[data-skin='terminal'] .kok-title-text::before {
+  content: '> ';
+  color: var(--skin-b-text);
+}
+/* 커서: 처음에 세 번 깜빡이고 켜진 채로 */
+:root[data-skin='terminal'] .kok-title-text::after {
+  content: '';
+  display: inline-block;
+  width: 0.5em;
+  height: 0.95em;
+  margin-left: 0.12em;
+  vertical-align: -0.1em;
+  background: var(--skin-a);
+  box-shadow: 0 0 8px var(--skin-glow-a);
+}
+:root[data-skin='terminal'] .kok-section-title::before {
+  content: '# ';
+  color: var(--skin-b-text);
+}
+:root[data-skin='terminal'] :is(.kok-card, .kok-hero, .kok-composer) {
+  border-radius: 0;
+  box-shadow: inset 0 0 0 1px var(--line);
+}
+/* 큰 카드: 두 겹 테두리 */
+:root[data-skin='terminal'] .kok-hero {
+  box-shadow:
+    inset 0 0 0 1px var(--skin-a),
+    0 0 0 3px var(--bg),
+    0 0 0 4px var(--line),
+    0 0 26px -10px var(--skin-glow-a);
+}
+:root[data-skin='terminal']
+  :is(
+    .kok-btn,
+    :is(a, button).bg-accent,
+    .kok-chip,
+    .kok-chip-on,
+    .kok-seg,
+    .kok-seg-on,
+    .kok-tab-pill,
+    .kok-input,
+    .kok-switch,
+    .kok-switch-knob,
+    .kok-nav-link
+  ) {
+  border-radius: 0;
+}
+:root[data-skin='terminal'] :is(.kok-btn-primary, :is(a, button).bg-accent) {
+  background-image: none;
+  box-shadow: 0 0 16px -4px var(--skin-glow-a);
+}
+:root[data-skin='terminal'] .kok-btn-secondary {
+  background: transparent;
+  color: var(--skin-a-text);
+  box-shadow: inset 0 0 0 1px var(--skin-line);
+}
+:root[data-skin='terminal'] .kok-btn-secondary:hover {
+  background: color-mix(in srgb, var(--skin-a) 12%, transparent);
+}
+:root[data-skin='terminal'] .kok-chip-on {
+  background: var(--skin-b);
+  color: var(--skin-b-ink);
+  box-shadow: none;
+}
+:root[data-skin='terminal'] .kok-input {
+  background: var(--bg);
+  border-width: 1px;
+  border-color: var(--line);
+  caret-color: var(--skin-a);
+}
+:root[data-skin='terminal'] .kok-input:focus {
+  border-color: var(--skin-a);
+}
+:root[data-skin='terminal'] .kok-tabbar {
+  border-radius: 0;
+  box-shadow: 0 -1px 0 var(--line);
+}
+:root[data-skin='terminal'] .kok-tab-pill.is-on {
+  background: var(--skin-a);
+  color: var(--skin-a-ink);
+}
+:root[data-skin='terminal'] .kok-fab {
+  border-radius: 0;
+  background-image: none;
+  box-shadow:
+    0 0 0 3px var(--bg),
+    0 0 0 4px var(--skin-a),
+    0 0 26px -6px var(--skin-glow-a);
+}
+:root[data-skin='terminal'] :is(.kok-sheet, .kok-pop, .kok-toast, .kok-selbar) {
+  border-radius: 0;
+}
+:root[data-skin='terminal'] .kok-sheet {
+  box-shadow: 0 0 0 1px var(--line);
+}
+:root[data-skin='terminal'] .kok-pop {
+  box-shadow: 0 0 0 1px var(--skin-line);
+}
+:root[data-skin='terminal'] .kok-nav-link.is-on {
+  background: var(--skin-a);
+  color: var(--skin-a-ink);
+}
+:root[data-skin='terminal'] .kok-nav-link.is-on svg {
+  color: var(--skin-a-ink);
+}
+:root[data-skin='terminal'] .kok-bone {
+  border-radius: 0;
+}
+:root[data-skin='terminal'] ::selection {
+  background: var(--skin-a);
+  color: var(--skin-a-ink);
+}
+/* 가끔 화면을 훑고 지나가는 옅은 빛 띠 */
+:root[data-skin='terminal'] .kok-skin-fx::before {
+  left: 0;
+  right: 0;
+  top: -160px;
+  height: 160px;
+  opacity: 0;
+  background: linear-gradient(to bottom, transparent, var(--skin-art-3) 60%, transparent);
+}
+
+/* =====================================================================================
+   브루탈: 강조 색이 물든 바탕의 망점, 흰 카드에 굵은 검정 테두리와 딱딱한 그림자, 누르면 그림자 위로 내려앉는다
+   ===================================================================================== */
+:root[data-skin='brutal'] .kok-skin-art::before {
+  inset: 0;
+  background: radial-gradient(var(--skin-art-1) 1.7px, transparent 2.1px) 0 0 / 14px 14px;
+  -webkit-mask: radial-gradient(120% 55% at 100% 0%, #000, transparent 70%), radial-gradient(100% 45% at 0% 100%, #000, transparent 70%);
+  mask: radial-gradient(120% 55% at 100% 0%, #000, transparent 70%), radial-gradient(100% 45% at 0% 100%, #000, transparent 70%);
+}
+:root[data-skin='brutal'] .kok-title {
+  color: var(--skin-title);
+}
+:root[data-skin='brutal'] .kok-title-text {
+  /* 채움 색 형광 띠 + 강조 색 딱딱한 그림자 */
+  background: linear-gradient(transparent 58%, var(--skin-art-3) 58% 90%, transparent 90%);
+  text-shadow: 2px 2px 0 var(--skin-title-2);
+  -webkit-box-decoration-break: clone;
+  box-decoration-break: clone;
+}
+:root[data-skin='brutal'] :is(.kok-card, .kok-composer) {
+  border-radius: 12px;
+  box-shadow:
+    inset 0 0 0 2.5px var(--skin-line),
+    4px 4px 0 var(--skin-shadow);
+}
+:root[data-skin='brutal'] .kok-hero {
+  box-shadow:
+    inset 0 0 0 3px var(--skin-line),
+    7px 7px 0 var(--skin-b),
+    7px 7px 0 2.5px var(--skin-line);
+}
+@media (hover: hover) and (pointer: fine) {
+  :root[data-skin='brutal'] .kok-card-hover:hover {
+    transform: translate(-2px, -2px);
+    box-shadow:
+      inset 0 0 0 2.5px var(--skin-line),
+      6px 6px 0 var(--skin-shadow);
+  }
+}
+:root[data-skin='brutal'] :is(.kok-btn, :is(a, button).bg-accent):not(.kok-btn-ghost) {
+  border-radius: 12px;
+  box-shadow:
+    inset 0 0 0 2.5px var(--skin-line),
+    3px 3px 0 var(--skin-shadow);
+}
+:root[data-skin='brutal'] :is(.kok-btn-primary, :is(a, button).bg-accent) {
+  background: var(--skin-a);
+  color: var(--skin-a-ink);
+}
+:root[data-skin='brutal'] .kok-btn-secondary {
+  background: var(--surface);
+}
+:root[data-skin='brutal'] .kok-btn-ghost:hover {
+  background: var(--surface-2);
+}
+/* 누르면 그림자 자리로 내려앉는다 */
+:root[data-skin='brutal'] :is(.kok-btn, :is(a, button).bg-accent):not(.kok-btn-ghost).press:active:not(:disabled) {
+  transform: translate(3px, 3px);
+  box-shadow: inset 0 0 0 2.5px var(--skin-line);
+}
+:root[data-skin='brutal'] .kok-chip {
+  box-shadow: inset 0 0 0 2px var(--skin-line);
+  color: var(--ink);
+}
+:root[data-skin='brutal'] .kok-chip-on {
+  background: var(--skin-b);
+  color: var(--skin-b-ink);
+  box-shadow:
+    inset 0 0 0 2.5px var(--skin-line),
+    2px 2px 0 var(--skin-shadow);
+}
+:root[data-skin='brutal'] .kok-input {
+  background: var(--surface);
+  border-radius: 12px;
+  border-width: 2.5px;
+  border-color: var(--skin-line);
+}
+:root[data-skin='brutal'] .kok-input:focus {
+  box-shadow: 3px 3px 0 var(--skin-shadow);
+}
+:root[data-skin='brutal'] .kok-seg {
+  border-radius: 12px;
+  box-shadow: inset 0 0 0 2px var(--skin-line);
+}
+:root[data-skin='brutal'] .kok-seg-on {
+  border-radius: 9px;
+  background: var(--skin-a);
+  box-shadow: inset 0 0 0 2px var(--skin-line);
+}
+:root[data-skin='brutal'] .kok-switch {
+  box-shadow: inset 0 0 0 2px var(--skin-line);
+}
+:root[data-skin='brutal'] .kok-switch-knob {
+  box-shadow: inset 0 0 0 2px var(--skin-line);
+}
+:root[data-skin='brutal'] .kok-tabbar {
+  border-radius: 0;
+  background: var(--surface);
+  box-shadow: 0 -2.5px 0 var(--skin-line);
+}
+:root[data-skin='brutal'] .kok-tab-pill.is-on {
+  border-radius: 10px;
+  background: var(--skin-a);
+  color: var(--skin-a-ink);
+  box-shadow: inset 0 0 0 2px var(--skin-line);
+}
+:root[data-skin='brutal'] .kok-fab {
+  border-radius: 18px;
+  background-image: none;
+  box-shadow:
+    inset 0 0 0 2.5px var(--skin-line),
+    4px 4px 0 var(--skin-shadow);
+}
+:root[data-skin='brutal'] .kok-fab:active {
+  transform: translate(3px, 3px);
+  box-shadow: inset 0 0 0 2.5px var(--skin-line);
+}
+:root[data-skin='brutal'] :is(.kok-sheet, .kok-pop, .kok-selbar) {
+  box-shadow:
+    inset 0 0 0 2.5px var(--skin-line),
+    5px 5px 0 var(--skin-shadow);
+}
+:root[data-skin='brutal'] .kok-sheet {
+  border-radius: 22px 22px 0 0;
+}
+@media (min-width: 640px) {
+  :root[data-skin='brutal'] .kok-sheet {
+    border-radius: 22px;
+  }
+}
+:root[data-skin='brutal'] .kok-toast {
+  border-radius: 12px;
+  box-shadow:
+    inset 0 0 0 2.5px var(--skin-line),
+    3px 3px 0 var(--skin-shadow);
+}
+:root[data-skin='brutal'] .kok-nav-link {
+  border-radius: 12px;
+}
+:root[data-skin='brutal'] .kok-nav-link.is-on {
+  background: var(--skin-a);
+  box-shadow:
+    inset 0 0 0 2.5px var(--skin-line),
+    3px 3px 0 var(--skin-shadow);
+}
+:root[data-skin='brutal'] .kok-nav-link.is-on svg {
+  color: var(--ink);
+}
+:root[data-skin='brutal'] ::selection {
+  background: var(--skin-a);
+  color: #000;
+}
+
+/* =====================================================================================
+   스케치북: 파란 줄과 빨간 여백 줄의 노트, 손으로 그린 테두리, 펜 버튼, 형광펜 밑줄 제목, 마스킹 테이프
+   ===================================================================================== */
+:root[data-skin='sketch'] .kok-skin-art {
+  background: linear-gradient(to bottom, transparent 31px, var(--skin-art-1) 31px 32px) 0 6px / 100% 32px;
+}
+:root[data-skin='sketch'] .kok-skin-art::before {
+  top: 0;
+  bottom: 0;
+  left: 10px;
+  width: 1.5px;
+  background: var(--skin-art-2);
+}
+@media (min-width: 768px) {
+  :root[data-skin='sketch'] .kok-skin-art::before {
+    left: 252px;
+  }
+}
+:root[data-skin='sketch'] .kok-title {
+  color: var(--skin-title);
+}
+:root[data-skin='sketch'] .kok-title-text {
+  position: relative;
+  isolation: isolate;
+}
+/* 형광펜 밑줄 (처음에 왼쪽에서 오른쪽으로 쓱 칠해진다) */
+:root[data-skin='sketch'] .kok-title-text::after {
+  content: '';
+  position: absolute;
+  z-index: -1;
+  left: -0.12em;
+  right: -0.12em;
+  bottom: 0.04em;
+  height: 0.42em;
+  border-radius: 0.3em 0.15em 0.35em 0.2em;
+  background: var(--skin-glow-b);
+  transform: rotate(-0.8deg);
+  transform-origin: left center;
+}
+:root[data-skin='sketch'] :is(.kok-card, .kok-composer) {
+  border-radius: 18px 6px 20px 8px / 8px 20px 6px 18px;
+  box-shadow:
+    inset 0 0 0 1.5px var(--skin-line),
+    2px 3px 0 var(--skin-shadow);
+}
+:root[data-skin='sketch'] .kok-card:nth-child(3n + 2) {
+  border-radius: 7px 19px 9px 21px / 20px 7px 18px 9px;
+}
+:root[data-skin='sketch'] .kok-card:nth-child(3n) {
+  border-radius: 20px 9px 16px 6px / 6px 16px 9px 22px;
+}
+/* 큰 카드: 위에 마스킹 테이프 */
+:root[data-skin='sketch'] .kok-hero {
+  box-shadow:
+    inset 0 0 0 2px var(--skin-line),
+    3px 4px 0 var(--skin-shadow);
+}
+:root[data-skin='sketch'] .kok-hero::before {
+  inset: -11px auto auto 50%;
+  width: 96px;
+  height: 22px;
+  z-index: 2;
+  border-radius: 2px;
+  background: color-mix(in srgb, var(--skin-b) 70%, transparent);
+  transform: translateX(-50%) rotate(-3deg);
+  box-shadow: 0 1px 2px var(--skin-shadow);
+}
+:root[data-skin='sketch'] .kok-hero::after {
+  display: none;
+}
+:root[data-skin='sketch'] :is(.kok-btn, :is(a, button).bg-accent):not(.kok-btn-ghost) {
+  border-radius: 255px 18px 225px 18px / 18px 225px 18px 255px;
+}
+:root[data-skin='sketch'] :is(.kok-btn-primary, :is(a, button).bg-accent) {
+  background-image: none;
+  box-shadow:
+    inset 0 0 0 1.5px var(--skin-line),
+    2px 3px 0 var(--skin-shadow);
+}
+:root[data-skin='sketch'] .kok-btn-secondary {
+  background: var(--surface);
+  box-shadow: inset 0 0 0 1.5px var(--skin-line);
+}
+:root[data-skin='sketch'] :is(.kok-chip, .kok-chip-on, .kok-tab-pill, .kok-seg-on) {
+  border-radius: 255px 15px 225px 15px / 15px 225px 15px 255px;
+}
+:root[data-skin='sketch'] .kok-chip-on {
+  background: var(--skin-b);
+  color: var(--skin-b-ink);
+  box-shadow: inset 0 0 0 1.5px var(--skin-line);
+}
+:root[data-skin='sketch'] .kok-input {
+  background: transparent;
+  border-width: 0 0 2px;
+  border-color: var(--skin-line);
+  border-radius: 0;
+  padding-left: 2px;
+}
+:root[data-skin='sketch'] .kok-input:focus {
+  background: transparent;
+  border-color: var(--skin-a);
+}
+:root[data-skin='sketch'] .kok-seg {
+  background: transparent;
+  box-shadow: inset 0 0 0 1.5px var(--skin-line);
+  border-radius: 255px 15px 225px 15px / 15px 225px 15px 255px;
+}
+:root[data-skin='sketch'] .kok-seg-on {
+  background: var(--skin-b);
+  box-shadow: none;
+}
+:root[data-skin='sketch'] .kok-switch {
+  box-shadow: inset 0 0 0 1.5px var(--skin-line);
+}
+:root[data-skin='sketch'] .kok-tabbar {
+  border-radius: 0;
+  background: color-mix(in srgb, var(--bg) 94%, transparent);
+  box-shadow: 0 -1.5px 0 var(--skin-line);
+}
+:root[data-skin='sketch'] .kok-tab-pill.is-on {
+  background: var(--skin-b);
+  color: var(--ink);
+}
+:root[data-skin='sketch'] .kok-fab {
+  background-image: none;
+  border-radius: 58% 42% 55% 45% / 45% 55% 42% 58%;
+  box-shadow:
+    inset 0 0 0 2px var(--skin-line),
+    3px 4px 0 var(--skin-shadow);
+}
+:root[data-skin='sketch'] :is(.kok-sheet, .kok-pop, .kok-selbar) {
+  box-shadow:
+    inset 0 0 0 1.5px var(--skin-line),
+    3px 4px 0 var(--skin-shadow);
+}
+:root[data-skin='sketch'] .kok-sheet {
+  border-radius: 26px 10px 0 0 / 14px 22px 0 0;
+}
+@media (min-width: 640px) {
+  :root[data-skin='sketch'] .kok-sheet {
+    border-radius: 26px 10px 24px 12px / 14px 22px 12px 26px;
+  }
+}
+:root[data-skin='sketch'] .kok-nav-link.is-on {
+  background: var(--skin-b);
+  border-radius: 255px 15px 225px 15px / 15px 225px 15px 255px;
+}
+:root[data-skin='sketch'] .kok-nav-link.is-on svg {
+  color: var(--ink);
+}
+:root[data-skin='sketch'] ::selection {
+  background: var(--skin-b);
+  color: var(--ink);
+}
+
+/* =====================================================================================
+   움직임 (가끔, 짧게. transform·opacity 만)
+   ===================================================================================== */
+@keyframes kok-sk-breathe {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.62;
+  }
+}
+/* 네온관이 가끔 두 번 깜빡인다 (9초에 한 번, 0.4초 안에) */
+@keyframes kok-sk-flicker {
+  0%,
+  91%,
+  93.5%,
+  95.5%,
+  100% {
+    opacity: 1;
+  }
+  92% {
+    opacity: 0.35;
+  }
+  94.5% {
+    opacity: 0.6;
+  }
+}
+/* 글리치: 7초에 한 번 0.35초 동안 어긋난다 */
+@keyframes kok-sk-glitch {
+  0%,
+  94%,
+  100% {
+    transform: none;
+  }
+  94.6% {
+    transform: translate(-3px, 1px) skewX(-8deg);
+  }
+  95.4% {
+    transform: translate(3px, -1px) skewX(6deg);
+  }
+  96.2% {
+    transform: translate(-1px, 0) skewX(-2deg);
+  }
+  97% {
+    transform: none;
+  }
+}
+@keyframes kok-sk-glitch-frame {
+  0%,
+  94%,
+  100% {
+    transform: translate(-4px, -3px);
+  }
+  95% {
+    transform: translate(3px, -1px);
+  }
+  96% {
+    transform: translate(-7px, 2px);
+  }
+  97% {
+    transform: translate(-4px, -3px);
+  }
+}
+@keyframes kok-sk-glitch-frame-2 {
+  0%,
+  94%,
+  100% {
+    transform: translate(4px, 3px);
+  }
+  95% {
+    transform: translate(-3px, 2px);
+  }
+  96% {
+    transform: translate(7px, -1px);
+  }
+  97% {
+    transform: translate(4px, 3px);
+  }
+}
+/* 화면을 가로지르는 띠: 11초에 한 번 */
+@keyframes kok-sk-tear {
+  0%,
+  88%,
+  100% {
+    opacity: 0;
+    transform: translate(0, 34vh);
+  }
+  88.5% {
+    opacity: 1;
+    transform: translate(-8px, 34vh);
+  }
+  89.5% {
+    opacity: 1;
+    transform: translate(10px, 33vh);
+  }
+  90.5% {
+    opacity: 0;
+    transform: translate(0, 33vh);
+  }
+}
+@keyframes kok-sk-tear-2 {
+  0%,
+  89%,
+  100% {
+    opacity: 0;
+    transform: translate(0, 61vh);
+  }
+  89.4% {
+    opacity: 1;
+    transform: translate(12px, 61vh);
+  }
+  90.2% {
+    opacity: 0;
+    transform: translate(-6px, 61vh);
+  }
+}
+/* 해가 처음에 천천히 떠오른다 (앱을 열 때 한 번) */
+@keyframes kok-sk-sunrise {
+  from {
+    opacity: 0;
+    transform: translate(-50%, 22%);
+  }
+}
+/* 터미널 커서: 세 번 깜빡이고 켜진 채로 */
+@keyframes kok-sk-blink {
+  0%,
+  49% {
+    opacity: 1;
+  }
+  50%,
+  100% {
+    opacity: 0;
+  }
+}
+/* 화면을 훑는 빛 띠: 9초에 한 번 */
+@keyframes kok-sk-roll {
+  0%,
+  72% {
+    opacity: 0;
+    transform: translateY(0);
+  }
+  73% {
+    opacity: 1;
+    transform: translateY(0);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(calc(100lvh + 160px));
+  }
+}
+/* 형광펜이 쓱 칠해진다 */
+@keyframes kok-sk-swipe {
+  from {
+    transform: rotate(-0.8deg) scaleX(0);
+  }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  :root[data-skin='neon']:not([data-motion='off']) .kok-hero::after {
+    animation: kok-sk-breathe 4.6s ease-in-out infinite;
+  }
+  :root[data-skin='neon']:not([data-motion='off']) .kok-title-text {
+    animation: kok-sk-flicker 9s linear infinite;
+  }
+  :root[data-skin='glitch']:not([data-motion='off']) .kok-title-text {
+    animation: kok-sk-glitch 7s steps(1, end) infinite;
+  }
+  :root[data-skin='glitch']:not([data-motion='off']) .kok-hero::before {
+    animation: kok-sk-glitch-frame 7s steps(1, end) 1.2s infinite;
+  }
+  :root[data-skin='glitch']:not([data-motion='off']) .kok-hero::after {
+    animation: kok-sk-glitch-frame-2 7s steps(1, end) 1.2s infinite;
+  }
+  :root[data-skin='glitch']:not([data-motion='off']) .kok-skin-fx::before {
+    animation: kok-sk-tear 11s linear 3s infinite;
+  }
+  :root[data-skin='glitch']:not([data-motion='off']) .kok-skin-fx::after {
+    animation: kok-sk-tear-2 11s linear 3s infinite;
+  }
+  :root[data-skin='synthwave']:not([data-motion='off']) .kok-skin-art::before {
+    animation: kok-sk-sunrise 1.6s var(--ease-out) backwards;
+  }
+  :root[data-skin='terminal']:not([data-motion='off']) .kok-title-text::after {
+    animation: kok-sk-blink 1s steps(1, end) 3;
+  }
+  :root[data-skin='terminal']:not([data-motion='off']) .kok-skin-fx::before {
+    animation: kok-sk-roll 9s linear 2s infinite;
+  }
+  :root[data-skin='sketch']:not([data-motion='off']) .kok-title-text::after {
+    animation: kok-sk-swipe 420ms var(--ease-out) 120ms backwards;
+  }
+}

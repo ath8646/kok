@@ -623,6 +623,120 @@ async def answer_any(page):
     await page.get_by_role("button", name="다음").click()
 
 
+async def terminal_steps(browser, page):
+    """터미널 (시그니처 테마 '터미널'의 숨은 화면). page: 학생, 터미널 테마, 홈"""
+    student = USERS["student"][0]
+    step("terminal (terminal theme): the home icon opens a Linux-like shell, ./setting manages KOK data, files and history stay on the device")
+    entry = page.get_by_role("link", name="터미널 열기")
+    await expect(entry).to_be_visible()
+    await entry.click()
+    await page.wait_for_url("**/terminal?from=home")
+    term = page.locator(".kok-term-screen")
+    live = page.locator(".kok-term-live")
+    await expect(term).to_contain_text("KOK Linux 1.0")
+    await expect(live).to_contain_text("student@kok:~$")
+    # 아래 메뉴 없이 화면 가득 (집중 모드)
+    assert await page.locator("nav.kok-tabbar").count() == 0
+
+    async def run_cmd(cmd, want=None, timeout=10000):
+        await page.keyboard.type(cmd)
+        await page.keyboard.press("Enter")
+        if want:
+            await expect(term).to_contain_text(want, timeout=timeout, use_inner_text=True)
+
+    await run_cmd("pwd", "/home/student")
+    await run_cmd("ls /root", "허가 거부")
+    await run_cmd("echo 콕콕 > a.txt && cat a.txt | wc -c", re.compile(r"wc -c\n\s*7\n"))
+    await run_cmd("printf '%s-%s\\n' 터미널 시험", "터미널-시험")
+    # 탭으로 이름 채우기 (bash 처럼)
+    await page.keyboard.type("cat he")
+    await page.keyboard.press("Tab")
+    await expect(live).to_contain_text("cat help.txt")
+    await page.keyboard.press("Enter")
+    await expect(term).to_contain_text("2. setting — KOK 관리 모드")
+    # 커서는 실제 터미널처럼 계속 깜빡인다
+    blink = await page.evaluate("(() => { const s = getComputedStyle(document.querySelector('.kok-term-cursor'), '::after'); return [s.animationName, s.animationIterationCount]; })()")
+    assert blink == ["kok-sk-blink", "infinite"], blink
+    # setting: 과목은 폴더, 자료는 파일. 바꾸면 DB 에 바로
+    await run_cmd("./setting", "KOK setting 1.0")
+    await expect(live).to_contain_text("setting:/$")
+    await run_cmd("ls", "과학/")
+    await run_cmd("mkdir 터미널과목", "'터미널과목' 과목을 만들었어요")
+    assert db(f"select count(*) from public.subjects where user_id = '{student}' and name = '터미널과목'") == "1"
+    note = db(f"select id from public.sources where user_id = '{student}' and status = 'ready' and parent_id is null and not starred order by created_at limit 1")
+    await run_cmd(f"star #{note[:8]}", "별표를 달았어요")
+    assert db(f"select starred from public.sources where id = '{note}'") == "t"
+    await run_cmd(f"unstar #{note[:8]}", "별표를 뺐어요")
+    assert db(f"select starred from public.sources where id = '{note}'") == "f"
+    await run_cmd(f"info #{note[:8]}", re.compile(r"상태\s+완료"))
+    await run_cmd("stats", "카드 상태")
+    await run_cmd("config notify.done off", re.compile(r"notify\.done: \w+ → off"))
+    assert db(f"select settings->'notify'->>'done' from public.profiles where id = '{student}'") == "false"
+    await run_cmd("config notify.done on", "notify.done: off → on")
+    await run_cmd("rmdir 터미널과목", "'터미널과목' 과목을 지웠어요")
+    assert db(f"select count(*) from public.subjects where user_id = '{student}' and name = '터미널과목'") == "0"
+    await run_cmd("exit", "setting 을 나왔어요")
+    await expect(live).to_contain_text("student@kok:~$")
+    # nano: ^O 쓰기, ^X 나가기
+    await run_cmd("nano memo.txt")
+    nano = page.get_by_role("dialog", name="nano 편집기: memo.txt")
+    await expect(nano).to_be_visible()
+    await page.keyboard.type("터미널 메모")
+    await page.keyboard.press("Control+o")
+    await expect(nano.get_by_text("쓸 파일 이름: memo.txt")).to_be_visible()
+    await page.keyboard.press("Enter")
+    await expect(nano.get_by_text("[ 1줄 씀 ]")).to_be_visible()
+    await page.keyboard.press("Control+x")
+    await expect(nano).to_be_hidden()
+    await run_cmd("cat memo.txt", "터미널 메모")
+    await no_hscroll(page, "terminal")
+    await shot(page, "55-terminal", full=False)
+    # 다시 열어도 파일과 명령 기록이 그대로 (이 기기에만)
+    await page.reload()
+    await expect(term).to_contain_text("마지막 로그인")
+    await term.click()
+    await run_cmd("cat memo.txt; history | grep -c nano", "터미널 메모")
+    await page.keyboard.press("ArrowUp")
+    await expect(live).to_contain_text("cat memo.txt; history")
+    await page.keyboard.press("Control+c")
+    await run_cmd("exit")
+    await page.wait_for_url("**/home")
+    await expect(page.get_by_role("link", name="터미널 열기")).to_be_visible()
+    # 폰: 키보드 위 단추 줄 (CTRL 을 누르고 l = 화면 지우기)
+    pctx = await browser.new_context(viewport={"width": 390, "height": 760}, has_touch=True, is_mobile=True, device_scale_factor=1, locale="ko-KR")
+    await pctx.add_cookies([session_cookie(*USERS["student"])])
+    ppage = await pctx.new_page()
+    ppage.on("pageerror", lambda e: ERRORS.append(f"[terminal-touch] pageerror: {e}"))
+    await ppage.goto(BASE + "/terminal")
+    await expect(ppage.locator(".kok-term-win")).to_be_visible()
+    keys = ppage.get_by_role("toolbar", name="터미널 키")
+    await expect(keys).to_be_visible()
+    await ppage.locator(".kok-term-screen").tap()
+    await ppage.keyboard.type("ls")
+    await keys.get_by_role("button", name="컨트롤").tap()
+    await expect(keys.get_by_role("button", name="컨트롤")).to_have_attribute("aria-pressed", "true")
+    await ppage.keyboard.type("c")
+    await expect(ppage.locator(".kok-term-screen")).to_contain_text("ls^C")
+    await shot(ppage, "55-terminal-phone", full=False)
+    # nano 에서도 단추 줄: 기호를 넣고, CTRL·x 로 나가기 → 저장할지 묻는다
+    await ppage.keyboard.type("nano t.txt")
+    await ppage.keyboard.press("Enter")
+    pnano = ppage.get_by_role("dialog", name="nano 편집기: t.txt")
+    await expect(pnano).to_be_visible()
+    await ppage.keyboard.type("a")
+    await keys.get_by_role("button", name="/", exact=True).tap()
+    await expect(ppage.locator(".kok-nano-area")).to_have_value("a/")
+    await keys.get_by_role("button", name="컨트롤").tap()
+    await ppage.keyboard.type("x")
+    await expect(pnano.get_by_text("수정한 버퍼를 저장할까요?")).to_be_visible()
+    await pnano.get_by_role("button", name="Y 예").tap()
+    await expect(pnano).to_be_hidden()
+    await ppage.keyboard.type("cat t.txt")
+    await ppage.keyboard.press("Enter")
+    await expect(ppage.locator(".kok-term-screen")).to_contain_text("a/")
+    await pctx.close()
+
+
 async def tab_steps(browser):
     """탭을 오갈 때 (src/lib/view-cache.ts): 다시 들어온 화면은 처음부터 그대로 보이고, 처음 읽는 동안에도 임시 글이 보였다가 바뀌지 않는다.
     데이터를 바꾼 뒤에는 기억해 둔 옛 화면을 보이지 않는다. 복습을 끝낸 뒤 '홈으로'는 미리 읽어 둔 홈이 바로 보인다"""
@@ -3259,9 +3373,19 @@ async def main():
             "(() => { const s = getComputedStyle(document.querySelector('.kok-title-text'), '::after'); return [s.animationName, s.animationIterationCount]; })()"
         )
         assert cursor == ["kok-sk-blink", "infinite"], cursor
+
+        await terminal_steps(browser, page)
+
         await page.goto(BASE + "/settings#theme")
         await skins.get_by_role("radio", name="브루탈", exact=True).click()
         await wait_saved({"light": "skin:brutal", "dark": "skin:brutal"})
+        # 다른 테마에서는 터미널 아이콘이 없고, 주소로 들어와도 안내만
+        await page.goto(BASE + "/terminal")
+        await expect(page.get_by_text("터미널 테마에서 열려요")).to_be_visible()
+        assert await page.locator(".kok-term-win").count() == 0
+        await page.goto(BASE + "/home")
+        await expect(page.locator("h1.kok-title").first).to_be_visible()
+        await expect(page.get_by_role("link", name="터미널 열기")).to_be_hidden()
         await page.goto(BASE + "/review")
         await page.wait_for_timeout(800)
         # 카드는 굵은 테두리(안쪽 그림자) + 번지지 않는 딱딱한 그림자 (큰 카드는 7px, 다른 카드는 4px)

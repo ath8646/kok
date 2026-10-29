@@ -11,6 +11,7 @@ import { HomeAsk } from '@/components/chat/HomeChat';
 import { ProcessingList, useActiveSources } from '@/components/ProcessingList';
 import { SOURCES_CHANGED, useQuickAdd } from '@/components/QuickAdd';
 import { Button, DONE, Energy, ICONS, Icon, LargeHeader, LinkButton, ProgressRing, SectionTitle, Sheet, Swap, cx, useToast } from '@/components/ui';
+import { TerminalEntry } from '@/components/terminal/TerminalEntry';
 import { deleteSession, reviewedAfter } from '@/lib/data';
 import { homeViewKey, loadHome, type HomeData } from '@/lib/home-data';
 import { continuePlan, pickToday, streakInfo } from '@/lib/review-plan';
@@ -251,9 +252,13 @@ export default function HomePage() {
         compactTitle={title ?? '오늘'}
         subtitle={subtitle}
         actions={
-          <span className="md:hidden">
-            <EnergyPill me={me} />
-          </span>
+          <>
+            {/* 시그니처 테마 '터미널'일 때만 보이는 터미널 아이콘 */}
+            <TerminalEntry />
+            <span className="md:hidden">
+              <EnergyPill me={me} />
+            </span>
+          </>
         }
       />
 

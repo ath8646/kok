@@ -19,6 +19,7 @@ node fakebase/server.mjs                 # 가짜 백엔드 :54321 (다른 창�
 bash serve.sh                            # 앱 빌드 + :3000 (다른 창에서 계속 켜 두기)
 python3 e2e.py                           # 가입 → 자료 넣기 → 노트·그림·문제 → 복습 → 오답 → 관리자 … (화면은 shots/ 에)
 python3 e2e_fail.py                      # 처리 실패·환불·다시 하기, 비상 스위치, 다른 사람 자료 막기
+python3 e2e_term.py                      # 터미널 테마의 숨은 터미널만 (셸·./setting·nano·폰 키 줄)
 ```
 
 로그인은 가짜 세션 쿠키로 대신해요(`student@example.com`, 관리자 `admin@example.com`, `other@example.com`).

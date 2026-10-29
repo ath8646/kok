@@ -566,6 +566,376 @@
   background: linear-gradient(to bottom, transparent, var(--skin-art-3) 60%, transparent);
 }
 
+/* -------------------------------------------------------------------------------------
+   터미널 테마의 숨은 화면: 홈 위의 터미널 아이콘 → /terminal (components/terminal).
+   ANSI 색 0~7 은 테마의 글자 색 (흐린 글자·빨강·초록·주황·가지 색·본문): 터미널 바탕(--bg) 위에서 4.5 이상 (skins.test.ts)
+   ------------------------------------------------------------------------------------- */
+.kok-term-entry {
+  display: none;
+}
+:root[data-skin='terminal'] .kok-term-entry {
+  display: grid;
+  place-items: center;
+  width: 40px;
+  height: 40px;
+  margin-right: 6px;
+  color: var(--skin-a-text);
+  box-shadow: inset 0 0 0 1px var(--skin-line);
+  transition:
+    transform 160ms var(--ease-out),
+    background-color 160ms ease;
+}
+:root[data-skin='terminal'] .kok-term-entry:hover {
+  background: color-mix(in srgb, var(--skin-a) 12%, transparent);
+}
+:root[data-skin='terminal'] .kok-term-entry:focus-visible {
+  outline: 2px solid var(--skin-a);
+  outline-offset: 2px;
+}
+.kok-term {
+  --term-bg: var(--bg);
+  --term-fg: var(--ink);
+  --term-font: 'Nanum Gothic Coding', ui-monospace, 'SFMono-Regular', Menlo, Consolas, 'Apple SD Gothic Neo', 'Malgun Gothic', monospace;
+  --t-0: var(--muted);
+  --t-1: var(--bad);
+  --t-2: var(--ok);
+  --t-3: var(--warn);
+  --t-4: var(--b1);
+  --t-5: var(--b6);
+  --t-6: var(--b7);
+  --t-7: var(--ink);
+  /* 폰에서 키보드가 열리면 보이는 곳만 (Terminal.tsx 가 visualViewport 로 적는다) */
+  position: fixed;
+  left: 0;
+  right: 0;
+  top: var(--vv-top, 0px);
+  height: var(--vv-h, 100dvh);
+  z-index: 60;
+  display: grid;
+  place-items: center;
+  padding: 28px;
+}
+.kok-term-win {
+  display: flex;
+  flex-direction: column;
+  width: min(980px, 100%);
+  height: min(700px, 100%);
+  overflow: hidden;
+  background: var(--term-bg);
+  color: var(--term-fg);
+  box-shadow:
+    0 0 0 1px var(--line),
+    0 28px 70px -20px rgba(0, 0, 0, 0.75),
+    0 0 36px -12px var(--skin-glow-a, transparent);
+}
+.kok-term.is-max {
+  padding: 0;
+}
+.kok-term.is-max .kok-term-win {
+  width: 100%;
+  height: 100%;
+}
+.kok-term-bar {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 8px;
+  height: 40px;
+  padding: 0 8px;
+  background: var(--surface);
+  border-bottom: 1px solid var(--line);
+  user-select: none;
+}
+.kok-term-bar-side,
+.kok-term-btns {
+  display: flex;
+  flex: none;
+  justify-content: flex-end;
+  gap: 6px;
+  width: 90px;
+}
+.kok-term-title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  font: 700 13px/1.2 var(--term-font);
+  color: var(--ink);
+  text-align: center;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.kok-term-btn {
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  background: var(--surface-2);
+  color: var(--ink);
+  transition:
+    transform 160ms var(--ease-out),
+    background-color 160ms ease;
+}
+.kok-term-btn svg {
+  width: 14px;
+  height: 14px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.7;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.kok-term-btn:hover {
+  background: var(--surface-3);
+}
+.kok-term-btn.is-close:hover {
+  background: var(--bad);
+  color: var(--term-bg);
+}
+.kok-term-btn:active,
+.kok-term-key:active {
+  transform: scale(0.94);
+}
+.kok-term-btn:focus-visible,
+.kok-term-key:focus-visible {
+  outline: 2px solid var(--skin-a, var(--accent));
+  outline-offset: 2px;
+}
+.kok-term-body {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+}
+.kok-term-screen {
+  position: absolute;
+  inset: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 6px 10px 14px;
+  font-family: var(--term-font);
+  font-size: 14px;
+  line-height: 1.4;
+  font-variant-ligatures: none;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  word-break: break-all;
+  cursor: text;
+  scrollbar-width: thin;
+  scrollbar-color: var(--line) transparent;
+}
+.kok-term-line {
+  min-height: 1.4em;
+}
+.kok-term-live {
+  position: relative;
+}
+/* 입력은 보이지 않는 칸이 받고(한글 조합·붙여 넣기), 글과 커서는 줄에 그린다. 16px: iOS 가 확대하지 않게 */
+.kok-term-input {
+  position: absolute;
+  left: 0;
+  bottom: 0;
+  width: 2px;
+  height: 1.4em;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  outline: none;
+  background: transparent;
+  color: transparent;
+  caret-color: transparent;
+  opacity: 0;
+  font-size: 16px;
+  pointer-events: none;
+}
+.kok-term-measure {
+  position: absolute;
+  top: 0;
+  left: 0;
+  visibility: hidden;
+  white-space: pre;
+  pointer-events: none;
+}
+/* 칸에 딱 맞지 않는 기호(·★─ 등: 글꼴마다 너비가 다르다)는 1칸·2칸 상자 가운데에 (Terminal.tsx GridText) */
+.kok-term-g1,
+.kok-term-g2 {
+  display: inline-flex;
+  justify-content: center;
+}
+.kok-term-g1 {
+  width: 1ch;
+}
+.kok-term-g2 {
+  width: 2ch;
+}
+/* 커서: 밑 글자 위에 같은 글자를 칠한 칸을 겹친다 (꺼진 때는 밑 글자가 그대로 보인다) */
+.kok-term-cursor {
+  position: relative;
+}
+.kok-term-cursor::after {
+  content: attr(data-ch);
+  position: absolute;
+  inset: 0;
+  display: flex;
+  justify-content: center;
+  white-space: pre;
+  background: var(--skin-a, var(--term-fg));
+  color: var(--skin-a-ink, var(--term-bg));
+}
+.kok-term-cursor.is-idle::after {
+  background: transparent;
+  color: transparent;
+  box-shadow: inset 0 0 0 1px var(--skin-a, var(--term-fg));
+}
+/* 폰: 키보드 위 단추 줄 */
+.kok-term-keys {
+  display: none;
+}
+.kok-term-key {
+  flex: 1 0 auto;
+  min-width: 42px;
+  height: 38px;
+  padding: 0 8px;
+  font: 700 13px/1 var(--term-font);
+  color: var(--ink);
+  background: var(--surface-2);
+  transition: transform 160ms var(--ease-out);
+}
+.kok-term-key.is-on {
+  background: var(--skin-a, var(--accent));
+  color: var(--skin-a-ink, var(--accent-ink));
+}
+/* nano */
+.kok-nano {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--term-bg);
+  font-family: var(--term-font);
+  font-size: 14px;
+  line-height: 1.4;
+}
+.kok-nano-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 1px 10px;
+  background: var(--term-fg);
+  color: var(--term-bg);
+  white-space: nowrap;
+}
+.kok-nano-file {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.kok-nano-area {
+  flex: 1;
+  min-height: 0;
+  padding: 4px 10px;
+  border: 0;
+  outline: none;
+  resize: none;
+  background: transparent;
+  color: var(--term-fg);
+  font: inherit;
+  caret-color: var(--skin-a, var(--term-fg));
+}
+.kok-nano-status,
+.kok-nano-prompt {
+  min-height: 1.4em;
+  padding: 0 10px;
+  text-align: center;
+}
+.kok-nano-prompt {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 4px 12px;
+  text-align: left;
+}
+.kok-nano-inv {
+  padding: 0 4px;
+  background: var(--term-fg);
+  color: var(--term-bg);
+}
+.kok-nano-choices {
+  display: flex;
+  gap: 14px;
+}
+.kok-nano-keys {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  padding: 2px 6px 6px;
+}
+.kok-nano-keys button,
+.kok-nano-choices button {
+  padding: 3px 4px;
+  color: var(--term-fg);
+  text-align: left;
+  white-space: nowrap;
+}
+.kok-nano-keys b,
+.kok-nano-choices b {
+  padding: 0 2px;
+  background: var(--term-fg);
+  color: var(--term-bg);
+  font-weight: 700;
+}
+.kok-nano-keys button:focus-visible,
+.kok-nano-choices button:focus-visible {
+  outline: 1px solid var(--skin-a, var(--accent));
+}
+@media (min-width: 768px) {
+  .kok-nano-keys {
+    grid-template-columns: repeat(6, minmax(0, 1fr));
+  }
+}
+@media (max-width: 767px) {
+  .kok-term {
+    padding: 0;
+  }
+  .kok-term-win {
+    width: 100%;
+    height: 100%;
+    box-shadow: none;
+  }
+  .kok-term-desk {
+    display: none !important;
+  }
+  .kok-term-bar {
+    height: calc(46px + env(safe-area-inset-top));
+    padding-top: env(safe-area-inset-top);
+  }
+  .kok-term-bar-side,
+  .kok-term-btns {
+    width: 40px;
+  }
+  .kok-term-btn.is-close {
+    width: 36px;
+    height: 36px;
+  }
+  .kok-term-screen {
+    font-size: 13px;
+  }
+}
+@media (pointer: coarse) {
+  .kok-term-keys {
+    display: flex;
+    flex: none;
+    gap: 4px;
+    overflow-x: auto;
+    padding: 6px 6px calc(6px + env(safe-area-inset-bottom));
+    background: var(--surface);
+    border-top: 1px solid var(--line);
+    scrollbar-width: none;
+  }
+  /* 손가락 기기: 글 칸 16px (iOS 가 확대하지 않게) */
+  .kok-nano-area {
+    font-size: 16px;
+  }
+}
+
 /* =====================================================================================
    브루탈: 강조 색이 물든 바탕의 망점, 흰 카드에 굵은 검정 테두리와 딱딱한 그림자, 누르면 그림자 위로 내려앉는다
    ===================================================================================== */
@@ -1058,6 +1428,11 @@
     animation: kok-sk-sunrise 1.6s var(--ease-out) backwards;
   }
   :root[data-skin='terminal']:not([data-motion='off']) .kok-title-text::after {
+    animation: kok-sk-blink 1.06s steps(1, end) infinite;
+  }
+  /* 터미널 화면의 커서·홈의 터미널 아이콘 커서 (칠 때마다 켜진 채로 다시 시작: Terminal.tsx 의 key) */
+  :root[data-skin='terminal']:not([data-motion='off']) .kok-term-cursor:not(.is-idle)::after,
+  :root[data-skin='terminal']:not([data-motion='off']) .kok-term-entry-cursor {
     animation: kok-sk-blink 1.06s steps(1, end) infinite;
   }
   :root[data-skin='terminal']:not([data-motion='off']) .kok-skin-fx::before {

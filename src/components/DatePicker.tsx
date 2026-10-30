@@ -4,7 +4,7 @@
 // - 키보드: 화살표 하루·한 주, Page Up/Down 한 달, Home/End 그 주의 처음·끝, Enter·Space 고르기, Esc 접기 (시트는 닫지 않는다)
 // - 달력은 늘 여섯 줄이라 달을 넘겨도 높이가 바뀌지 않는다. 오늘은 테두리, 고른 날은 포인트 색
 import { useEffect, useId, useRef, useState, type KeyboardEvent } from 'react';
-import { WEEKDAYS, addDays, addMonths, dayLabel, isDay, monthGrid, monthOf, shortDayLabel, weekday } from '@/lib/calendar';
+import { WEEKDAYS, addDays, addMonths, dayLabel, isDay, monthGrid, monthOf, pickedLabel, shortDayLabel, weekday } from '@/lib/calendar';
 import { daysUntil, kstDateString } from '@/lib/time';
 import { ICONS, Icon, cx, inputClass } from './ui';
 
@@ -105,7 +105,7 @@ export function DatePicker({
         className={cx(inputClass, 'press flex items-center gap-2 text-left')}
       >
         <Icon d={ICONS.calendar} size={18} className="shrink-0 text-muted" />
-        <span className={cx('min-w-0 flex-1 truncate', !picked && 'text-muted')}>{picked ? dayLabel(picked) : placeholder}</span>
+        <span className={cx('min-w-0 flex-1 truncate', !picked && 'text-muted')}>{picked ? pickedLabel(picked, today) : placeholder}</span>
         {dDay && left !== null ? (
           <span className={cx('shrink-0 rounded-full px-2 py-0.5 text-xs font-bold', left >= 0 ? 'bg-accent-soft text-accent' : 'bg-surface-3 text-muted')}>
             {leftText}

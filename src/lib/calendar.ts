@@ -66,3 +66,10 @@ export function shortDayLabel(s: string): string {
   const { m } = monthOf(s);
   return `${m}월 ${Number(s.slice(8, 10))}일 ${WEEKDAYS[weekday(s)]}요일`;
 }
+
+/** 날짜 고르기 단추의 짧은 글 ('11월 18일 (수)', 올해가 아니면 '2027년 1월 5일 (화)'): 좁은 폰에서도 잘리지 않게 */
+export function pickedLabel(s: string, today: string): string {
+  const { y, m } = monthOf(s);
+  const day = `${m}월 ${Number(s.slice(8, 10))}일 (${WEEKDAYS[weekday(s)]})`;
+  return y === monthOf(today).y ? day : `${y}년 ${day}`;
+}

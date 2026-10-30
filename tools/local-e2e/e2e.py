@@ -1,7 +1,7 @@
 """KOK v0.1 끝-끝 시험 (가짜 Supabase·Claude + 로컬 Postgres).
 사용: python3 e2e.py  (앱: localhost:3000, 가짜 백엔드: localhost:54321)
 """
-import asyncio, base64, datetime, json, os, pathlib, sys, time, io, re, urllib.parse, urllib.request
+import asyncio, base64, json, os, pathlib, sys, time, io, re, urllib.parse, urllib.request
 from playwright.async_api import async_playwright, expect
 
 # 로컬 Postgres 접속 (db.sh 와 같은 기본값)
@@ -4522,11 +4522,16 @@ async def main():
         # 열면 오늘 칸에 초점, 다음 달로 넘겨 15일을 고른다
         await expect(sform.get_by_role("button", name=re.compile(", 오늘$"))).to_be_focused()
         await sform.get_by_role("button", name="다음 달").click()
-        kst = datetime.datetime.now(datetime.timezone(datetime.timedelta(hours=9))).date()
+        # main 안에서는 datetime 이 클래스 이름이다 (위의 from datetime import datetime)
+        import datetime as dtm
+
+        kst = dtm.datetime.now(dtm.timezone(dtm.timedelta(hours=9))).date()
         ny, nm = (kst.year + 1, 1) if kst.month == 12 else (kst.year, kst.month + 1)
         await sform.get_by_role("button", name=re.compile(f"^{nm}월 15일 ")).click()
         await expect(trigger).to_have_attribute("aria-expanded", "false")
-        await expect(trigger).to_contain_text(f"{ny}년 {nm}월 15일")
+        # 단추 글은 짧게 (올해면 해 없이), 읽어 주는 이름은 해까지
+        await expect(trigger).to_contain_text(f"{nm}월 15일 (")
+        await expect(trigger).to_have_attribute("aria-label", re.compile(f"^시험 날짜: {ny}년 {nm}월 15일 "))
         await expect(trigger).to_contain_text("D-")
         await shot(spage, "111-exam-date", full=False)
         # Esc 는 달력만 접고 창은 그대로
@@ -4563,6 +4568,7 @@ async def main():
             await expect(apage2.get_by_text(label, exact=True).first).to_be_visible()
         if db(f"select count(*) from public.theme_images where id = '{ai_image}'") == "1":
             await expect(apage2.get_by_role("img", name="신고한 테마 그림")).to_be_visible()
+        await apage2.get_by_text("신고할 때 본 결과").first.scroll_into_view_if_needed()
         await shot(apage2, "112-admin-reports", full=False)
         r = await apage2.request.post(BASE + "/api/reports", headers={"origin": BASE}, data={"kind": "cover", "target": fig_sid, "reason": "남의 표지"})
         assert r.status == 404, (r.status, await r.text())
@@ -4571,6 +4577,9 @@ async def main():
         await actx2.close()
 
         step("theme studio: colours are picked in the app's colour box (not the browser's) — keyboard, drag, code; the preview follows; Esc closes only the box")
+        # 기본 테마를 쓰는 중이면 지금 테마 칸에 '이 테마로 내 테마 만들기'
+        theme_json = json.dumps({"light": "preset:default", "dark": "preset:default", "color": "default"})
+        db(f"update public.profiles set settings = jsonb_set(coalesce(settings, '{{}}'::jsonb), '{{theme}}', '{theme_json}'::jsonb) where id = '{me_id}'")
         cctx, cpage = await new_ctx(browser, "student")
         await cpage.goto(BASE + "/settings")
         await cpage.get_by_role("button", name="이 테마로 내 테마 만들기").first.click()

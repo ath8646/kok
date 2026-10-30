@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { addDays, addMonths, dayLabel, isDay, monthGrid, shortDayLabel, weekday } from '@/lib/calendar';
+import { addDays, addMonths, dayLabel, isDay, monthGrid, pickedLabel, shortDayLabel, weekday } from '@/lib/calendar';
 
 describe('달력 계산 (lib/calendar.ts)', () => {
   it('날짜 글을 읽고 없는 날은 받지 않는다', () => {
@@ -34,5 +34,8 @@ describe('달력 계산 (lib/calendar.ts)', () => {
   it('읽어 주는 이름', () => {
     expect(dayLabel('2026-11-18')).toBe('2026년 11월 18일 수요일');
     expect(shortDayLabel('2026-11-01')).toBe('11월 1일 일요일');
+    // 단추 글: 올해면 해를 빼고 짧게
+    expect(pickedLabel('2026-11-18', '2026-10-30')).toBe('11월 18일 (수)');
+    expect(pickedLabel('2027-01-05', '2026-12-20')).toBe('2027년 1월 5일 (화)');
   });
 });

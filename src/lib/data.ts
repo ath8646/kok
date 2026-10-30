@@ -111,10 +111,17 @@ export async function topLevelSources<T>(
 }
 
 export async function fetchSources(
-  opts: { subjectId?: string; active?: boolean; limit?: number; /** 노트에 더하는 자료도 (동시에 정리하는 수 세기) */ withChildren?: boolean } = {},
+  opts: {
+    subjectId?: string;
+    active?: boolean;
+    limit?: number;
+    /** 노트에 더하는 자료도 (동시에 정리하는 수 세기) */ withChildren?: boolean;
+    /** 자료함 정리 칸(별표·복습·순서)도 (features.organize 일 때만: 칸 단위 GRANT) */ organize?: boolean;
+  } = {},
 ): Promise<SourceRowWithUnit[]> {
+  const cols: string = opts.organize ? `${SOURCE_COLS}, ${ORGANIZE_COLS}` : SOURCE_COLS;
   const build = (onlyTop: boolean) => {
-    let q = sb().from('sources').select(SOURCE_COLS).order('created_at', { ascending: false });
+    let q = sb().from('sources').select(cols).order('created_at', { ascending: false });
     if (onlyTop) q = q.is('parent_id', null);
     if (opts.subjectId) q = q.eq('subject_id', opts.subjectId);
     if (opts.active) q = q.in('status', ['queued', 'processing', 'error']);
@@ -123,7 +130,7 @@ export async function fetchSources(
   };
   const { data, error } = opts.withChildren ? await build(false) : await topLevelSources(build);
   if (error) throw error;
-  return (data ?? []) as SourceRowWithUnit[];
+  return (data ?? []) as unknown as SourceRowWithUnit[];
 }
 
 /** 카드 미리보기에 쓸 노트 조각: 요약 (직접 만든 노트는 요약이 없으면 첫 개념) */
@@ -270,7 +277,11 @@ export async function recordSessionAnswer(key: SessionKey, qid: string, entry: A
 export async function fetchReviewedSince(iso: string): Promise<Map<string, string>> {
   const out = new Map<string, string>();
   for (let from = 0; ; from += 1000) {
-    const { data, error } = await sb().from('review_logs').select('question_id, reviewed_at').gte('reviewed_at', iso).range(from, from + 999);
+    const { data, error } = await sb()
+      .from('review_logs')
+      .select('question_id, reviewed_at')
+      .gte('reviewed_at', iso)
+      .range(from, from + 999);
     if (error) throw error;
     for (const r of data ?? []) {
       if (!r.question_id) continue;

@@ -4,7 +4,7 @@
 // - SelectionBar: 아래 띠 (폰은 아래 메뉴 자리를 덮고, 넓은 화면은 가운데에 뜬다). 안에는 BarAction 만 넣는다
 import { Children, useCallback, useEffect, useState, type ReactNode } from 'react';
 import { useQuickAdd } from './QuickAdd';
-import { Icon, Spinner, cx } from './ui';
+import { ICONS, Icon, Spinner, cx } from './ui';
 
 export function useMultiSelect() {
   const [selecting, setSelecting] = useState(false);
@@ -43,6 +43,28 @@ export function useMultiSelect() {
   }, [selecting, setFabHidden, endSelect]);
   return { selecting, picked, setPicked, startSelect, endSelect, togglePick };
 }
+
+/**
+ * 고르는 동안 카드 왼쪽 위 모서리에 걸친 동그라미 (고르면 채워지며 체크가 톡).
+ * 카드 밖으로 반쯤 나와 있어서 카드 안의 글·단추는 그대로다 (고르기를 시작해도 카드 모양이 바뀌지 않게).
+ * 부모는 relative, 카드를 자르지(overflow) 않는 칸이어야 한다
+ */
+export function PickBadge({ picked }: { picked: boolean }) {
+  return (
+    <span
+      aria-hidden="true"
+      className={cx(
+        'kok-pick-badge kok-appear pointer-events-none absolute -left-1.5 -top-1.5 z-10 grid h-6 w-6 place-items-center rounded-full transition-colors duration-150',
+        picked ? 'bg-accent text-accent-ink' : 'bg-surface ring-2 ring-inset ring-line',
+      )}
+    >
+      {picked ? <Icon key="on" d={ICONS.check} size={14} strokeWidth={3} className="kok-check-in" /> : null}
+    </span>
+  );
+}
+
+/** 고른 카드의 테두리 (카드 모양은 그대로, 바깥에 포인트 색 고리) */
+export const PICKED_RING = 'ring-2 ring-accent ring-offset-2 ring-offset-bg';
 
 /** 고른 칸의 키보드: 스페이스·엔터로 고른다 (role=checkbox) */
 export function pickKeyHandler(onPick: () => void) {

@@ -41,7 +41,28 @@ export type GradeOutcome = {
 };
 
 const TYPE_LABEL = { mcq: '객관식', ox: 'OX', cloze: '빈칸', short: '단답' } as const;
-const RATING_LABEL: Record<Rating, string> = { 1: '다시', 2: '어려움', 3: '알맞음', 4: '쉬움' };
+
+/**
+ * 평가 단추: 단추마다 다른 색(다시 빨강·어려움 주황·알맞음 초록·쉬움 파랑)과 기억 막대(1~4칸)로 색을 못 가려도 구분된다.
+ * 색은 모두 카드 위 글자로 4.5 이상인 색이라, 고른 단추(그 색으로 채움)의 글자(카드 색)도 4.5 이상이다
+ */
+const RATINGS: ReadonlyArray<{ r: Rating; label: string; color: string }> = [
+  { r: 1, label: '다시', color: 'var(--bad)' },
+  { r: 2, label: '어려움', color: 'var(--warn)' },
+  { r: 3, label: '알맞음', color: 'var(--ok)' },
+  { r: 4, label: '쉬움', color: 'var(--b1)' },
+];
+
+/** 기억 막대: 평가만큼 칸이 찬다 (다시 1칸 … 쉬움 4칸) */
+function RatingMeter({ level }: { level: Rating }) {
+  return (
+    <svg aria-hidden="true" width={22} height={12} viewBox="0 0 22 12" className="shrink-0">
+      {[0, 1, 2, 3].map((i) => (
+        <rect key={i} x={i * 6} y={9 - i * 3} width={4} height={3 + i * 3} rx={1.2} fill="currentColor" opacity={i < level ? 1 : 0.25} />
+      ))}
+    </svg>
+  );
+}
 
 export function answerText(q: ReviewQuestion): string {
   if (q.type === 'mcq') return q.choices?.[Number(q.answer)] ?? '';
@@ -100,7 +121,8 @@ export function QuestionCard({
   onShowVisual,
   onReport,
   index,
-  total,
+  progress,
+  nextLabel,
 }: {
   q: ReviewQuestion;
   sourceKind?: string;
@@ -111,8 +133,12 @@ export function QuestionCard({
   onAppeal?: (given: string) => Promise<void>;
   onShowVisual?: () => void;
   onReport?: () => void;
+  /** 세션에서 몇 번째로 나온 문제인지 (0부터: 첫 문제만 떠오르는 움직임 없이) */
   index?: number;
-  total?: number;
+  /** 위에 보일 번호: n / 문제 수. again 은 틀려서 한 번 더 나온 문제 (번호 대신 '한 번 더') */
+  progress?: { n: number; of: number; again: boolean };
+  /** 평가마다 다음 복습까지 ('10분 뒤', '3일 뒤'): 채점할 때 한 번 계산한다 */
+  nextLabel?: (rating: Rating) => string;
 }) {
   // 문제마다 새로 만들어진다 (부모가 key 로 문제 id 를 준다)
   const started = useRef(0);
@@ -122,6 +148,8 @@ export function QuestionCard({
   const [outcome, setOutcome] = useState<GradeOutcome | null>(null);
   const [ms, setMs] = useState(0);
   const [rating, setRating] = useState<Rating>(3);
+  /** 평가마다 다음 복습까지 (채점할 때 한 번: 다시 그려도 글이 바뀌지 않게) */
+  const [nexts, setNexts] = useState<string[] | null>(null);
   const [appealed, setAppealed] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
   const resultTitle = useRef<HTMLParagraphElement>(null);
@@ -149,6 +177,13 @@ export function QuestionCard({
       const res = await onSubmit(value, spent);
       setOutcome(res);
       setRating(res.correct && res.partial ? 2 : autoRate(res.correct, spent));
+      if (nextLabel) {
+        try {
+          setNexts(RATINGS.map((x) => nextLabel(x.r)));
+        } catch {
+          setNexts(null);
+        }
+      }
     } finally {
       setBusy(false);
     }
@@ -205,9 +240,14 @@ export function QuestionCard({
     // 다음 문제는 살짝 떠오르며 나타난다 (부모가 문제마다 key 를 바꿔 새로 만든다)
     <div className={cx('grid gap-4', (index ?? 0) > 0 && 'kok-q-in')}>
       <div className="flex flex-wrap items-center gap-2 text-sm text-muted">
-        {typeof index === 'number' && total ? (
+        {progress?.again ? (
+          // 틀려서 한 번 더 나온 문제: 문제 수는 그대로 (5문제면 5문제)
+          <span className="inline-flex items-center gap-1 font-semibold text-ink">
+            <Icon d={ICONS.retry} size={15} strokeWidth={2.4} />한 번 더
+          </span>
+        ) : progress ? (
           <span className="font-semibold text-ink">
-            {index + 1} / {total}
+            {progress.n} / {progress.of}
           </span>
         ) : null}
         <Chip>{TYPE_LABEL[q.type]}</Chip>
@@ -419,21 +459,30 @@ export function QuestionCard({
           <div className="grid gap-2 border-t border-black/10 pt-3 dark:border-white/10">
             <p className="text-xs text-muted">다음 복습 날짜를 정하는 평가예요. 자동으로 골랐고, 바꿔도 돼요.</p>
             <div className="grid grid-cols-4 gap-1.5" role="radiogroup" aria-label="평가">
-              {([1, 2, 3, 4] as Rating[]).map((r) => (
-                <button
-                  key={r}
-                  type="button"
-                  role="radio"
-                  aria-checked={rating === r}
-                  onClick={() => setRating(r)}
-                  className={cx(
-                    'rounded-xl border-2 py-2 text-sm font-semibold',
-                    rating === r ? 'border-ink bg-ink text-surface' : 'border-line bg-surface text-ink',
-                  )}
-                >
-                  {RATING_LABEL[r]}
-                </button>
-              ))}
+              {RATINGS.map(({ r, label, color }, i) => {
+                const on = rating === r;
+                return (
+                  <button
+                    key={r}
+                    type="button"
+                    role="radio"
+                    aria-checked={on}
+                    onClick={() => setRating(r)}
+                    // 고르지 않은 단추: 흰 바탕에 그 색 글자·막대 / 고른 단추: 그 색으로 채우고 글자는 카드 색
+                    style={{ ['--rate' as string]: color }}
+                    className={cx(
+                      'kok-rate press grid min-h-[62px] justify-items-center gap-0.5 rounded-2xl border-2 px-1 pb-1.5 pt-2 text-center transition-[background-color,border-color,color] duration-150',
+                      on
+                        ? 'is-on border-[color:var(--rate)] bg-[color:var(--rate)] text-surface'
+                        : 'border-line bg-surface text-[color:var(--rate)] hover:border-[color:var(--rate)]',
+                    )}
+                  >
+                    <RatingMeter level={r} />
+                    <span className="text-[14px] font-bold leading-tight">{label}</span>
+                    {nexts?.[i] ? <span className={cx('text-[11px] leading-tight', on ? 'text-surface' : 'text-muted')}>{nexts[i]}</span> : null}
+                  </button>
+                );
+              })}
             </div>
             <Button size="lg" variant="ink" onClick={() => onNext({ rating, correct: outcome.correct, given: givenText, ms })}>
               다음

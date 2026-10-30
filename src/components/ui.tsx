@@ -1,7 +1,8 @@
 'use client';
 // KOK 공통 화면 조각 (버튼, 카드, 시트, 큰 제목, 메뉴, 알림 등)
 import Link from 'next/link';
-import { createContext, useCallback, useContext, useEffect, useId, useRef, useState, type ReactNode } from 'react';
+import { createContext, useCallback, useContext, useEffect, useId, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
+import { createPortal } from 'react-dom';
 import { ICONS } from '@/lib/icons';
 import { trackedFetch } from '@/lib/view-cache';
 
@@ -343,6 +344,53 @@ export function Swap({ still = false, className, children }: { still?: boolean; 
 // ------------------------------------------------------------- 메뉴 (⋮ 를 누르면 펼쳐지는 작은 목록)
 export type MenuItem = { label: string; onSelect: () => void; danger?: boolean; icon?: string };
 
+/** 메뉴와 단추 사이, 메뉴와 화면 끝 사이 (px) */
+const MENU_GAP = 4;
+const MENU_EDGE = 8;
+
+/**
+ * 메뉴를 단추 옆 화면 안에 둔다: 아래 자리(화면 아래 메뉴·고르기 띠 위까지)가 모자라면 위로 열고,
+ * 양쪽 모두 모자라면 넓은 쪽에 두고 안에서 스크롤한다. 왼쪽·오른쪽 끝도 넘지 않는다.
+ * 단추가 화면 밖으로 나갔으면 false (메뉴를 닫는다)
+ */
+function placeMenu(trigger: HTMLElement, m: HTMLElement, align: 'left' | 'right'): boolean {
+  const b = trigger.getBoundingClientRect();
+  const vw = document.documentElement.clientWidth || window.innerWidth;
+  const vh = window.innerHeight;
+  if ((!b.width && !b.height) || b.bottom < 0 || b.top > vh) {
+    m.style.visibility = 'hidden';
+    return false;
+  }
+  m.style.visibility = '';
+  let bottom = vh - MENU_EDGE;
+  // 창(시트 등) 안의 메뉴는 창이 화면 아래 메뉴를 덮고 있어서 화면 끝까지 쓴다
+  if (!m.parentElement?.closest('[role="dialog"]')) {
+    for (const el of document.querySelectorAll<HTMLElement>('.kok-tabbar, .kok-selbar')) {
+      const r = el.getBoundingClientRect();
+      if (r.height > 0 && r.top < vh && r.top > vh / 2) bottom = Math.min(bottom, r.top - MENU_EDGE);
+    }
+  }
+  const top = MENU_EDGE;
+  const h = m.scrollHeight;
+  const below = bottom - (b.bottom + MENU_GAP);
+  const above = b.top - MENU_GAP - top;
+  const up = h > below && above > below;
+  const room = Math.max(96, up ? above : below);
+  const height = Math.min(h, room);
+  m.style.maxHeight = h > room ? `${room}px` : '';
+  m.style.top = `${Math.round(up ? b.top - MENU_GAP - height : b.bottom + MENU_GAP)}px`;
+  const w = m.offsetWidth;
+  const left = Math.max(MENU_EDGE, Math.min(align === 'right' ? b.right - w : b.left, vw - MENU_EDGE - w));
+  m.style.left = `${Math.round(left)}px`;
+  m.style.transformOrigin = `${up ? 'bottom' : 'top'} ${align}`;
+  return true;
+}
+
+/**
+ * ⋮ 메뉴. 펼친 목록은 화면 맨 위 층에 그린다(창 안이면 그 창에): 카드가 잘라 내거나(overflow)
+ * 화면 아래 메뉴·옆 카드 밑에 깔리지 않게. 열면 첫 칸에 초점, 위아래 화살표·Home·End 로 옮기고,
+ * Esc·고르기는 ⋮ 로 초점을 돌려준다. Tab 은 메뉴를 닫고 다음 칸으로
+ */
 export function Menu({
   label,
   items,
@@ -358,17 +406,32 @@ export function Menu({
   small?: boolean;
 }) {
   const [open, setOpen] = useState(false);
+  /** 펼친 목록을 그릴 곳: 메뉴가 든 창(role=dialog), 없으면 body */
+  const [host, setHost] = useState<HTMLElement | null>(null);
   const wrap = useRef<HTMLDivElement>(null);
+  const pop = useRef<HTMLDivElement>(null);
+  const menuId = useId();
+  const trigger = () => wrap.current?.querySelector<HTMLButtonElement>('button') ?? null;
+  const close = (focusBack: boolean) => {
+    setOpen(false);
+    if (focusBack) trigger()?.focus({ preventScroll: true });
+  };
+  const closeRef = useRef(close);
+  useEffect(() => {
+    closeRef.current = close;
+  });
   useEffect(() => {
     if (!open) return;
     const onDown = (e: PointerEvent) => {
-      if (wrap.current && !wrap.current.contains(e.target as Node)) setOpen(false);
+      const t = e.target as Node;
+      if (wrap.current?.contains(t) || pop.current?.contains(t)) return;
+      setOpen(false);
     };
     // Esc 는 열린 메뉴만 닫는다: 창의 capture 단계에서 먼저 받아 멈춰서, 시트(Sheet)·자료함 고르기 같은 다른 Esc 가 같이 닫히지 않게
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== 'Escape') return;
       e.stopPropagation();
-      setOpen(false);
+      closeRef.current(true);
     };
     window.addEventListener('pointerdown', onDown);
     window.addEventListener('keydown', onKey, true);
@@ -377,49 +440,111 @@ export function Menu({
       window.removeEventListener('keydown', onKey, true);
     };
   }, [open]);
+  // 그리기 전에 자리를 잡고(번쩍이지 않게), 화면이 움직이면 ⋮ 를 따라간다. 열 때 첫 칸에 초점
+  useLayoutEffect(() => {
+    if (!open || !host) return;
+    const m = pop.current;
+    const t = wrap.current?.querySelector<HTMLButtonElement>('button');
+    if (!m || !t) return;
+    let raf = 0;
+    const follow = () => {
+      cancelAnimationFrame(raf);
+      raf = requestAnimationFrame(() => {
+        if (pop.current && !placeMenu(t, pop.current, align)) setOpen(false);
+      });
+    };
+    if (placeMenu(t, m, align)) m.querySelector<HTMLElement>('[role="menuitem"]')?.focus({ preventScroll: true });
+    else follow();
+    window.addEventListener('scroll', follow, true);
+    window.addEventListener('resize', follow);
+    window.visualViewport?.addEventListener('resize', follow);
+    return () => {
+      cancelAnimationFrame(raf);
+      window.removeEventListener('scroll', follow, true);
+      window.removeEventListener('resize', follow);
+      window.visualViewport?.removeEventListener('resize', follow);
+    };
+  }, [open, host, align]);
+  const onMenuKey = (e: React.KeyboardEvent) => {
+    const list = Array.from(pop.current?.querySelectorAll<HTMLElement>('[role="menuitem"]') ?? []);
+    if (!list.length) return;
+    if (e.key === 'Tab') {
+      // ⋮ 에 초점을 두고 닫으면, 브라우저가 거기서부터 다음(Shift 는 앞) 칸으로 옮긴다
+      close(true);
+      return;
+    }
+    const i = list.indexOf(document.activeElement as HTMLElement);
+    const to =
+      e.key === 'ArrowDown'
+        ? (i + 1) % list.length
+        : e.key === 'ArrowUp'
+          ? (i - 1 + list.length) % list.length
+          : e.key === 'Home'
+            ? 0
+            : e.key === 'End'
+              ? list.length - 1
+              : -1;
+    if (to < 0) return;
+    e.preventDefault();
+    list[to].focus({ preventScroll: true });
+  };
   return (
     <div ref={wrap} className={cx('relative', className)}>
       <IconButton
         label={label}
         aria-haspopup="menu"
         aria-expanded={open}
+        aria-controls={open ? menuId : undefined}
         className={small ? 'h-8 w-8 text-muted hover:text-ink' : undefined}
         onClick={(e) => {
           e.preventDefault();
           e.stopPropagation();
-          setOpen((o) => !o);
+          if (open) {
+            setOpen(false);
+            return;
+          }
+          setHost((e.currentTarget.closest('[role="dialog"]') as HTMLElement | null) ?? document.body);
+          setOpen(true);
         }}
       >
         <Icon d={ICONS.more} size={small ? 18 : 22} strokeWidth={3} />
       </IconButton>
-      {open ? (
-        <div
-          role="menu"
-          className={cx(
-            'kok-pop absolute z-40 min-w-44 overflow-hidden rounded-2xl bg-surface py-1.5 shadow-[0_12px_32px_var(--shadow-strong)] ring-1 ring-line',
-            small ? 'top-9' : 'top-11',
-            align === 'right' ? 'right-0 origin-top-right' : 'left-0 origin-top-left',
-          )}
-        >
-          {items.map((it) => (
-            <button
-              key={it.label}
-              type="button"
-              role="menuitem"
-              className={cx('flex w-full items-center gap-3 px-4 py-2.5 text-left text-[15px] hover:bg-surface-2', it.danger ? 'text-bad' : 'text-ink')}
-              onClick={(e) => {
-                e.preventDefault();
-                e.stopPropagation();
-                setOpen(false);
-                it.onSelect();
-              }}
+      {open && host
+        ? createPortal(
+            <div
+              ref={pop}
+              id={menuId}
+              role="menu"
+              aria-label={label}
+              onKeyDown={onMenuKey}
+              className="kok-pop fixed left-0 top-0 z-[60] min-w-44 max-w-[calc(100vw-16px)] overflow-y-auto overscroll-contain rounded-2xl bg-surface py-1.5 shadow-[0_12px_32px_var(--shadow-strong)] ring-1 ring-line"
             >
-              {it.icon ? <Icon d={it.icon} size={18} /> : null}
-              {it.label}
-            </button>
-          ))}
-        </div>
-      ) : null}
+              {items.map((it) => (
+                <button
+                  key={it.label}
+                  type="button"
+                  role="menuitem"
+                  tabIndex={-1}
+                  className={cx(
+                    'flex w-full items-center gap-3 whitespace-nowrap px-4 py-2.5 text-left text-[15px] hover:bg-surface-2 focus-visible:bg-surface-2 focus-visible:[outline-offset:-3px]',
+                    it.danger ? 'text-bad' : 'text-ink',
+                  )}
+                  onClick={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    // 고른 일이 창을 열면 창이 초점을 가져간다 (먼저 ⋮ 로 돌려 두어 초점이 사라지지 않게)
+                    close(true);
+                    it.onSelect();
+                  }}
+                >
+                  {it.icon ? <Icon d={it.icon} size={18} className="shrink-0" /> : null}
+                  {it.label}
+                </button>
+              ))}
+            </div>,
+            host,
+          )
+        : null}
     </div>
   );
 }

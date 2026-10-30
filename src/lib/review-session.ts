@@ -129,3 +129,24 @@ export function resumePlan<T extends ConceptCard>(
 export function sessionProgress<T>(r: ResumeResult<T>): { done: number; total: number; remaining: number } {
   return { done: r.done.length, total: r.done.length + r.remaining.length, remaining: r.remaining.length };
 }
+
+/** 복습 화면에서 답 하나 (틀려서 한 번 더 나온 문제는 같은 id 로 또 들어온다) */
+export type AnswerResult = { id: string; correct: boolean; graduated: boolean; enteredWrong: boolean };
+
+/**
+ * 끝 화면의 수: 문제마다 처음 답으로 센다 (틀려서 한 번 더 푼 문제를 두 번 세지 않는다).
+ * total 푼 문제 수, right 처음에 맞힌 수, enteredWrong 오답노트에 담긴 문제 수, graduated 졸업한 문제 수
+ */
+export function sessionTally(results: AnswerResult[]): { total: number; right: number; enteredWrong: number; graduated: number } {
+  const first = new Map<string, AnswerResult>();
+  const entered = new Set<string>();
+  const grad = new Set<string>();
+  for (const r of results) {
+    if (!first.has(r.id)) first.set(r.id, r);
+    if (r.enteredWrong) entered.add(r.id);
+    if (r.graduated) grad.add(r.id);
+  }
+  let right = 0;
+  for (const r of first.values()) if (r.correct) right += 1;
+  return { total: first.size, right, enteredWrong: entered.size, graduated: grad.size };
+}

@@ -1516,12 +1516,14 @@ async def main():
             await expect(page.get_by_text(re.compile(r"전부 \d+문제 · 약 \d+분이면 다 풀어요"))).to_be_visible()
             print("   all questions fit in 5 minutes")
         await shot(page, "16a-review-today", full=False)
+        n_start = int(re.search(r"(\d+)문제 시작", await start_btn.inner_text()).group(1))
         await start_btn.click()
         # 남은 시간은 안내만 (시계 아이콘 + 분:초)
         await expect(page.get_by_text(re.compile(r"남은 시간 \d+:\d{2}"))).to_be_visible()
         # 고른 기간은 다음에 그대로 (설정에 저장)
         await poll_db(f"select settings->'review'->>'period' from public.profiles where id = '{USERS['student'][0]}'", "today")
         seen = 0
+        again_seen = 0
         answered_types = set()
         for i in range(30):
             if await page.get_by_role("heading", name=re.compile("오늘 할 일 끝|다 풀었어요|다음에 또")).count():
@@ -1530,6 +1532,13 @@ async def main():
             if "그만하기" not in card_text:
                 await page.wait_for_timeout(400)
                 continue
+            # 위 번호는 처음 고른 문제 수 그대로 (틀려서 한 번 더 나온 문제는 번호 대신 '한 번 더')
+            counter = re.search(r"(\d+) / (\d+)", card_text)
+            if counter:
+                assert int(counter.group(2)) == n_start, (counter.group(0), n_start)
+            else:
+                assert "한 번 더" in card_text, card_text[:200]
+                again_seen += 1
             # 유형별로 답하기
             if await page.get_by_role("button", name="O 맞다").count():
                 answered_types.add("ox")
@@ -1549,6 +1558,21 @@ async def main():
             await expect(page.get_by_role("button", name="다음", exact=True)).to_be_visible(timeout=15000)
             if seen == 0:
                 await shot(page, "17-review-graded", full=False)
+                # 평가 단추: 다시·어려움·알맞음·쉬움이 저마다 다른 색 (고른 것은 그 색으로 채움), 다음 복습까지 보인다
+                rate = page.get_by_role("radiogroup", name="평가")
+                tones = await rate.evaluate(
+                    """(g) => [...g.querySelectorAll('[role=radio]')].map((b) => {
+                      const on = b.getAttribute('aria-checked') === 'true';
+                      const label = b.querySelector('span').textContent;
+                      return [label, on ? getComputedStyle(b).backgroundColor : getComputedStyle(b.querySelector('span')).color];
+                    })"""
+                )
+                assert [t[0] for t in tones] == ["다시", "어려움", "알맞음", "쉬움"], tones
+                assert len({t[1] for t in tones}) == 4, tones
+                await expect(rate.get_by_text(re.compile(r"^(곧|\d+(분|시간|일|달|년) 뒤)$")).first).to_be_visible()
+                await rate.get_by_role("radio", name=re.compile("^쉬움")).click()
+                await expect(rate.get_by_role("radio", name=re.compile("^쉬움"))).to_have_attribute("aria-checked", "true")
+                await shot(page, "17b-review-rating", full=False)
             if "short" in answered_types and seen < 8 and "AI 채점" in await page.locator("main").inner_text():
                 await shot(page, "18-review-ai-grade", full=False)
             seen += 1
@@ -1560,7 +1584,12 @@ async def main():
         end_text = await page.locator("main").inner_text()
         assert not re.search("[\U0001F300-\U0001FAFF\u2600-\u27BF]", end_text), end_text
         await shot(page, "19-review-end", full=False)
-        print("   answered:", seen, sorted(answered_types))
+        print("   answered:", seen, "of", n_start, "(again", again_seen, ")", sorted(answered_types))
+        # 끝 화면의 '푼 문제'는 고른 문제 수: 틀려서 한 번 더 푼 문제를 두 번 세지 않는다
+        if await page.get_by_role("heading", name=re.compile("오늘 할 일 끝|다 풀었어요")).count():
+            solved = await page.evaluate("(() => { const p = [...document.querySelectorAll('main p')].find((x) => x.textContent.trim() === '푼 문제'); return p ? p.previousElementSibling.textContent.trim() : null })()")
+            assert solved == str(n_start), (solved, n_start, seen)
+            assert seen == n_start + again_seen, (seen, n_start, again_seen)
         # 다시 열면 고른 기간(오늘)이 그대로 (복습할 차례가 남아 있으면 그것이 먼저). 끝까지 푼 세션은 저장한 것이 지워진다
         await page.goto(BASE + "/review")
         await expect(page.get_by_role("radiogroup", name="언제 공부한 문제를 풀까요?")).to_be_visible()
@@ -2970,6 +2999,7 @@ async def main():
         assert await weak_cards.count() >= 1
         n_weak_q = int(re.search(r"틀린 문제 (\d+)", await weak_cards.first.inner_text()).group(1))
         assert 1 <= n_weak_q <= n_wrong - 3, (n_weak_q, n_wrong)
+        weak_box0 = await weak_cards.first.bounding_box()
         await weak_cards.first.hover()
         await page.mouse.down()
         await page.wait_for_timeout(650)
@@ -2978,7 +3008,11 @@ async def main():
         assert page.url.endswith("/wrong"), page.url
         weak_boxes = page.get_by_role("checkbox").filter(has_text="틀린 문제 ")
         await expect(weak_boxes.first).to_have_attribute("aria-checked", "true")
+        # 고르는 동안에도 카드 모양은 그대로: 링크 줄도 보이고(누를 수는 없다) 자리·크기가 같다. 모서리에 동그라미
+        await expect(weak_boxes.first.get_by_text("이 개념 풀기")).to_be_visible()
         await expect(page.get_by_role("link", name="이 개념 풀기")).to_have_count(0)
+        assert await weak_boxes.first.bounding_box() == weak_box0, (await weak_boxes.first.bounding_box(), weak_box0)
+        await expect(page.locator("main .kok-pick-badge").first).to_be_visible()
         await weak_boxes.first.click()
         await expect(page.get_by_role("heading", name="문제 고르기")).to_be_visible()
         await expect(weak_boxes.first).to_have_attribute("aria-checked", "false")
@@ -2992,14 +3026,22 @@ async def main():
         await expect(page.get_by_text(f"틀린 문제 {n_wrong}개 · 3번 연속 맞히면 졸업해요")).to_be_visible()
         wrong_cards = page.locator("main .kok-card", has=page.get_by_role("button", name="다 외웠어요 · 빼기"))
         await expect(wrong_cards).to_have_count(n_wrong)
-        # 틀린 문제 카드를 꾹 누르면 고르기 (카드 둘)
+        # 틀린 문제 카드를 꾹 누르면 고르기 (카드 둘). 펼쳐 둔 답도 그대로
+        await wrong_cards.nth(1).get_by_role("button", name=re.compile("번 틀림")).click()
+        await expect(wrong_cards.nth(1).get_by_role("button", name=re.compile("번 틀림"))).to_have_attribute("aria-expanded", "true")
+        wrong_box1 = await wrong_cards.nth(1).bounding_box()
         await wrong_cards.first.hover()
         await page.mouse.down()
         await page.wait_for_timeout(650)
         await page.mouse.up()
         await expect(page.get_by_role("heading", name="1개 선택")).to_be_visible()
-        await page.get_by_role("checkbox").filter(has_text="번 틀림").nth(1).click()
+        second = page.get_by_role("checkbox").filter(has_text="번 틀림").nth(1)
+        assert await second.bounding_box() == wrong_box1, (await second.bounding_box(), wrong_box1)
+        # 고르는 동안 '다 외웠어요 · 빼기' 자리를 눌러도 빼지 않고 고르기만 한다
+        rm = await second.get_by_text("다 외웠어요 · 빼기").bounding_box()
+        await page.mouse.click(rm["x"] + rm["width"] / 2, rm["y"] + rm["height"] / 2)
         await expect(page.get_by_role("heading", name="2개 선택")).to_be_visible()
+        assert int(psql(wrong_count_sql)) == n_wrong
         await shot(page, "106-wrong-select", full=False)
         await page.get_by_role("toolbar", name="고른 문제 2개").get_by_role("button", name="2개 다 외웠어요 · 빼기").click()
         await expect(page.get_by_text("2개를 다 외운 문제로 뺐어요.")).to_be_visible()
@@ -4419,6 +4461,107 @@ async def main():
         # 남의 과목과는 합칠 수 없다 (서버)
         r = await page.request.post(BASE + "/api/subjects/merge", headers={"origin": BASE}, data={"from": art, "into": other_subject})
         assert r.status == 404, r.status
+        await ctx.close()
+
+        step("menus: a card menu at the very bottom opens upward above the tab bar, on top of the cards, one line per item; arrows move, Esc gives focus back")
+        ctx, page = await new_ctx(browser, "student")
+        await page.goto(BASE + "/library")
+        lib_cards = page.locator("main [data-flip]")
+        await expect(lib_cards.first).to_be_visible()
+        await page.evaluate("window.scrollTo(0, document.documentElement.scrollHeight)")
+        await page.wait_for_timeout(300)
+        last_menu = lib_cards.last.get_by_role("button", name=re.compile("메뉴$"))
+        await last_menu.click()
+        menu = page.get_by_role("menu")
+        await expect(menu).to_be_visible()
+        mb = await menu.bounding_box()
+        tb = await page.locator(".kok-tabbar").bounding_box()
+        assert mb and tb and mb["y"] >= 0 and mb["y"] + mb["height"] <= tb["y"] + 0.5, (mb, tb)
+        assert mb["x"] >= 0 and mb["x"] + mb["width"] <= 390, mb
+        # 위로 열렸다 (⋮ 위에), 맨 위 층이라 아래 메뉴·옆 카드에 가리지 않는다
+        btn_box = await last_menu.bounding_box()
+        assert mb["y"] + mb["height"] <= btn_box["y"], (mb, btn_box)
+        hit = await page.evaluate(
+            "([x, y]) => !!document.elementFromPoint(x, y)?.closest('[role=menu]')",
+            [mb["x"] + mb["width"] / 2, mb["y"] + mb["height"] - 6],
+        )
+        assert hit, "menu bottom is covered"
+        item_h = (await page.get_by_role("menuitem", name="다른 과목으로 옮기기").bounding_box())["height"]
+        assert item_h < 48, item_h
+        await shot(page, "96-menu-bottom", full=False)
+        await expect(page.get_by_role("menuitem").first).to_be_focused()
+        await page.keyboard.press("ArrowDown")
+        await expect(page.get_by_role("menuitem").nth(1)).to_be_focused()
+        await page.keyboard.press("End")
+        await expect(page.get_by_role("menuitem").last).to_be_focused()
+        await page.keyboard.press("ArrowDown")
+        await expect(page.get_by_role("menuitem").first).to_be_focused()
+        await page.keyboard.press("Escape")
+        await expect(menu).to_have_count(0)
+        await expect(last_menu).to_be_focused()
+        # 맨 위 카드의 메뉴는 아래로 열린다
+        await page.evaluate("window.scrollTo(0, 0)")
+        await page.wait_for_timeout(200)
+        first_menu = lib_cards.first.get_by_role("button", name=re.compile("메뉴$"))
+        await first_menu.click()
+        mb = await menu.bounding_box()
+        fb = await first_menu.bounding_box()
+        assert mb["y"] >= fb["y"] + fb["height"], (mb, fb)
+        # 밖을 누르면 닫힌다
+        await page.mouse.click(20, 400)
+        await expect(menu).to_have_count(0)
+        await ctx.close()
+
+        step("home: long-press a recent note to pick several — the cards keep their look (a badge on the corner), star them together, Esc ends")
+        ctx, page = await new_ctx(browser, "student")
+        await page.goto(BASE + "/home")
+        await expect(page.get_by_role("heading", name="최근 노트")).to_be_visible()
+        rcards = page.locator("main a.kok-detail-card")
+        n_recent = await rcards.count()
+        assert n_recent >= 2, n_recent
+        two_ids = [(await rcards.nth(i).get_attribute("href")).rsplit("/", 1)[-1] for i in range(2)]
+        star_before = {x: db(f"select starred from public.sources where id = '{x}'") for x in two_ids}
+        await rcards.first.scroll_into_view_if_needed()
+        # 카드 칸 (누르는 동안 작아지는 움직임·떠오름과 상관없는 자리). 첫 카드는 화면 끝이 아니라 여백에 맞춰 멈춘다
+        wrap0 = await rcards.first.locator("xpath=..").bounding_box()
+        assert wrap0["x"] >= 15, wrap0
+        await rcards.first.hover()
+        await page.mouse.down()
+        await page.wait_for_timeout(650)
+        await page.mouse.up()
+        await expect(page.get_by_role("heading", name="1개 선택", exact=True)).to_be_visible()
+        assert page.url.endswith("/home"), page.url
+        # 카드는 그대로 (자리·크기), 왼쪽 위 모서리에 동그라미
+        await page.wait_for_timeout(300)
+        assert await rcards.first.locator("xpath=..").bounding_box() == wrap0, (await rcards.first.locator("xpath=..").bounding_box(), wrap0)
+        await expect(page.locator("main .kok-pick-badge")).to_have_count(n_recent)
+        rbar = page.get_by_role("toolbar", name=re.compile("^고른 노트"))
+        await expect(rbar).to_be_visible()
+        await expect(page.get_by_role("button", name="자료 넣기", exact=True)).to_have_count(0)
+        await rcards.nth(1).click()
+        await expect(page.get_by_role("heading", name="2개 선택", exact=True)).to_be_visible()
+        assert page.url.endswith("/home"), page.url
+        await shot(page, "15c-home-recent-select", full=False)
+        await no_hscroll(page, "home recent selecting")
+        star_btn = rbar.get_by_role("button", name=re.compile("^별표"))
+        to_star = (await star_btn.inner_text()).strip() == "별표"
+        await star_btn.click()
+        await expect(page.get_by_text("노트 2개에 별표했어요." if to_star else "노트 2개의 별표를 뺐어요.")).to_be_visible()
+        await poll_db(f"select count(*) from public.sources where id in ('{two_ids[0]}', '{two_ids[1]}') and starred", "2" if to_star else "0")
+        await expect(rbar).to_have_count(0)
+        await expect(page.get_by_role("heading", name="최근 노트")).to_be_visible()
+        # 키보드: '고르기'로 시작, 스페이스로 고르기, 모두 고르기, Esc 로 끝
+        await page.get_by_role("button", name="고르기", exact=True).click()
+        await expect(page.get_by_role("heading", name="노트 고르기", exact=True)).to_be_visible()
+        await rcards.first.focus()
+        await page.keyboard.press("Space")
+        await expect(page.get_by_role("heading", name="1개 선택", exact=True)).to_be_visible()
+        await page.get_by_role("button", name="모두 고르기").click()
+        await expect(page.get_by_role("heading", name=f"{n_recent}개 선택", exact=True)).to_be_visible()
+        await page.keyboard.press("Escape")
+        await expect(page.get_by_role("heading", name="최근 노트")).to_be_visible()
+        for x, v in star_before.items():
+            db(f"update public.sources set starred = {'true' if v == 't' else 'false'} where id = '{x}'")
         await ctx.close()
 
         step("library: move notes to another subject (card menu, several at once into a new subject) — questions and cards follow")

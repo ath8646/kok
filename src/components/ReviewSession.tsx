@@ -27,19 +27,37 @@ import {
   type PlanData,
 } from '@/lib/data';
 import { autoGrade, autoRating, type Rating } from '@/lib/grading';
-import { PERIOD_LABEL, REVIEW_MINUTES, continuePlan, paceFrom, periodCounts, periodPool, pickToday, secondsFor, streakInfo, type ReviewMinutes, type ReviewPeriod } from '@/lib/review-plan';
+import {
+  PERIOD_LABEL,
+  REVIEW_MINUTES,
+  continuePlan,
+  paceFrom,
+  periodCounts,
+  periodPool,
+  pickToday,
+  secondsFor,
+  streakInfo,
+  type ReviewMinutes,
+  type ReviewPeriod,
+} from '@/lib/review-plan';
 import { practiceFrom, reviewModeKey, type ReviewMode } from '@/lib/review-mode';
 import { warmHome } from '@/lib/home-data';
 import { readView, viewStamp, writeView } from '@/lib/view-cache';
-import { resumePlan, type ResumeResult, type SessionKey, type SessionRow } from '@/lib/review-session';
+import { resumePlan, sessionTally, type AnswerResult, type ResumeResult, type SessionKey, type SessionRow } from '@/lib/review-session';
 import { kstDateString } from '@/lib/time';
-import { reviewCard, type StoredCard } from '@/lib/srs';
+import { dueLabel, reviewCard, type StoredCard } from '@/lib/srs';
 import { ACCEPTED_MAX_CHARS, zMindmap, type Mindmap } from '@/lib/ai/schemas';
 import type { CardRow, MeResponse, QuestionRow } from '@/lib/types';
 
 type Phase = 'loading' | 'start' | 'run' | 'end';
 type Item = { q: QuestionRow; card: CardRow; requeued: number };
-type Result = { correct: boolean; graduated: boolean; enteredWrong: boolean };
+
+/** 푸는 중 위에 보일 번호: 처음 푸는 문제는 'n / 문제 수'(틀려서 한 번 더 나온 문제는 세지 않는다), 한 번 더 나온 문제는 again */
+function progressOf(queue: Item[], idx: number): { n: number; of: number; again: boolean } {
+  const of = new Set(queue.map((it) => it.q.id)).size;
+  const firsts = queue.slice(0, idx + 1).filter((it) => it.requeued === 0).length;
+  return { n: Math.min(of, Math.max(1, firsts)), of, again: (queue[idx]?.requeued ?? 0) > 0 };
+}
 type PracticeNote = { id: string; title: string; sourceId: string };
 type ReviewSettings = MeResponse['settings']['review'];
 type PlanCardRow = PlanData['cards'][number];
@@ -319,7 +337,7 @@ export function ReviewSession({
   const [target, setTarget] = useState(0);
   const [startedAt, setStartedAt] = useState(0);
   const [endedAt, setEndedAt] = useState(0);
-  const [results, setResults] = useState<Result[]>([]);
+  const [results, setResults] = useState<AnswerResult[]>([]);
   /** 다 풀기 전에 그만뒀는지 (끝 화면 제목) */
   const [stopped, setStopped] = useState(false);
   const [now, setNow] = useState(0);
@@ -343,11 +361,14 @@ export function ReviewSession({
   const qcols: QCols = { figures: figuresOn, sourceFigures: !!me?.features.sourceFigures };
   /** 저장한 복습 세션 (DB 에 표가 있을 때만): 이 방법에서 읽을 열쇠 */
   const sessionsOn = !!me?.features.sessions;
+  const organizeOn = !!me?.features.organize;
   const keys = useMemo(() => (sessionsOn ? sessionKeys(mode, autoStart) : []), [sessionsOn, mode, autoStart]);
   /** 시작 화면에 보일 '하던 복습 이어서 하기' (남은 문제가 있는 저장한 세션) */
   const [resume, setResume] = useState<Saved | null>(() => (cached ? keptResume(mode, cached.saved) : null));
   /** 푸는 중인 세션: 푼 문제를 DB 에 적는다 (한 번에 하나씩, 다시 나온 문제는 한 번만) */
-  const session = useRef<{ key: SessionKey; pace: number; secOf: Map<string, number>; recorded: Set<string>; chain: Promise<void>; failed: number } | null>(null);
+  const session = useRef<{ key: SessionKey; pace: number; secOf: Map<string, number>; recorded: Set<string>; chain: Promise<void>; failed: number } | null>(
+    null,
+  );
   /** 마지막으로 푼 세션의 열쇠 (끝 화면의 '조금 더 하기') */
   const lastKey = useRef<SessionKey | null>(null);
 
@@ -530,9 +551,9 @@ export function ReviewSession({
         .catch(() => {});
       refresh();
       // 끝 화면 다음에는 대개 홈으로 간다: 저장이 다 끝난 지금 홈을 미리 읽어 두면 홈이 바로 (바뀐 진행으로) 보인다
-      if (!practice) warmHome(owner, sessionsOn);
+      if (!practice) warmHome(owner, { sessions: sessionsOn, organize: organizeOn });
     },
-    [practice, setFocus, toast, refresh, plan, choice, reviewSettings, mode, owner, sessionsOn],
+    [practice, setFocus, toast, refresh, plan, choice, reviewSettings, mode, owner, sessionsOn, organizeOn],
   );
 
   /** 지난번에 고른 시간·기간을 기억한다 (다음에 그대로 고른 채 연다) */
@@ -605,7 +626,9 @@ export function ReviewSession({
               toast('진행 상황을 저장하지 못했어요. 이번 복습은 이어서 하기가 안 될 수 있어요.', 'bad');
             });
           }
-          session.current = ok ? { key, pace: sessionPace, secOf, recorded: new Set(saved ? Object.keys(saved.row.answered) : []), chain: Promise.resolve(), failed: 0 } : null;
+          session.current = ok
+            ? { key, pace: sessionPace, secOf, recorded: new Set(saved ? Object.keys(saved.row.answered) : []), chain: Promise.resolve(), failed: 0 }
+            : null;
         } else {
           session.current = null;
         }
@@ -730,13 +753,19 @@ export function ReviewSession({
     const ss = session.current;
     if (ss && !ss.recorded.has(q.id)) {
       ss.recorded.add(q.id);
-      const entry = { ok: r.correct, sec: Math.round(ss.secOf.get(q.id) ?? secondsFor({ ...card, type: q.type, importance: 'medium' }, ss.pace)), at: at.toISOString() };
-      ss.chain = ss.chain.then(() => recordSessionAnswer(ss.key, q.id, entry)).catch(() => {
-        ss.failed += 1;
-      });
+      const entry = {
+        ok: r.correct,
+        sec: Math.round(ss.secOf.get(q.id) ?? secondsFor({ ...card, type: q.type, importance: 'medium' }, ss.pace)),
+        at: at.toISOString(),
+      };
+      ss.chain = ss.chain
+        .then(() => recordSessionAnswer(ss.key, q.id, entry))
+        .catch(() => {
+          ss.failed += 1;
+        });
     }
 
-    setResults((rs) => [...rs, { correct: r.correct, graduated, enteredWrong }]);
+    setResults((rs) => [...rs, { id: q.id, correct: r.correct, graduated, enteredWrong }]);
     // 곧 다시 볼 문제(틀린 문제)는 이번 세션 끝에 한 번 더. 목표 시간이 지났으면 더 늘리지 않는다 (다음 복습에 나온다)
     let nextQueue = queue.map((it, i) => (i === idx ? { ...it, card: updated } : it));
     const soon = Date.parse(next.due) - at.getTime() <= 10 * 60_000;
@@ -769,7 +798,12 @@ export function ReviewSession({
             key={`${item.q.id}-${idx}`}
             q={item.q as ReviewQuestion}
             index={idx}
-            total={queue.length}
+            progress={progressOf(queue, idx)}
+            nextLabel={(rating) => {
+              const c = item.card;
+              const stored: StoredCard = { due: c.due, state: c.state, reps: c.reps, lapses: c.lapses, last_review: c.last_review, fsrs: c.fsrs ?? {} };
+              return dueLabel(reviewCard(stored, rating, new Date(), settings.retention).due);
+            }}
             subjectName={subjectNames.get(item.q.subject_id)}
             onSubmit={onSubmit}
             autoRate={(correct, ms) => autoRating(item.q.type, correct, ms)}
@@ -927,10 +961,8 @@ export function ReviewSession({
 
   // ------------------------------------------------------------ 끝 화면
   if (phase === 'end') {
-    const total = results.length;
-    const right = results.filter((r) => r.correct).length;
-    const enteredWrong = results.filter((r) => r.enteredWrong).length;
-    const graduated = results.filter((r) => r.graduated).length;
+    // 문제마다 처음 답으로 센다: 틀려서 한 번 더 푼 문제는 두 번 세지 않는다 (5문제를 풀면 5문제)
+    const { total, right, enteredWrong, graduated } = sessionTally(results);
     const dueDone = choosesPeriod(mode) && choice?.period === 'due' && !remaining;
     const heading = !total ? '다음에 또 만나요' : stopped ? '여기까지 풀었어요' : dueDone ? '오늘 할 일 끝!' : '다 풀었어요!';
     const great = total > 0 && right / total >= 0.8;
@@ -1040,7 +1072,19 @@ export function ReviewSession({
 }
 
 /** 시작 화면 맨 위: 하던 복습(저장한 세션)을 이어서 하거나 처음부터 (features.sessions) */
-function ResumeCard({ saved, subjectName, starting, onContinue, onRestart }: { saved: Saved; subjectName?: string; starting: boolean; onContinue: () => void; onRestart: () => void }) {
+function ResumeCard({
+  saved,
+  subjectName,
+  starting,
+  onContinue,
+  onRestart,
+}: {
+  saved: Saved;
+  subjectName?: string;
+  starting: boolean;
+  onContinue: () => void;
+  onRestart: () => void;
+}) {
   const done = saved.res.done.length;
   const total = done + saved.res.remaining.length;
   const what = saved.key === 'wrong' ? '오답 다시 풀기' : `${PERIOD_LABEL[saved.row.period]}${subjectName ? ` · ${subjectName}` : ''}`;

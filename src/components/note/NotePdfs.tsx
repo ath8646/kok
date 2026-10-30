@@ -5,7 +5,7 @@ import { useEffect, useState } from 'react';
 import { sb } from '@/lib/data';
 import { PDF_LIMITS, pdfSizeLabel, type NotePdfRow, type PdfTheme } from '@/lib/note-pdf';
 import { PdfViewer } from '../PdfViewer';
-import { BarAction, SelectionBar, pickKeyHandler, useMultiSelect } from '../SelectionBar';
+import { BarAction, PICKED_RING, PickBadge, SelectionBar, pickKeyHandler, useMultiSelect } from '../SelectionBar';
 import { useLongPress } from '../useLongPress';
 import { Button, Chip, ICONS, Icon, IconButton, Menu, Sheet, api, cx, inputClass, radioKeys, useToast, DONE, type MenuItem } from '../ui';
 
@@ -145,9 +145,7 @@ export function NotePdfs({ noteId, noteTitle, canCreate }: { noteId: string; not
           {selecting ? (
             <span className="kok-swap">{pickedRows.length ? `${pickedRows.length}개 선택` : 'PDF 고르기'}</span>
           ) : (
-            <>
-              PDF 요약 정리 {list.length ? <span className="ml-1 text-sm font-semibold text-muted">{list.length}</span> : null}
-            </>
+            <>PDF 요약 정리 {list.length ? <span className="ml-1 text-sm font-semibold text-muted">{list.length}</span> : null}</>
           )}
         </h3>
         {selecting ? (
@@ -238,7 +236,13 @@ export function NotePdfs({ noteId, noteTitle, canCreate }: { noteId: string; not
           <p className="text-sm leading-relaxed text-muted">지금 노트의 정리·용어·공식·마인드맵·자료 그림이 들어가요. AI를 쓰지 않아서 에너지가 들지 않아요.</p>
           <label className="grid gap-1.5">
             <span className="text-sm font-semibold">이름</span>
-            <input className={inputClass} value={name} maxLength={PDF_LIMITS.name} placeholder={`${noteTitle}${list.length ? ` (${list.length + 1})` : ''}`} onChange={(e) => setName(e.target.value)} />
+            <input
+              className={inputClass}
+              value={name}
+              maxLength={PDF_LIMITS.name}
+              placeholder={`${noteTitle}${list.length ? ` (${list.length + 1})` : ''}`}
+              onChange={(e) => setName(e.target.value)}
+            />
           </label>
           <div role="radiogroup" aria-label="종이" className="grid grid-cols-2 gap-2">
             {THEMES.map((t, i) => {
@@ -252,7 +256,10 @@ export function NotePdfs({ noteId, noteTitle, canCreate }: { noteId: string; not
                   tabIndex={t.value === theme ? 0 : -1}
                   onKeyDown={(e) => radioKeys(e, i, THEMES.length, (n) => setTheme(THEMES[n].value))}
                   onClick={() => setTheme(t.value)}
-                  className={cx('press grid gap-2 rounded-2xl border-2 p-3 text-left transition-colors', on ? 'border-accent bg-accent-soft' : 'border-line bg-surface hover:border-accent/60')}
+                  className={cx(
+                    'press grid gap-2 rounded-2xl border-2 p-3 text-left transition-colors',
+                    on ? 'border-accent bg-accent-soft' : 'border-line bg-surface hover:border-accent/60',
+                  )}
                 >
                   <PaperPreview theme={t.value} />
                   <span className="block text-sm font-semibold">{t.label}</span>
@@ -281,7 +288,14 @@ export function NotePdfs({ noteId, noteTitle, canCreate }: { noteId: string; not
             rename();
           }}
         >
-          <input className={inputClass} value={newName} maxLength={PDF_LIMITS.name} autoFocus aria-label="새 이름" onChange={(e) => setNewName(e.target.value)} />
+          <input
+            className={inputClass}
+            value={newName}
+            maxLength={PDF_LIMITS.name}
+            autoFocus
+            aria-label="새 이름"
+            onChange={(e) => setNewName(e.target.value)}
+          />
         </form>
       </Sheet>
 
@@ -302,7 +316,8 @@ export function NotePdfs({ noteId, noteTitle, canCreate }: { noteId: string; not
         }
       >
         <p className="text-[15px] leading-relaxed">
-          {confirm && confirm.length > 1 ? `PDF ${confirm.length}개를 지울까요?` : `'${list.find((r) => r.id === confirm?.[0])?.name ?? 'PDF'}'를 지울까요?`} 되돌릴 수 없어요.
+          {confirm && confirm.length > 1 ? `PDF ${confirm.length}개를 지울까요?` : `'${list.find((r) => r.id === confirm?.[0])?.name ?? 'PDF'}'를 지울까요?`}{' '}
+          되돌릴 수 없어요.
         </p>
       </Sheet>
 
@@ -351,28 +366,32 @@ function PdfRow({
         }
       }}
     >
+      {/* 고르는 동안에도 줄 모양은 그대로(아이콘·⋮ 도 보인다), 모서리에 동그라미만 걸린다 */}
       <div
-        className={cx('kok-card flex items-center gap-3 rounded-[20px] p-3 pr-1.5', selecting && 'cursor-pointer', selecting && picked && 'ring-2 ring-accent ring-offset-2 ring-offset-bg')}
+        className={cx('kok-card flex items-center gap-3 rounded-[20px] p-3 pr-1.5', selecting && 'cursor-pointer', selecting && picked && PICKED_RING)}
         {...selectProps}
       >
-        {selecting ? (
-          <span aria-hidden="true" className={cx('grid h-6 w-6 shrink-0 place-items-center rounded-full border-2 transition-colors', picked ? 'border-accent bg-accent text-accent-ink' : 'border-line bg-surface')}>
-            {picked ? <Icon d={ICONS.check} size={14} strokeWidth={3} /> : null}
-          </span>
-        ) : (
-          <span className="grid h-11 w-11 shrink-0 place-items-center rounded-2xl bg-accent-soft text-accent" aria-hidden="true">
-            <Icon d={ICONS.pdf} size={22} />
-          </span>
-        )}
-        <button type="button" className="min-w-0 flex-1 py-1 text-left" onClick={onOpen} tabIndex={selecting ? -1 : undefined} aria-label={`${row.name} 보기`}>
+        <span className="grid h-11 w-11 shrink-0 place-items-center rounded-2xl bg-accent-soft text-accent" aria-hidden="true">
+          <Icon d={ICONS.pdf} size={22} />
+        </span>
+        <button
+          type="button"
+          className="min-w-0 flex-1 py-1 text-left"
+          onClick={onOpen}
+          tabIndex={selecting ? -1 : undefined}
+          aria-label={selecting ? undefined : `${row.name} 보기`}
+        >
           <span className="block truncate font-semibold">{row.name}</span>
           <span className="mt-0.5 flex flex-wrap items-center gap-1.5 text-xs text-muted">
             {meta}
             {row.version ? <Chip>v{row.version}</Chip> : null}
           </span>
         </button>
-        {!selecting ? <Menu label={`${row.name} 메뉴`} items={menu} small /> : null}
+        <div inert={selecting || undefined} aria-hidden={selecting || undefined}>
+          <Menu label={`${row.name} 메뉴`} items={menu} small />
+        </div>
       </div>
+      {selecting ? <PickBadge picked={picked} /> : null}
     </li>
   );
 }

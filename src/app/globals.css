@@ -1632,11 +1632,6 @@ body.kok-editing .kok-fab {
   position: relative;
   isolation: isolate;
 }
-/* 열린 ⋯ 메뉴(ui.tsx Menu)가 든 카드는 옆 카드 위로: 카드마다 모서리 단추 칸(z-10)이나 별표 빛(isolation)이 따로 쌓여서,
-   그대로 두면 나중 카드의 별·⋯ 단추가 열린 메뉴 위에 그려진다. 위 띠(z-30)·아래 메뉴(z-40) 밑 */
-:is([data-flip], .kok-glow, .z-10):has([role='menu']) {
-  z-index: 25;
-}
 .kok-glow::before,
 .kok-glow::after {
   content: '';

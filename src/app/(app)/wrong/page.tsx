@@ -5,7 +5,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { useMe } from '@/components/AppShell';
 import { QuestionPreview } from '@/components/QuestionList';
 import { RichText } from '@/components/RichText';
-import { BarAction, SelectionBar, pickKeyHandler, useMultiSelect } from '@/components/SelectionBar';
+import { BarAction, PICKED_RING, PickBadge, SelectionBar, pickKeyHandler, useMultiSelect } from '@/components/SelectionBar';
 import { useLongPress } from '@/components/useLongPress';
 import {
   Button,
@@ -222,7 +222,8 @@ export default function WrongPage() {
       <span className="kok-bone mt-[7px] h-2.5 w-52 max-w-full" />
     </span>
   ) : selecting ? (
-    <span className="kok-swap">문제나 개념을 눌러 고르고, 아래에서 한꺼번에 빼요</span>
+    // 한 줄로 (부제 줄이 늘어 아래 카드가 밀리지 않게)
+    <span className="kok-swap">카드를 눌러 고르고, 아래에서 빼요</span>
   ) : (
     // 기억해 둔 목록으로 처음 그린 부제는 번지지 않는다
     <Swap key={subtitleText} still={!!first && !fresh}>
@@ -302,7 +303,6 @@ export default function WrongPage() {
               <SectionTitle>
                 <span className="kok-fill inline-block">약점 개념 {weak.length}개</span>
               </SectionTitle>
-              {selecting ? <p className="-mt-2 px-1 text-xs text-muted">개념을 고르면 그 개념의 틀린 문제가 모두 골라져요.</p> : null}
               <div className="grid gap-2">
                 {weak.map((w, i) => {
                   const n = notes.get(w.note_id);
@@ -312,7 +312,7 @@ export default function WrongPage() {
                   return (
                     <WeakCard
                       key={`${w.note_id}:${w.key_point_id}`}
-                      index={selecting ? 0 : i + 1}
+                      index={i + 1}
                       title={t}
                       noteTitle={n?.title ?? '노트'}
                       count={w.count}
@@ -343,21 +343,20 @@ export default function WrongPage() {
           ) : null}
 
           <SectionTitle>
-            <span className="kok-fill block" style={{ ['--i' as string]: selecting ? 0 : itemsFrom - 1 }}>
+            <span className="kok-fill block" style={{ ['--i' as string]: itemsFrom - 1 }}>
               틀린 문제 {items.length}개
             </span>
           </SectionTitle>
-          {!selecting ? (
-            <p className="-mt-2 px-1 text-xs text-muted">카드를 꾹 누르면 여러 개를 한꺼번에 뺄 수 있어요 (개념 카드를 꾹 누르면 그 개념의 문제 모두).</p>
-          ) : null}
+          {/* 고르는 동안에도 그대로 둔다 (줄이 사라지며 카드가 밀리지 않게) */}
+          <p className="-mt-2 px-1 text-xs text-muted">카드를 꾹 누르면 여러 개를 한꺼번에 뺄 수 있어요 (개념 카드를 꾹 누르면 그 개념의 문제 모두).</p>
           <div className="grid gap-2">
             {items.map(({ q, lapses }, i) => (
               <WrongCard
                 key={q.id}
                 q={q}
                 lapses={lapses}
-                index={selecting ? 0 : itemsFrom + i}
-                expanded={!selecting && open === q.id}
+                index={itemsFrom + i}
+                expanded={open === q.id}
                 onToggleOpen={() => setOpen(open === q.id ? null : q.id)}
                 selecting={selecting}
                 picked={picked.has(q.id)}
@@ -409,7 +408,10 @@ export default function WrongPage() {
   );
 }
 
-/** 약점 개념 카드: 개념 풀기·노트·마인드맵 링크. 꾹 누르면 그 개념의 틀린 문제를 모두 골라 여러 개 고르기 (고르는 동안은 링크로 가지 않는다) */
+/**
+ * 약점 개념 카드: 개념 풀기·노트·마인드맵 링크. 꾹 누르면 그 개념의 틀린 문제를 모두 골라 여러 개 고르기.
+ * 고르는 동안에도 카드는 그대로(링크도 보인다)이고 모서리에 동그라미만 걸린다: 어디를 눌러도 고르기만 한다
+ */
 function WeakCard({
   index,
   title,
@@ -448,53 +450,37 @@ function WeakCard({
         }
       }}
     >
-      <Card
-        className={cx('grid gap-2', selecting && 'kok-card-hover cursor-pointer', selecting && picked && 'ring-2 ring-accent ring-offset-2 ring-offset-bg')}
-        {...selectProps}
-      >
+      <Card className={cx('grid gap-2', selecting && 'cursor-pointer', selecting && picked && PICKED_RING)} {...selectProps}>
         <div className="kok-fill flex flex-wrap items-center justify-between gap-2">
-          <div className="flex min-w-0 items-center gap-2.5">
-            {selecting ? (
-              <span
-                aria-hidden="true"
-                className={cx(
-                  'grid h-6 w-6 shrink-0 place-items-center rounded-full border-2 transition-colors',
-                  picked ? 'border-accent bg-accent text-accent-ink' : 'border-line bg-surface',
-                )}
-              >
-                {picked ? <Icon d={ICONS.check} size={14} strokeWidth={3} /> : null}
-              </span>
-            ) : null}
-            <div className="min-w-0">
-              <p className="truncate font-bold">{title}</p>
-              <p className="truncate text-sm text-muted">{noteTitle}</p>
-            </div>
+          <div className="min-w-0">
+            <p className="truncate font-bold">{title}</p>
+            <p className="truncate text-sm text-muted">{noteTitle}</p>
           </div>
           <Chip tone="bad">틀린 문제 {count}</Chip>
         </div>
-        {!selecting ? (
-          <div className="kok-fill flex flex-wrap gap-2">
-            <LinkButton size="sm" href={links.solve}>
-              이 개념 풀기
-            </LinkButton>
-            {links.note ? (
-              <Link className={buttonClass('secondary', 'sm')} href={links.note}>
-                노트에서 보기
-              </Link>
-            ) : null}
-            {links.map ? (
-              <Link className={buttonClass('secondary', 'sm')} href={links.map}>
-                마인드맵에서 보기
-              </Link>
-            ) : null}
-          </div>
-        ) : null}
+        {/* 고르는 동안에도 보이지만 누를 수 없다 (누르면 카드를 고른다) */}
+        <div className="kok-fill flex flex-wrap gap-2" inert={selecting || undefined} aria-hidden={selecting || undefined}>
+          <LinkButton size="sm" href={links.solve}>
+            이 개념 풀기
+          </LinkButton>
+          {links.note ? (
+            <Link className={buttonClass('secondary', 'sm')} href={links.note}>
+              노트에서 보기
+            </Link>
+          ) : null}
+          {links.map ? (
+            <Link className={buttonClass('secondary', 'sm')} href={links.map}>
+              마인드맵에서 보기
+            </Link>
+          ) : null}
+        </div>
       </Card>
+      {selecting ? <PickBadge picked={picked} /> : null}
     </div>
   );
 }
 
-/** 틀린 문제 카드: 누르면 답을 펼치고, 꾹 누르면 여러 개 고르기 (고르는 동안은 카드 어디를 눌러도 고르기만) */
+/** 틀린 문제 카드: 누르면 답을 펼치고, 꾹 누르면 여러 개 고르기 (고르는 동안은 카드 모양 그대로, 어디를 눌러도 고르기만) */
 function WrongCard({
   q,
   lapses,
@@ -536,22 +522,8 @@ function WrongCard({
         }
       }}
     >
-      <Card
-        className={cx('grid gap-2', selecting && 'kok-card-hover cursor-pointer', selecting && picked && 'ring-2 ring-accent ring-offset-2 ring-offset-bg')}
-        {...selectProps}
-      >
+      <Card className={cx('grid gap-2', selecting && 'cursor-pointer', selecting && picked && PICKED_RING)} {...selectProps}>
         <div className="kok-fill flex items-start gap-2">
-          {selecting ? (
-            <span
-              aria-hidden="true"
-              className={cx(
-                'mt-0.5 grid h-6 w-6 shrink-0 place-items-center rounded-full border-2 transition-colors',
-                picked ? 'border-accent bg-accent text-accent-ink' : 'border-line bg-surface',
-              )}
-            >
-              {picked ? <Icon d={ICONS.check} size={14} strokeWidth={3} /> : null}
-            </span>
-          ) : null}
           <button
             type="button"
             className="flex min-w-0 flex-1 items-start gap-2 text-left"
@@ -571,14 +543,14 @@ function WrongCard({
             <QuestionPreview q={q} />
           </div>
         ) : null}
-        {!selecting ? (
-          <div className="kok-fill flex justify-end">
-            <Button size="sm" variant="ghost" onClick={onRemove}>
-              다 외웠어요 · 빼기
-            </Button>
-          </div>
-        ) : null}
+        {/* 고르는 동안에도 보이지만 누를 수 없다 (누르면 카드를 고른다) */}
+        <div className="kok-fill flex justify-end" inert={selecting || undefined} aria-hidden={selecting || undefined}>
+          <Button size="sm" variant="ghost" onClick={onRemove}>
+            다 외웠어요 · 빼기
+          </Button>
+        </div>
       </Card>
+      {selecting ? <PickBadge picked={picked} /> : null}
     </div>
   );
 }

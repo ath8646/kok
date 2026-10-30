@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { continuePlan, plansForTimes, secondsFor, type PlanCard } from '@/lib/review-plan';
-import { readSession, resumePlan, sessionProgress, type SessionRow } from '@/lib/review-session';
+import { readSession, resumePlan, sessionProgress, sessionTally, type SessionRow } from '@/lib/review-session';
 
 // 2026-10-18 10:00 KST
 const now = new Date('2026-10-18T01:00:00Z');
@@ -33,7 +33,13 @@ const pool: C[] = [...low, ...high, star, wrong];
 const cardOf = (id: string) => pool.find((c) => c.question_id === id);
 const opts = { subjects, interleave: false, now, cardOf, reviewedSince: new Set<string>() };
 
-const session = (plan: string[], answered: SessionRow['answered'] = {}, seen = '2026-10-18T00:00:00Z') => ({ plan, answered, minutes: 5, pace: 1, seen_at: seen });
+const session = (plan: string[], answered: SessionRow['answered'] = {}, seen = '2026-10-18T00:00:00Z') => ({
+  plan,
+  answered,
+  minutes: 5,
+  pace: 1,
+  seen_at: seen,
+});
 
 describe('이어서 풀 문제 (continuePlan)', () => {
   it('푼 것이 없으면 그 시간의 계획과 같다', () => {
@@ -52,7 +58,14 @@ describe('이어서 풀 문제 (continuePlan)', () => {
     const more = continuePlan(rest, subjects, 5, { now, interleave: false, seeds });
     expect(more.cards.map((c) => c.question_id)).toEqual(p5.cards.slice(3).map((c) => c.question_id));
     const full = p5.cards.map((c) => ({ key: `${c.note_id}:${c.key_point_id}`, sec: secondsFor(c, 1) }));
-    expect(continuePlan(pool.filter((c) => !p5.cards.includes(c)), subjects, 5, { now, interleave: false, seeds: full }).cards).toEqual([]);
+    expect(
+      continuePlan(
+        pool.filter((c) => !p5.cards.includes(c)),
+        subjects,
+        5,
+        { now, interleave: false, seeds: full },
+      ).cards,
+    ).toEqual([]);
   });
 });
 
@@ -63,7 +76,11 @@ describe('저장한 세션 이어서 하기 (resumePlan)', () => {
 
   it('푼 문제는 빼고 나머지는 그 순서 그대로: 계획은 바뀌지 않는다', () => {
     const answered = { [ids[0]]: { ok: true, sec: sec(ids[0]), at: '' }, [ids[1]]: { ok: false, sec: sec(ids[1]), at: '' } };
-    const r = resumePlan(session(ids, answered), pool.filter((c) => !answered[c.question_id]), opts);
+    const r = resumePlan(
+      session(ids, answered),
+      pool.filter((c) => !answered[c.question_id]),
+      opts,
+    );
     expect(r.done).toEqual([ids[0], ids[1]]);
     expect(r.remaining.map((c) => c.question_id)).toEqual(ids.slice(2));
     expect(r.plan).toEqual(ids);
@@ -74,7 +91,11 @@ describe('저장한 세션 이어서 하기 (resumePlan)', () => {
 
   it('계획에 있던 문제를 다른 데서 풀었으면 끝낸 것으로 센다', () => {
     const elsewhere = new Set([ids[2]]);
-    const r = resumePlan(session(ids), pool.filter((c) => c.question_id !== ids[2]), { ...opts, reviewedSince: elsewhere });
+    const r = resumePlan(
+      session(ids),
+      pool.filter((c) => c.question_id !== ids[2]),
+      { ...opts, reviewedSince: elsewhere },
+    );
     expect(r.done).toEqual([ids[2]]);
     expect(r.remaining.map((c) => c.question_id)).toEqual(ids.filter((id) => id !== ids[2]));
     expect(r.changed).toBe(false);
@@ -82,14 +103,22 @@ describe('저장한 세션 이어서 하기 (resumePlan)', () => {
 
   it('계획에서 사라진 문제(지움·쉬게 함) 자리는 같은 시간 안에서 다른 문제로 채운다', () => {
     const gone = ids[ids.length - 1];
-    const r = resumePlan(session(ids), pool.filter((c) => c.question_id !== gone), opts);
+    const r = resumePlan(
+      session(ids),
+      pool.filter((c) => c.question_id !== gone),
+      opts,
+    );
     expect(r.done).toEqual([]);
     expect(r.remaining.map((c) => c.question_id)).not.toContain(gone);
     // 하나가 빠진 만큼 채운다 (같은 수)
     expect(r.remaining.length).toBe(ids.length);
     expect(r.changed).toBe(true);
     // 다시 열면 그대로
-    const again = resumePlan(session(r.plan), pool.filter((c) => c.question_id !== gone), opts);
+    const again = resumePlan(
+      session(r.plan),
+      pool.filter((c) => c.question_id !== gone),
+      opts,
+    );
     expect(again.changed).toBe(false);
   });
 
@@ -128,5 +157,27 @@ describe('저장한 세션 이어서 하기 (resumePlan)', () => {
     });
     expect(row?.plan).toEqual(['a']);
     expect(readSession({ ...row, key: 'other' })).toBeNull();
+  });
+});
+
+describe('sessionTally (끝 화면의 수)', () => {
+  it('틀려서 한 번 더 푼 문제는 한 번만 센다: 5문제에 2개 틀리면 푼 문제 5, 맞힌 수는 처음 답으로', () => {
+    const r = (id: string, correct: boolean, enteredWrong = false) => ({ id, correct, graduated: false, enteredWrong });
+    const t = sessionTally([r('a', true), r('b', false, true), r('c', true), r('d', false, true), r('e', true), r('b', true), r('d', false), r('d', true)]);
+    expect(t).toEqual({ total: 5, right: 3, enteredWrong: 2, graduated: 0 });
+  });
+  it('졸업은 문제마다 한 번, 빈 목록은 0', () => {
+    expect(
+      sessionTally([
+        { id: 'a', correct: true, graduated: true, enteredWrong: false },
+        { id: 'a', correct: true, graduated: true, enteredWrong: false },
+      ]),
+    ).toEqual({
+      total: 1,
+      right: 1,
+      enteredWrong: 0,
+      graduated: 1,
+    });
+    expect(sessionTally([])).toEqual({ total: 0, right: 0, enteredWrong: 0, graduated: 0 });
   });
 });

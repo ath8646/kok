@@ -10,16 +10,17 @@ import { EnergyPill, useMe } from '@/components/AppShell';
 import { HomeAsk } from '@/components/chat/HomeChat';
 import { ProcessingList, useActiveSources } from '@/components/ProcessingList';
 import { SOURCES_CHANGED, useQuickAdd } from '@/components/QuickAdd';
+import { RecentNotes } from '@/components/RecentNotes';
+import { useMultiSelect } from '@/components/SelectionBar';
 import { Button, DONE, Energy, ICONS, Icon, LargeHeader, LinkButton, ProgressRing, SectionTitle, Sheet, Swap, cx, useToast } from '@/components/ui';
 import { TerminalEntry } from '@/components/terminal/TerminalEntry';
 import { deleteSession, reviewedAfter } from '@/lib/data';
-import { homeViewKey, loadHome, type HomeData } from '@/lib/home-data';
+import { homeViewKey, loadHome, type HomeData, type Recent } from '@/lib/home-data';
 import { continuePlan, pickToday, streakInfo } from '@/lib/review-plan';
 import { resumePlan } from '@/lib/review-session';
 import { daysUntil, kstDateString } from '@/lib/time';
 import { subjectVar } from '@/lib/colors';
 import { dueLabel } from '@/lib/srs';
-import { previewText } from '@/lib/richtext';
 import { energyPeriodLabel } from '@/lib/plans';
 import { readView, viewStamp, writeView } from '@/lib/view-cache';
 import type { MeResponse } from '@/lib/types';
@@ -80,11 +81,14 @@ export default function HomePage() {
   const [confirmRestart, setConfirmRestart] = useState(false);
   const [clearing, setClearing] = useState(false);
   const sessionsOn = !!me?.features.sessions;
+  const organizeOn = !!me?.features.organize;
+  // 최근 노트 여러 개 고르기 (꾹 누르기): 고르는 동안 화면 아래를 띠만큼 띄운다
+  const select = useMultiSelect();
 
   useEffect(() => {
     let alive = true;
     const stamp = viewStamp();
-    loadHome(sessionsOn)
+    loadHome({ sessions: sessionsOn, organize: organizeOn })
       .then((d) => {
         if (!alive) return;
         setData(d);
@@ -98,7 +102,7 @@ export default function HomePage() {
     return () => {
       alive = false;
     };
-  }, [active.doneCount, version, sessionsOn, owner]);
+  }, [active.doneCount, version, sessionsOn, organizeOn, owner]);
 
   const reloadActive = active.reload;
   useEffect(() => {
@@ -136,7 +140,6 @@ export default function HomePage() {
   const wrongCount = live.filter((c) => c.in_wrong_note).length;
   const hasCards = !!plan?.cards.length;
   const doneToday = plan?.doneToday ?? 0;
-  const subjectOf = new Map((plan?.subjects ?? []).map((s) => [s.id, s]));
 
   // 오늘의 KOK: 저장한 세션이 있으면 그 진행(다른 데서 푼 문제도 끝낸 것으로), 없으면 지금 시작하면 고를 N분 분량 (시작하면 같은 계산으로 같은 문제)
   let view: TodayView;
@@ -214,12 +217,6 @@ export default function HomePage() {
             : '잘했어요!'
           : '자료를 넣으면 AI가 정리하고 문제를 만들어요';
 
-  const recentLink = (
-    // 화면 바탕 위 글자는 본문·흐린 글자만(화면 빛 위에서 읽히게, fx.ts): 포인트 글자는 연한 알약 안에
-    <Link href="/library" className="press rounded-full bg-accent-soft px-3 py-1 text-sm font-semibold text-accent hover:brightness-95">
-      자료함 →
-    </Link>
-  );
   // 다 읽으면 제목·부제가 그 자리에 나타나고(새 글은 살짝 번진다), 읽는 동안에도 줄 높이를 지켜 아래가 튀지 않게 한다
   const titleNode =
     title === null ? (
@@ -245,8 +242,16 @@ export default function HomePage() {
   /** 읽은 뒤에만 보이는 글 (읽는 동안에는 회색 줄, 못 읽었으면 비움) */
   const known = (node: ReactNode, bone: string) => (!ready ? <Bone className={bone} /> : plan ? node : null);
 
+  /** 최근 노트를 화면에서 바로 고친다 (지운 노트 빼기 등: 다시 읽기 전에) */
+  const patchRecent = (fn: (rows: Recent[]) => Recent[]) => setData((d) => (d ? { ...d, recent: fn(d.recent) } : d));
+  /** 최근 노트를 바꾼 뒤: 홈(오늘 복습 수 포함)과 정리 중인 자료를 새로 읽는다 */
+  const reloadAll = () => {
+    setVersion((v) => v + 1);
+    active.reload();
+  };
+
   return (
-    <div className="grid gap-3">
+    <div className={cx('grid gap-3', select.selecting && 'pb-20')}>
       <LargeHeader
         title={titleNode}
         compactTitle={title ?? '오늘'}
@@ -441,40 +446,16 @@ export default function HomePage() {
           </div>
         </div>
       ) : recentShown.length ? (
-        <>
-          <SectionTitle action={recentLink}>최근 노트</SectionTitle>
-          <div className="no-scrollbar -mx-4 flex snap-x gap-3 overflow-x-auto px-4 pb-1 md:mx-0 md:grid md:grid-cols-4 md:overflow-visible md:px-0">
-            {recentShown.map((s, i) => {
-              const subj = subjectOf.get(s.subject_id);
-              const busy = s.status === 'queued' || s.status === 'processing';
-              return (
-                <Link
-                  key={s.id}
-                  href={`/notes/${s.id}`}
-                  className="kok-card kok-detail-card kok-card-hover press flex h-[150px] w-[150px] shrink-0 snap-start flex-col overflow-hidden p-3.5 md:w-auto"
-                  style={{ ['--i' as string]: i }}
-                >
-                  <p className={cx('kok-fill line-clamp-3 min-h-0 flex-1 text-xs leading-relaxed text-muted', busy && 'kok-shimmer rounded-lg')}>
-                    {busy
-                      ? '정리하는 중이에요…'
-                      : s.status === 'error'
-                        ? '멈췄어요. 눌러서 다시 해 보세요.'
-                        : s.summary
-                          ? previewText(s.summary)
-                          : s.manual
-                            ? '직접 만든 노트예요.'
-                            : '정리 노트가 준비됐어요.'}
-                  </p>
-                  <p className="kok-fill line-clamp-2 text-sm font-bold leading-snug">{s.title || '제목 없는 자료'}</p>
-                  <p className="kok-fill mt-1 flex items-center gap-1.5 truncate text-[11px] text-muted">
-                    {subj ? <span className="h-2 w-2 shrink-0 rounded-full" style={{ background: subjectVar(subj.color) }} aria-hidden="true" /> : null}
-                    <span className="truncate">{subj?.name ?? ''}</span>
-                  </p>
-                </Link>
-              );
-            })}
-          </div>
-        </>
+        // 누르면 노트, 꾹 누르면 여러 개 고르기 (자료함과 같은 아래 띠)
+        <RecentNotes
+          recent={recentShown}
+          subjects={plan?.subjects ?? []}
+          organize={organizeOn}
+          merge={!!me.features.merge}
+          select={select}
+          onLocal={patchRecent}
+          onChanged={reloadAll}
+        />
       ) : null}
 
       <SectionTitle>바로 가기</SectionTitle>

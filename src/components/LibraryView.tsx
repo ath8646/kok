@@ -11,7 +11,7 @@ import { stepLabel, useActiveSources } from './ProcessingList';
 import { SubjectForm } from './SubjectForm';
 import { StarButton, StarGlyph, useStarRefocus } from './note/StarButton';
 import { SortList } from './note/SortList';
-import { BarAction, SelectionBar, useMultiSelect } from './SelectionBar';
+import { BarAction, PICKED_RING, PickBadge, SelectionBar, useMultiSelect } from './SelectionBar';
 import { useLongPress } from './useLongPress';
 import { prefersReducedMotion } from './useReducedMotion';
 import {
@@ -1422,7 +1422,7 @@ function NoteCard({
   };
   // (누르기는 바깥 칸이 먼저 받아서 고르기만 한다: 아래 onClickCapture)
   const selectProps = selecting ? { role: 'checkbox' as const, 'aria-checked': picked, onKeyDown: pickKeys } : {};
-  const ring = selecting && picked ? 'ring-2 ring-accent ring-offset-2 ring-offset-bg' : '';
+  const ring = selecting && picked ? PICKED_RING : '';
   return (
     <div
       data-flip={s.id}
@@ -1448,7 +1448,7 @@ function NoteCard({
         // 멈춘 자료: 카드 안에서 바로 다시 하기 (단추를 링크 안에 넣지 않도록 제목만 링크)
         <div className={cx('kok-card flex h-[196px] flex-col overflow-hidden', ring || 'ring-2 ring-bad/40')}>
           <div className={cx('relative grid min-h-0 flex-1 content-start gap-1.5 overflow-hidden px-4 pt-4', fill)}>
-            <span className={cx('text-xs font-bold text-bad', selecting ? 'pl-7' : corner)}>멈췄어요 · 에너지는 돌려줬어요</span>
+            <span className={cx('text-xs font-bold text-bad', corner)}>멈췄어요 · 에너지는 돌려줬어요</span>
             <p className="line-clamp-2 text-[13px] leading-relaxed text-muted">{s.error ?? '정리하다가 문제가 생겼어요.'}</p>
             <button
               type="button"
@@ -1484,7 +1484,7 @@ function NoteCard({
           >
             {processing ? (
               <div className="grid gap-2">
-                <div className={cx('flex items-center gap-2.5', selecting ? 'pl-7' : corner)}>
+                <div className={cx('flex items-center gap-2.5', corner)}>
                   <ProgressRing value={s.progress} label={`${s.title || '자료'} 진행`} />
                   <span className="min-w-0 text-xs font-bold leading-snug text-accent">{stepLabel(s)}</span>
                 </div>
@@ -1504,7 +1504,7 @@ function NoteCard({
             ) : (
               // 정리 중이던 카드가 끝나면 미리보기가 번지며 나타난다
               <p className={cx('line-clamp-5 text-[13px] leading-relaxed text-muted', startedBusy && 'kok-fade')}>
-                <span className={cx('h-5', selecting ? 'float-left w-6' : organize ? 'float-right w-14' : 'float-right w-6')} aria-hidden="true" />
+                <span className={cx('float-right h-5', organize ? 'w-14' : 'w-6')} aria-hidden="true" />
                 {s.summary ? previewText(s.summary) : s.manual ? '직접 만든 노트예요. 눌러서 채워 보세요.' : '정리 노트가 준비됐어요.'}
               </p>
             )}
@@ -1512,26 +1512,18 @@ function NoteCard({
           <div className={cx('px-4 pb-3.5', cover && !processing ? 'pt-2.5' : 'pt-1.5', fill)}>{footer}</div>
         </Link>
       )}
-      {selecting ? (
-        // 고르기 동그라미 (왼쪽 위): 고르면 채워지며 체크가 톡
-        <span
-          className={cx(
-            'kok-appear pointer-events-none absolute left-2.5 top-2.5 z-10 grid h-6 w-6 place-items-center rounded-full transition-colors duration-150',
-            picked ? 'bg-accent text-accent-ink' : 'bg-surface/90 ring-2 ring-inset ring-line',
-          )}
-          aria-hidden="true"
-        >
-          {picked ? <Icon key="on" d={ICONS.check} size={14} strokeWidth={3} className="kok-check-in" /> : null}
-        </span>
-      ) : (
-        // 오른쪽 위: 별표(한 번 누르면 별이 튀고 카드가 맨 위로) + 메뉴. 표지 그림이 이 자리까지 닿으면 단추 뒤에 옅은 바탕
-        <div
-          className={cx('absolute right-1.5 top-1.5 z-10 flex items-center', coverBusy && 'rounded-full bg-surface/90 shadow-[0_1px_6px_var(--shadow-strong)]')}
-        >
-          {organize ? <StarButton small starFor={s.id} on={!!s.starred} label={`${label} 별표`} onToggle={onStar} /> : null}
-          <Menu label={`${s.title || '자료'} 메뉴`} items={items} small />
-        </div>
-      )}
+      {/* 오른쪽 위: 별표(한 번 누르면 별이 튀고 카드가 맨 위로) + 메뉴. 표지 그림이 이 자리까지 닿으면 단추 뒤에 옅은 바탕.
+          고르는 동안에도 보이지만(카드 모양 그대로) 누를 수 없다: 누르면 카드를 고른다 */}
+      <div
+        className={cx('absolute right-1.5 top-1.5 z-10 flex items-center', coverBusy && 'rounded-full bg-surface/90 shadow-[0_1px_6px_var(--shadow-strong)]')}
+        inert={selecting || undefined}
+        aria-hidden={selecting || undefined}
+      >
+        {organize ? <StarButton small starFor={s.id} on={!!s.starred} label={`${label} 별표`} onToggle={onStar} /> : null}
+        <Menu label={`${s.title || '자료'} 메뉴`} items={items} small />
+      </div>
+      {/* 고르기 동그라미 (왼쪽 위 모서리에 걸친다): 고르면 채워지며 체크가 톡 */}
+      {selecting ? <PickBadge picked={picked} /> : null}
     </div>
   );
 }

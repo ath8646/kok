@@ -79,6 +79,8 @@ export default function SettingsPage() {
   const [subjects, setSubjects] = useState<SubjectRow[]>(() => kept?.subjects ?? []);
   const [ledger, setLedger] = useState<Ledger[]>(() => kept?.ledger ?? []);
   const [confirmText, setConfirmText] = useState('');
+  // 탈퇴 칸 (계정 삭제 안내 페이지에서 ?delete=1 로 오면 펼친 채로)
+  const [deleteOpen, setDeleteOpen] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const first = useRef(true);
   const owner = me?.userId;
@@ -104,6 +106,12 @@ export default function SettingsPage() {
     // 다른 화면에서 #energy·#chat·#theme 로 들어오면 그 칸으로
     const hash = window.location.hash.slice(1);
     if (/^[a-z]+$/.test(hash)) setTimeout(() => document.getElementById(hash)?.scrollIntoView({ behavior: 'smooth' }), 300);
+    // 계정 삭제 안내(/delete-account)에서 오면 탈퇴 칸을 펼쳐 그 자리로 (로그인을 거쳐도 남게 #이 아니라 ?값)
+    if (new URLSearchParams(window.location.search).get('delete') === '1')
+      setTimeout(() => {
+        setDeleteOpen(true);
+        document.getElementById('delete-account')?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      }, 300);
     // 글꼴 고르기 미리보기
     for (const f of THEME_FONTS) loadThemeFont(f);
     return () => {
@@ -683,7 +691,7 @@ export default function SettingsPage() {
         <a href="/api/account/export" className="font-semibold text-accent underline" download>
           내 데이터 내려받기 (JSON)
         </a>
-        <details>
+        <details id="delete-account" className="scroll-mt-24" open={deleteOpen} onToggle={(e) => setDeleteOpen(e.currentTarget.open)}>
           <summary className="cursor-pointer font-semibold text-bad">탈퇴하기</summary>
           <div className="mt-3 grid gap-2">
             <p className="text-sm">
@@ -722,6 +730,7 @@ export default function SettingsPage() {
         <Link href="/terms">이용약관</Link>
         <Link href="/privacy">개인정보처리방침</Link>
         <Link href="/ai-guide">AI 사용 안내</Link>
+        <Link href="/delete-account">계정 삭제 안내</Link>
         {me.isAdmin ? <Link href="/admin">관리자</Link> : null}
         <span>KOK v0.1</span>
       </div>

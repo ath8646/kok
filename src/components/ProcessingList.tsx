@@ -8,6 +8,8 @@ import { SOURCES_CHANGED } from '@/lib/events';
 import { activeViewKey, loadActive } from '@/lib/home-data';
 import { dropView, readView, viewStamp, writeView } from '@/lib/view-cache';
 import { Button, ICONS, Icon, ProgressRing, api, cx, useToast, DONE } from './ui';
+import { useConfirm } from './Confirm';
+import { josa } from '@/lib/josa';
 
 export function stepLabel(s: Pick<SourceRowWithUnit, 'status' | 'step' | 'chunk_index' | 'chunk_total' | 'progress'>): string {
   if (s.status === 'error') return '멈췄어요';
@@ -94,6 +96,7 @@ export function useActiveSources(owner: string | null | undefined, subjectId?: s
 
 export function ProcessingList({ items, justDone, reload }: Pick<ReturnType<typeof useActiveSources>, 'items' | 'justDone' | 'reload'>) {
   const toast = useToast();
+  const ask = useConfirm();
   const [busy, setBusy] = useState<string | null>(null);
   if (!items) return null;
   if (!items.length && !justDone.length) return null;
@@ -157,7 +160,17 @@ export function ProcessingList({ items, justDone, reload }: Pick<ReturnType<type
                     size="sm"
                     variant="ghost"
                     onClick={async () => {
-                      if (!confirm('이 자료를 지울까요?')) return;
+                      const name = s.title?.trim() ? `'${s.title.trim()}'` : '이 자료';
+                      if (
+                        !(await ask({
+                          title: '자료 지우기',
+                          body: `${josa(name, '을')} 지울까요?`,
+                          note: '정리가 멈춘 자료예요. 되돌릴 수 없어요.',
+                          ok: '지우기',
+                          danger: true,
+                        }))
+                      )
+                        return;
                       try {
                         await api(`/api/sources/${s.id}`, { method: 'DELETE' });
                         window.dispatchEvent(new Event(SOURCES_CHANGED));

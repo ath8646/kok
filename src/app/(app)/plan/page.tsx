@@ -2,6 +2,7 @@
 // 요금제: 무료와 Pro 비교, 지금 쓰는 테스트 플랜, 쿠폰 입력 (결제는 v0.4)
 import { useState, type ReactNode } from 'react';
 import { useMe } from '@/components/AppShell';
+import { useConfirm } from '@/components/Confirm';
 import { ApiError, Button, Card, Chip, Energy, Field, LargeHeader, api, inputClass, useToast } from '@/components/ui';
 import { planLabel } from '@/lib/plans';
 
@@ -19,6 +20,7 @@ type Redeemed = {
 export default function PlanPage() {
   const { me, refresh } = useMe();
   const toast = useToast();
+  const ask = useConfirm();
   const [code, setCode] = useState('');
   const [busy, setBusy] = useState(false);
   if (!me) return null;
@@ -96,9 +98,12 @@ export default function PlanPage() {
                 // 다른 테스트 플랜을 쓰는 중이면 바꿀지 묻는다 (바꾸면 지금 플랜의 남은 기간·번개는 없어진다)
                 if (!(err instanceof ApiError && err.code === 'plan_active')) throw err;
                 const cur = me.planInfo;
-                const ok = confirm(
-                  `지금 쓰는 '${cur.name}' 플랜${cur.until ? `(${day(cur.until)}까지)` : ''}이 이 코드의 플랜으로 바뀌어요. 지금 플랜의 남은 기간과 번개는 없어져요. 바꿀까요?`,
-                );
+                const ok = await ask({
+                  title: '플랜 바꾸기',
+                  body: `지금 쓰는 '${cur.name}' 플랜${cur.until ? `(${day(cur.until)}까지)` : ''}이 이 코드의 플랜으로 바뀌어요. 바꿀까요?`,
+                  note: '지금 플랜의 남은 기간과 번개는 없어져요.',
+                  ok: '바꾸기',
+                });
                 if (!ok) return;
                 r = await redeem(true);
               }

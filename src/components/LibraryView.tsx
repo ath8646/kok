@@ -56,6 +56,8 @@ import { SubjectPickSheet } from './SubjectPick';
 import { MergeNotesSheet } from './MergeNotesSheet';
 import { CoverArt } from './CoverArt';
 import { CoverSheet } from './CoverSheet';
+import { useConfirm } from './Confirm';
+import { josa } from '@/lib/josa';
 import { coverCornerBusy, readCover } from '@/lib/cover';
 import { COVER_RESERVE, COVER_RESERVE_MENU } from '@/lib/cover-layout';
 
@@ -76,9 +78,7 @@ async function fetchLibrary(organize: boolean, covers: boolean): Promise<LibData
     fetchSubjects(),
     fetchAll<SourceRowWithUnit>((a, b) =>
       topLevelSources<SourceRowWithUnit[]>((onlyTop) => {
-        let q = sb()
-          .from('sources')
-          .select(cols);
+        let q = sb().from('sources').select(cols);
         if (onlyTop) q = q.is('parent_id', null);
         return q.order('created_at', { ascending: false }).order('id').range(a, b) as unknown as PromiseLike<{
           data: SourceRowWithUnit[] | null;
@@ -131,6 +131,7 @@ export function LibraryView() {
   const router = useRouter();
   const pathname = usePathname();
   const toast = useToast();
+  const ask = useConfirm();
   const quick = useQuickAdd();
   const owner = me?.userId;
   const active = useActiveSources(owner);
@@ -410,7 +411,10 @@ export function LibraryView() {
       // 차례를 새로 받는 과목은 하나씩, 나머지는 한 번에
       const plain = patches.filter((p) => p.patch.position === undefined).map((p) => p.id);
       for (let i = 0; i < plain.length; i += BULK_MAX) {
-        const { error } = await sb().from('subjects').update(flags).in('id', plain.slice(i, i + BULK_MAX));
+        const { error } = await sb()
+          .from('subjects')
+          .update(flags)
+          .in('id', plain.slice(i, i + BULK_MAX));
         if (error) failed = true;
       }
       for (const p of patches) {
@@ -588,7 +592,16 @@ export function LibraryView() {
 
   /** 과목 고치기 시트의 지우기 (한 번 묻는다) */
   const deleteSubject = async (s: SubjectRow) => {
-    if (!confirm(`'${s.name}' 과목과 그 안의 자료·노트·문제·복습 기록을 모두 지울까요? 되돌릴 수 없어요.`)) return;
+    if (
+      !(await ask({
+        title: '과목 지우기',
+        body: `${josa(`'${s.name}' 과목`, '과')} 그 안의 자료·노트·문제·복습 기록을 모두 지울까요?`,
+        note: '되돌릴 수 없어요. 목록에서만 빼고 싶으면 과목을 보관하세요.',
+        ok: '모두 지우기',
+        danger: true,
+      }))
+    )
+      return;
     if (await deleteSubjects([s])) {
       setEditingSubject(null);
       setDrawer(false);
@@ -661,7 +674,16 @@ export function LibraryView() {
   const bulkDelete = async () => {
     const ids = pickedRows.map((s) => s.id);
     if (!ids.length) return;
-    if (!confirm(`고른 자료 ${ids.length}개와 그 노트·문제·복습 기록을 모두 지울까요? 되돌릴 수 없어요.`)) return;
+    if (
+      !(await ask({
+        title: '자료 지우기',
+        body: `고른 자료 ${ids.length}개와 그 노트·문제·복습 기록을 모두 지울까요?`,
+        note: '되돌릴 수 없어요.',
+        ok: `${ids.length}개 지우기`,
+        danger: true,
+      }))
+    )
+      return;
     setBulkBusy('delete');
     try {
       let deleted = 0;
@@ -994,7 +1016,17 @@ export function LibraryView() {
                     onCover={coversOn && me?.canFigures ? () => setCoverId(s.id) : undefined}
                     tint={subjects.find((x) => x.id === s.subject_id)?.color ?? null}
                     onDelete={async () => {
-                      if (!confirm(`'${s.title || '이 자료'}'와 노트·문제를 지울까요? 되돌릴 수 없어요.`)) return;
+                      const name = s.title?.trim() ? `'${s.title.trim()}'` : '이 자료';
+                      if (
+                        !(await ask({
+                          title: '자료 지우기',
+                          body: `${josa(name, '과')} 노트·문제·복습 기록을 지울까요?`,
+                          note: '되돌릴 수 없어요.',
+                          ok: '지우기',
+                          danger: true,
+                        }))
+                      )
+                        return;
                       try {
                         await api(`/api/sources/${s.id}`, { method: 'DELETE' });
                         dropView(LIBRARY_VIEW);
@@ -1050,11 +1082,7 @@ export function LibraryView() {
         open={!!moving}
         onClose={() => setMoving(null)}
         title="다른 과목으로 옮기기"
-        intro={
-          <>
-            {moving && moving.length > 1 ? `고른 노트 ${moving.length}개` : '이 노트'}를 옮길 과목을 골라요. 노트·문제·복습 기록이 함께 옮겨져요.
-          </>
-        }
+        intro={<>{moving && moving.length > 1 ? `고른 노트 ${moving.length}개` : '이 노트'}를 옮길 과목을 골라요. 노트·문제·복습 기록이 함께 옮겨져요.</>}
         subjects={subjects}
         exclude={movingFrom.length === 1 ? movingFrom : []}
         counts={counts}
@@ -1081,7 +1109,16 @@ export function LibraryView() {
         onConfirm={async (target) => {
           const from = mergingSubject;
           if (!from) return false;
-          if (!confirm(`'${from.name}' 과목의 자료와 복습 기록을 '${target.name}' 과목으로 옮기고 '${from.name}' 과목을 없앨까요? 되돌릴 수 없어요.`)) return false;
+          if (
+            !(await ask({
+              title: '과목 합치기',
+              body: `'${from.name}' 과목의 자료와 복습 기록을 ${josa(`'${target.name}' 과목`, '으로')} 옮기고 '${from.name}' 과목을 없앨까요?`,
+              note: '되돌릴 수 없어요.',
+              ok: '합치기',
+              danger: true,
+            }))
+          )
+            return false;
           return mergeSubject(from, target);
         }}
       />
@@ -1100,7 +1137,6 @@ export function LibraryView() {
           router.push(`/notes/${keepId}`);
         }}
       />
-
 
       {/* 순서 바꾸기 (과목 안에서). 과목이 여럿이면 위의 칩으로 과목을 바꾼다 (뒤의 자료함도 그 과목으로) */}
       <Sheet open={ordering && !!subject} onClose={() => setOrdering(false)} title={subject ? `${subject.name} 순서 바꾸기` : '순서 바꾸기'}>
@@ -1188,6 +1224,7 @@ export function LibraryView() {
           <CoverSheet
             open={!!s}
             onClose={() => setCoverId(null)}
+            sourceId={s?.id ?? null}
             name={s?.title || '이 노트'}
             cover={s ? readCover(s.cover) : null}
             tint={s ? (subjects.find((x) => x.id === s.subject_id)?.color ?? null) : null}
@@ -1489,10 +1526,7 @@ function NoteCard({
       ) : (
         // 오른쪽 위: 별표(한 번 누르면 별이 튀고 카드가 맨 위로) + 메뉴. 표지 그림이 이 자리까지 닿으면 단추 뒤에 옅은 바탕
         <div
-          className={cx(
-            'absolute right-1.5 top-1.5 z-10 flex items-center',
-            coverBusy && 'rounded-full bg-surface/90 shadow-[0_1px_6px_var(--shadow-strong)]',
-          )}
+          className={cx('absolute right-1.5 top-1.5 z-10 flex items-center', coverBusy && 'rounded-full bg-surface/90 shadow-[0_1px_6px_var(--shadow-strong)]')}
         >
           {organize ? <StarButton small starFor={s.id} on={!!s.starred} label={`${label} 별표`} onToggle={onStar} /> : null}
           <Menu label={`${s.title || '자료'} 메뉴`} items={items} small />

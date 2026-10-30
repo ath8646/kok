@@ -6,6 +6,8 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useMe } from '@/components/AppShell';
+import { useConfirm } from '@/components/Confirm';
+import { AiMark, ReportButton, ReportSheet, type ReportWhat } from '@/components/ReportSheet';
 import { RichText } from '@/components/RichText';
 import { Energy, EnergyEstimate, ICONS, Icon, Menu, api, cx, useToast, DONE } from '@/components/ui';
 import { THINK_OUT, estimateSmallTask } from '@/lib/ai/models';
@@ -13,6 +15,7 @@ import { clientModel } from '@/lib/client-model';
 import { sb } from '@/lib/data';
 import { picksTokens, prepareChatFiles, releasePicks, type ChatPick } from '@/lib/chat-files';
 import type { ChatSolution, ChatTurn, HomeChatReply } from '@/lib/chat';
+import { chatSnapshot } from '@/lib/report';
 import type { ModelTier } from '@/lib/settings';
 import {
   ChatDropHint,
@@ -62,6 +65,7 @@ function turnOf(m: Msg): ChatTurn {
 export function HomeAsk() {
   const { me, refresh } = useMe();
   const toast = useToast();
+  const ask = useConfirm();
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [closing, setClosing] = useState(false);
@@ -71,6 +75,7 @@ export function HomeAsk() {
   const [tier, setTier] = useState<ModelTier>(() => me?.settings.models.chat ?? 'fast');
   const [saving, setSaving] = useState<Msg | null>(null);
   const [viewer, setViewer] = useState<SentFile | null>(null);
+  const [report, setReport] = useState<ReportWhat | null>(null);
   const area = useRef<HTMLTextAreaElement>(null);
   const list = useRef<HTMLDivElement>(null);
   const camera = useRef<HTMLInputElement>(null);
@@ -83,6 +88,16 @@ export function HomeAsk() {
   // 대화에 쓴 사진 미리보기 주소: 홈을 떠날 때 돌려준다
   const allPicks = useRef<ChatPick[]>([]);
   useEffect(() => () => releasePicks(allPicks.current), []);
+
+  // 신고할 답 (홈 채팅은 대화를 저장하지 않아서 화면이 바로 앞의 물음과 답을 보낸다)
+  const snapshotOf = (m: Msg): string => {
+    const at = messages.findIndex((x) => x.id === m.id);
+    const asked = messages
+      .slice(0, Math.max(at, 0))
+      .reverse()
+      .find((x) => x.role === 'user');
+    return chatSnapshot({ question: asked ? turnOf(asked).content : null, reply: m.content, solution: m.solution });
+  };
 
   const show = useCallback(() => {
     if (closeTimer.current) clearTimeout(closeTimer.current);
@@ -112,12 +127,12 @@ export function HomeAsk() {
   useEffect(() => {
     if (!open) return;
     const onKey = (e: KeyboardEvent) => {
-      // 노트에 넣기 창이나 사진 보기가 떠 있으면 그것만 닫는다
-      if (e.key === 'Escape' && !saving && !viewer) hide();
+      // 노트에 넣기 창·신고 창·사진 보기가 떠 있으면 그것만 닫는다
+      if (e.key === 'Escape' && !saving && !viewer && !report) hide();
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [open, hide, saving, viewer]);
+  }, [open, hide, saving, viewer, report]);
 
   // 새 말이 오면 맨 아래로
   useEffect(() => {
@@ -187,9 +202,13 @@ export function HomeAsk() {
     }
   };
 
-  const newChat = () => {
+  const newChat = async () => {
     if (sending) return;
-    if (messages.length && !confirm('지금 대화를 지우고 새로 시작할까요?')) return;
+    if (
+      messages.length &&
+      !(await ask({ title: '새 대화', body: '지금 대화를 지우고 새로 시작할까요?', note: '이 대화는 저장되지 않아서 다시 볼 수 없어요.', ok: '새로 시작' }))
+    )
+      return;
     setMessages([]);
     attach.clear();
     releasePicks(allPicks.current);
@@ -355,7 +374,13 @@ export function HomeAsk() {
                           }
                         />
                       ) : null}
-                      {m.role === 'assistant' && m.energy ? <Energy n={Math.round(m.energy * 10) / 10} className="px-1 text-[11px] text-muted" /> : null}
+                      {m.role === 'assistant' ? (
+                        <div className="flex flex-wrap items-center gap-x-2 gap-y-1 pl-1 text-[11px] text-muted">
+                          <AiMark label="AI 답" />
+                          {m.energy ? <Energy n={Math.round(m.energy * 10) / 10} /> : null}
+                          <ReportButton className="-ml-1" onClick={() => setReport({ kind: 'chat', snapshot: snapshotOf(m) })} />
+                        </div>
+                      ) : null}
                     </li>
                   ))}
                   {sending ? <ThinkingRow label={busyLabel} /> : null}
@@ -405,6 +430,7 @@ export function HomeAsk() {
           toast(`'${place.noteTitle}'에 문제를 넣었어요.`, 'ok', DONE);
         }}
       />
+      <ReportSheet what={report} onClose={() => setReport(null)} />
       {viewer?.url ? <ImageViewer src={viewer.url} alt={viewer.name} onClose={() => setViewer(null)} /> : null}
     </>
   );

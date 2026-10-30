@@ -6,6 +6,7 @@ import { THINK_OUT, estimateSmallTask } from '@/lib/ai/models';
 import { clientModel } from '@/lib/client-model';
 import { sb } from '@/lib/data';
 import { useMe } from './AppShell';
+import { useConfirm } from './Confirm';
 import { QuestionFigure, StepsDisclosure, useSolution } from './figure/SolutionView';
 import { SourceFigureView } from './figure/SourceFigureView';
 import { readQuestionFigure } from '@/lib/source-figures';
@@ -72,7 +73,8 @@ export function clearsSolution(before: Pick<QuestionRow, 'type' | 'choices' | 'a
 export type CardInfo = { lapses: number; wrong_count: number; in_wrong_note: boolean; due: string; reps: number };
 
 /** 지우기를 바꿀 때 (노트 버전: 다른 버전에 있는 문제는 지우지 않고 이 버전에서만 뺀다) */
-export type QuestionRemoval = { label: string; confirm: string; run: () => Promise<boolean> };
+/** 문제 빼기·지우기: 단추 글, 확인 창의 묻는 말·덧붙이는 말, 되돌릴 수 없는 일인지, 할 일 */
+export type QuestionRemoval = { label: string; confirm: string; note?: string; danger?: boolean; run: () => Promise<boolean> };
 
 export function QuestionList({
   questions,
@@ -96,6 +98,7 @@ export function QuestionList({
   emptyText?: string;
 }) {
   const toast = useToast();
+  const ask = useConfirm();
   const { me } = useMe();
   const [editing, setEditing] = useState<QuestionRow | null>(null);
   const [reporting, setReporting] = useState<QuestionRow | null>(null);
@@ -206,9 +209,15 @@ export function QuestionList({
                     variant="ghost"
                     className="ml-auto text-bad"
                     onClick={async () => {
-                      const r = removal?.(q);
-                      if (!confirm(r?.confirm ?? '이 문제를 지울까요? 푼 기록도 같이 지워져요.')) return;
-                      const ok = r ? await r.run() : !(await sb().from('questions').delete().eq('id', q.id)).error;
+                      const r = removal?.(q) ?? {
+                        label: '지우기',
+                        confirm: '이 문제를 지울까요?',
+                        note: '푼 기록도 같이 지워지고 되돌릴 수 없어요.',
+                        danger: true,
+                        run: async () => !(await sb().from('questions').delete().eq('id', q.id)).error,
+                      };
+                      if (!(await ask({ title: r.danger ? '문제 지우기' : '문제 빼기', body: r.confirm, note: r.note, ok: r.label, danger: r.danger }))) return;
+                      const ok = await r.run();
                       if (!ok) toast('지우지 못했어요.', 'bad');
                       else onChanged();
                     }}
@@ -241,9 +250,17 @@ export function QuestionList({
                   setSaving(false);
                   return;
                 }
-                await update(editing.id, { ...rest, edited: true, ...(reset ? { figure: null, steps: null } : {}) }, '고쳤어요. AI가 다시 만들어도 그대로 남아요.');
+                await update(
+                  editing.id,
+                  { ...rest, edited: true, ...(reset ? { figure: null, steps: null } : {}) },
+                  '고쳤어요. AI가 다시 만들어도 그대로 남아요.',
+                );
               } else {
-                await update(editing.id, { ...d, edited: true, ...(reset ? { figure: null, steps: null } : {}) }, '고쳤어요. AI가 다시 만들어도 그대로 남아요.');
+                await update(
+                  editing.id,
+                  { ...d, edited: true, ...(reset ? { figure: null, steps: null } : {}) },
+                  '고쳤어요. AI가 다시 만들어도 그대로 남아요.',
+                );
               }
               setSaving(false);
               setEditing(null);

@@ -134,8 +134,27 @@ insert into public.cards (question_id, subject_id)
 insert into public.review_logs (question_id, rating, correct)
   select id, 3, true from public.questions limit 1;
 
--- 신고
+-- 신고 (AI 결과 종류도: 채팅 답·표지·테마 그림·레슨)
 insert into public.reports (target_type, reason) values ('other', '테스트 신고');
+insert into public.reports (target_type, target_id, reason) values ('chat', 'home', '틀린 내용이 있어요');
+-- 신고할 때 본 결과(snapshot)·처리 상태는 학생이 적지 못한다 (서버가 적는다)
+do $$ begin
+  begin
+    insert into public.reports (target_type, reason, snapshot) values ('chat', '가짜 결과', 'AI: ...');
+    raise exception 'student snapshot insert should be denied';
+  exception when insufficient_privilege then null;
+  end;
+  begin
+    insert into public.reports (target_type, reason, status) values ('other', '스스로 해결', 'resolved');
+    raise exception 'student status insert should be denied';
+  exception when insufficient_privilege then null;
+  end;
+  begin
+    insert into public.reports (target_type, reason) values ('nonsense', '없는 종류');
+    raise exception 'unknown report type should be rejected';
+  exception when check_violation then null;
+  end;
+end $$;
 
 -- 파일: 학생은 직접 올리지 못한다 (내 폴더도). 서버가 준 주소로만 올린다
 do $$ begin
@@ -475,9 +494,19 @@ begin
   end;
 end $$;
 reset role;
--- 서버(service_role)는 제한을 받지 않는다
+-- 서버(service_role)는 제한을 받지 않는다. 신고할 때 본 결과도 서버가 적는다 (4000자까지)
 set role service_role;
 insert into public.reports (reporter_id, target_type, reason) values ('22222222-2222-2222-2222-222222222222', 'other', 'server insert');
+insert into public.reports (reporter_id, target_type, target_id, reason, snapshot)
+  values ('22222222-2222-2222-2222-222222222222', 'course', '00000000-0000-4000-8000-000000000000:l-0-1', '틀린 내용이 있어요', '레슨: 광합성');
+do $$ begin
+  begin
+    insert into public.reports (reporter_id, target_type, reason, snapshot)
+      values ('22222222-2222-2222-2222-222222222222', 'chat', '너무 긴 결과', repeat('가', 4001));
+    raise exception 'snapshot over 4000 chars should be rejected';
+  exception when check_violation then null;
+  end;
+end $$;
 reset role;
 
 -- 자료 만들기: 동시에 정리하는 수와 에너지(정리 중인 것까지)를 한 번에 검사한다

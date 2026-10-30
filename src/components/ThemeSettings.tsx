@@ -53,6 +53,8 @@ import { clientModel } from '@/lib/client-model';
 import { sb } from '@/lib/data';
 import { ApiError, Button, Chip, Energy, Field, ICONS, Icon, LinkButton, Segmented, Sheet, Toggle, api, cx, inputClass, radioKeys, useToast, DONE } from './ui';
 import { MiniTile, SkinMini, ThemeThumb } from './theme/minis';
+import { useConfirm } from './Confirm';
+import { josa } from '@/lib/josa';
 import { GlowSettings, GroupHead, type GlowLook } from './theme/GlowSettings';
 import { ThemeStudio, type Ready, type StudioStart, type ThemeRow } from './theme/ThemeStudio';
 
@@ -95,6 +97,7 @@ const PRO_ONLY = '테마는 Pro에서 쓸 수 있어요.';
 
 export function ThemeSettings({ me, theme, onChange }: { me: MeResponse; theme: Theme; onChange: (patch: Partial<Theme>) => void }) {
   const toast = useToast();
+  const ask = useConfirm();
   const canTheme = me.canTheme;
   const themesOn = me.features.themes;
   const [customs, setCustomsState] = useState<Ready[] | null>(null);
@@ -308,7 +311,7 @@ export function ThemeSettings({ me, theme, onChange }: { me: MeResponse; theme: 
   };
 
   const removeTheme = async (t: Ready) => {
-    if (!confirm(`'${t.name}'를 지울까요?`)) return;
+    if (!(await ask({ title: '테마 지우기', body: `${josa(`'${t.name}'`, '을')} 지울까요?`, note: '되돌릴 수 없어요.', ok: '지우기', danger: true }))) return;
     try {
       await api(`/api/themes/${t.id}`, { method: 'DELETE' });
       toast('테마를 지웠어요.', 'plain', DONE);

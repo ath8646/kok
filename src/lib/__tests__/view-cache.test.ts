@@ -88,6 +88,7 @@ describe('데이터를 바꾸는 요청 세기', () => {
     expect(writesData('POST', '/api/sources/s1/process')).toBe(false);
     expect(writesData('POST', '/api/chat')).toBe(false);
     expect(writesData('POST', '/api/uploads')).toBe(false);
+    expect(writesData('POST', '/api/reports')).toBe(false);
     expect(writesData('POST', 'http://localhost:3000/api/sources/move')).toBe(true);
   });
 

@@ -4,7 +4,9 @@
 import { useEffect, useRef, useState } from 'react';
 import { autoGrade } from '@/lib/grading';
 import { starsFor, type CourseCard, type CourseCheck, type Stars as StarCount } from '@/lib/course';
+import { lessonStepSnapshot } from '@/lib/report';
 import { RichText } from '../RichText';
+import { ReportSheet, type ReportWhat } from '../ReportSheet';
 import { Button, ICONS, Icon, cx, inputClass } from '../ui';
 
 type Step = { kind: 'card'; card: CourseCard } | { kind: 'check'; check: CourseCheck };
@@ -22,6 +24,7 @@ export function LessonPlayer({
   goal,
   cards,
   checks,
+  reportTarget,
   onClose,
   onFinish,
 }: {
@@ -32,6 +35,8 @@ export function LessonPlayer({
   goal?: string;
   cards: CourseCard[];
   checks: CourseCheck[];
+  /** '이상해요' 신고에 남길 번호 ('노트번호:l-단계-레슨'·'노트번호:r-단계'·'노트번호:final'). 없으면 신고 단추도 없다 */
+  reportTarget?: string;
   onClose: () => void;
   /** 끝까지 했을 때: 별 수와 맞힌 수 */
   onFinish: (r: { stars: StarCount; correct: number; total: number }) => void;
@@ -41,6 +46,11 @@ export function LessonPlayer({
   const [correct, setCorrect] = useState(0);
   const [answered, setAnswered] = useState<boolean | null>(null);
   const [finished, setFinished] = useState(false);
+  const [report, setReport] = useState<ReportWhat | null>(null);
+  const reportOpen = useRef(false);
+  useEffect(() => {
+    reportOpen.current = !!report;
+  }, [report]);
   const panel = useRef<HTMLDivElement>(null);
   const step = steps[index];
   const total = checks.length;
@@ -53,7 +63,9 @@ export function LessonPlayer({
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
         e.stopPropagation();
-        onClose();
+        // 신고 창이 떠 있으면 그것만 닫는다 (이 창이 Esc 를 먼저 받아서 시트는 받지 못한다)
+        if (reportOpen.current) setReport(null);
+        else onClose();
       }
     };
     window.addEventListener('keydown', onKey, true);
@@ -76,15 +88,40 @@ export function LessonPlayer({
     <div className="kok-player fixed inset-0 z-[70] flex flex-col bg-bg" role="dialog" aria-modal="true" aria-label={title}>
       {/* 위: 닫기 + 진행 막대 */}
       <div className="flex items-center gap-3 px-3 pb-2 pt-[calc(10px+env(safe-area-inset-top))]">
-        <button type="button" onClick={onClose} aria-label="레슨 닫기" className="press grid h-11 w-11 shrink-0 place-items-center rounded-full text-muted hover:bg-surface-2">
+        <button
+          type="button"
+          onClick={onClose}
+          aria-label="레슨 닫기"
+          className="press grid h-11 w-11 shrink-0 place-items-center rounded-full text-muted hover:bg-surface-2"
+        >
           <Icon d={ICONS.close} size={24} />
         </button>
-        <div className="h-3.5 min-w-0 flex-1 overflow-hidden rounded-full bg-surface-3" role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(progress * 100)} aria-label="레슨 진행">
+        <div
+          className="h-3.5 min-w-0 flex-1 overflow-hidden rounded-full bg-surface-3"
+          role="progressbar"
+          aria-valuemin={0}
+          aria-valuemax={100}
+          aria-valuenow={Math.round(progress * 100)}
+          aria-label="레슨 진행"
+        >
           <div className="h-full origin-left rounded-full bg-accent transition-transform duration-300 ease-out" style={{ transform: `scaleX(${progress})` }} />
         </div>
         <span className="w-11 shrink-0 text-right text-xs font-semibold tabular-nums text-muted" aria-hidden="true">
           {finished ? steps.length : index + 1}/{steps.length}
         </span>
+        {reportTarget ? (
+          <button
+            type="button"
+            onClick={() =>
+              setReport({ kind: 'course', target: reportTarget, snapshot: finished ? undefined : lessonStepSnapshot(step ?? null, index) || undefined })
+            }
+            aria-label="이상해요 (신고)"
+            title="이상해요"
+            className="press -ml-1 grid h-11 w-11 shrink-0 place-items-center rounded-full text-muted hover:bg-surface-2 hover:text-ink"
+          >
+            <Icon d={ICONS.flag} size={20} />
+          </button>
+        ) : null}
       </div>
 
       <div ref={panel} tabIndex={-1} className="min-h-0 flex-1 overflow-y-auto px-4 pb-6 outline-none md:px-0">
@@ -110,6 +147,9 @@ export function LessonPlayer({
         </div>
       </div>
 
+      {/* 신고 창: 이 창 안에 둬야 창(z 70) 위에 뜬다 */}
+      <ReportSheet what={report} onClose={() => setReport(null)} />
+
       {/* 아래: 큰 단추 하나 (채점 뒤에는 맞았는지에 따라 색이 바뀐다) */}
       <div
         className={cx(
@@ -132,7 +172,10 @@ export function LessonPlayer({
               <button
                 type="button"
                 onClick={next}
-                className={cx('press min-w-[140px] rounded-full px-6 py-3.5 text-base font-semibold text-white hover:brightness-110', answered ? 'bg-ok' : 'bg-bad')}
+                className={cx(
+                  'press min-w-[140px] rounded-full px-6 py-3.5 text-base font-semibold text-white hover:brightness-110',
+                  answered ? 'bg-ok' : 'bg-bad',
+                )}
               >
                 계속
               </button>
@@ -181,7 +224,15 @@ type MarkState = 'none' | 'right' | 'reveal' | 'wrong';
 function Mark({ state, className }: { state: Exclude<MarkState, 'none'>; className?: string }) {
   const ok = state !== 'wrong';
   return (
-    <span className={cx('grid h-6 w-6 shrink-0 place-items-center rounded-full text-surface', ok ? 'kok-check-in bg-ok' : 'bg-bad', state === 'reveal' && 'is-late', className)} aria-hidden="true">
+    <span
+      className={cx(
+        'grid h-6 w-6 shrink-0 place-items-center rounded-full text-surface',
+        ok ? 'kok-check-in bg-ok' : 'bg-bad',
+        state === 'reveal' && 'is-late',
+        className,
+      )}
+      aria-hidden="true"
+    >
       <Icon d={ok ? ICONS.check : ICONS.close} size={ok ? 14 : 12} strokeWidth={3} />
     </span>
   );
@@ -223,12 +274,21 @@ function CheckCard({ check, onGraded }: { check: CourseCheck; onGraded: (correct
     setResult(ok);
     onGraded(ok);
   };
-  const answerText = check.type === 'mcq' ? (check.choices?.[Number(check.answer)] ?? '') : check.type === 'ox' ? (check.answer ? 'O (맞다)' : 'X (틀리다)') : String(check.answer);
+  const answerText =
+    check.type === 'mcq'
+      ? (check.choices?.[Number(check.answer)] ?? '')
+      : check.type === 'ox'
+        ? check.answer
+          ? 'O (맞다)'
+          : 'X (틀리다)'
+        : String(check.answer);
   return (
     <div className="kok-step-next mt-4 grid gap-3">
       <div className="kok-card rounded-[28px] p-5">
         <span className="inline-flex items-center gap-1.5 rounded-full bg-surface-2 px-2.5 py-1 text-xs font-bold text-muted">확인 문제</span>
-        <p className="mt-3 text-[19px] font-semibold leading-relaxed">{check.type === 'cloze' ? <ClozePrompt text={check.prompt} /> : <RichText text={check.prompt} />}</p>
+        <p className="mt-3 text-[19px] font-semibold leading-relaxed">
+          {check.type === 'cloze' ? <ClozePrompt text={check.prompt} /> : <RichText text={check.prompt} />}
+        </p>
 
         {check.type === 'mcq' && check.choices ? (
           <div className="mt-4 grid gap-2">
@@ -310,7 +370,11 @@ function CheckCard({ check, onGraded }: { check: CourseCheck; onGraded: (correct
               <input
                 ref={inputRef}
                 aria-label="답"
-                className={cx(inputClass, 'transition-[border-color,background-color] duration-200', result !== null && given !== null && (result ? 'border-ok! bg-ok-soft! pr-12' : 'border-bad! bg-bad-soft! pr-12'))}
+                className={cx(
+                  inputClass,
+                  'transition-[border-color,background-color] duration-200',
+                  result !== null && given !== null && (result ? 'border-ok! bg-ok-soft! pr-12' : 'border-bad! bg-bad-soft! pr-12'),
+                )}
                 value={result !== null ? String(given ?? '') : text}
                 disabled={result !== null}
                 maxLength={200}

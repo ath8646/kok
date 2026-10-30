@@ -24,6 +24,8 @@ export type NotePdfInput = {
   figures: PdfFigure[];
   theme: PdfTheme;
   date: Date;
+  /** AI 가 만든 정리인지 (직접 쓴 빈 노트가 아니면): 인공지능기본법의 생성형 AI 결과물 표시 — 쪽마다 'AI 정리'와 파일 정보(Subject·Keywords) */
+  aiMade: boolean;
 };
 
 // ------------------------------------------------------------- 크기·색
@@ -217,8 +219,10 @@ class Sheet {
     this.pages.push(this.page);
     this.page.drawRectangle({ x: 0, y: 0, width: PAGE.w, height: PAGE.h, color: this.p.bg });
     // 모눈: 가로·세로 줄
-    for (let x = GRID; x < PAGE.w; x += GRID) this.page.drawLine({ start: { x, y: 0 }, end: { x, y: PAGE.h }, thickness: 0.5, color: this.p.grid, opacity: this.p.gridAlpha });
-    for (let y = GRID; y < PAGE.h; y += GRID) this.page.drawLine({ start: { x: 0, y }, end: { x: PAGE.w, y }, thickness: 0.5, color: this.p.grid, opacity: this.p.gridAlpha });
+    for (let x = GRID; x < PAGE.w; x += GRID)
+      this.page.drawLine({ start: { x, y: 0 }, end: { x, y: PAGE.h }, thickness: 0.5, color: this.p.grid, opacity: this.p.gridAlpha });
+    for (let y = GRID; y < PAGE.h; y += GRID)
+      this.page.drawLine({ start: { x: 0, y }, end: { x: PAGE.w, y }, thickness: 0.5, color: this.p.grid, opacity: this.p.gridAlpha });
     this.y = MARGIN.top;
   }
 
@@ -323,7 +327,15 @@ class Sheet {
           const piece = r.chars.slice(a - rs, b - rs).join('');
           const w = this.width(piece, size);
           const baseline = this.py(this.y + size * 0.86);
-          if (r.mark) this.page.drawRectangle({ x: cx - 1, y: baseline - size * 0.22, width: w + 2, height: size * 1.1, color: this.p.mark, opacity: this.p === PALETTES.dark ? 0.28 : 0.55 });
+          if (r.mark)
+            this.page.drawRectangle({
+              x: cx - 1,
+              y: baseline - size * 0.22,
+              width: w + 2,
+              height: size * 1.1,
+              color: this.p.mark,
+              opacity: this.p === PALETTES.dark ? 0.28 : 0.55,
+            });
           this.draw(piece, cx, baseline, size, r.red ? this.p.pink : color, { bold: r.b });
           cx += w;
         }
@@ -339,7 +351,14 @@ class Sheet {
   }
 
   /** 둥근 네모 (SVG 경로: 원점은 왼쪽 위, y 는 아래로) */
-  roundRect(x: number, yTop: number, w: number, h: number, r: number, o: { fill?: RGB; stroke?: RGB; strokeWidth?: number; opacity?: number; strokeOpacity?: number }) {
+  roundRect(
+    x: number,
+    yTop: number,
+    w: number,
+    h: number,
+    r: number,
+    o: { fill?: RGB; stroke?: RGB; strokeWidth?: number; opacity?: number; strokeOpacity?: number },
+  ) {
     const rr = Math.min(r, w / 2, h / 2);
     const d = `M ${rr} 0 H ${w - rr} A ${rr} ${rr} 0 0 1 ${w} ${rr} V ${h - rr} A ${rr} ${rr} 0 0 1 ${w - rr} ${h} H ${rr} A ${rr} ${rr} 0 0 1 0 ${h - rr} V ${rr} A ${rr} ${rr} 0 0 1 ${rr} 0 Z`;
     this.page.drawSvgPath(d, {
@@ -549,7 +568,17 @@ class Sheet {
     const block = h + 12 + (f.title ? 15 : 0) + capLines.length * 12.5 + 10;
     this.need(Math.min(block, PAGE.h - MARGIN.top - MARGIN.bottom));
     const x = MARGIN.x + (CONTENT_W - w) / 2;
-    this.page.drawRectangle({ x: x - 3, y: this.py(this.y, h + 6), width: w + 6, height: h + 6, color: hex('#ffffff'), opacity: this.p === PALETTES.dark ? 0.06 : 0.5, borderColor: this.p.line, borderOpacity: this.p.lineAlpha, borderWidth: 0.8 });
+    this.page.drawRectangle({
+      x: x - 3,
+      y: this.py(this.y, h + 6),
+      width: w + 6,
+      height: h + 6,
+      color: hex('#ffffff'),
+      opacity: this.p === PALETTES.dark ? 0.06 : 0.5,
+      borderColor: this.p.line,
+      borderOpacity: this.p.lineAlpha,
+      borderWidth: 0.8,
+    });
     this.page.drawImage(img, { x, y: this.py(this.y + 3, h), width: w, height: h });
     this.y += h + 12;
     if (f.title) {
@@ -574,15 +603,19 @@ class Sheet {
     this.y += 2;
   }
 
-  /** 쪽마다: 아래 가운데 쪽 번호, 오른쪽 KOK (글은 끝나야 모두 몇 쪽인지 알아서 마지막에) */
-  footers(title: string) {
+  /** 쪽마다: 아래 가운데 쪽 번호, 오른쪽 KOK (AI 가 만든 정리면 그 앞에 'AI 정리'). 글은 끝나야 모두 몇 쪽인지 알아서 마지막에 */
+  footers(title: string, aiMade: boolean) {
     const n = this.pages.length;
+    const kokW = this.head.widthOfTextAtSize('KOK', 10);
     this.pages.forEach((pg, i) => {
       const t = `${i + 1} / ${n}`;
       this.draw(t, (PAGE.w - this.width(t, 8.5)) / 2, 22, 8.5, this.p.muted, { page: pg });
-      pg.drawText('KOK', { x: PAGE.w - MARGIN.x - this.head.widthOfTextAtSize('KOK', 10), y: 21, size: 10, font: this.head, color: this.p.lavender });
+      pg.drawText('KOK', { x: PAGE.w - MARGIN.x - kokW, y: 21, size: 10, font: this.head, color: this.p.lavender });
+      if (aiMade) this.draw(AI_LABEL, PAGE.w - MARGIN.x - kokW - 7 - this.width(AI_LABEL, 8.5), 22, 8.5, this.p.muted, { page: pg });
       if (i > 0) {
-        const short = Array.from(this.clean(plainMathText(title), 'head')).slice(0, 30).join('');
+        const short = Array.from(this.clean(plainMathText(title), 'head'))
+          .slice(0, 30)
+          .join('');
         this.draw(short, MARGIN.x, 22, 8.5, this.p.muted, { page: pg });
       }
     });
@@ -590,6 +623,8 @@ class Sheet {
 }
 
 const IMPORTANCE = { high: '★★★', medium: '★★☆', low: '★☆☆' } as const;
+/** 쪽 아래의 생성형 AI 결과물 표시 */
+const AI_LABEL = 'AI 정리';
 const LETTERS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
 
 /** 노트 → PDF 바이트와 쪽 수 */
@@ -600,7 +635,13 @@ export async function buildNotePdf(input: NotePdfInput): Promise<{ bytes: Uint8A
   doc.setTitle(input.title);
   doc.setAuthor('KOK');
   doc.setCreator('KOK');
+  doc.setProducer('KOK');
   doc.setCreationDate(input.date);
+  // 기계가 읽는 표시: AI 가 만든 내용이 든 파일 (인공지능기본법·각 앱이 파일 정보로 알아볼 수 있게)
+  if (input.aiMade) {
+    doc.setSubject('AI가 만든 공부 정리 (KOK) · AI-generated study notes');
+    doc.setKeywords(['AI 생성', 'AI-generated', 'generative AI', 'KOK']);
+  }
   const embedded = await Promise.all(fonts.map((f) => doc.embedFont(f, { subset: true })));
   const [body, head, ...extra] = embedded;
   const kit = (font: PDFFont) => {
@@ -611,7 +652,7 @@ export async function buildNotePdf(input: NotePdfInput): Promise<{ bytes: Uint8A
   const s = new Sheet(doc, p, body, head, extra, kit);
   const note = input.note;
   const date = input.date.toLocaleDateString('ko-KR', { year: 'numeric', month: 'long', day: 'numeric', timeZone: 'Asia/Seoul' });
-  const metaParts = ['@ KOK', input.subject, input.unit || note.unit, date].filter(Boolean);
+  const metaParts = ['@ KOK', input.aiMade ? 'AI가 만든 정리' : '', input.subject, input.unit || note.unit, date].filter(Boolean);
   s.title(input.title || note.title || '정리 노트', metaParts.join(' · '));
 
   let n = 0;
@@ -637,7 +678,10 @@ export async function buildNotePdf(input: NotePdfInput): Promise<{ bytes: Uint8A
       s.gap(8);
     });
     // 개념에 붙지 않은 주의·예시
-    const loose = [...note.pitfalls.filter((x) => !kpTitle.has(x.key_point_id)).map((x) => ['warn', x.text] as const), ...note.examples.filter((x) => !kpTitle.has(x.key_point_id)).map((x) => ['example', x.text] as const)];
+    const loose = [
+      ...note.pitfalls.filter((x) => !kpTitle.has(x.key_point_id)).map((x) => ['warn', x.text] as const),
+      ...note.examples.filter((x) => !kpTitle.has(x.key_point_id)).map((x) => ['example', x.text] as const),
+    ];
     for (const [kind, text] of loose) s.callout(kind, text);
     if (loose.length) s.gap(6);
   }
@@ -679,7 +723,7 @@ export async function buildNotePdf(input: NotePdfInput): Promise<{ bytes: Uint8A
     s.gap(6);
   }
 
-  s.footers(input.title || note.title);
+  s.footers(input.title || note.title, input.aiMade);
   const bytes = await doc.save();
   return { bytes, pages: s.pages.length };
 }

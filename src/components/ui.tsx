@@ -505,8 +505,9 @@ export function ToastProvider({ children }: { children: ReactNode }) {
   return (
     <ToastCtx.Provider value={push}>
       {children}
+      {/* 레슨·테마 만들기·PDF 보기 같은 전체 화면 창(z 70) 위에도 보이게 (묻는 창 z 95 보다는 아래) */}
       <div
-        className="kok-toasts pointer-events-none fixed inset-x-0 bottom-[calc(92px+env(safe-area-inset-bottom))] z-[60] flex flex-col items-center gap-2 px-4 md:bottom-8"
+        className="kok-toasts pointer-events-none fixed inset-x-0 bottom-[calc(92px+env(safe-area-inset-bottom))] z-[90] flex flex-col items-center gap-2 px-4 md:bottom-8"
         aria-live="polite"
       >
         {items.map((t) => (

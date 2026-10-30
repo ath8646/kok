@@ -24,6 +24,10 @@ import { estimateSmallTask } from '@/lib/ai/models';
 import { clientModel } from '@/lib/client-model';
 import { shrinkImage } from '@/lib/image';
 import { ApiError, Button, DONE, Energy, ICONS, Icon, Menu, Segmented, Sheet, Toggle, api, cx, inputClass, radioKeys, useToast } from '@/components/ui';
+import { useConfirm } from '@/components/Confirm';
+import { ColorPicker } from '@/components/ColorPicker';
+import { AiMark, ReportButton, ReportSheet, type ReportWhat } from '@/components/ReportSheet';
+import { josa } from '@/lib/josa';
 import { MiniTile, SkinMini, TwoDots } from './minis';
 import { onTone } from './GlowSettings';
 
@@ -46,6 +50,7 @@ const TABS: Array<{ id: TabId; label: string; icon: string }> = [
 
 const MODES: Mode[] = ['light', 'dark'];
 const MODE_LABEL: Record<Mode, string> = { light: '밝을 때', dark: '어두울 때' };
+const PALETTE_LABEL: Record<keyof Palette, string> = { bg: '바탕', surface: '카드', accent: '포인트' };
 // 덮는 정도 기본값 (서버 DIM_IMAGE·DIM_PATTERN 과 같게). 사진은 무엇이 그려졌는지 몰라서 진하게 덮는다
 const DIM_IMAGE = 0.8;
 const DIM_PATTERN = 0.3;
@@ -140,6 +145,7 @@ export function ThemeStudio({
   onDeleted: (id: string) => void;
 }) {
   const toast = useToast();
+  const confirmIt = useConfirm();
   const own = start.kind === 'edit' ? start.theme : null;
   const [id, setId] = useState<string | null>(own?.id ?? null);
   const [updatedAt, setUpdatedAt] = useState<string | null>(own?.updatedAt ?? null);
@@ -186,6 +192,7 @@ export function ThemeStudio({
   const [focusPart, setFocusPart] = useState<{ part: PreviewPart; n: number } | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [ask, setAsk] = useState(false);
+  const [report, setReport] = useState<ReportWhat | null>(null);
   const [big, setBig] = useState(false);
   const panelRef = useRef<HTMLDivElement>(null);
   const rootRef = useRef<HTMLDivElement>(null);
@@ -347,7 +354,9 @@ export function ThemeStudio({
   };
 
   const remove = async () => {
-    if (!id || !confirm(`'${draft.name || '이 테마'}'를 지울까요?`)) return;
+    if (!id) return;
+    const name = draft.name.trim() ? `'${draft.name.trim()}'` : '이 테마';
+    if (!(await confirmIt({ title: '테마 지우기', body: `${josa(name, '을')} 지울까요?`, note: '되돌릴 수 없어요.', ok: '지우기', danger: true }))) return;
     try {
       await api(`/api/themes/${id}`, { method: 'DELETE' });
       toast('테마를 지웠어요.', 'plain', DONE);
@@ -605,6 +614,7 @@ export function ThemeStudio({
                   setImage={setImage}
                   setSpec={setSpec}
                   hoverProps={hoverProps}
+                  onReport={(id) => setReport({ kind: 'theme', target: id })}
                 />
               )
             ) : null}
@@ -613,6 +623,13 @@ export function ThemeStudio({
           </div>
         </div>
       </div>
+
+      {/* AI 그림 신고: 이 창 안에 둬야 창(z 70) 위에 뜬다. data-studio-ask 가 있으면 창의 Esc 는 시트에 맡긴다 */}
+      {report ? (
+        <div data-studio-ask="">
+          <ReportSheet what={report} onClose={() => setReport(null)} />
+        </div>
+      ) : null}
 
       <Sheet open={ask} onClose={() => setAsk(false)} title="저장하지 않고 닫을까요?">
         <div className="grid gap-3 pb-1" data-studio-ask="">
@@ -798,7 +815,14 @@ function StylePanel({ spec, setSpec, hoverProps }: { spec: ThemeSpec; setSpec: S
 
 // ------------------------------------------------------------------ 색
 function ColorPanel({ spec, setSpec, hoverProps, looks }: { spec: ThemeSpec; setSpec: SetSpec; hoverProps: HoverProps; looks: Record<Mode, ModeLook> }) {
+  // 펼친 색 고르기 칸: 'accent' 또는 '모드-칸' ('light-bg' …)
+  const [picking, setPicking] = useState<string | null>(null);
   if (spec.skin) return <SkinColors spec={spec} setSpec={setSpec} hoverProps={hoverProps} />;
+  const closePick = () => {
+    const id = picking ? `pick-${picking}` : null;
+    setPicking(null);
+    if (id) requestAnimationFrame(() => document.getElementById(id)?.focus());
+  };
   const accent = spec.light.accent;
   const tone = toneOf(spec);
   const setAccent = (c: string, key?: string) =>
@@ -863,9 +887,17 @@ function ColorPanel({ spec, setSpec, hoverProps, looks }: { spec: ThemeSpec; set
               </button>
             );
           })}
-          <label
-            className="press relative grid h-9 w-9 cursor-pointer place-items-center overflow-hidden rounded-full shadow-[0_0_0_1px_var(--line)]"
+          <button
+            id="pick-accent"
+            type="button"
+            aria-expanded={picking === 'accent'}
+            aria-label="포인트 색 직접 고르기"
             title="직접 고르기"
+            onClick={() => setPicking(picking === 'accent' ? null : 'accent')}
+            className={cx(
+              'press relative grid h-9 w-9 place-items-center overflow-hidden rounded-full transition-shadow',
+              picking === 'accent' ? 'shadow-[0_0_0_2px_var(--surface),0_0_0_4px_var(--ink)]' : 'shadow-[0_0_0_1px_var(--line)]',
+            )}
           >
             <span
               className="absolute inset-0"
@@ -875,15 +907,9 @@ function ColorPanel({ spec, setSpec, hoverProps, looks }: { spec: ThemeSpec; set
             <span className="relative grid h-5 w-5 place-items-center rounded-full bg-surface text-ink" aria-hidden="true">
               <Icon d={ICONS.plus} size={12} strokeWidth={3} />
             </span>
-            <input
-              type="color"
-              className="absolute inset-0 cursor-pointer opacity-0"
-              aria-label="포인트 색 직접 고르기"
-              value={accent}
-              onChange={(e) => setAccent(e.target.value, 'accent')}
-            />
-          </label>
+          </button>
         </div>
+        {picking === 'accent' ? <ColorPicker label="포인트 색" value={accent} onChange={(hex) => setAccent(hex, 'accent')} onClose={closePick} /> : null}
       </Block>
       <Block title="바탕 느낌" hint="화면 바탕과 카드 색이에요. 밝을 때·어두울 때 모두 같이 바뀌어요." hover={hoverProps('cards')}>
         <div className="grid grid-cols-2 gap-2 sm:grid-cols-4" role="radiogroup" aria-label="바탕 느낌">
@@ -931,19 +957,46 @@ function ColorPanel({ spec, setSpec, hoverProps, looks }: { spec: ThemeSpec; set
                     ['surface', '카드'],
                     ['accent', '포인트'],
                   ] as Array<[keyof Palette, string]>
-                ).map(([k, label]) => (
-                  <label key={k} className="grid gap-1 text-xs font-semibold text-muted">
-                    <input
-                      type="color"
-                      aria-label={`${MODE_LABEL[m]} ${label} 색`}
-                      className="h-10 w-full cursor-pointer rounded-xl border border-line bg-surface p-1"
-                      value={spec[m][k]}
-                      onChange={(e) => setColor(m, k, e.target.value)}
-                    />
-                    {label}
-                  </label>
-                ))}
+                ).map(([k, label]) => {
+                  const on = picking === `${m}-${k}`;
+                  return (
+                    <button
+                      key={k}
+                      id={`pick-${m}-${k}`}
+                      type="button"
+                      aria-expanded={on}
+                      aria-label={`${MODE_LABEL[m]} ${label} 색 ${spec[m][k]}`}
+                      onClick={() => setPicking(on ? null : `${m}-${k}`)}
+                      className="press grid gap-1 text-left text-xs font-semibold text-muted"
+                    >
+                      <span
+                        className={cx(
+                          'block h-10 w-full rounded-xl border border-line transition-shadow',
+                          on && 'shadow-[0_0_0_2px_var(--surface),0_0_0_4px_var(--ink)]',
+                        )}
+                        style={{ background: spec[m][k] }}
+                        aria-hidden="true"
+                      />
+                      {label}
+                    </button>
+                  );
+                })}
               </div>
+              {picking?.startsWith(`${m}-`)
+                ? (() => {
+                    const k = picking.slice(m.length + 1) as keyof Palette;
+                    return (
+                      <ColorPicker
+                        key={picking}
+                        className="mt-1"
+                        label={`${MODE_LABEL[m]} ${PALETTE_LABEL[k]} 색`}
+                        value={spec[m][k]}
+                        onChange={(hex) => setColor(m, k, hex)}
+                        onClose={closePick}
+                      />
+                    );
+                  })()
+                : null}
             </div>
           ))}
           <p className="text-xs text-muted">밝을 때는 밝은 바탕, 어두울 때는 어두운 바탕으로만 고를 수 있어요. 글자가 잘 보이게 색을 조금 바꿀 수 있어요.</p>
@@ -990,6 +1043,13 @@ function SkinColors({ spec, setSpec, hoverProps }: { spec: ThemeSpec; setSpec: S
   // 고른 색과 실제로 쓰는 색이 많이 다르면 알려 준다 (글자가 읽히게 밝기를 맞춘 것)
   const far = (x: string, y: string) => contrast(x, y) > 1.25;
   const adjusted = far(s.a, built.vars['--skin-a']) || far(s.b, built.vars['--skin-b']);
+  // 펼친 색 고르기 칸 (첫째·둘째 색)
+  const [picking, setPicking] = useState<0 | 1 | null>(null);
+  const closePick = () => {
+    const k = picking;
+    setPicking(null);
+    if (k !== null) requestAnimationFrame(() => document.getElementById(`pick-skin-${k}`)?.focus());
+  };
   return (
     <>
       <Block title={`${info.label} 색 짝`} hint="시그니처 테마의 모양은 그대로 두고 두 가지 색만 바꿔요." hover={hoverProps('hero')}>
@@ -1028,29 +1088,38 @@ function SkinColors({ spec, setSpec, hoverProps }: { spec: ThemeSpec; setSpec: S
           {([0, 1] as const).map((k) => {
             const c = info.colors[k];
             const value = k === 0 ? s.a : s.b;
+            const on = picking === k;
             return (
-              <label
+              <button
                 key={k}
-                className="press flex cursor-pointer items-center gap-3 rounded-2xl border-2 border-line p-2.5 hover:bg-surface-2"
+                id={`pick-skin-${k}`}
+                type="button"
+                aria-expanded={on}
+                onClick={() => setPicking(on ? null : k)}
+                className={cx(
+                  'press flex items-center gap-3 rounded-2xl border-2 p-2.5 text-left',
+                  on ? 'border-ink bg-surface' : 'border-line hover:bg-surface-2',
+                )}
                 {...hoverProps(k === 0 ? 'button' : 'chips')}
               >
-                <span className="relative h-11 w-11 shrink-0 overflow-hidden rounded-xl ring-1 ring-line" style={{ background: value }}>
-                  <input
-                    type="color"
-                    className="absolute inset-0 cursor-pointer opacity-0"
-                    aria-label={c.name}
-                    value={value}
-                    onChange={(e) => (k === 0 ? setColors(e.target.value, s.b, 'skin-a') : setColors(s.a, e.target.value, 'skin-b'))}
-                  />
-                </span>
+                <span className="h-11 w-11 shrink-0 rounded-xl ring-1 ring-line" style={{ background: value }} aria-hidden="true" />
                 <span className="min-w-0">
                   <span className="block text-sm font-bold">{c.name}</span>
                   <span className="block text-xs text-muted">{c.hint}</span>
                 </span>
-              </label>
+              </button>
             );
           })}
         </div>
+        {picking !== null ? (
+          <ColorPicker
+            key={picking}
+            label={info.colors[picking].name}
+            value={picking === 0 ? s.a : s.b}
+            onChange={(hex) => (picking === 0 ? setColors(hex, s.b, 'skin-a') : setColors(s.a, hex, 'skin-b'))}
+            onClose={closePick}
+          />
+        ) : null}
         {adjusted ? <p className="text-xs text-muted">글자가 잘 보이게 고른 색의 밝기를 조금 맞췄어요.</p> : null}
       </Block>
     </>
@@ -1074,6 +1143,7 @@ function BgPanel({
   setImage,
   setSpec,
   hoverProps,
+  onReport,
 }: {
   me: MeResponse;
   spec: ThemeSpec;
@@ -1090,6 +1160,8 @@ function BgPanel({
   setImage: (img: ThemeImage | null, dim?: number) => void;
   setSpec: SetSpec;
   hoverProps: HoverProps;
+  /** AI 가 그린 그림 신고 (theme_images 번호) */
+  onReport: (imageId: string) => void;
 }) {
   const kinds: Array<{ value: 'none' | 'file' | 'ai' | 'pattern'; label: string }> = [
     { value: 'none', label: '없음' },
@@ -1113,6 +1185,13 @@ function BgPanel({
             if (k === 'none') setImage(null);
           }}
         />
+        {/* AI 가 그린 그림이면 알리고 신고할 수 있게 (인공지능기본법·Google Play AI 생성 콘텐츠 정책) */}
+        {spec.image?.kind === 'file' && spec.image.ai ? (
+          <div className="flex items-center justify-between gap-2">
+            <AiMark label="AI가 그린 그림이에요" className="pl-1" />
+            <ReportButton onClick={() => spec.image?.kind === 'file' && onReport(spec.image.id)} />
+          </div>
+        ) : null}
         {kind === 'file' ? (
           <label className="press grid cursor-pointer justify-items-center gap-1.5 rounded-2xl border-2 border-dashed border-line px-4 py-6 text-center hover:border-accent">
             <Icon d={ICONS.upload} size={24} className="text-muted" />

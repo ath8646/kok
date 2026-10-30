@@ -9,7 +9,7 @@ export const revalidate = 300;
 export default async function PrivacyPage() {
   const site = await getSiteInfo();
   return (
-    <LegalPage title="개인정보처리방침" updated="2026년 10월 18일">
+    <LegalPage title="개인정보처리방침" updated="2026년 10월 30일">
       <p>KOK(이하 &lsquo;서비스&rsquo;)은 공부에 꼭 필요한 정보만 모으고, 이용자가 언제든 내려받거나 지울 수 있게 해요.</p>
 
       <Sec title="1. 모으는 정보와 이유">
@@ -54,6 +54,14 @@ export default async function PrivacyPage() {
                 <td className="py-2 pr-3">복습 일정 계산, 오답노트, 연속 기록</td>
               </tr>
               <tr className="border-b border-line align-top">
+                <td className="py-2 pr-3">채팅에 보낸 말과 사진·파일, AI 테마를 만들 때 적은 부탁 글</td>
+                <td className="py-2 pr-3">AI 답·풀이, 테마 만들기 (홈 채팅은 저장하지 않고, 사진·파일은 Pro만 보관해요)</td>
+              </tr>
+              <tr className="border-b border-line align-top">
+                <td className="py-2 pr-3">&lsquo;이상해요&rsquo; 신고 내용(고른 이유, 적은 말, 신고할 때 본 AI 결과)</td>
+                <td className="py-2 pr-3">AI가 만든 틀리거나 맞지 않는 내용을 확인하고 고치기</td>
+              </tr>
+              <tr className="border-b border-line align-top">
                 <td className="py-2 pr-3">AI 사용 기록(작업 종류, 토큰 수, 비용)</td>
                 <td className="py-2 pr-3">에너지 한도 계산, 비용 관리, 부정 사용 막기</td>
               </tr>
@@ -85,34 +93,89 @@ export default async function PrivacyPage() {
 
       <Sec title="3. 맡기는 곳과 해외 이전">
         <p>
-          서비스를 운영하려고 아래 회사에 정보 처리를 맡겨요. {KAKAO_LOGIN ? '카카오를 빼면 모두 해외 회사라서' : '모두 해외 회사라서'}, 서비스를 쓰는 동안
-          인터넷으로 정보가 전송돼요.
+          서비스를 운영하려고 아래 회사에 정보 처리를 맡겨요. {KAKAO_LOGIN ? '카카오를 빼면 모두 해외 회사라서' : '모두 해외 회사라서'} 정보가 나라 밖으로
+          옮겨져요(국외 이전). 서비스를 쓸 때마다 그때 필요한 정보만 암호화한 인터넷 통신(HTTPS)으로 보내요.
         </p>
-        <ul className="list-disc pl-5">
-          <li>
-            <b>Supabase Inc.</b> (미국) · 로그인, 데이터베이스, 파일 저장 · 데이터는 서울 지역 서버에 저장 · 탈퇴할 때까지
-          </li>
-          <li>
-            <b>Vercel Inc.</b> (미국) · 웹사이트와 서버 실행(서울 지역) · 요청을 처리하는 동안과 짧은 로그 보관 기간
-          </li>
-          <li>
-            <b>Anthropic PBC</b> (미국) · AI(Claude)로 자료 정리·문제 만들기·채점 · 공부 자료와 답이 AI 처리를 위해 전송돼요. Anthropic의 상업용 API 정책에 따라
-            처리되고 정해진 기간이 지나면 지워져요.
-          </li>
-          <li>
-            <b>Google LLC</b> (미국) · 구글 로그인 · 구글로 로그인할 때
-          </li>
-          {KAKAO_LOGIN ? (
-            <li>
-              <b>(주)카카오</b> (대한민국) · 카카오 로그인 · 카카오로 로그인할 때
-            </li>
-          ) : null}
-          {APPLE_LOGIN ? (
-            <li>
-              <b>Apple Inc.</b> (미국) · Apple 로그인 · Apple로 로그인할 때
-            </li>
-          ) : null}
-        </ul>
+        <div className="overflow-x-auto">
+          <table className="w-full min-w-[560px] border-collapse text-sm">
+            <thead>
+              <tr className="border-b border-line text-left">
+                <th className="py-2 pr-3">받는 곳 (나라 · 연락처)</th>
+                <th className="py-2 pr-3">맡기는 일과 옮기는 정보</th>
+                <th className="py-2 pr-3">보관 기간</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr className="border-b border-line align-top">
+                <td className="py-2 pr-3">
+                  <b>Supabase, Inc.</b> (미국) · privacy@supabase.com
+                </td>
+                <td className="py-2 pr-3">로그인, 데이터베이스, 파일 저장 · 위 1번의 정보 모두 (데이터는 서울 지역 서버에 저장)</td>
+                <td className="py-2 pr-3">탈퇴할 때까지</td>
+              </tr>
+              <tr className="border-b border-line align-top">
+                <td className="py-2 pr-3">
+                  <b>Vercel Inc.</b> (미국) · privacy@vercel.com
+                </td>
+                <td className="py-2 pr-3">웹사이트와 서버 실행(서울 지역) · 요청 내용, 접속 기록(IP 주소, 브라우저 정보)</td>
+                <td className="py-2 pr-3">요청을 처리하는 동안, 서버 로그는 짧은 기간</td>
+              </tr>
+              <tr className="border-b border-line align-top">
+                <td className="py-2 pr-3">
+                  <b>Anthropic PBC</b> (미국) · privacy@anthropic.com
+                </td>
+                <td className="py-2 pr-3">
+                  AI(Claude)로 정리·문제·채점·채팅 답·레슨·표지 그림·테마 만들기 · 넣은 공부 자료와 노트 내용, 채팅에 보낸 말과 사진·파일, 테마 부탁 글
+                  (이메일·이름 같은 계정 정보는 보내지 않아요)
+                </td>
+                <td className="py-2 pr-3">받은 뒤 30일 안에 지워요 (이용 정책 위반으로 표시된 것은 최대 2년)</td>
+              </tr>
+              <tr className="border-b border-line align-top">
+                <td className="py-2 pr-3">
+                  <b>Cloudflare, Inc.</b> (미국) · privacyquestions@cloudflare.com
+                </td>
+                <td className="py-2 pr-3">AI 테마의 배경 그림 그리기 (Workers AI) · AI가 내 부탁 글로 만든 그림 설명(영어 글)만</td>
+                <td className="py-2 pr-3">그림을 만드는 동안만 (저장하거나 AI 학습에 쓰지 않아요)</td>
+              </tr>
+              <tr className={KAKAO_LOGIN || APPLE_LOGIN ? 'border-b border-line align-top' : 'align-top'}>
+                <td className="py-2 pr-3">
+                  <b>Google LLC</b> (미국) ·{' '}
+                  <a className="underline" href="https://support.google.com/policies/contact/general_privacy_form">
+                    개인정보 문의 양식
+                  </a>
+                </td>
+                <td className="py-2 pr-3">구글 로그인 · 구글로 로그인할 때 로그인 요청</td>
+                <td className="py-2 pr-3">구글의 개인정보처리방침에 따라</td>
+              </tr>
+              {KAKAO_LOGIN ? (
+                <tr className={APPLE_LOGIN ? 'border-b border-line align-top' : 'align-top'}>
+                  <td className="py-2 pr-3">
+                    <b>(주)카카오</b> (대한민국)
+                  </td>
+                  <td className="py-2 pr-3">카카오 로그인 · 카카오로 로그인할 때 로그인 요청</td>
+                  <td className="py-2 pr-3">카카오의 개인정보처리방침에 따라</td>
+                </tr>
+              ) : null}
+              {APPLE_LOGIN ? (
+                <tr className="align-top">
+                  <td className="py-2 pr-3">
+                    <b>Apple Inc.</b> (미국)
+                  </td>
+                  <td className="py-2 pr-3">Apple 로그인 · Apple로 로그인할 때 로그인 요청</td>
+                  <td className="py-2 pr-3">Apple의 개인정보처리방침에 따라</td>
+                </tr>
+              ) : null}
+            </tbody>
+          </table>
+        </div>
+        <p>
+          <b>거부하려면</b>: 국외 이전을 원하지 않으면 가입하지 않거나 언제든{' '}
+          <a className="underline" href="/delete-account">
+            탈퇴
+          </a>
+          할 수 있어요. 다만 이 회사들 없이는 서비스를 제공할 수 없어서, 거부하면 KOK을 쓸 수 없어요. AI 테마 그림을 만들지 않으면 Cloudflare로는 아무것도
+          보내지 않아요.
+        </p>
         <p>이 밖의 곳에 개인정보를 팔거나 넘기지 않아요. 법에 따른 요청이 있을 때만 예외로 해요.</p>
       </Sec>
 
@@ -120,7 +183,13 @@ export default async function PrivacyPage() {
         <ul className="list-disc pl-5">
           <li>설정 &gt; 내 데이터에서 내 정보를 내려받을 수 있어요.</li>
           <li>닉네임, 자료, 노트, 문제는 앱에서 직접 고치거나 지울 수 있어요.</li>
-          <li>설정에서 탈퇴하면 모든 정보가 지워져요 (위 2번의 알아볼 수 없게 바꾼 기록은 빼고).</li>
+          <li>
+            설정에서 탈퇴하면 모든 정보가 지워져요 (위 2번의 알아볼 수 없게 바꾼 기록은 빼고). 방법은{' '}
+            <a className="underline" href="/delete-account">
+              계정 삭제 안내
+            </a>
+            에 있어요.
+          </li>
           <li>그 밖의 열람·정정·삭제·처리 정지 요청은 아래 연락처로 보내 주세요.</li>
         </ul>
       </Sec>

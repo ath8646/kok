@@ -10,6 +10,7 @@ import { previewText } from '@/lib/richtext';
 import { starredFirst } from '@/lib/note-order';
 import { RichText, Tex } from './RichText';
 import { Button, Chip, Icon, ICONS, cx } from './ui';
+import { useConfirm } from './Confirm';
 import { StarButton, StarGlyph, useStarRefocus } from './note/StarButton';
 import { SortList } from './note/SortList';
 import { FormulaEditor, KeyPointEditor, SummaryEditor, TermEditor, type KeyPointDraft } from './note/NoteEditors';
@@ -218,6 +219,7 @@ export function NoteView({
   /** 인쇄된 쪽 번호 (body.page_labels): 쪽 표시를 책의 쪽 번호로 */
   pageLabels?: PageLabels;
 }) {
+  const ask = useConfirm();
   const [editing, setEditing] = useState<string | null>(null);
   const [sorting, setSorting] = useState<Sorting>(null);
   // 고칠 수 없게 되면(자료를 더하기 시작함 등) 열려 있던 고치기 칸과 순서 바꾸기를 닫는다
@@ -236,7 +238,10 @@ export function NoteView({
   const onDirty = useCallback((d: boolean) => {
     dirty.current = d;
   }, []);
-  const leave = () => !editing || !dirty.current || window.confirm('고치던 내용이 아직 저장되지 않았어요. 그래도 닫을까요?');
+  const leave = async () =>
+    !editing ||
+    !dirty.current ||
+    (await ask({ title: '고치던 내용', body: '고치던 내용이 아직 저장되지 않았어요. 그래도 닫을까요?', ok: '닫기', cancel: '계속 고치기', danger: true }));
   // 고치기 칸·순서 바꾸기를 닫으면 연 버튼으로 초점을 돌려준다 (키보드·화면 읽기에서 자리를 잃지 않게)
   const returnTo = useRef<string | null>(null);
   useEffect(() => {
@@ -262,15 +267,15 @@ export function NoteView({
     setEditing(null);
   };
   /** 고치기 칸 열기. back: 닫은 뒤 초점을 돌려줄 버튼 */
-  const open = (key: string, back: string = key) => {
-    if (editing === key || !leave()) return;
+  const open = async (key: string, back: string = key) => {
+    if (editing === key || !(await leave())) return;
     dirty.current = false;
     returnTo.current = back;
     setSorting(null);
     setEditing(key);
   };
-  const sortToggle = (s: Exclude<Sorting, null>) => {
-    if (!leave()) return;
+  const sortToggle = async (s: Exclude<Sorting, null>) => {
+    if (!(await leave())) return;
     dirty.current = false;
     returnTo.current = `sort-${s}`;
     setEditing(null);
@@ -376,8 +381,17 @@ export function NoteView({
                 label: '이 그림 빼기',
                 icon: ICONS.trash,
                 danger: true,
-                onSelect: () => {
-                  if (!window.confirm('이 그림을 노트에서 뺄까요? 이 그림으로 만든 문제는 그대로 남아요.')) return;
+                onSelect: async () => {
+                  if (
+                    !(await ask({
+                      title: '그림 빼기',
+                      body: '이 그림을 노트에서 뺄까요?',
+                      note: '이 그림으로 만든 문제는 그대로 남아요.',
+                      ok: '빼기',
+                      danger: true,
+                    }))
+                  )
+                    return;
                   onFiguresChange(figures.filter((x) => x.id !== f.id));
                 },
               },

@@ -83,8 +83,8 @@ export function dropView(key?: string): void {
 
 /** POST 로 부르지만 읽기만 하는 Supabase 함수 */
 const READ_RPCS = new Set(['kok_my_study_days']);
-/** 데이터를 바꾸지 않는 앱 API: 멈춘 정리 이어 달리기(끝나면 정리 목록이 따로 알린다), 홈 채팅(대화는 저장하지 않는다), 올리기 주소 받기 */
-const READ_POSTS = [/^\/api\/sources\/[^/]+\/process$/, /^\/api\/chat$/, /^\/api\/uploads$/];
+/** 데이터를 바꾸지 않는 앱 API: 멈춘 정리 이어 달리기(끝나면 정리 목록이 따로 알린다), 홈 채팅(대화는 저장하지 않는다), 올리기 주소 받기, 신고(화면에 보이는 것이 바뀌지 않는다) */
+const READ_POSTS = [/^\/api\/sources\/[^/]+\/process$/, /^\/api\/chat$/, /^\/api\/uploads$/, /^\/api\/reports$/];
 
 /**
  * 이 요청이 데이터를 바꿀 수 있는지: Supabase 표 쓰기(POST·PATCH·DELETE)와 읽기 함수가 아닌 함수, 앱 API 의 GET 이 아닌 요청.

@@ -35,6 +35,33 @@ export function toHex([r, g, b]: Rgb): string {
   return `#${c(r)}${c(g)}${c(b)}`;
 }
 
+/** '#rrggbb' → [색상 0~360, 채도 0~1, 밝기 0~1] (색 고르기 창의 네모·띠) */
+export function toHsv(hex: string): [number, number, number] {
+  const [r, g, b] = toRgb(hex).map((x) => x / 255);
+  const max = Math.max(r, g, b);
+  const d = max - Math.min(r, g, b);
+  let h = 0;
+  if (d > 0) {
+    if (max === r) h = ((g - b) / d) % 6;
+    else if (max === g) h = (b - r) / d + 2;
+    else h = (r - g) / d + 4;
+    h *= 60;
+    if (h < 0) h += 360;
+  }
+  return [h, max === 0 ? 0 : d / max, max];
+}
+
+export function fromHsv(h: number, s: number, v: number): string {
+  const hh = (((h % 360) + 360) % 360) / 60;
+  const ss = Math.max(0, Math.min(1, s));
+  const vv = Math.max(0, Math.min(1, v));
+  const c = vv * ss;
+  const x = c * (1 - Math.abs((hh % 2) - 1));
+  const [r, g, b] = hh < 1 ? [c, x, 0] : hh < 2 ? [x, c, 0] : hh < 3 ? [0, c, x] : hh < 4 ? [0, x, c] : hh < 5 ? [x, 0, c] : [c, 0, x];
+  const m = vv - c;
+  return toHex([(r + m) * 255, (g + m) * 255, (b + m) * 255]);
+}
+
 /** WCAG 상대 밝기 */
 export function luminance(hex: string): number {
   const [r, g, b] = toRgb(hex).map((v) => {

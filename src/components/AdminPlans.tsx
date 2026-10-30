@@ -3,6 +3,8 @@
 // 테스트 플랜: 번개(에너지) 총량과 한도를 정해 만든다. 코드를 쓴 사람은 코드에 정한 날수 동안 이 플랜을 쓰고, 끝나면 원래 요금제로 돌아간다.
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Select } from '@/components/Select';
+import { useConfirm } from '@/components/Confirm';
+import { josa } from '@/lib/josa';
 import { ApiError, Button, Card, Chip, Energy, Field, SectionTitle, Sheet, Toggle, api, cx, inputClass, useToast, DONE } from '@/components/ui';
 import { MAX_FILE_MB, type Limits } from '@/lib/settings';
 
@@ -157,6 +159,7 @@ export function AdminPlans({
   figuresOn?: boolean;
 }) {
   const toast = useToast();
+  const ask = useConfirm();
   const [plans, setPlans] = useState<PlanRow[] | null>(null);
   const [schemaHint, setSchemaHint] = useState<string | null>(null);
   const [coupons, setCoupons] = useState<Coupon[]>([]);
@@ -241,10 +244,11 @@ export function AdminPlans({
   };
 
   const removePlan = async (p: PlanRow) => {
-    const parts = [`'${p.name}' 플랜을 지울까요?`];
-    if (p.codes) parts.push(`이 플랜의 코드 ${p.codes}개도 함께 지워져요.`);
-    if (p.active_users) parts.push(`지금 쓰는 ${p.active_users}명은 원래 요금제로 돌아가요.`);
-    if (!confirm(parts.join(' '))) return;
+    const notes: string[] = [];
+    if (p.codes) notes.push(`이 플랜의 코드 ${p.codes}개도 함께 지워져요.`);
+    if (p.active_users) notes.push(`지금 쓰는 ${p.active_users}명은 원래 요금제로 돌아가요.`);
+    notes.push('되돌릴 수 없어요.');
+    if (!(await ask({ title: '플랜 지우기', body: `${josa(`'${p.name}' 플랜`, '을')} 지울까요?`, note: notes.join(' '), ok: '지우기', danger: true }))) return;
     setBusy(`del-${p.id}`);
     try {
       await api(`/api/admin/plans/${p.id}`, { method: 'DELETE' });
@@ -474,6 +478,8 @@ export function AdminPlans({
         {form ? (
           <form
             className="grid gap-3"
+            // 브라우저의 검사 말풍선 대신 앱 알림으로 (toBody 가 검사한다)
+            noValidate
             onSubmit={(e) => {
               e.preventDefault();
               savePlan();

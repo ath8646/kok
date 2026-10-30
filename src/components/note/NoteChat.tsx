@@ -8,6 +8,8 @@ import { useRouter } from 'next/navigation';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { RichText } from '@/components/RichText';
 import { useMe } from '@/components/AppShell';
+import { useConfirm } from '@/components/Confirm';
+import { AiMark, ReportButton, ReportSheet, type ReportWhat } from '@/components/ReportSheet';
 import { ApiError, Button, Energy, EnergyEstimate, ICONS, Icon, Menu, api, cx, useToast, DONE } from '@/components/ui';
 import {
   ChatDropHint,
@@ -34,6 +36,8 @@ const SUGGESTIONS = ['핵심만 3줄로 정리해 줘', '제일 헷갈리기 쉬
 /** 창을 열 때 보여 주는 대화 수 (가장 최근 것부터) */
 const CHAT_SHOWN = 200;
 const BASE_COLS = 'id, role, content, model, energy, proposal, created_at';
+/** 서버에 저장된 말의 번호 (보내는 중의 임시 말은 'temp-…') */
+const SAVED_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 function answerText(q: ChatQuestion): string {
   if (q.type === 'mcq') return q.choices?.[Number(q.answer)] ?? '';
@@ -62,6 +66,7 @@ export function NoteChat({
 }) {
   const { me, refresh } = useMe();
   const toast = useToast();
+  const ask = useConfirm();
   const [open, setOpen] = useState(false);
   const [closing, setClosing] = useState(false);
   const [messages, setMessages] = useState<ChatMessage[] | null>(null);
@@ -70,6 +75,7 @@ export function NoteChat({
   const [applying, setApplying] = useState<string | null>(null);
   const [tier, setTier] = useState<ModelTier>(() => me?.settings.models.chat ?? 'fast');
   const [viewer, setViewer] = useState<SentFile | null>(null);
+  const [report, setReport] = useState<ReportWhat | null>(null);
   /** 보관한 사진·PDF 의 한 번짜리 주소 (경로 → 주소) */
   // 보관한 파일의 보기 주소 (한 시간 짜리라 끝나기 전에 다시 받는다)
   const [urls, setUrls] = useState<Map<string, { url: string; exp: number }>>(() => new Map());
@@ -179,11 +185,12 @@ export function NoteChat({
   useEffect(() => {
     if (!open) return;
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape' && !viewer) hide();
+      // 신고 창·사진 보기가 떠 있으면 그것만 닫는다
+      if (e.key === 'Escape' && !viewer && !report) hide();
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [open, hide, viewer]);
+  }, [open, hide, viewer, report]);
   useEffect(
     () => () => {
       if (closeTimer.current) clearTimeout(closeTimer.current);
@@ -327,7 +334,16 @@ export function NoteChat({
   };
 
   const clear = async () => {
-    if (!confirm(`이 노트의 대화를 모두 지울까요?${filesOn && me.keepChatFiles ? ' 대화에 붙인 사진·파일도 같이 지워져요.' : ''}`)) return;
+    if (
+      !(await ask({
+        title: '대화 모두 지우기',
+        body: '이 노트의 대화를 모두 지울까요?',
+        note: `${filesOn && me.keepChatFiles ? '대화에 붙인 사진·파일도 같이 지워져요. ' : ''}노트에 넣은 문제·내용은 그대로예요.`,
+        ok: '모두 지우기',
+        danger: true,
+      }))
+    )
+      return;
     try {
       // 보관한 파일은 학생이 지울 수 없어서 서버가 지운다 (파일 칸이 없는 예전 DB 는 기록만 지운다)
       if (filesOn) await api(`/api/notes/${noteId}/chat`, { method: 'DELETE' });
@@ -470,11 +486,14 @@ export function NoteChat({
                           />
                         ) : null}
                         {m.role === 'assistant' ? (
-                          <div className="flex flex-wrap items-center gap-1.5 px-1 text-[11px] text-muted">
+                          <div className="flex flex-wrap items-center gap-x-2 gap-y-1 pl-1 text-[11px] text-muted">
+                            <AiMark label="AI 답" />
                             {m.proposal?.outside ? (
                               <span className="rounded-full bg-warn-soft px-2 py-0.5 font-semibold text-warn">노트 밖 설명 포함</span>
                             ) : null}
                             {m.energy ? <Energy n={Math.round(Number(m.energy) * 10) / 10} /> : null}
+                            {/* 저장된 답만 (서버가 그 답을 다시 읽어 신고와 함께 남긴다) */}
+                            {SAVED_ID.test(m.id) ? <ReportButton className="-ml-1" onClick={() => setReport({ kind: 'chat', target: m.id })} /> : null}
                           </div>
                         ) : null}
                         {m.proposal && m.proposal.kind !== 'none' ? (
@@ -533,6 +552,7 @@ export function NoteChat({
           </div>
         </div>
       ) : null}
+      <ReportSheet what={report} onClose={() => setReport(null)} />
       {viewer?.url ? <ImageViewer src={viewer.url} alt={viewer.name} onClose={() => setViewer(null)} /> : null}
     </>
   );

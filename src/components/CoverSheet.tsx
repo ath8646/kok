@@ -1,5 +1,5 @@
 'use client';
-// 표지 그림 창 (Pro, 자료함 카드 메뉴 '표지 그림'): 지금 표지를 크게 보고 다시 그리기(번개 조금)·빼기.
+// 표지 그림 창 (Pro, 자료함 카드 메뉴 '표지 그림'): 지금 표지를 크게 보고 다시 그리기(번개 조금)·빼기·신고('이상해요': 같은 창 안에서 신고 칸으로 바뀐다).
 // 그리기·빼기 요청과 목록 고치기는 여는 화면(LibraryView)이 한다 (onDraw·onRemove)
 import { useState } from 'react';
 import { estimateCover } from '@/lib/ai/models';
@@ -9,11 +9,13 @@ import type { Cover } from '@/lib/cover';
 import { ICONS } from '@/lib/icons';
 import { useMe } from './AppShell';
 import { CoverArt } from './CoverArt';
+import { AiMark, ReportButton, ReportForm } from './ReportSheet';
 import { Button, DONE, EnergyEstimate, Icon, Sheet, Spinner, cx, useToast } from './ui';
 
 export function CoverSheet({
   open,
   onClose,
+  sourceId,
   name,
   cover,
   tint,
@@ -22,6 +24,8 @@ export function CoverSheet({
 }: {
   open: boolean;
   onClose: () => void;
+  /** 표지가 붙은 자료 (신고할 때 서버가 이 자료의 표지를 다시 읽는다) */
+  sourceId: string | null;
   /** 노트 이름 */
   name: string;
   cover: Cover | null;
@@ -36,6 +40,11 @@ export function CoverSheet({
   const [busy, setBusy] = useState<'draw' | 'remove' | null>(null);
   // 새로 그릴 때마다 그림이 번지며 나타나게 (key)
   const [drawn, setDrawn] = useState(0);
+  const [reporting, setReporting] = useState(false);
+  const close = () => {
+    setReporting(false);
+    onClose();
+  };
   const est = me ? estimateCover(clientModel(me, me.settings.models.visual), me.usdPerEnergy) : null;
 
   const draw = async () => {
@@ -66,10 +75,17 @@ export function CoverSheet({
     }
   };
 
+  if (reporting && cover && sourceId) {
+    return (
+      <Sheet open={open} onClose={close} title="이상해요">
+        <ReportForm what={{ kind: 'cover', target: sourceId }} onDone={() => setReporting(false)} autoFocus />
+      </Sheet>
+    );
+  }
   return (
     <Sheet
       open={open}
-      onClose={onClose}
+      onClose={close}
       title="표지 그림"
       footer={
         <div className="flex gap-2">
@@ -92,7 +108,9 @@ export function CoverSheet({
       <div className="grid gap-3">
         <div
           className="relative aspect-[3/2] overflow-hidden rounded-[22px] bg-surface ring-1 ring-line"
-          style={{ backgroundImage: `linear-gradient(color-mix(in srgb, ${subjectVar(tint)} 8%, transparent), color-mix(in srgb, ${subjectVar(tint)} 8%, transparent))` }}
+          style={{
+            backgroundImage: `linear-gradient(color-mix(in srgb, ${subjectVar(tint)} 8%, transparent), color-mix(in srgb, ${subjectVar(tint)} 8%, transparent))`,
+          }}
         >
           {cover ? (
             <CoverArt
@@ -121,6 +139,12 @@ export function CoverSheet({
         <p className="sr-only" aria-live="polite">
           {busy === 'draw' ? '표지를 그리는 중이에요.' : ''}
         </p>
+        {cover ? (
+          <div className="-mt-1 flex items-center justify-between gap-2">
+            <AiMark label="AI가 고른 도표예요" className="pl-1" />
+            <ReportButton onClick={() => setReporting(true)} />
+          </div>
+        ) : null}
         <p className="text-[15px] leading-relaxed">
           <span className="font-semibold">{name}</span>의 핵심을 AI가 연표·흐름도·비교표 같은 작은 도표로 그려요. 다시 그리면 새로 골라서 그려요.
         </p>

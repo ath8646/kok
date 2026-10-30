@@ -3,6 +3,7 @@ import { useState } from 'react';
 import { SUBJECT_COLORS } from '@/lib/settings';
 import { SUBJECT_COLOR_LABEL, subjectVar } from '@/lib/colors';
 import { Button, Field, cx, inputClass } from './ui';
+import { DatePicker } from './DatePicker';
 
 export type SubjectDraft = { name: string; color: string; exam_date: string | null };
 
@@ -53,8 +54,10 @@ export function SubjectForm({
           htmlFor="sf-exam"
           hint="시험까지 모든 문제를 적어도 2번 보도록 일정을 당기고, 3일 전부터는 틀린 문제와 중요한 문제를 먼저 내요."
         >
-          <div className="flex gap-2">
-            <input id="sf-exam" type="date" className={inputClass} value={exam} onChange={(e) => setExam(e.target.value)} />
+          <div className="flex items-start gap-2">
+            <div className="min-w-0 flex-1">
+              <DatePicker id="sf-exam" label="시험 날짜" value={exam} onChange={setExam} dDay />
+            </div>
             {exam ? (
               <Button variant="ghost" onClick={() => setExam('')}>
                 지우기

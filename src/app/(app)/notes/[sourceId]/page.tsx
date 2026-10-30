@@ -6,6 +6,8 @@
 import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useMe } from '@/components/AppShell';
+import { useConfirm } from '@/components/Confirm';
+import { ReportSheet } from '@/components/ReportSheet';
 import { SOURCES_CHANGED, SUBJECTS_CHANGED, useQuickAdd } from '@/components/QuickAdd';
 import { NoteView, type NoteBody } from '@/components/NoteView';
 import { ProcessingView } from '@/components/note/ProcessingView';
@@ -244,6 +246,7 @@ export default function NotePage() {
   const { me } = useMe();
   const router = useRouter();
   const toast = useToast();
+  const ask = useConfirm();
   // 처음 연 주소의 ?tab= · ?kp= · ?v= (다른 화면에서 눌러 들어오면 그리는 동안 window.location 은 아직 앞 화면 주소라 useSearchParams 로 읽는다)
   const params = useSearchParams();
   const [opened] = useState(() => ({ tab: params.get('tab'), kp: params.get('kp'), v: params.get('v') }));
@@ -277,7 +280,6 @@ export default function NotePage() {
   const [reporting, setReporting] = useState(false);
   // 자료 그림 다시 찾기 (원본에서 그림 자리를 새 방법으로)
   const [relocating, setRelocating] = useState(false);
-  const [reason, setReason] = useState('');
   const [renaming, setRenaming] = useState(false);
   const [newTitle, setNewTitle] = useState('');
   const [renameBusy, setRenameBusy] = useState(false);
@@ -699,7 +701,8 @@ export default function NotePage() {
           if (plan === 'hide') {
             return {
               label: '이 버전에서 빼기',
-              confirm: '이 문제를 지금 버전에서 뺄까요? 다른 버전에는 그대로 남아요.',
+              confirm: '이 문제를 지금 버전에서 뺄까요?',
+              note: '다른 버전에는 그대로 남아요.',
               // 쉬는 중이던 문제는 그것도 기억해 둔다 (그 버전으로 돌아오면 다시 쉬는 중)
               run: async () =>
                 !(
@@ -713,13 +716,16 @@ export default function NotePage() {
           if (plan === 'unlist') {
             return {
               label: '이 버전에서 빼기',
-              confirm: '이 문제를 이 버전에서 뺄까요? 다른 버전에는 그대로 남아요.',
+              confirm: '이 문제를 이 버전에서 뺄까요?',
+              note: '다른 버전에는 그대로 남아요.',
               run: () => setOldQuestionIds((old?.questionIds ?? []).filter((x) => x !== q.id)),
             };
           }
           return {
             label: '지우기',
-            confirm: '이 문제를 지울까요? 푼 기록도 같이 지워져요.',
+            confirm: '이 문제를 지울까요?',
+            note: '푼 기록도 같이 지워지고 되돌릴 수 없어요.',
+            danger: true,
             run: async () => {
               const ok = !(await sb().from('questions').delete().eq('id', q.id)).error;
               if (ok && old) await setOldQuestionIds(old.questionIds.filter((x) => x !== q.id));
@@ -739,7 +745,15 @@ export default function NotePage() {
 
   const switchTo = async (n: number) => {
     if (!note) return;
-    if (!confirm(`버전 ${n}: 이 버전을 지금 버전으로 쓸까요?\n복습에는 이 버전의 문제가 나와요. 지금 쓰던 버전도 기록에 그대로 남아요.`)) return;
+    if (
+      !(await ask({
+        title: `버전 ${n} 쓰기`,
+        body: '이 버전을 지금 버전으로 쓸까요?',
+        note: '복습에는 이 버전의 문제가 나와요. 지금 쓰던 버전도 기록에 그대로 남아요.',
+        ok: '이 버전 쓰기',
+      }))
+    )
+      return;
     setVerBusy(`use-${n}`);
     try {
       await api(`/api/notes/${note.id}/versions`, { method: 'POST', body: JSON.stringify({ action: 'switch', number: n }) });
@@ -756,16 +770,30 @@ export default function NotePage() {
 
   const deleteVersion = async (n: number) => {
     if (!note) return;
-    const warnCurrent = n === cur ? '\n지금 쓰는 버전이라, 지우면 남은 버전 중 가장 최근 버전을 쓰게 돼요.' : '';
     // 같이 지워지는 자료를 이름으로 알려 준다 (그 버전에만 있는 더한 자료·합쳐 들어온 노트의 자료)
     const gone = onlyInVersion(versions, n, sourceId);
-    const goneLine = gone.length
-      ? `\n함께 지워지는 자료: ${gone
+    const goneNames = gone.length
+      ? `${gone
           .slice(0, 3)
           .map((m) => `'${materialLabel(m)}'`)
-          .join(', ')}${gone.length > 3 ? ` 외 ${gone.length - 3}개` : ''} (그 자료로 만든 문제와 푼 기록도)`
+          .join(', ')}${gone.length > 3 ? ` 외 ${gone.length - 3}개` : ''}`
       : '';
-    if (!confirm(`버전 ${n}: 이 버전을 지울까요?\n이 버전에만 있던 문제(푼 기록 포함)도 함께 지워져요.${goneLine}\n되돌릴 수 없어요.${warnCurrent}`)) return;
+    if (
+      !(await ask({
+        title: `버전 ${n} 지우기`,
+        body: '이 버전을 지울까요? 이 버전에만 있던 문제(푼 기록 포함)도 함께 지워져요.',
+        note: (
+          <>
+            {goneNames ? <span className="block">함께 지워지는 자료: {goneNames} (그 자료로 만든 문제와 푼 기록도)</span> : null}
+            {n === cur ? <span className="block">지금 쓰는 버전이라, 지우면 남은 버전 중 가장 최근 버전을 쓰게 돼요.</span> : null}
+            <span className="block">되돌릴 수 없어요.</span>
+          </>
+        ),
+        ok: '지우기',
+        danger: true,
+      }))
+    )
+      return;
     setVerBusy(`del-${n}`);
     try {
       await api(`/api/notes/${note.id}/versions`, { method: 'POST', body: JSON.stringify({ action: 'delete', number: n }) });
@@ -796,9 +824,12 @@ export default function NotePage() {
   const reorganize = async () => {
     if (!note || reorg) return;
     if (
-      !confirm(
-        '겹치는 개념을 AI가 하나로 묶고 차례를 다듬을까요?\n지금 노트는 원본 탭의 버전 기록에 남아서 언제든 돌아갈 수 있어요. 문제와 푼 기록은 그대로예요.',
-      )
+      !(await ask({
+        title: 'AI로 다시 정리',
+        body: '겹치는 개념을 AI가 하나로 묶고 차례를 다듬을까요?',
+        note: '지금 노트는 원본 탭의 버전 기록에 남아서 언제든 돌아갈 수 있어요. 문제와 푼 기록은 그대로예요.',
+        ok: '다시 정리',
+      }))
     )
       return;
     setReorg('note');
@@ -984,7 +1015,11 @@ export default function NotePage() {
         }
       />
       <div ref={subbarRef} className={cx(STICKY_BELOW_TOPBAR, 'kok-subbar z-20 -mx-4 -mt-4 px-4 pb-2.5 pt-1 md:-mx-6 md:px-6', subbarStuck && 'is-stuck')}>
-        <div className={cx('kok-seg grid gap-1 rounded-full bg-surface-2 p-1', coursesOn ? 'grid-cols-5' : 'grid-cols-4')} role="tablist" aria-label="노트 보기">
+        <div
+          className={cx('kok-seg grid gap-1 rounded-full bg-surface-2 p-1', coursesOn ? 'grid-cols-5' : 'grid-cols-4')}
+          role="tablist"
+          aria-label="노트 보기"
+        >
           {TABS.filter((t) => t.id !== 'course' || coursesOn).map((t) => (
             <button
               key={t.id}
@@ -1342,32 +1377,7 @@ export default function NotePage() {
         />
       ) : null}
 
-      <Sheet open={reporting} onClose={() => setReporting(false)} title="이상해요">
-        <div className="grid gap-3">
-          <p className="text-sm text-muted">정리나 그림에서 틀린 곳, 이상한 곳을 알려 주세요. 관리자가 확인해요. 직접 고칠 수도 있어요.</p>
-          <textarea
-            className={cx(inputClass, 'min-h-24')}
-            value={reason}
-            maxLength={1000}
-            onChange={(e) => setReason(e.target.value)}
-            placeholder="예: 2번 개념 설명이 교과서와 달라요"
-          />
-          <Button
-            disabled={!reason.trim()}
-            onClick={async () => {
-              const { error } = await sb().from('reports').insert({ target_type: 'note', target_id: note.id, reason: reason.trim() });
-              if (error) toast('보내지 못했어요.', 'bad');
-              else {
-                toast('신고했어요. 고마워요!', 'ok', DONE);
-                setReason('');
-                setReporting(false);
-              }
-            }}
-          >
-            보내기
-          </Button>
-        </div>
-      </Sheet>
+      <ReportSheet what={reporting ? { kind: 'note', target: note.id } : null} onClose={() => setReporting(false)} />
     </div>
   );
 }

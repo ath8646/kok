@@ -39,7 +39,8 @@ export async function POST(req: NextRequest, ctx: RouteContext<'/api/notes/[id]/
       admin.from('visuals').select('spec').eq('note_id', note.id).eq('type', 'mindmap').maybeSingle(),
     ]);
     if (cErr) throw cErr;
-    if ((count ?? 0) >= PDF_LIMITS.perNote) throw new UserFacingError('too_many', `PDF 요약은 노트마다 ${PDF_LIMITS.perNote}개까지 둘 수 있어요. 안 쓰는 것을 지워 주세요.`, 400);
+    if ((count ?? 0) >= PDF_LIMITS.perNote)
+      throw new UserFacingError('too_many', `PDF 요약은 노트마다 ${PDF_LIMITS.perNote}개까지 둘 수 있어요. 안 쓰는 것을 지워 주세요.`, 400);
     const mindmap = mm ? (zMindmap.safeParse(mm.spec).data ?? null) : null;
 
     // 자료 그림: 원본에서 자른 그림 몇 장 (못 읽은 그림은 뺀다)
@@ -67,6 +68,8 @@ export async function POST(req: NextRequest, ctx: RouteContext<'/api/notes/[id]/
       figures,
       theme,
       date: new Date(),
+      // 직접 쓴 빈 노트(자료를 더하지 않음)만 AI 표시를 빼고, 나머지는 AI 가 만든 정리
+      aiMade: note.raw.manual !== true || note.version !== null,
     });
 
     const rowId = crypto.randomUUID();

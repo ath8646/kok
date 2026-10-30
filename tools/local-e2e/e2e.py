@@ -1,7 +1,7 @@
 """KOK v0.1 끝-끝 시험 (가짜 Supabase·Claude + 로컬 Postgres).
 사용: python3 e2e.py  (앱: localhost:3000, 가짜 백엔드: localhost:54321)
 """
-import asyncio, base64, json, os, pathlib, sys, time, io, re, urllib.parse, urllib.request
+import asyncio, base64, datetime, json, os, pathlib, sys, time, io, re, urllib.parse, urllib.request
 from playwright.async_api import async_playwright, expect
 
 # 로컬 Postgres 접속 (db.sh 와 같은 기본값)
@@ -277,6 +277,48 @@ async def wait_frame_js(page, script, timeout=6000):
                     pass
         await asyncio.sleep(0.15)
     raise AssertionError(f"preview never satisfied: {script}")
+
+
+CONFIRM = "[data-kok-confirm]"
+
+
+async def app_confirm(page, ok=True, timeout=6000):
+    """앱의 묻는 창(components/Confirm.tsx, 브라우저 confirm 대신)에 답한다. 창에 보인 글을 돌려준다"""
+    box = page.locator(CONFIRM)
+    await expect(box).to_be_visible(timeout=timeout)
+    text = await box.inner_text()
+    answer = "ok" if ok else "cancel"
+    await box.locator(f'[data-confirm="{answer}"]').click()
+    await expect(box).to_be_hidden()
+    return text
+
+
+# 묻는 창이 뜨면 바로 '확인'을 누른다 (여러 번 묻는 구간: 예전의 page.on("dialog", accept) 대신. 이 page 를 닫을 때까지)
+AUTO_CONFIRM_JS = """
+(() => {
+  if (window.__kokAutoConfirm) return;
+  window.__kokAutoConfirm = true;
+  const tick = () => document.querySelector('[data-kok-confirm] [data-confirm="ok"]')?.click();
+  new MutationObserver(tick).observe(document.documentElement, { childList: true, subtree: true });
+})();
+"""
+
+
+async def auto_confirm(page):
+    await page.add_init_script(AUTO_CONFIRM_JS)
+    await page.evaluate(AUTO_CONFIRM_JS)
+
+
+async def send_report(page, reason, text=None):
+    """'이상해요' 신고 창(components/ReportSheet.tsx)에서 이유를 골라 보낸다"""
+    rsheet = page.get_by_role("dialog", name="이상해요")
+    await expect(rsheet).to_be_visible()
+    await expect(rsheet.get_by_role("button", name="보내기")).to_be_disabled()
+    await rsheet.get_by_role("button", name=reason).click()
+    if text:
+        await rsheet.get_by_label("자세한 내용").fill(text)
+    await rsheet.get_by_role("button", name="보내기").click()
+    await expect(page.get_by_text("신고했어요. 고마워요!").last).to_be_visible()
 
 
 def db(q):
@@ -978,6 +1020,11 @@ async def main():
         await page.get_by_label("요약", exact=True).fill("광합성은 엽록체에서 빛으로 포도당을 만드는 과정이다.")
         await page.get_by_role("button", name="저장", exact=True).first.click()
         await expect(page.get_by_text("엽록체에서 빛으로 포도당을")).to_be_visible()
+        # 노트 신고 ('이상해요'): 노트 메뉴 → 이유 칩 → 보내기 (서버가 내 노트인지 보고 남긴다)
+        await page.get_by_role("button", name="노트 메뉴").click()
+        await page.get_by_role("menuitem", name="이상해요 (신고)").click()
+        await send_report(page, "빠진 내용이 있어요", "명반응 설명이 없어요")
+        assert db("select target_type || '|' || reason from public.reports order by id desc limit 1") == "note|빠진 내용이 있어요: 명반응 설명이 없어요"
 
         step("note editing: easy marks, stars on top, examples, formulas, order")
         sid = page.url.rstrip("/").split("/")[-1].split("?")[0]
@@ -1032,16 +1079,10 @@ async def main():
         # 고치던 내용이 있으면 다른 칸을 열기 전에 한 번 묻는다 (아니요 → 그대로), 닫으면 연 버튼으로 초점이 돌아온다
         await page.get_by_role("button", name="요약 고치기").click()
         await page.get_by_label("요약", exact=True).fill("고치던 요약")
-        asked = []
-
-        async def say_no(d):
-            asked.append(d.message)
-            await d.dismiss()
-
-        page.once("dialog", lambda d: asyncio.ensure_future(say_no(d)))
         await page.locator("#kp-k4").get_by_role("button", name=re.compile("고치기$")).click()
+        asked = await app_confirm(page, ok=False)
         await expect(page.get_by_label("요약", exact=True)).to_have_value("고치던 요약")
-        assert asked and "저장되지 않았어요" in asked[0], asked
+        assert "저장되지 않았어요" in asked and "계속 고치기" in asked, asked
         await page.get_by_role("button", name="취소").first.click()
         await expect(page.get_by_role("button", name="요약 고치기")).to_be_focused()
         assert nbody("{summary}") == "광합성은 빛으로 ==포도당==을 만든다"
@@ -1981,19 +2022,14 @@ async def main():
         await expect(apage.get_by_text(re.compile("새 코드 · 베타 테스터 3일"))).to_be_visible()
         code2 = (await apage.locator("button.font-mono").first.inner_text()).strip()
         assert code2 != plan_code
-        dialog_msgs = []
-
-        async def accept_dialog(d):
-            dialog_msgs.append(d.message)
-            await d.accept()
-
         await opage.goto(BASE + "/plan")
-        opage.once("dialog", accept_dialog)
         n0 = len(ERRORS)
         await opage.get_by_label("쿠폰 번호").fill(code2)
         await opage.get_by_role("button", name="쿠폰 쓰기").click()
+        # 플랜을 바꿀 때는 앱의 묻는 창으로 한 번 묻는다 (브라우저 confirm 이 아니다)
+        dialog_msg = await app_confirm(opage)
+        assert "바뀌어요" in dialog_msg and "플랜 바꾸기" in dialog_msg, dialog_msg
         await expect(opage.get_by_text(re.compile("'베타 테스터' 플랜이 켜졌어요!"))).to_be_visible()
-        assert dialog_msgs and "바뀌어요" in dialog_msgs[0], dialog_msgs
         # 먼저 물어보려고 받은 409 는 오류 목록에서 뺀다
         assert all("/api/coupon" in e or "status of 409" in e for e in ERRORS[n0:]), ERRORS[n0:]
         del ERRORS[n0:]
@@ -2011,16 +2047,16 @@ async def main():
         await expect(plan_item.get_by_text("쓰는 사람 1명")).to_be_visible()
         await apage.get_by_label("사용자 찾기").fill("other@example.com")
         await apage.get_by_role("button", name="찾기", exact=True).click()
-        apage.once("dialog", lambda d: d.accept())
         await apage.get_by_role("button", name="테스트 플랜 끝내기").click()
+        await app_confirm(apage)
         await expect(apage.get_by_text("테스트 플랜을 끝냈어요.")).to_be_visible()
         await expect(plan_item.get_by_text("쓰는 사람 0명")).to_be_visible()  # 플랜 목록도 다시 읽는다
         me = await (await opage.request.get(BASE + "/api/me")).json()
         assert me["planInfo"]["kind"] == "free" and me["energy"]["period"] == "day", me["planInfo"]
         # 플랜에서 쓴 번개는 무료 오늘 몫에서 빼지 않는다
         assert me["energy"]["usedToday"] == 0 and me["energy"]["remaining"] == me["energy"]["limit"], me["energy"]
-        apage.once("dialog", lambda d: d.accept())
         await plan_item.get_by_role("button", name="지우기").click()
+        await app_confirm(apage)
         await expect(apage.get_by_text("플랜을 지웠어요.")).to_be_visible()
         await expect(apage.get_by_text("아직 만든 테스트 플랜이 없어요.")).to_be_visible()
         assert psql("select count(*) from public.custom_plans") == "0"
@@ -2053,6 +2089,21 @@ async def main():
         await expect(chat.get_by_text(re.compile("노트에 따르면 광합성은")).first).to_be_visible(timeout=15000)
         assert "**" not in await chat.inner_text(), "markdown marks are removed from replies"
         await expect(chat.get_by_text(re.compile(r"^에너지 [\d.]+$")).first).to_be_visible()
+        # AI 답에는 'AI 답' 표시와 '이상해요'(신고): 서버가 그 답과 물어본 말을 다시 읽어 신고와 함께 남긴다. Esc 는 신고 창만 닫는다
+        await expect(chat.get_by_text("AI 답", exact=True).first).to_be_visible()
+        await chat.get_by_role("button", name="이상해요").first.click()
+        await expect(page.get_by_role("dialog", name="이상해요")).to_be_visible()
+        await page.keyboard.press("Escape")
+        await expect(page.get_by_role("dialog", name="이상해요")).to_be_hidden()
+        await expect(chat).to_be_visible()
+        await chat.get_by_role("button", name="이상해요").first.click()
+        await send_report(page, "틀린 내용이 있어요", "장소가 틀렸어요")
+        await expect(chat).to_be_visible()
+        rep = psql(
+            "select reason || '|' || (snapshot like '%학생: 광합성은 어디서 일어나?%AI: %노트에 따르면 광합성은%')::text "
+            "from public.reports where target_type = 'chat' order by id desc limit 1"
+        )
+        assert rep == "틀린 내용이 있어요: 장소가 틀렸어요|true", rep
         # 먼저 생각하게 한 호출이 글 없이 끝나면(Haiku 5.5 가 가끔 그런다) 서버가 생각을 끄고 한 번 더 불러 답을 만든다. 에너지는 두 번을 합쳐 받는다
         stats0 = json.loads(urllib.request.urlopen("http://localhost:54321/__stats").read())
         energy0 = float(psql(f"select coalesce(sum(energy), 0) from public.chat_messages m join public.notes n on n.id = m.note_id where n.source_id = '{note_sid}'"))
@@ -2195,8 +2246,8 @@ async def main():
         await expect(page.get_by_text("버전 1에만 있는 문제이다.")).to_be_visible()
         assert psql("select status from public.questions where prompt = '버전 1에만 있는 문제이다.'") == "hidden"
         await shot(page, "46-old-version", full=False)
-        page.once("dialog", lambda d: d.accept())
         await page.get_by_role("button", name="이 버전 쓰기").first.click()
+        await app_confirm(page)
         await expect(page.get_by_text("지금 버전을 바꿨어요 (버전 1).")).to_be_visible()
         await expect(page.get_by_text("지난 버전을 보고 있어요")).to_have_count(0)
         assert "v=" not in page.url, page.url
@@ -2206,17 +2257,11 @@ async def main():
         await expect(page.get_by_text("버전 1에만 있는 문제이다.")).to_be_visible()
         await expect(page.get_by_text("식물은 밤에도 호흡을 한다.")).to_have_count(0)
         await page.get_by_role("tab", name="원본").click()
-        del_msgs = []
-
-        async def accept_delete(d):
-            del_msgs.append(d.message)
-            await d.accept()
-
-        page.once("dialog", lambda d: asyncio.ensure_future(accept_delete(d)))
         await versions.locator("li").filter(has_text="버전 2 · 더한 자료").get_by_role("button", name="지우기").click()
+        del_msg = await app_confirm(page)
         await expect(page.get_by_text("버전을 지웠어요.")).to_be_visible()
         # 같이 지워지는 더한 자료를 이름으로 알려 준다
-        assert del_msgs and "함께 지워지는 자료:" in del_msgs[0], del_msgs
+        assert "함께 지워지는 자료:" in del_msg, del_msg
         await expect(versions.get_by_text("버전 2 · 더한 자료")).to_have_count(0)
         assert psql("select count(*) from public.questions where prompt = '식물은 밤에도 호흡을 한다.'") == "0"
         assert psql(f"select count(*) from public.sources where parent_id = '{note_sid}'") == "0"
@@ -2306,8 +2351,8 @@ async def main():
         versions2 = page2.get_by_role("region", name="버전 기록")
         await versions2.locator("li").filter(has_text=f"버전 {v_c} ·").get_by_role("button", name="열기").click()
         await expect(page2.get_by_text("지난 버전을 보고 있어요")).to_be_visible()
-        page2.once("dialog", lambda d: d.accept())
         await page2.get_by_role("button", name="이 버전 쓰기").first.click()
+        await app_confirm(page2)
         await expect(page2.get_by_text(f"지금 버전을 바꿨어요 (버전 {v_c}).")).to_be_visible()
         assert cur_version() == v_c
         assert psql(f"select status || ',' || rested_hidden::text from public.questions where id = '{only_cur}'") == "hidden,true"
@@ -2344,8 +2389,8 @@ async def main():
         await page2.goto(BASE + f"/notes/{note_sid}?tab=original")
         assert await wait_ready(page2)
         await versions2.locator("li").filter(has_text=f"버전 {v_b} ·").get_by_role("button", name="열기").click()
-        page2.once("dialog", lambda d: d.accept())
         await page2.get_by_role("button", name="이 버전 쓰기").first.click()
+        await app_confirm(page2)
         await expect(page2.get_by_text(f"지금 버전을 바꿨어요 (버전 {v_b}).")).to_be_visible()
         assert psql(f"select status || ',' || rested_hidden::text from public.questions where id = '{only_cur}'") == "suspended,false"
         await page2.close()
@@ -2557,6 +2602,13 @@ async def main():
         assert await preview.get_attribute("aria-label") != alt1
         assert cover_calls(fig_sid) == 2
         await shot(page, "58-cover-sheet", full=False)
+        # 표지에는 AI 표시와 '이상해요': 같은 창이 신고 칸으로 바뀌고, 보내면 표지 창으로 돌아온다 (서버가 표지 글을 다시 읽어 남긴다)
+        await expect(cover_sheet.get_by_text("AI가 고른 도표예요")).to_be_visible()
+        await cover_sheet.get_by_role("button", name="이상해요").click()
+        await send_report(page, "노트와 맞지 않아요")
+        await expect(cover_sheet).to_be_visible()
+        rep = psql("select target_id || '|' || (snapshot like '%모양: %')::text from public.reports where target_type = 'cover' order by id desc limit 1")
+        assert rep == f"{fig_sid}|true", rep
         # 빼기: 카드에 다시 한 줄 요약
         await cover_sheet.get_by_role("button", name="표지 빼기").click()
         await expect(cover_sheet).to_be_hidden()
@@ -2621,6 +2673,7 @@ async def main():
         plan_check = psql(f"select jsonb_array_length(plan->'units') || ' ' || jsonb_array_length(plan->'units'->0->'lessons'->0->'checks') || ' ' || jsonb_array_length(plan->'units'->0->'lessons'->0->'key_point_ids') from public.note_courses where note_id = '{fig_nid}'")
         assert plan_check == "2 2 1", plan_check
         await expect(page.get_by_text("0 / 7 끝냄")).to_be_visible()
+        await expect(page.get_by_text("AI가 만든 레슨")).to_be_visible()
         await shot(page, "101-course-path")
         await no_hscroll(page, "course path")
         # 아직 차례가 아닌 칸을 누르면 건너뛸지 묻는다: '앞 레슨부터'는 닫기만, '건너뛰고 시작'은 그 레슨을 연다 (진도는 끝내야 적힌다)
@@ -2638,6 +2691,17 @@ async def main():
         skipped = page.get_by_role("dialog", name=re.compile("^레슨 2"))
         await expect(skipped).to_be_visible()
         await expect(skipped.get_by_text("개념", exact=True)).to_be_visible()
+        # 레슨에도 '이상해요'(위 띠의 깃발): 레슨 창 위에 뜨고 Esc 는 신고 창만 닫는다. 서버가 레슨 내용을, 화면이 보던 칸을 남긴다
+        await skipped.get_by_role("button", name="이상해요 (신고)").click()
+        await expect(page.get_by_role("dialog", name="이상해요")).to_be_visible()
+        await page.keyboard.press("Escape")
+        await expect(page.get_by_role("dialog", name="이상해요")).to_be_hidden()
+        await expect(skipped).to_be_visible()
+        await skipped.get_by_role("button", name="이상해요 (신고)").click()
+        await send_report(page, "수준에 맞지 않아요")
+        await expect(skipped).to_be_visible()
+        rep = psql("select target_id || '|' || (snapshot like '%레슨: %카드 1: %보던 칸 1 (카드)%')::text from public.reports where target_type = 'course' order by id desc limit 1")
+        assert rep.startswith(f"{fig_nid}:l-") and rep.endswith("|true"), rep
         await skipped.get_by_role("button", name="레슨 닫기").click()
         await expect(skipped).to_have_count(0)
         await expect(page.get_by_text("0 / 7 끝냄")).to_be_visible()
@@ -2853,9 +2917,9 @@ async def main():
         await wait_js(page, "() => [...document.querySelectorAll('[aria-label=\"p1.jpg 크게 보기\"] img')].some((i) => i.complete && i.naturalWidth > 0)")
         # 대화를 지우면 보관한 사진도 지운다
         assert psql(f"select count(*) from storage.objects where name like '{student_id}/chat/{fig_sid}/%'") == "1"
-        page.once("dialog", lambda d: asyncio.ensure_future(d.accept()))
         await chat.get_by_role("button", name="채팅 메뉴").click()
         await page.get_by_role("menuitem", name="대화 모두 지우기").click()
+        await app_confirm(page)
         await poll_db(f"select count(*) from public.chat_messages m join public.notes n on n.id = m.note_id where n.source_id = '{fig_sid}'", "0")
         await poll_db(f"select count(*) from storage.objects where name like '{student_id}/chat/{fig_sid}/%'", "0")
         await page.keyboard.press("Escape")
@@ -2899,6 +2963,12 @@ async def main():
         await save.get_by_role("button", name="이 노트에 넣기").click()
         await expect(save).to_be_hidden()
         await poll_db(f"select count(*) from public.questions q join public.notes n on n.id = q.note_id where n.source_id = '{math_sid}'", "2")
+        # 홈 채팅 답 신고: 대화를 저장하지 않아서 화면이 물어본 말·답·풀이 단계·정답을 같이 보낸다
+        await ask.get_by_role("button", name="이상해요").last.click()
+        await send_report(page, "풀이가 이상해요")
+        await expect(ask).to_be_visible()
+        rep = psql("select target_id || '|' || reason || '|' || (snapshot like '%학생: 이것도 풀어 줘%1단계: %정답: %')::text from public.reports where target_type = 'chat' order by id desc limit 1")
+        assert rep == "home|풀이가 이상해요|true", rep
         # 홈을 떠나면 대화가 사라진다
         await page.keyboard.press("Escape")
         await expect(ask).to_be_hidden()
@@ -3138,6 +3208,19 @@ async def main():
         # AI 가 그린 그림은 표시해 둔다 (설명 없이 다시 그리기), 사진은 무엇이 그려졌는지 몰라 글자가 잘 보이게 0.7 넘게 덮는다
         assert sql(f"select spec->'image'->>'ai' from public.user_themes where id = '{ai_theme}'") == "true"
         assert float(await css_var(page, "--theme-dim")) >= 0.7, await css_var(page, "--theme-dim")
+        # 테마 만들기 화면의 배경 칸: AI 가 그린 그림이라고 알리고 '이상해요'로 신고 (창 안에 뜨고, 보내면 창은 그대로)
+        await page.get_by_role("button", name=re.compile("' 테마 고치기$")).click()
+        ai_editor = page.get_by_role("dialog", name="테마 고치기")
+        await expect(ai_editor).to_be_visible()
+        await ai_editor.get_by_role("tab", name="배경").click()
+        await expect(ai_editor.get_by_text("AI가 그린 그림이에요")).to_be_visible()
+        await ai_editor.get_by_role("button", name="이상해요").click()
+        await send_report(page, "부탁한 것과 달라요")
+        await expect(ai_editor).to_be_visible()
+        rep = sql(f"select target_id || '|' || (snapshot like '%그림 설명(AI에게 보낸 것): soft watercolor%')::text from public.reports where target_type = 'theme' order by id desc limit 1")
+        assert rep == f"{ai_image}|true", rep
+        await ai_editor.get_by_role("button", name="닫기", exact=True).first.click()
+        await expect(ai_editor).to_be_hidden()
         # 화살표로 테마 고르기 (지금 고른 칸만 Tab 으로 들어가고, → 로 다음 칸)
         ai_radio = page.get_by_role("radiogroup", name="내 테마", exact=True).get_by_role("radio", checked=True)
         assert await ai_radio.get_attribute("tabindex") == "0"
@@ -3250,9 +3333,9 @@ async def main():
         await page.goto(BASE + "/settings#theme")
         await page.get_by_role("button", name="'물결 테마' 테마 고치기").click()
         await expect(editor).to_be_visible()
-        page.once("dialog", lambda d: asyncio.ensure_future(d.accept()))
         await editor.get_by_role("button", name="테마 메뉴").click()
         await editor.get_by_role("menuitem", name="지우기").click()
+        await app_confirm(page)
         await expect(editor).to_be_hidden()
         await wait_js(page, "!document.documentElement.hasAttribute('data-bg') && !document.getElementById('kok-theme')")
         await wait_css(page, "--accent", "#6057e7")
@@ -3304,9 +3387,9 @@ async def main():
         await page.goto(BASE + "/settings#theme")
         await page.get_by_role("button", name="'떠 있는 민트' 테마 고치기").click()
         await expect(editor).to_be_visible()
-        page.once("dialog", lambda d: asyncio.ensure_future(d.accept()))
         await editor.get_by_role("button", name="테마 메뉴").click()
         await editor.get_by_role("menuitem", name="지우기").click()
+        await app_confirm(page)
         await expect(editor).to_be_hidden()
         await wait_saved({"light": "preset:default", "dark": "preset:default"})
         await wait_css(page, "--tab-float", "0")
@@ -3484,9 +3567,9 @@ async def main():
         # 지우면 기본 모양으로
         await page.get_by_role("button", name="'내 글리치' 테마 고치기").click()
         await expect(editor2).to_be_visible()
-        page.once("dialog", lambda d: asyncio.ensure_future(d.accept()))
         await editor2.get_by_role("button", name="테마 메뉴").click()
         await editor2.get_by_role("menuitem", name="지우기").click()
+        await app_confirm(page)
         await expect(editor2).to_be_hidden()
         await wait_js(page, "!document.documentElement.hasAttribute('data-skin')")
         await wait_saved({"light": "preset:default", "dark": "preset:default"})
@@ -3563,8 +3646,8 @@ async def main():
         # Pro 가 끝나도 내 테마는 보이고 지울 수 있다 (고치기는 없다)
         await expect(opage.get_by_role("listitem").get_by_text("Pro 때 테마", exact=True)).to_be_visible()
         await expect(opage.get_by_role("button", name="고치기", exact=True)).to_have_count(0)
-        opage.once("dialog", lambda d: asyncio.ensure_future(d.accept()))
         await opage.get_by_role("button", name="지우기", exact=True).click()
+        await app_confirm(opage)
         await expect(opage.get_by_text("Pro 때 테마", exact=True)).to_have_count(0)
         assert sql(f"select count(*) from public.user_themes where user_id = '{other_id}'") == "0"
         r = await opage.request.post(BASE + "/api/themes", headers={"origin": BASE}, data={"name": "x", "spec": spec})
@@ -3794,8 +3877,8 @@ async def main():
         await page.mouse.up()
         await card(gone[1]).click()
         await expect(page.get_by_role("heading", name="2개 선택", exact=True)).to_be_visible()
-        page.once("dialog", lambda d: asyncio.ensure_future(d.accept()))
         await bar.get_by_role("button", name="지우기").click()
+        await app_confirm(page)
         await expect(page.get_by_text("2개를 지웠어요.")).to_be_visible()
         await expect(card(gone[0])).to_have_count(0)
         await expect(card(gone[1])).to_have_count(0)
@@ -4148,7 +4231,7 @@ async def main():
         social = db(f"select id from public.subjects where user_id = '{me_id}' and name = '사회'")
         art = db(f"select id from public.subjects where user_id = '{me_id}' and name = '미술'")
         ctx, page = await new_ctx(browser, "student")
-        page.on("dialog", lambda d: asyncio.ensure_future(d.accept()))
+        await auto_confirm(page)
         r = await page.request.post(BASE + "/api/notes/blank", headers={"origin": BASE}, data={"subjectId": music, "title": "음악 노트"})
         assert r.ok, await r.text()
         made = await r.json()
@@ -4238,7 +4321,7 @@ async def main():
 
         step("library: merge notes without AI (no energy) — new concept numbers, questions and records follow, originals stay in the 원본 tab")
         ctx, page = await new_ctx(browser, "student")
-        page.on("dialog", lambda d: asyncio.ensure_future(d.accept()))
+        await auto_confirm(page)
         spent = lambda: db(f"select coalesce(sum(energy), 0) from public.energy_ledger where user_id = '{me_id}'")  # noqa: E731
         energy_before = spent()
         await page.goto(BASE + f"/library/{bio}")
@@ -4290,7 +4373,7 @@ async def main():
 
         step("Pro: 'AI로 다시 정리' on a merged note (also from the menu after closing the tip) makes a new version; the note before stays in the version list")
         ctx, page = await new_ctx(browser, "student")
-        page.on("dialog", lambda d: asyncio.ensure_future(d.accept()))
+        await auto_confirm(page)
         await page.goto(BASE + f"/notes/{keep}")
         tip = page.get_by_role("region", name="합친 노트")
         await expect(tip.get_by_role("button", name=re.compile("^AI로 다시 정리"))).to_contain_text("약")
@@ -4329,7 +4412,7 @@ async def main():
 
         step("versions: going back before 'AI로 다시 정리' brings each question's concept back; merging into a note with versions makes a '노트 합치기' version; a note on an old version is not merged")
         ctx, page = await new_ctx(browser, "student")
-        page.on("dialog", lambda d: asyncio.ensure_future(d.accept()))
+        await auto_confirm(page)
         after_reorg = db(qsql)
         await page.goto(BASE + f"/notes/{keep}")
         await page.get_by_role("tab", name="원본").click()
@@ -4420,6 +4503,69 @@ async def main():
         assert db(f"select count(*) from public.sources where id in ('{old_src}', '{old_kid}')") == "2"
         await ctx.close()
         db(f"delete from public.subjects where user_id = '{me_id}' and name in ({', '.join(repr(x) for x in extra)})")
+
+        step("subject: the exam date is picked in the app's calendar (not the browser's date box)")
+        sctx, spage = await new_ctx(browser, "student")
+        exam_sid = db(f"select id from public.subjects where user_id = '{me_id}' and not archived order by created_at limit 1")
+        db(f"update public.subjects set exam_date = null where id = '{exam_sid}'")
+        await spage.goto(BASE + f"/library/{exam_sid}")
+        await spage.get_by_role("button", name="과목 메뉴").click()
+        await spage.get_by_role("menuitem", name="과목 고치기").click()
+        sform = spage.get_by_role("dialog", name="과목 고치기")
+        assert await sform.locator("input[type=date]").count() == 0, "no native date box"
+        trigger = sform.get_by_role("button", name=re.compile("^시험 날짜: "))
+        await trigger.click()
+        await expect(trigger).to_have_attribute("aria-expanded", "true")
+        # 열면 오늘 칸에 초점, 다음 달로 넘겨 15일을 고른다
+        await expect(sform.get_by_role("button", name=re.compile(", 오늘$"))).to_be_focused()
+        await sform.get_by_role("button", name="다음 달").click()
+        kst = datetime.datetime.now(datetime.timezone(datetime.timedelta(hours=9))).date()
+        ny, nm = (kst.year + 1, 1) if kst.month == 12 else (kst.year, kst.month + 1)
+        await sform.get_by_role("button", name=re.compile(f"^{nm}월 15일 ")).click()
+        await expect(trigger).to_have_attribute("aria-expanded", "false")
+        await expect(trigger).to_contain_text(f"{ny}년 {nm}월 15일")
+        await expect(trigger).to_contain_text("D-")
+        await shot(spage, "111-exam-date", full=False)
+        # Esc 는 달력만 접고 창은 그대로
+        await trigger.click()
+        await spage.keyboard.press("Escape")
+        await expect(trigger).to_have_attribute("aria-expanded", "false")
+        await expect(sform).to_be_visible()
+        await sform.get_by_role("button", name="저장", exact=True).click()
+        await expect(sform).to_be_hidden()
+        await poll_db(f"select exam_date::text from public.subjects where id = '{exam_sid}'", f"{ny:04d}-{nm:02d}-15")
+        db(f"update public.subjects set exam_date = null where id = '{exam_sid}'")
+        # 계정 삭제 안내: 로그인하고 오면 설정의 탈퇴 칸이 펼쳐진다 (지우지는 않는다)
+        await spage.goto(BASE + "/delete-account")
+        await spage.get_by_role("link", name="로그인하고 계정 지우기").click()
+        await spage.wait_for_url(re.compile(r"/settings\?delete=1"))
+        await expect(spage.locator("details#delete-account")).to_have_attribute("open", "")
+        await sctx.close()
+
+        step("account deletion page opens without logging in (Google Play: delete account on the web)")
+        nctx, npage = await new_ctx(browser)
+        r = await npage.goto(BASE + "/delete-account")
+        assert r and r.status == 200, r and r.status
+        await expect(npage.get_by_role("heading", name="계정 삭제", exact=True)).to_be_visible()
+        await expect(npage.get_by_role("link", name="로그인하고 계정 지우기")).to_be_visible()
+        await no_hscroll(npage, "delete account")
+        await shot(npage, "113-delete-account")
+        await nctx.close()
+
+        step("admin: the '이상해요' inbox shows what was reported (chat answer, cover, lesson, theme picture) with the AI result; other people's things are refused")
+        actx2, apage2 = await new_ctx(browser, "admin", width=1280)
+        await apage2.goto(BASE + "/admin")
+        await expect(apage2.get_by_text("신고할 때 본 결과").first).to_be_visible(timeout=15000)
+        for label in ["채팅 답", "표지 그림", "레슨", "테마 그림"]:
+            await expect(apage2.get_by_text(label, exact=True).first).to_be_visible()
+        if db(f"select count(*) from public.theme_images where id = '{ai_image}'") == "1":
+            await expect(apage2.get_by_role("img", name="신고한 테마 그림")).to_be_visible()
+        await shot(apage2, "112-admin-reports", full=False)
+        r = await apage2.request.post(BASE + "/api/reports", headers={"origin": BASE}, data={"kind": "cover", "target": fig_sid, "reason": "남의 표지"})
+        assert r.status == 404, (r.status, await r.text())
+        r = await apage2.request.post(BASE + "/api/reports", headers={"origin": BASE}, data={"kind": "chat", "reason": "   "})
+        assert r.status == 400, (r.status, await r.text())
+        await actx2.close()
 
         await figure_steps(browser)
         await tab_steps(browser)

@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
-import { contrast, deriveTokens, fitPalette, mix, normalizeHex, toRgb, CORE_TOKENS, type Mode, type TokenMap } from '@/lib/themes/colors';
+import { contrast, deriveTokens, fitPalette, fromHsv, mix, normalizeHex, toHsv, toRgb, CORE_TOKENS, type Mode, type TokenMap } from '@/lib/themes/colors';
 import { BASE_TOKENS, presetTokens } from '@/lib/themes/presets';
 import { readSpec, zThemeSpec } from '@/lib/themes/spec';
 import { imageCss, themeCss } from '@/lib/themes/css';
@@ -597,5 +597,22 @@ describe('색 하나로 만드는 테마 (테마 만들기의 포인트 색·바
     // 직접 고른 바탕이면 느낌이 없다
     const p = paletteFromColor('#635aea', 'gray');
     expect(toneOf({ ...p, light: { ...p.light, bg: '#e9f0ff' } })).toBeNull();
+  });
+});
+
+describe('색 고르기 창의 HSV (themes/colors.ts)', () => {
+  it('hex ↔ HSV 가 서로 되돌아온다', () => {
+    for (const hex of ['#000000', '#ffffff', '#ff0000', '#00ff00', '#0000ff', '#635aea', '#f53071', '#7f7f7f', '#123456']) {
+      const [h, s, v] = toHsv(hex);
+      expect(fromHsv(h, s, v)).toBe(hex);
+    }
+  });
+  it('기본 색의 값', () => {
+    expect(toHsv('#ff0000')).toEqual([0, 1, 1]);
+    const [h, s, v] = toHsv('#00ffff');
+    expect([Math.round(h), s, v]).toEqual([180, 1, 1]);
+    expect(toHsv('#808080')[1]).toBe(0);
+    expect(fromHsv(720, 2, -1)).toBe('#000000');
+    expect(fromHsv(-120, 1, 1)).toBe('#0000ff');
   });
 });

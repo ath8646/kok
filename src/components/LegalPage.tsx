@@ -17,6 +17,7 @@ export function LegalPage({ title, updated, children }: { title: string; updated
         <Link href="/terms">이용약관</Link>
         <Link href="/privacy">개인정보처리방침</Link>
         <Link href="/ai-guide">AI 사용 안내</Link>
+        <Link href="/delete-account">계정 삭제</Link>
       </footer>
     </main>
   );

@@ -2,6 +2,7 @@
 // 관리자 화면: 키 상태, 숫자, 비상 스위치, 공지, 모델, 한도, 사용자, 테스트 플랜·쿠폰, 신고함, 운영자 정보
 import { useCallback, useEffect, useState } from 'react';
 import { AdminPlans } from '@/components/AdminPlans';
+import { useAskText, useConfirm } from '@/components/Confirm';
 import { useMe } from '@/components/AppShell';
 import { QuestionPreview } from '@/components/QuestionList';
 import { Select } from '@/components/Select';
@@ -10,6 +11,7 @@ import { costMultiplier } from '@/lib/ai/models';
 import { MAX_FILE_MB, type Limits, type ModelsConfig, type Notice } from '@/lib/settings';
 import type { QuestionRow } from '@/lib/types';
 import { accountLabel } from '@/lib/login';
+import { REPORT_LABEL } from '@/lib/report';
 
 type Overview = {
   stats: {
@@ -43,7 +45,17 @@ type UserRow = {
   banned: boolean;
   created_at: string;
 };
-type Report = { id: number; reporter_id: string; target_type: string; target_id: string | null; reason: string; status: string; created_at: string };
+type Report = {
+  id: number;
+  reporter_id: string;
+  target_type: string;
+  target_id: string | null;
+  reason: string;
+  status: string;
+  created_at: string;
+  /** 신고할 때 본 AI 결과 (schema.sql 을 다시 실행하기 전 DB 에는 없다) */
+  snapshot?: string | null;
+};
 
 const LIMIT_LABELS: Array<[keyof Limits, string]> = [
   ['freeDaily', '무료 하루 에너지'],
@@ -81,6 +93,8 @@ const EFFORT_TASKS: Array<[keyof ModelsConfig['effort'], string]> = [
 export default function AdminPage() {
   const { me, refresh: refreshMe } = useMe();
   const toast = useToast();
+  const ask = useConfirm();
+  const askText = useAskText();
   const [ov, setOv] = useState<Overview | null>(null);
   const [limits, setLimits] = useState<Limits | null>(null);
   const [models, setModels] = useState<ModelsConfig | null>(null);
@@ -97,6 +111,8 @@ export default function AdminPage() {
   const [reports, setReports] = useState<{
     reports: Report[];
     questions: Record<string, QuestionRow>;
+    /** 테마 그림 신고: 그림 번호 → 잠깐 볼 수 있는 주소 */
+    pictures?: Record<string, string>;
     users: Record<string, { email: string; nickname: string }>;
   } | null>(null);
 
@@ -295,8 +311,18 @@ export default function AdminPage() {
         <Button
           variant={ov.settings.aiEnabled ? 'danger' : 'primary'}
           busy={busy === 'ai_enabled'}
-          onClick={() => {
-            if (ov.settings.aiEnabled && !confirm('모든 사용자의 AI 기능을 끌까요? 복습은 계속 돼요.')) return;
+          onClick={async () => {
+            if (
+              ov.settings.aiEnabled &&
+              !(await ask({
+                title: 'AI 전체 끄기',
+                body: '모든 사용자의 AI 기능을 끌까요?',
+                note: '복습은 계속 돼요. 관리자는 계속 쓸 수 있어요.',
+                ok: '끄기',
+                danger: true,
+              }))
+            )
+              return;
             saveSetting('ai_enabled', !ov.settings.aiEnabled, ov.settings.aiEnabled ? 'AI 끄기를' : 'AI 켜기를');
           }}
         >
@@ -417,8 +443,18 @@ export default function AdminPage() {
                     size="sm"
                     variant="secondary"
                     onClick={async () => {
-                      const days = Number(prompt('Pro를 며칠 켤까요? (0이면 끄기)', '30'));
-                      if (!Number.isFinite(days) || days < 0) return;
+                      const typed = await askText({
+                        title: 'Pro 기간',
+                        body: `${accountLabel(u.email, u.provider)}의 Pro를 며칠 켤까요? 0이면 꺼요. 테스트 플랜이 켜져 있으면 플랜이 끝난 뒤부터 세요.`,
+                        label: '며칠',
+                        value: '30',
+                        inputMode: 'numeric',
+                        ok: '정하기',
+                        cancel: '그만두기',
+                        check: (v) => (/^\d{1,4}$/.test(v.trim()) && Number(v) <= 3650 ? null : '0부터 3650까지 숫자로 적어 주세요.'),
+                      });
+                      if (typed === null) return;
+                      const days = Number(typed.trim());
                       try {
                         await api(`/api/admin/users/${u.id}`, { method: 'PATCH', body: JSON.stringify({ proDays: Math.round(days) }) });
                         loadUsers(q);
@@ -434,7 +470,17 @@ export default function AdminPage() {
                       size="sm"
                       variant="secondary"
                       onClick={async () => {
-                        if (!confirm(`'${u.custom_plan!.name}' 플랜을 지금 끝낼까요? 원래 요금제로 돌아가요.`)) return;
+                        const plan = u.custom_plan!.name;
+                        if (
+                          !(await ask({
+                            title: '테스트 플랜 끝내기',
+                            body: `'${plan}' 플랜을 지금 끝낼까요?`,
+                            note: '원래 요금제로 돌아가요.',
+                            ok: '끝내기',
+                            danger: true,
+                          }))
+                        )
+                          return;
                         try {
                           await api(`/api/admin/users/${u.id}`, { method: 'PATCH', body: JSON.stringify({ endCustomPlan: true }) });
                           toast('테스트 플랜을 끝냈어요.', 'ok', DONE);
@@ -453,7 +499,17 @@ export default function AdminPage() {
                     variant="ghost"
                     className={u.banned ? '' : 'text-bad'}
                     onClick={async () => {
-                      if (!u.banned && !confirm('이 계정의 AI 기능을 멈출까요?')) return;
+                      if (
+                        !u.banned &&
+                        !(await ask({
+                          title: '계정 정지',
+                          body: '이 계정의 AI 기능을 멈출까요?',
+                          note: '복습과 노트 보기는 그대로 돼요. 언제든 정지를 풀 수 있어요.',
+                          ok: '정지',
+                          danger: true,
+                        }))
+                      )
+                        return;
                       try {
                         await api(`/api/admin/users/${u.id}`, { method: 'PATCH', body: JSON.stringify({ banned: !u.banned }) });
                         loadUsers(q);
@@ -488,12 +544,25 @@ export default function AdminPage() {
           return (
             <div key={r.id} className="grid gap-2 rounded-xl border border-line p-3">
               <div className="flex flex-wrap items-center gap-2 text-sm">
-                <Chip>{r.target_type === 'question' ? '문제' : r.target_type === 'note' ? '노트' : r.target_type}</Chip>
+                <Chip>{REPORT_LABEL[r.target_type] ?? r.target_type}</Chip>
                 <span className="text-muted">
                   {who?.nickname ?? who?.email ?? '사용자'} · {new Date(r.created_at).toLocaleString('ko-KR')}
                 </span>
               </div>
-              <p className="font-semibold">“{r.reason}”</p>
+              <p className="whitespace-pre-wrap font-semibold">“{r.reason}”</p>
+              {r.target_type === 'theme' && r.target_id && reports.pictures?.[r.target_id] ? (
+                // 신고한 AI 그림 (서명 주소, 1시간)
+                // eslint-disable-next-line @next/next/no-img-element
+                <img src={reports.pictures[r.target_id]} alt="신고한 테마 그림" className="max-h-56 w-auto justify-self-start rounded-xl ring-1 ring-line" />
+              ) : null}
+              {r.snapshot ? (
+                <div className="grid gap-1">
+                  <p className="text-xs font-semibold text-muted">신고할 때 본 결과</p>
+                  <pre className="max-h-64 overflow-auto whitespace-pre-wrap break-words rounded-xl bg-surface-2 p-3 font-sans text-[13px] leading-relaxed">
+                    {r.snapshot}
+                  </pre>
+                </div>
+              ) : null}
               {q ? (
                 <div className="rounded-xl bg-surface-2 p-3">
                   <QuestionPreview q={q} />

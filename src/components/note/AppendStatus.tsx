@@ -4,12 +4,14 @@ import { useState } from 'react';
 import type { ChildSource } from '@/lib/versions';
 import { stepLabel } from '../ProcessingList';
 import { Button, ICONS, Icon, ProgressRing, api, cx, useToast, DONE } from '../ui';
+import { useConfirm } from '../Confirm';
 
 const KIND_ICON = { text: ICONS.pen, pdf: ICONS.file, image: ICONS.image } as const;
 const KIND_LABEL = { text: '글', pdf: 'PDF', image: '사진' } as const;
 
 export function AppendStatus({ kids, onChanged }: { kids: ChildSource[]; onChanged: () => void }) {
   const toast = useToast();
+  const ask = useConfirm();
   const [busy, setBusy] = useState<string | null>(null);
   const shown = kids.filter((k) => k.status !== 'ready');
   if (!shown.length) return null;
@@ -67,7 +69,16 @@ export function AppendStatus({ kids, onChanged }: { kids: ChildSource[]; onChang
                     variant="ghost"
                     disabled={busy === k.id}
                     onClick={async () => {
-                      if (!confirm('더하려던 이 자료를 지울까요? 노트는 그대로예요.')) return;
+                      if (
+                        !(await ask({
+                          title: '더하려던 자료 지우기',
+                          body: '더하려던 이 자료를 지울까요?',
+                          note: '노트는 그대로예요.',
+                          ok: '지우기',
+                          danger: true,
+                        }))
+                      )
+                        return;
                       try {
                         await api(`/api/sources/${k.id}`, { method: 'DELETE' });
                         onChanged();

@@ -338,7 +338,7 @@ create table if not exists public.coupon_redemptions (
 create table if not exists public.reports (
   id bigint generated always as identity primary key,
   reporter_id uuid not null default auth.uid() references auth.users(id) on delete cascade,
-  target_type text not null check (target_type in ('question', 'note', 'visual', 'other')),
+  target_type text not null check (target_type in ('question', 'note', 'visual', 'other', 'chat', 'cover', 'theme', 'course')),
   target_id text check (target_id is null or char_length(target_id) <= 100),
   reason text not null check (char_length(reason) between 1 and 1000),
   status text not null default 'open' check (status in ('open', 'resolved', 'dismissed')),
@@ -347,6 +347,24 @@ create table if not exists public.reports (
 );
 create index if not exists reports_status_idx on public.reports (status, created_at desc);
 create index if not exists reports_reporter_idx on public.reports (reporter_id, created_at desc);
+-- AI 결과 신고 (Google Play AI 생성 콘텐츠 정책: 앱 안에서 신고): 채팅 답·표지 그림·AI 테마 그림·레슨도 받는다.
+-- snapshot: 신고할 때 본 AI 결과 (저장하지 않는 홈 채팅 답도 운영자가 볼 수 있게, 나중에 바뀌거나 지워져도 남게). 넣기는 서버(/api/reports)가 한다
+alter table public.reports add column if not exists snapshot text;
+do $$
+begin
+  if not exists (
+    select 1 from pg_constraint
+     where conrelid = 'public.reports'::regclass and conname = 'reports_target_type_check'
+       and pg_get_constraintdef(oid) like '%course%'
+  ) then
+    alter table public.reports drop constraint if exists reports_target_type_check;
+    alter table public.reports add constraint reports_target_type_check
+      check (target_type in ('question', 'note', 'visual', 'other', 'chat', 'cover', 'theme', 'course'));
+  end if;
+  if not exists (select 1 from pg_constraint where conrelid = 'public.reports'::regclass and conname = 'reports_snapshot_check') then
+    alter table public.reports add constraint reports_snapshot_check check (snapshot is null or char_length(snapshot) <= 4000);
+  end if;
+end $$;
 
 -- ---------------------------------------------------------------------
 -- app_settings: 운영 설정 (관리자 화면에서 바꾼다)
@@ -908,8 +926,9 @@ grant usage, select on sequence public.review_logs_id_seq to authenticated;
 -- 에너지 기록: 보기만
 grant select on public.energy_ledger to authenticated;
 
--- 신고: 쓰기, 내 신고 보기
-grant select, insert on public.reports to authenticated;
+-- 신고: 내 신고 보기, 쓰기는 무엇·이유만 (신고할 때 본 AI 결과(snapshot)와 처리 상태는 서버가 적는다)
+grant select on public.reports to authenticated;
+grant insert (target_type, target_id, reason) on public.reports to authenticated;
 grant usage, select on sequence public.reports_id_seq to authenticated;
 
 -- 운영 설정: 보기만

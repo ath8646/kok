@@ -32,6 +32,8 @@ import { SubjectPickList } from './SubjectPick';
 import { useLongPress } from './useLongPress';
 import { useReducedMotion } from './useReducedMotion';
 import { Button, ICONS, Icon, Sheet, Spinner, cx, inputClass } from './ui';
+import { confirmOpen, useConfirm } from './Confirm';
+import { josa } from '@/lib/josa';
 
 /** 이만큼 넘으면 찾기 칸을 보인다 */
 const SEARCH_FROM = 7;
@@ -98,6 +100,7 @@ export function SubjectDrawer({
   /** 고른 칸에 붙는 말 (자료함 '보는 중', 복습 '고름') */
   currentLabel?: string;
 }) {
+  const ask = useConfirm();
   const [query, setQuery] = useState('');
   const [showArchived, setShowArchived] = useState(false);
   const [view, setView] = useState<View>({ kind: 'list' });
@@ -270,7 +273,8 @@ export function SubjectDrawer({
   useEffect(() => {
     if (!open) return;
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') escRef.current(e);
+      // 확인 창이 떠 있으면 그 창만 닫는다 (서랍은 한 단계 뒤로 가지 않는다)
+      if (e.key === 'Escape' && !confirmOpen()) escRef.current(e);
     };
     window.addEventListener('keydown', onKey, true);
     return () => window.removeEventListener('keydown', onKey, true);
@@ -359,12 +363,12 @@ export function SubjectDrawer({
           >
             <Icon d={ICONS.reorder} size={14} strokeWidth={2.2} />
             순서 바꾸기
-            <span aria-hidden="true" className={cx('relative h-5 w-9 shrink-0 rounded-full transition-colors duration-200', sorting ? 'bg-fab' : 'bg-surface-3')}>
+            <span
+              aria-hidden="true"
+              className={cx('relative h-5 w-9 shrink-0 rounded-full transition-colors duration-200', sorting ? 'bg-fab' : 'bg-surface-3')}
+            >
               <span
-                className={cx(
-                  'absolute left-0.5 top-0.5 h-4 w-4 rounded-full bg-white shadow transition-transform duration-200',
-                  sorting && 'translate-x-4',
-                )}
+                className={cx('absolute left-0.5 top-0.5 h-4 w-4 rounded-full bg-white shadow transition-transform duration-200', sorting && 'translate-x-4')}
               />
             </span>
           </button>
@@ -471,9 +475,7 @@ export function SubjectDrawer({
           ) : null}
         </div>
       ) : null}
-      {nothing ? (
-        <p className="py-6 text-center text-sm text-muted">{searching ? `‘${query.trim()}’에 맞는 과목이 없어요.` : '과목이 없어요.'}</p>
-      ) : null}
+      {nothing ? <p className="py-6 text-center text-sm text-muted">{searching ? `‘${query.trim()}’에 맞는 과목이 없어요.` : '과목이 없어요.'}</p> : null}
     </div>
   );
   let footer: ReactNode = undefined;
@@ -617,7 +619,9 @@ export function SubjectDrawer({
               />
             </>
           )}
-          {manage.onEdit ? <ActionRow icon={ICONS.edit} title="이름·색·시험 날 바꾸기" desc="과목 정보를 고쳐요" chevron onClick={() => manage.onEdit?.(s)} /> : null}
+          {manage.onEdit ? (
+            <ActionRow icon={ICONS.edit} title="이름·색·시험 날 바꾸기" desc="과목 정보를 고쳐요" chevron onClick={() => manage.onEdit?.(s)} />
+          ) : null}
           {manage.onMerge && subjects.length > 1 ? (
             <ActionRow
               icon={ICONS.merge}
@@ -681,7 +685,16 @@ export function SubjectDrawer({
         busy={merging}
         onClick={async () => {
           if (!into) return;
-          if (!confirm(`'${s.name}' 과목의 자료 ${n}개와 복습 기록을 '${into.name}' 과목으로 옮기고 '${s.name}' 과목을 없앨까요? 되돌릴 수 없어요.`)) return;
+          if (
+            !(await ask({
+              title: '과목 합치기',
+              body: `'${s.name}' 과목의 자료 ${n}개와 복습 기록을 ${josa(`'${into.name}' 과목`, '으로')} 옮기고 '${s.name}' 과목을 없앨까요?`,
+              note: '되돌릴 수 없어요.',
+              ok: '합치기',
+              danger: true,
+            }))
+          )
+            return;
           setMerging(true);
           try {
             if (await onMerge(s, into)) {
@@ -705,12 +718,7 @@ export function SubjectDrawer({
     const onDelete = manage.onDelete;
     body = (
       <div className="kok-appear grid gap-4">
-        <BackButton
-          ref={backRef}
-          onClick={back}
-          label={shown.from === 'subject' && one ? one.name : '과목 고르기'}
-          disabled={!!busy}
-        />
+        <BackButton ref={backRef} onClick={back} label={shown.from === 'subject' && one ? one.name : '과목 고르기'} disabled={!!busy} />
         <div className="grid gap-1">
           <h3 className="break-keep font-display text-lg leading-snug">{one ? `‘${one.name}’ 과목을 지울까요?` : `과목 ${rows.length}개를 지울까요?`}</h3>
           <p className="break-keep text-sm leading-relaxed text-muted">
@@ -732,9 +740,7 @@ export function SubjectDrawer({
               <Icon d={ICONS.archive} size={19} />
             </span>
             <div className="grid min-w-0 gap-2.5">
-              <p className="break-keep text-sm leading-relaxed">
-                다 끝난 과목이면 지우지 말고 보관해 보세요. 목록에서만 빠지고, 복습은 그대로 나와요.
-              </p>
+              <p className="break-keep text-sm leading-relaxed">다 끝난 과목이면 지우지 말고 보관해 보세요. 목록에서만 빠지고, 복습은 그대로 나와요.</p>
               <Button
                 size="sm"
                 variant="secondary"
@@ -790,7 +796,15 @@ export function SubjectDrawer({
   }
 
   const title =
-    shown.kind === 'subject' ? '과목 관리' : shown.kind === 'merge' ? '과목 합치기' : shown.kind === 'delete' ? '과목 지우기' : selecting ? '과목 고르기' : '모든 과목';
+    shown.kind === 'subject'
+      ? '과목 관리'
+      : shown.kind === 'merge'
+        ? '과목 합치기'
+        : shown.kind === 'delete'
+          ? '과목 지우기'
+          : selecting
+            ? '과목 고르기'
+            : '모든 과목';
   return (
     <Sheet open={open} onClose={close} title={title} footer={footer}>
       <div ref={rootRef}>{body}</div>
@@ -1066,7 +1080,8 @@ function PinnedGrid({
         container: liveEl ?? undefined,
         announcements,
         screenReaderInstructions: {
-          draggable: '꾹 누른 채 끌면 순서가 바뀌어요. 키보드는 스페이스나 엔터로 들고, 화살표로 옮긴 뒤 다시 스페이스나 엔터로 놓아요. Esc 를 누르면 그만둬요.',
+          draggable:
+            '꾹 누른 채 끌면 순서가 바뀌어요. 키보드는 스페이스나 엔터로 들고, 화살표로 옮긴 뒤 다시 스페이스나 엔터로 놓아요. Esc 를 누르면 그만둬요.',
         },
       }}
     >

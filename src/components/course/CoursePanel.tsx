@@ -26,6 +26,7 @@ import {
 import { Button, Chip, EmptyState, Energy, ICONS, Icon, Menu, Sheet, api, cx, radioKeys, useToast, DONE, type MenuItem } from '../ui';
 import { CoursePath, Stars } from './CoursePath';
 import { LessonPlayer } from './LessonPlayer';
+import { AiMark } from '../ReportSheet';
 
 type CourseRow = { id: string; level: CourseLevel; plan: CoursePlan; progress: CourseProgress; updatedAt: string };
 
@@ -220,6 +221,8 @@ export function CoursePanel({
             <div className="flex flex-wrap items-center gap-2">
               <Chip tone="accent">{COURSE_LEVEL_INFO[course.level].name} 수준</Chip>
               {stats && stats.done === stats.total ? <Chip tone="ok">모두 끝냄</Chip> : null}
+              {/* 생성형 AI 결과물 표시 (인공지능기본법). 이상한 곳은 레슨 위 깃발로 신고 */}
+              <AiMark label="AI가 만든 레슨" />
             </div>
             <h2 className="mt-2 font-display text-[22px] leading-snug">{course.plan.title || noteTitle}</h2>
             {course.plan.intro ? <p className="mt-1 text-sm leading-relaxed text-muted">{course.plan.intro}</p> : null}
@@ -273,6 +276,7 @@ export function CoursePanel({
             goal={lessonOf(open)?.goal}
             cards={lessonOf(open)?.cards ?? []}
             checks={lessonOf(open)?.checks ?? []}
+            reportTarget={`${noteId}:${open.id}`}
             onClose={() => setOpen(null)}
             onFinish={(r) => finish(open, r.stars)}
           />
@@ -283,6 +287,7 @@ export function CoursePanel({
             subtitle={open.kind === 'final' ? '모든 단계에서 뽑은 문제' : `${open.unit + 1}단계에서 뽑은 문제`}
             cards={[]}
             checks={open.kind === 'final' ? finalChecks(course.plan, seed) : recapChecks(course.plan, open.unit, seed)}
+            reportTarget={`${noteId}:${open.id}`}
             onClose={() => setOpen(null)}
             onFinish={(r) => finish(open, r.stars)}
           />

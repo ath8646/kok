@@ -322,6 +322,50 @@ async def send_report(page, reason, text=None):
     await expect(page.get_by_text("신고했어요. 고마워요!").last).to_be_visible()
 
 
+async def edit_on(page):
+    """노트 정리 탭의 고치기 모드를 켠다 (이미 켜져 있으면 그대로)"""
+    done = page.get_by_role("button", name="완료", exact=True)
+    if await done.count():
+        return
+    await page.get_by_role("button", name="고치기", exact=True).click()
+    await expect(done).to_be_visible()
+
+
+async def edit_off(page):
+    """고치기 모드를 끝낸다 ('완료')"""
+    await page.get_by_role("button", name="완료", exact=True).click()
+    await expect(page.get_by_role("button", name="고치기", exact=True)).to_be_visible()
+
+
+async def edit_text(page, name, text, scope=None):
+    """고치기 모드의 글 칸(화면 읽기 이름)을 눌러 그 자리에서 글을 바꾼다. 켜진 편집기(ProseMirror)를 돌려준다.
+    글 칸은 Esc·다른 칸을 누르면 저장된다"""
+    root = scope or page
+    await root.get_by_role("textbox", name=name, exact=True).click()
+    pm = root.locator(f".ProseMirror[aria-label='{name}']")
+    await expect(pm).to_be_focused()
+    await pm.fill(text)
+    return pm
+
+
+async def select_in(pm, word):
+    """켜진 편집기 안에서 글자를 고른다 (처음 나오는 곳)"""
+    await pm.evaluate(
+        """(el, w) => {
+          const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
+          while (walker.nextNode()) {
+            const t = walker.currentNode; const i = t.textContent.indexOf(w);
+            if (i < 0) continue;
+            const r = document.createRange(); r.setStart(t, i); r.setEnd(t, i + w.length);
+            const s = getSelection(); s.removeAllRanges(); s.addRange(r); return;
+          }
+          throw new Error('not found: ' + w);
+        }""",
+        word,
+    )
+    await pm.page.wait_for_timeout(120)
+
+
 def db(q):
     """로컬 앱 DB 에 한 줄 묻기 (글로 돌려준다)"""
     import subprocess
@@ -983,6 +1027,8 @@ async def main():
         composer = page.get_by_role("dialog", name="자료 넣기")
         await expect(composer).to_be_visible()
         assert "compose=1" not in page.url, page.url
+        # 단원은 고르지 않으면 '단원 없음' (AI 가 정하지 않는다)
+        await expect(composer.get_by_role("button", name="단원: 단원 없음")).to_be_visible()
         await shot(page, "06-composer-empty", full=False)
         text = "내가 쓴 광합성 정리. 광합성은 식물이 빛을 받아 물과 이산화탄소로 포도당과 산소를 만드는 과정이다. 엽록체에서 일어난다. 밤에도 광합성을 한다."
         box = composer.get_by_label("공부한 내용")
@@ -1018,10 +1064,11 @@ async def main():
         await expect(sub).to_have_class(re.compile("is-stuck"))
         await page.evaluate("window.scrollTo(0, 0)")
         await expect(sub).not_to_have_class(re.compile("is-stuck"))
-        # 요약 고치기
-        await page.get_by_role("button", name="요약 고치기").click()
-        await page.get_by_label("요약", exact=True).fill("광합성은 엽록체에서 빛으로 포도당을 만드는 과정이다.")
-        await page.get_by_role("button", name="저장", exact=True).first.click()
+        # 요약 고치기: 위 띠의 '고치기' → 요약을 눌러 그 자리에서 → Esc → '완료'
+        await edit_on(page)
+        await edit_text(page, "한 줄 요약", "광합성은 엽록체에서 빛으로 포도당을 만드는 과정이다.")
+        await page.keyboard.press("Escape")
+        await edit_off(page)
         await expect(page.get_by_text("엽록체에서 빛으로 포도당을")).to_be_visible()
         # 노트 신고 ('이상해요'): 노트 메뉴 → 이유 칩 → 보내기 (서버가 내 노트인지 보고 남긴다)
         await page.get_by_role("button", name="노트 메뉴").click()
@@ -1029,24 +1076,41 @@ async def main():
         await send_report(page, "빠진 내용이 있어요", "명반응 설명이 없어요")
         assert db("select target_type || '|' || reason from public.reports order by id desc limit 1") == "note|빠진 내용이 있어요: 명반응 설명이 없어요"
 
-        step("note editing: easy marks, stars on top, examples, formulas, order")
+        step("note editing: edit mode in place (marks shown as they are, auto-save), stars on top, examples, formulas, drag order")
         sid = page.url.rstrip("/").split("/")[-1].split("?")[0]
         nbody = lambda path: db(f"select body #>> '{path}' from public.notes where source_id = '{sid}'")
-        # 요약: 고른 글을 형광펜 버튼으로 꾸미면 기호가 붙고 미리보기에 보인다
-        await page.get_by_role("button", name="요약 고치기").click()
-        box = page.get_by_label("요약", exact=True)
-        await box.fill("광합성은 빛으로 포도당을 만든다")
-        await box.evaluate("(el) => { el.focus(); el.setSelectionRange(9, 12); }")
-        await page.get_by_role("toolbar", name="요약 꾸미기").get_by_role("button", name="형광펜").click()
-        await expect(box).to_have_value("광합성은 빛으로 ==포도당==을 만든다")
-        await expect(page.locator("mark.kok-mark", has_text="포도당")).to_be_visible()
-        # 꾸미는 법
-        await page.get_by_role("toolbar", name="요약 꾸미기").get_by_role("button", name="꾸미는 법").click()
-        await expect(page.get_by_text("쉽게 꾸미는 법")).to_be_visible()
+        # 단원은 학생이 고른 것만: 고르지 않고 넣은 자료는 AI 가 단원을 정하지 않는다 (AI 가 읽은 단원은 'AI 추천'으로만)
+        assert db(f"select unit from public.sources where id = '{sid}'") == "", "AI must not set the unit"
+        assert nbody("{unit}") == "2. 식물과 에너지"
+        await edit_on(page)
+        await page.get_by_role("button", name=re.compile("^단원: 단원 없음")).click()
+        unit_sheet = page.get_by_role("dialog", name="단원")
+        await expect(unit_sheet.get_by_role("radio", name=re.compile("^2\\. 식물과 에너지"))).to_contain_text("AI 추천")
+        await expect(unit_sheet.get_by_role("radio", name="단원 없음")).to_have_attribute("aria-checked", "true")
+        await shot(page, "08-note-unit-sheet", full=False)
+        await page.keyboard.press("Escape")
+        await expect(unit_sheet).to_be_hidden()
+        await edit_off(page)
+        # AI 가 정한 중요도(꼭 외우기·중요·참고)는 기본으로 보이지 않는다 (설정에서 켠다)
+        for imp in ["꼭 외우기", "중요", "참고"]:
+            assert await page.locator("article").get_by_text(imp, exact=True).count() == 0, imp
+        # 요약: 고치기 모드에서 글을 고르고 꾸미기 줄의 형광펜 → 보이는 그대로 칠해지고, 저장은 기호로
+        await edit_on(page)
+        await expect(page.get_by_text("글을 누르면 그 자리에서 고쳐요")).to_be_visible()
+        pm = await edit_text(page, "한 줄 요약", "광합성은 빛으로 포도당을 만든다")
+        await select_in(pm, "포도당")
+        bar = page.get_by_role("toolbar", name="글 꾸미기")
+        await expect(bar).to_be_visible()
+        await bar.get_by_role("button", name="형광펜").click()
+        await expect(pm.locator("mark.kok-mark", has_text="포도당")).to_be_visible()
+        await expect(bar.get_by_role("button", name="형광펜")).to_have_attribute("aria-pressed", "true")
         await shot(page, "08-note-edit-marks", full=False)
-        await page.get_by_role("button", name="저장", exact=True).first.click()
+        await page.keyboard.press("Escape")
+        await expect(page.get_by_role("toolbar", name="글 꾸미기")).to_be_hidden()
+        await poll_db(f"select body #>> '{{summary}}' from public.notes where source_id = '{sid}'", "광합성은 빛으로 ==포도당==을 만든다")
+        await expect(page.get_by_text("저장됨")).to_be_visible()
+        await edit_off(page)
         await expect(page.locator("section mark.kok-mark", has_text="포도당")).to_be_visible()
-        assert nbody("{summary}") == "광합성은 빛으로 ==포도당==을 만든다"
         # 별표: 별이 켜지고 그 개념이 맨 위로 (나머지는 원래 순서)
         stars = page.get_by_role("button", name=re.compile(" 별표$"))
         assert await stars.count() == 4, await stars.count()
@@ -1068,9 +1132,7 @@ async def main():
         await expect(cards.nth(2)).to_contain_text("광합성 장소")
         # 키보드로 별표를 빼면 카드가 제자리로 옮겨 가도 초점은 그 별에 남는다 (다시 별표해 되돌린다)
         kp_star = page.get_by_role("button", name="광합성의 재료 별표", exact=True)
-        await page.get_by_role("button", name="광합성의 재료 고치기", exact=True).focus()
-        await page.keyboard.press("Tab")
-        await expect(kp_star).to_be_focused()
+        await kp_star.focus()
         await page.keyboard.press("Enter")
         await expect(kp_star).to_have_attribute("aria-pressed", "false")
         await expect(cards.first).to_contain_text("광합성의 결과물")
@@ -1079,82 +1141,107 @@ async def main():
         await expect(kp_star).to_have_attribute("aria-pressed", "true")
         await expect(cards.first).to_contain_text("광합성의 재료")
         await expect(kp_star).to_be_focused()
-        # 고치던 내용이 있으면 다른 칸을 열기 전에 한 번 묻는다 (아니요 → 그대로), 닫으면 연 버튼으로 초점이 돌아온다
-        await page.get_by_role("button", name="요약 고치기").click()
-        await page.get_by_label("요약", exact=True).fill("고치던 요약")
-        await page.locator("#kp-k4").get_by_role("button", name=re.compile("고치기$")).click()
-        asked = await app_confirm(page, ok=False)
-        await expect(page.get_by_label("요약", exact=True)).to_have_value("고치던 요약")
-        assert "저장되지 않았어요" in asked and "계속 고치기" in asked, asked
-        await page.get_by_role("button", name="취소").first.click()
-        await expect(page.get_by_role("button", name="요약 고치기")).to_be_focused()
-        assert nbody("{summary}") == "광합성은 빛으로 ==포도당==을 만든다"
-        # 개념 고치기: 중요도, 함정 빼기, 예시 더하기 (목록 기호로)
+        # 개념 고치기 (그 자리에서): 설명 덧붙이기, 함정 빼기(×), 예시 더하기(- 를 치면 목록, !!…!! 는 빨간 글씨)
+        await edit_on(page)
         kp2 = page.locator("#kp-k2")
-        await kp2.get_by_role("button", name=re.compile("고치기$")).click()
-        await kp2.get_by_role("radio", name="참고").click()
-        await kp2.get_by_role("button", name="함정 빼기").click()
-        await kp2.get_by_role("button", name="예시 추가").click()
-        await kp2.get_by_role("textbox", name=re.compile("^예시")).last.fill("- 잎을 잘라 보면 초록색 알갱이가 보인다\n- 알갱이 속에 !!엽록소!!가 있다")
-        await kp2.get_by_role("button", name="저장", exact=True).click()
-        await expect(kp2.locator(".kok-li")).to_have_count(2)
-        await expect(kp2.locator(".kok-red", has_text="엽록소")).to_be_visible()
-        await expect(kp2.get_by_text("참고", exact=True)).to_be_visible()
-        # (저장은 화면이 먼저 바뀌고 잠시 뒤에 끝난다)
+        expl_name = await kp2.get_by_role("textbox", name=re.compile("개념 설명$")).get_attribute("aria-label")
+        expl_before = nbody("{key_points,1,explanation}")
+        await kp2.get_by_role("textbox", name=expl_name).click()
+        await page.keyboard.press("Control+End")
+        await page.keyboard.type(" 잎에 많다")
+        await kp2.get_by_role("button", name=re.compile("함정 1 빼기$")).click()
         await poll_db(f"select count(*) from public.notes n, jsonb_array_elements(n.body->'pitfalls') p where n.source_id = '{sid}' and p->>'key_point_id' = 'k2'", "0")
+        await poll_db(f"select body #>> '{{key_points,1,explanation}}' from public.notes where source_id = '{sid}'", expl_before + " 잎에 많다")
+        await kp2.get_by_role("button", name=re.compile("예시 더하기$")).click()
+        ex_pm = kp2.locator(".ProseMirror[aria-label$='예시 1']")
+        await expect(ex_pm).to_be_focused()
+        await page.keyboard.type("- 잎을 잘라 보면 초록색 알갱이가 보인다")
+        await page.keyboard.press("Enter")
+        await page.keyboard.type("알갱이 속에 !!엽록소!!가 있다")
+        await expect(ex_pm.locator("li")).to_have_count(2)
+        await expect(ex_pm.locator(".kok-red", has_text="엽록소")).to_be_visible()
+        await shot(page, "08-note-edit-example", full=False)
+        await page.keyboard.press("Escape")
+        await poll_db(
+            f"select p->>'text' from public.notes n, jsonb_array_elements(n.body->'examples') p where n.source_id = '{sid}' and p->>'key_point_id' = 'k2'",
+            "- 잎을 잘라 보면 초록색 알갱이가 보인다\n- 알갱이 속에 !!엽록소!!가 있다",
+        )
+        # 비운 채 둔 함정은 칸을 떠나면 빠진다
+        await kp2.get_by_role("button", name=re.compile("함정 더하기$")).click()
+        await expect(kp2.locator(".ProseMirror[aria-label$='함정 1']")).to_be_focused()
+        await page.keyboard.press("Escape")
+        await expect(kp2.get_by_role("textbox", name=re.compile("함정 1$"))).to_have_count(0)
+        # 개념 지우기는 묻지 않고 지운 뒤 아래 띠에서 되돌린다
+        await kp2.get_by_role("button", name=re.compile(" 메뉴$")).click()
+        await page.get_by_role("menuitem", name="개념 지우기").click()
+        await expect(page.locator("#kp-k2")).to_have_count(0)
+        await expect(page.get_by_text(re.compile("^'광합성 장소.*' 개념을 지웠어요$"))).to_be_visible()
+        await poll_db(f"select count(*) from public.notes n, jsonb_array_elements(n.body->'key_points') k where n.source_id = '{sid}' and k->>'id' = 'k2'", "0")
+        await page.get_by_role("button", name="되돌리기", exact=True).click()
+        await expect(page.locator("#kp-k2")).to_be_visible()
         await poll_db(f"select count(*) from public.notes n, jsonb_array_elements(n.body->'examples') p where n.source_id = '{sid}' and p->>'key_point_id' = 'k2'", "1")
-        # 공식 더하기: 기호 버튼과 미리보기
+        # 공식 더하기: 기호 버튼과 미리보기, 읽을 수 있는 공식이면 저절로 저장
         await page.get_by_role("button", name="공식 추가").click()
-        fe = page.locator(".kok-card", has=page.get_by_role("toolbar", name="공식 기호"))
-        await fe.get_by_label("공식 이름 (없어도 돼요)").fill("원의 넓이")
-        tex = fe.get_by_role("textbox", name="공식", exact=True)
+        tex = page.get_by_role("textbox", name="공식", exact=True)
+        await expect(tex).to_be_focused()
         await tex.fill("S = ")
         await tex.press("End")
+        fe = page.get_by_role("toolbar", name="공식 기호")
         await fe.get_by_role("button", name="파이").click()
         await tex.press("End")
         await tex.press_sequentially("r")
         await fe.get_by_role("button", name="거듭제곱").click()
         await page.keyboard.type("2")
         await expect(tex).to_have_value("S = \\pi r^{2}")
-        await expect(fe.locator(".katex-display")).to_be_visible()
+        await expect(page.locator(".katex-display").last).to_be_visible()
         await shot(page, "08-note-formula", full=False)
-        await fe.get_by_role("button", name="저장", exact=True).click()
-        # 저장 요청이 끝날 때까지 기다린다 (누르자마자 읽으면 아직 옛 노트일 수 있다)
+        await page.get_by_role("button", name="닫기", exact=True).click()
         await poll_db(f"select body #>> '{{formulas,1,latex}}' from public.notes where source_id = '{sid}'", "S = \\pi r^{2}")
-        # 순서 바꾸기 (키보드): 별표하지 않은 개념끼리
-        kp_sec = page.locator("section", has=page.get_by_role("heading", name=re.compile("^핵심 개념")))
-        await kp_sec.get_by_role("button", name="순서 바꾸기").click()
-        rows = kp_sec.get_by_role("list", name="개념 순서", exact=True).locator("li")
-        await expect(rows).to_have_count(2)
-        await expect(rows.first).to_contain_text("광합성 장소")
-        await shot(page, "08-note-sort", full=False)
-        await rows.first.get_by_role("button").focus()
+        await edit_text(page, "공식 2 이름", "원의 넓이")
+        await page.keyboard.press("Escape")
+        await poll_db(f"select body #>> '{{formulas,1,label}}' from public.notes where source_id = '{sid}'", "원의 넓이")
+        # 끌어서 순서 바꾸기 (키보드): 손잡이에서 스페이스 → ↓ → 스페이스. 별표하지 않은 개념끼리
+        grip = page.get_by_role("button", name=re.compile("^'광합성 장소.*' 옮기기$"))
+        await grip.focus()
         await page.keyboard.press("Space")
         await page.wait_for_timeout(200)
         await page.keyboard.press("ArrowDown")
         await page.wait_for_timeout(300)
         await page.keyboard.press("Space")
-        await expect(rows.first).to_contain_text("빛의 세기")
         await poll_db(f"select string_agg(k->>'id', ',' order by o) from public.notes n, jsonb_array_elements(n.body->'key_points') with ordinality as t(k, o) where n.source_id = '{sid}'", "k1,k4,k3,k2")
-        await kp_sec.get_by_role("button", name="완료").click()
         await expect(cards.nth(2)).to_contain_text("빛의 세기")
         await expect(cards.nth(3)).to_contain_text("광합성 장소")
-        # 순서 바꾸기 (마우스로 끌기): 용어
+        # ⋯ 메뉴의 '위로 옮기기'로 되돌릴 수도 있다 (별표 묶음 밖으로는 못 간다)
+        await page.locator("#kp-k2").get_by_role("button", name=re.compile(" 메뉴$")).click()
+        await page.get_by_role("menuitem", name="위로 옮기기").click()
+        await poll_db(f"select string_agg(k->>'id', ',' order by o) from public.notes n, jsonb_array_elements(n.body->'key_points') with ordinality as t(k, o) where n.source_id = '{sid}'", "k1,k2,k3,k4")
+        await page.locator("#kp-k2").get_by_role("button", name=re.compile(" 메뉴$")).click()
+        await expect(page.get_by_role("menuitem", name="위로 옮기기")).to_have_count(0)
+        await page.keyboard.press("Escape")
+        await page.locator("#kp-k2").get_by_role("button", name=re.compile(" 메뉴$")).click()
+        await page.get_by_role("menuitem", name="아래로 옮기기").click()
+        await poll_db(f"select string_agg(k->>'id', ',' order by o) from public.notes n, jsonb_array_elements(n.body->'key_points') with ordinality as t(k, o) where n.source_id = '{sid}'", "k1,k4,k3,k2")
+        # 끌어서 순서 바꾸기 (마우스): 용어
         term_sec = page.locator("section", has=page.get_by_role("heading", name=re.compile("^용어")))
-        await term_sec.get_by_role("button", name="순서 바꾸기").click()
-        trows = term_sec.get_by_role("list", name="용어 순서").locator("li")
-        await expect(trows).to_have_count(3)
-        a = await trows.nth(0).bounding_box()
-        b = await trows.nth(1).bounding_box()
-        await page.mouse.move(a["x"] + 60, a["y"] + a["height"] / 2)
+        tgrips = term_sec.get_by_role("button", name=re.compile(" 옮기기$"))
+        await expect(tgrips).to_have_count(3)
+        # 카드가 길어서 용어는 화면 아래에 있다: 끌기 전에 보이게 내린다
+        await tgrips.nth(1).evaluate("(el) => el.scrollIntoView({ block: 'center' })")
+        await page.wait_for_timeout(200)
+        a = await tgrips.nth(0).bounding_box()
+        b = await tgrips.nth(1).bounding_box()
+        await page.mouse.move(a["x"] + a["width"] / 2, a["y"] + a["height"] / 2)
         await page.mouse.down()
-        await page.mouse.move(a["x"] + 60, a["y"] + a["height"] / 2 + 8, steps=4)
-        await page.mouse.move(b["x"] + 60, b["y"] + b["height"] / 2 + 10, steps=10)
+        await page.mouse.move(a["x"] + a["width"] / 2, a["y"] + a["height"] / 2 + 8, steps=4)
+        await page.mouse.move(b["x"] + b["width"] / 2, b["y"] + b["height"] / 2 + 10, steps=10)
         await page.wait_for_timeout(250)
         await page.mouse.up()
-        await expect(trows.first).to_contain_text("기공")
         await poll_db(f"select string_agg(t->>'term', ',' order by o) from public.notes n, jsonb_array_elements(n.body->'terms') with ordinality as x(t, o) where n.source_id = '{sid}'", "기공,엽록체,엽록소")
-        await term_sec.get_by_role("button", name="완료").click()
+        await shot(page, "08-note-edit-mode", full=True)
+        await edit_off(page)
+        await expect(page.get_by_role("toolbar", name="글 꾸미기")).to_have_count(0)
+        await expect(kp2.locator(".kok-li")).to_have_count(2)
+        await expect(kp2.locator(".kok-red", has_text="엽록소")).to_be_visible()
         await page.evaluate("window.scrollTo(0, 0)")
 
         step("visual tab: overview + branch cards, branch details, big map")
@@ -1806,8 +1893,14 @@ async def main():
         await composer.get_by_role("button", name="만들기").click()
         await page.wait_for_url("**/notes/*")
         assert await wait_ready(page), "blank note did not open"
-        await expect(page.get_by_role("heading", name="세포 호흡", exact=True)).to_be_visible()
+        # 새 빈 노트는 고치기 모드로 열린다 (이름은 큰 제목 자리에서 고친다)
+        await expect(page.get_by_role("button", name="완료", exact=True)).to_be_visible()
+        await expect(page.get_by_role("textbox", name="노트 이름")).to_have_value("세포 호흡")
+        assert "edit=1" not in page.url, page.url
         await expect(page.get_by_text("직접 만든 노트").first).to_be_visible()
+        await shot(page, "28-blank-note-edit", full=False)
+        await edit_off(page)
+        await expect(page.get_by_role("heading", name="세포 호흡", exact=True)).to_be_visible()
         await expect(page.get_by_text("아직 개념이 없어요")).to_be_visible()
         await shot(page, "28-blank-note", full=False)
         bsid = page.url.rstrip("/").split("/")[-1].split("?")[0]
@@ -1817,26 +1910,50 @@ async def main():
         bnid = db(f"select id from public.notes where source_id = '{bsid}'")
         r = await page.request.post(BASE + f"/api/notes/{bnid}/quiz", headers={"origin": BASE}, data={"action": "preview"})
         assert r.status == 400 and (await r.json())["error"] == "empty_note", (r.status, await r.text())
+        # '첫 개념 적기' → 고치기 모드의 새 개념 이름 칸 → 엔터로 설명 칸 (기호를 쳐도 꾸미기)
         await page.get_by_role("button", name="첫 개념 적기").click()
-        await page.get_by_label("개념 이름").fill("세포 호흡")
-        await page.get_by_label("설명", exact=True).fill("포도당을 분해해 **에너지**를 얻는 과정")
-        await page.get_by_role("button", name="저장", exact=True).click()
-        await expect(page.locator("article strong", has_text="에너지")).to_be_visible()
+        title_pm = page.locator(".ProseMirror[aria-label='1번 개념 이름']")
+        await expect(title_pm).to_be_focused()
+        await page.keyboard.type("세포 호흡")
+        await page.keyboard.press("Enter")
+        await expect(page.locator(".ProseMirror[aria-label='1번 개념 설명']")).to_be_focused()
+        await page.keyboard.type("포도당을 분해해 **에너지**를 얻는 과정")
+        await expect(page.locator(".ProseMirror[aria-label='1번 개념 설명'] strong", has_text="에너지")).to_be_visible()
+        await page.keyboard.press("Escape")
+        await poll_db(f"select body #>> '{{key_points,0,explanation}}' from public.notes where source_id = '{bsid}'", "포도당을 분해해 **에너지**를 얻는 과정")
         await page.get_by_role("button", name="용어 추가").click()
-        await page.get_by_label("용어", exact=True).fill("미토콘드리아")
-        await page.get_by_label("뜻", exact=True).fill("세포 호흡이 일어나는 곳")
-        await page.get_by_role("button", name="저장", exact=True).click()
+        await expect(page.locator(".ProseMirror[aria-label='용어 1']")).to_be_focused()
+        await page.keyboard.type("미토콘드리아")
+        await page.keyboard.press("Enter")
+        await page.keyboard.type("세포 호흡이 일어나는 곳")
+        await page.keyboard.press("Escape")
+        await poll_db(f"select body #>> '{{terms,0,meaning}}' from public.notes where source_id = '{bsid}'", "세포 호흡이 일어나는 곳")
+        # 빈 개념을 더하고 그냥 마치면 빠진다
+        await page.get_by_role("button", name="개념 추가").click()
+        await expect(page.locator(".ProseMirror[aria-label='2번 개념 이름']")).to_be_focused()
+        await edit_off(page)
+        await expect(page.locator("article strong", has_text="에너지")).to_be_visible()
         await expect(page.get_by_text("세포 호흡이 일어나는 곳")).to_be_visible()
+        await poll_db(f"select jsonb_array_length(body->'key_points') from public.notes where source_id = '{bsid}'", "1")
         assert db(f"select count(*) from public.energy_ledger where user_id = '{USERS['student'][0]}'") == ledger_before, "a blank note uses no energy"
         await page.get_by_role("tab", name="원본").click()
         await expect(page.get_by_text("직접 만든 노트라 원본이 없어요")).to_be_visible()
         await page.get_by_role("tab", name="정리").click()
-        # 이름 바꾸기 (노트와 자료함 이름이 같이)
+        # 이름·단원 바꾸기: 노트 메뉴 → 고치기 모드의 큰 제목 칸 (노트와 자료함 이름이 같이), 단원 칩 → 단원 창
         await page.get_by_role("button", name="노트 메뉴").click()
-        await page.get_by_role("menuitem", name="이름 바꾸기").click()
-        rename = page.get_by_role("dialog", name="노트 이름")
-        await rename.get_by_label("노트 이름").fill("세포 호흡 노트")
-        await rename.get_by_role("button", name="저장").click()
+        await page.get_by_role("menuitem", name="이름·단원 바꾸기").click()
+        title_box = page.get_by_role("textbox", name="노트 이름")
+        await expect(title_box).to_be_focused()
+        await title_box.fill("세포 호흡 노트")
+        await title_box.press("Enter")
+        await poll_db(f"select title from public.sources where id = '{bsid}'", "세포 호흡 노트")
+        await page.get_by_role("button", name=re.compile("^단원: 단원 없음")).click()
+        unit_sheet = page.get_by_role("dialog", name="단원")
+        await unit_sheet.get_by_label("새 단원 이름").fill("3. 세포 호흡")
+        await unit_sheet.get_by_role("button", name="쓰기").click()
+        await expect(unit_sheet).to_be_hidden()
+        await poll_db(f"select unit from public.sources where id = '{bsid}'", "3. 세포 호흡")
+        await edit_off(page)
         await expect(page.get_by_role("heading", name="세포 호흡 노트", exact=True)).to_be_visible()
         assert db(f"select title from public.sources where id = '{bsid}'") == "세포 호흡 노트"
         assert db(f"select title from public.notes where source_id = '{bsid}'") == "세포 호흡 노트"
@@ -1853,6 +1970,17 @@ async def main():
         await expect(page.get_by_role("radio", name="오른쪽으로")).to_have_attribute("aria-checked", "true")
         await shot(page, "28-settings")
         await no_hscroll(page, "settings")
+        # AI 가 정한 중요도: 켜면 개념 카드에 꼭 외우기·중요·참고가 보이고, 끄면 다시 숨는다
+        imp = page.get_by_label("개념 카드에 AI가 정한 중요도 보이기 (꼭 외우기·중요·참고)")
+        await expect(imp).not_to_be_checked()
+        await page.get_by_text("개념 카드에 AI가 정한 중요도 보이기").click()
+        await poll_db(f"select settings #>> '{{note,importance}}' from public.profiles where id = '{USERS['student'][0]}'", "true")
+        await page.goto(BASE + f"/notes/{sid}")
+        assert await wait_ready(page)
+        await expect(page.locator("article").get_by_text(re.compile("^(꼭 외우기|중요|참고)$")).first).to_be_visible()
+        await page.goto(BASE + "/settings")
+        await page.get_by_text("개념 카드에 AI가 정한 중요도 보이기").click()
+        await poll_db(f"select settings #>> '{{note,importance}}' from public.profiles where id = '{USERS['student'][0]}'", "false")
 
         step("plan: bad coupon")
         await page.goto(BASE + "/plan")
@@ -2229,9 +2357,10 @@ async def main():
         await expect(page.get_by_text("지난 버전을 보고 있어요")).to_be_visible()
         assert "v=1" in page.url, page.url
         await expect(page.get_by_role("heading", name=re.compile("광합성과 호흡"))).to_have_count(0)
-        await page.get_by_role("button", name="요약 고치기").click()
-        await page.get_by_label("요약", exact=True).fill("버전 1에서 고친 요약이에요.")
-        await page.get_by_role("button", name="저장", exact=True).first.click()
+        await edit_on(page)
+        await edit_text(page, "한 줄 요약", "버전 1에서 고친 요약이에요.")
+        await page.keyboard.press("Escape")
+        await edit_off(page)
         await expect(page.get_by_text("버전 1에서 고친 요약이에요.")).to_be_visible()
         await page.wait_for_timeout(600)
         v1_summary = lambda: psql(f"select v.body->>'summary' from public.note_versions v join public.notes n on n.id = v.note_id where n.source_id = '{note_sid}' and v.number = 1")
@@ -2361,9 +2490,9 @@ async def main():
         assert psql(f"select status || ',' || rested_hidden::text from public.questions where id = '{only_cur}'") == "hidden,true"
         # 첫 탭은 아직 예전(버전 {v_b}) 화면이다: 여기서 고쳐도 지금 버전을 덮어쓰지 않는다
         summary_before = psql(f"select body->>'summary' from public.notes where source_id = '{note_sid}'")
-        await page.get_by_role("button", name="요약 고치기").click()
-        await page.get_by_label("요약", exact=True).fill("예전 탭에서 고친 요약이에요.")
-        await page.get_by_role("button", name="저장", exact=True).first.click()
+        await edit_on(page)
+        await edit_text(page, "한 줄 요약", "예전 탭에서 고친 요약이에요.")
+        await page.keyboard.press("Escape")
         await expect(page.get_by_text("그사이 다른 곳에서 노트가 바뀌어서 방금 고친 것은 저장하지 못했어요.")).to_be_visible(timeout=10000)
         await page.wait_for_timeout(600)
         assert psql(f"select body->>'summary' from public.notes where source_id = '{note_sid}'") == summary_before
@@ -2375,19 +2504,21 @@ async def main():
         await page.wait_for_timeout(4500)  # 앞 알림이 사라지고 같은 알림이 다시 뜰 수 있게
         await page2.goto(BASE + f"/notes/{note_sid}")
         assert await wait_ready(page2)
-        await page2.get_by_role("button", name="요약 고치기").click()
-        await page2.get_by_label("요약", exact=True).fill("다른 탭에서 먼저 고친 요약이에요.")
-        await page2.get_by_role("button", name="저장", exact=True).first.click()
+        await edit_on(page2)
+        await edit_text(page2, "한 줄 요약", "다른 탭에서 먼저 고친 요약이에요.")
+        await page2.keyboard.press("Escape")
+        await edit_off(page2)
         await expect(page2.get_by_text("다른 탭에서 먼저 고친 요약이에요.")).to_be_visible()
         await page2.wait_for_timeout(800)
         assert psql(f"select body->>'summary' from public.notes where source_id = '{note_sid}'") == "다른 탭에서 먼저 고친 요약이에요."
-        await page.get_by_role("button", name="요약 고치기").click()
-        await page.get_by_label("요약", exact=True).fill("늦게 고친 요약이에요.")
-        await page.get_by_role("button", name="저장", exact=True).first.click()
+        await edit_on(page)
+        await edit_text(page, "한 줄 요약", "늦게 고친 요약이에요.")
+        await page.keyboard.press("Escape")
         await expect(page.get_by_text("그사이 다른 곳에서 노트가 바뀌어서 방금 고친 것은 저장하지 못했어요.")).to_be_visible(timeout=10000)
         await page.wait_for_timeout(600)
         assert psql(f"select body->>'summary' from public.notes where source_id = '{note_sid}'") == "다른 탭에서 먼저 고친 요약이에요."
         await expect(page.get_by_text("다른 탭에서 먼저 고친 요약이에요.")).to_be_visible(timeout=10000)
+        await edit_off(page)
         # 쉬게 한 문제는 그 버전으로 돌아와도 쉬는 중이다 (복습에 다시 나오지 않는다)
         await page2.goto(BASE + f"/notes/{note_sid}?tab=original")
         assert await wait_ready(page2)
@@ -2433,7 +2564,7 @@ async def main():
         # 자료를 더하는 동안에는 정리·그림을 고칠 수 없다 (합치는 바탕이 바뀌지 않게)
         await page.get_by_role("tab", name="정리").click()
         await expect(page.get_by_text("한 줄 요약")).to_be_visible()
-        assert await page.get_by_role("button", name="요약 고치기").count() == 0, "note editing is locked while adding material"
+        await expect(page.get_by_role("button", name="고치기", exact=True)).to_be_disabled()  # note editing is locked while adding material
         await page.get_by_role("tab", name="그림").click()
         await expect(page.get_by_role("button", name="고치기", exact=True)).to_be_disabled()
         await expect(page.get_by_text("이 노트에 자료를 더하는 중이에요. 끝나면 고칠 수 있어요.").first).to_be_visible()
@@ -3022,15 +3153,12 @@ async def main():
         await page.locator(f"main a[href='/notes/{note_sid}']").first.click()
         await wait_ready(page)
         await shot(page, "32-note-dark")
-        await page.locator("article[data-flip]").first.get_by_role("button", name=re.compile("고치기$")).click()
+        await edit_on(page)
+        await page.locator("article[data-flip]").first.get_by_role("textbox", name=re.compile("개념 설명$")).click()
         await page.wait_for_timeout(300)
         await shot(page, "32-note-edit-dark", full=False)
-        await page.get_by_role("button", name="취소").first.click()
-        kp_sec = page.locator("section", has=page.get_by_role("heading", name=re.compile("^핵심 개념")))
-        await kp_sec.get_by_role("button", name="순서 바꾸기").click()
-        await page.wait_for_timeout(300)
-        await shot(page, "32-note-sort-dark", full=False)
-        await kp_sec.get_by_role("button", name="완료").click()
+        await page.keyboard.press("Escape")
+        await edit_off(page)
         await page.get_by_role("tab", name="그림").click()
         await page.wait_for_timeout(500)
         await shot(page, "33-mindmap-dark", full=False)

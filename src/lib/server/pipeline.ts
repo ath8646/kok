@@ -1169,6 +1169,9 @@ async function stepCheckAndFinish(ctx: Ctx): Promise<'done' | Partial<SourceRow>
     // 검사하는 동안 버전이 바뀌었으면(일어나지 않아야 한다) 저장하지 않고 지금 버전에 다시 합친다
     if ((await finalizeAppend(ctx, { p_note: noteBody, p_visuals: visuals, p_questions: saved, p_expire: expire })) === 'stale') return remergePatch(ctx.src);
   } else {
+    // 단원은 학생이 고른 것만 쓴다: 고르지 않았으면(빈 칸) DB 함수가 AI 단원으로 채운 것을 다시 비운다.
+    // (AI 가 읽은 단원은 노트 정리(body.unit)에만 남아 노트 고치기의 단원 고르기에 'AI 추천'으로 보인다)
+    const { data: before } = await ctx.admin.from('sources').select('unit').eq('id', ctx.src.id).maybeSingle();
     const { error } = await ctx.admin.rpc('kok_finalize_source', {
       p_source: ctx.src.id,
       p_title: note.title || ctx.src.title,
@@ -1178,6 +1181,11 @@ async function stepCheckAndFinish(ctx: Ctx): Promise<'done' | Partial<SourceRow>
       p_expire: expire,
     });
     if (error) throw error;
+    const aiUnit = (typeof note.unit === 'string' ? note.unit : '').replace(/^ +| +$/g, '').slice(0, 40);
+    if (before && !String(before.unit ?? '').trim() && aiUnit) {
+      const { error: uErr } = await ctx.admin.from('sources').update({ unit: '' }).eq('id', ctx.src.id).eq('unit', aiUnit);
+      if (uErr) console.warn('[kok] could not clear the AI unit', ctx.src.id, uErr.message);
+    }
   }
   // 큰 PDF 를 나눈 조각은 정리가 끝나면 필요 없다 (원본은 '원본' 탭에서 보도록 남긴다)
   const parts = pdfPartsOf(ctx.src);

@@ -262,6 +262,15 @@ export const zUserSettings = z.object({
       done: z.boolean().catch(true),
     })
     .catch({ done: true }),
+  /**
+   * 노트: importance = 개념 카드에 AI 가 정한 중요도(꼭 외우기·중요·참고)를 보일지 (기본 끔, PDF 요약도 따른다).
+   * 꺼도 복습은 AI 중요도로 중요한 문제를 먼저 낸다
+   */
+  note: z
+    .object({
+      importance: z.boolean().catch(false),
+    })
+    .catch({ importance: false }),
 });
 export type UserSettings = z.infer<typeof zUserSettings>;
 export const DEFAULT_SETTINGS: UserSettings = zUserSettings.parse({});

@@ -13,6 +13,7 @@ import { MIN_TEXT_CHARS, checkText, fileKind, groupFiles, isSubmitKey, splitComp
 import { SUBJECT_COLORS } from '@/lib/settings';
 import { subjectVar } from '@/lib/colors';
 import { matchesSubject, pickerOrder } from '@/lib/subject-order';
+import { UnitOptions, useSubjectUnits } from './UnitPick';
 import { SOURCES_CHANGED, SUBJECTS_CHANGED } from '@/lib/events';
 import { topFileSink } from '@/lib/file-sink';
 import { ApiError, Button, EnergyEstimate, ICONS, Icon, Sheet, Spinner, api, cx, inputClass, useToast } from './ui';
@@ -65,6 +66,8 @@ type Item = {
   bytes?: number;
   /** false 면 이 노트의 문제를 복습에 넣지 않는다 (자료 넣기 창에서 끈 것) */
   review?: boolean;
+  /** 자료 넣기 창에서 고른 단원 (없으면 단원 없이: AI 가 정하지 않는다) */
+  unit?: string;
 };
 
 /** 올리기 전에 한 번 준비한 것 (다시 하기에서 사진을 또 줄이지 않게) */
@@ -382,6 +385,7 @@ export function QuickAddProvider({
               files,
               ...(it.parentId ? { parentId: it.parentId } : {}),
               ...(it.review === false ? { review: false } : {}),
+              ...(it.unit ? { unit: it.unit } : {}),
             }),
           });
           return 'ok';
@@ -512,7 +516,7 @@ export function QuickAddProvider({
   }, [runItem, runAppendChain]);
 
   const enqueue = useCallback(
-    (jobs: Job[], subjectId: string, into?: { parentId: string; noteTitle: string }, opts: { review?: boolean } = {}) => {
+    (jobs: Job[], subjectId: string, into?: { parentId: string; noteTitle: string }, opts: { review?: boolean; unit?: string } = {}) => {
       if (!jobs.length) return;
       const added: Item[] = jobs.map((job) => ({
         key: newId(),
@@ -524,6 +528,7 @@ export function QuickAddProvider({
         total: 0,
         ...(into ? { parentId: into.parentId, noteTitle: into.noteTitle } : {}),
         ...(opts.review === false ? { review: false } : {}),
+        ...(opts.unit && !into ? { unit: opts.unit } : {}),
       }));
       commit([...itemsRef.current, ...added]);
       if (!into) writeLast(meRef.current.userId, subjectId);
@@ -584,6 +589,8 @@ export function QuickAddProvider({
   const [attachments, setAttachments] = useState<Attachment[]>([]);
   /** 이번에 만드는 노트를 복습에 넣을지 (창을 열 때마다 켠 채로 시작한다) */
   const [review, setReview] = useState(true);
+  /** 이번에 만드는 노트의 단원 (창을 열 때마다·과목을 바꾸면 '단원 없음'으로 시작한다) */
+  const [unit, setUnit] = useState('');
 
   const closeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const fabRef = useRef<HTMLButtonElement>(null);
@@ -595,6 +602,7 @@ export function QuickAddProvider({
       closeTimer.current = null;
       setComposerSubject(subjectId || resolveSubject());
       setReview(true);
+      setUnit('');
       setClosing(false);
       setOpen(true);
       // 과목 목록을 아직 못 읽었을 때 열었으면, 읽은 뒤에 과목을 골라 둔다
@@ -667,11 +675,11 @@ export function QuickAddProvider({
     }
     jobs.push(...filesToJobs(attachedFiles, titleForFiles));
     if (!jobs.length) return;
-    enqueue(jobs, subjectId, undefined, { review });
+    enqueue(jobs, subjectId, undefined, { review, unit });
     setText('');
     setAttachments([]);
     closeComposer();
-  }, [composerSubject, text, attachments, filesToJobs, enqueue, closeComposer, toast, review]);
+  }, [composerSubject, text, attachments, filesToJobs, enqueue, closeComposer, toast, review, unit]);
 
   /** 빈 노트: AI 없이 직접 채우는 노트를 만들고 그 노트로 간다 (에너지를 쓰지 않는다) */
   const createBlank = useCallback(
@@ -684,20 +692,21 @@ export function QuickAddProvider({
       try {
         const r = await api<{ id: string }>('/api/notes/blank', {
           method: 'POST',
-          body: JSON.stringify({ subjectId, title, ...(review ? {} : { review: false }) }),
+          body: JSON.stringify({ subjectId, title, ...(unit ? { unit } : {}), ...(review ? {} : { review: false }) }),
         });
         writeLast(meRef.current.userId, subjectId);
         touchSubject(subjectId);
         window.dispatchEvent(new CustomEvent(SOURCES_CHANGED, { detail: { id: r.id } }));
         closeComposer();
-        router.push(`/notes/${r.id}`);
+        // 빈 노트는 고치기 모드로 연다 (바로 적을 수 있게)
+        router.push(`/notes/${r.id}?edit=1`);
         return true;
       } catch (e) {
         toast(e instanceof Error ? e.message : '빈 노트를 만들지 못했어요.', 'bad');
         return false;
       }
     },
-    [composerSubject, toast, closeComposer, router, review, touchSubject],
+    [composerSubject, toast, closeComposer, router, review, touchSubject, unit],
   );
 
   // ---------------------------------------------------------- 끌어다 놓기, 붙여 넣기
@@ -941,6 +950,7 @@ export function QuickAddProvider({
               subjects={subjects ?? []}
               subjectId={composerSubject}
               onSubject={(id) => {
+                if (id !== composerSubject) setUnit('');
                 setComposerSubject(id);
                 writeLast(me.userId, id);
               }}
@@ -958,6 +968,8 @@ export function QuickAddProvider({
               onClose={closeComposer}
               review={review}
               onReview={setReview}
+              unit={unit}
+              onUnit={setUnit}
             />
           ) : null}
           {dragging ? <DropOverlay subjectName={dropSubjectName} intoComposer={open} note={open ? null : noteTarget} /> : null}
@@ -993,6 +1005,8 @@ function Composer({
   onClose,
   review,
   onReview,
+  unit,
+  onUnit,
 }: {
   me: MeResponse;
   closing: boolean;
@@ -1012,12 +1026,18 @@ function Composer({
   /** 이번에 만드는 노트를 복습에 넣을지 */
   review: boolean;
   onReview: (on: boolean) => void;
+  /** 이번에 만드는 노트의 단원 ('' = 단원 없음) */
+  unit: string;
+  onUnit: (unit: string) => void;
 }) {
   const toast = useToast();
   const area = useRef<HTMLTextAreaElement>(null);
   const fileInput = useRef<HTMLInputElement>(null);
   const cameraInput = useRef<HTMLInputElement>(null);
   const [picking, setPicking] = useState(false);
+  // 단원 고르기 (단원 없음 · 이 과목에 있는 단원 · 새 단원)
+  const [unitPicking, setUnitPicking] = useState(false);
+  const units = useSubjectUnits(subjectId, unitPicking);
   // 과목이 많으면 찾기 (이름이나 첫 자음)
   const [pickQuery, setPickQuery] = useState('');
   const [newName, setNewName] = useState('');
@@ -1054,6 +1074,7 @@ function Composer({
   const pickSearch = subjects.length >= 7;
   const togglePicking = () => {
     setPicking((p) => !p);
+    setUnitPicking(false);
     setPickQuery('');
   };
   const trimmed = text.trim();
@@ -1132,12 +1153,12 @@ function Composer({
           else if (canSend) onSubmit();
         }}
       >
-        <div className="flex items-center justify-between gap-2">
-          <div className="flex min-w-0 items-center gap-1.5">
+        <div className="flex items-start justify-between gap-2">
+          <div className="flex min-w-0 flex-wrap items-center gap-1.5">
             <div className="relative min-w-0">
               <button
                 type="button"
-                className="press inline-flex max-w-[220px] items-center gap-2 rounded-full bg-surface-2 py-1.5 pl-3 pr-2.5 text-sm font-semibold"
+                className="press inline-flex max-w-[200px] items-center gap-2 rounded-full bg-surface-2 py-1.5 pl-3 pr-2.5 text-sm font-semibold"
                 aria-haspopup="listbox"
                 aria-expanded={picking}
                 onClick={togglePicking}
@@ -1222,6 +1243,50 @@ function Composer({
                       만들기
                     </button>
                   </div>
+                </div>
+              ) : null}
+            </div>
+            {/* 단원: 고르지 않으면 단원 없이 (AI 가 정하지 않는다) */}
+            <div className="relative min-w-0">
+              <button
+                type="button"
+                aria-haspopup="dialog"
+                aria-expanded={unitPicking}
+                aria-label={`단원: ${unit || '단원 없음'}`}
+                className={cx(
+                  'press inline-flex max-w-[170px] items-center gap-1.5 rounded-full py-1.5 pl-3 pr-2.5 text-sm font-semibold',
+                  unit ? 'bg-accent-soft text-accent' : 'bg-surface-2 text-muted hover:text-ink',
+                )}
+                onClick={() => {
+                  setUnitPicking((p) => !p);
+                  setPicking(false);
+                }}
+              >
+                <span className="truncate">{unit || '단원 없음'}</span>
+                <span aria-hidden="true">▾</span>
+              </button>
+              {unitPicking ? (
+                <div
+                  role="dialog"
+                  aria-label="단원 고르기"
+                  className="kok-pop absolute left-0 top-10 z-10 w-64 origin-top-left rounded-2xl bg-surface p-1.5 shadow-[0_12px_32px_var(--shadow-strong)] ring-1 ring-line sm:bottom-10 sm:top-auto sm:origin-bottom-left"
+                  onKeyDown={(e) => {
+                    // Esc 는 단원 고르기만 닫는다 (입력창은 그대로)
+                    if (e.key === 'Escape') {
+                      e.stopPropagation();
+                      setUnitPicking(false);
+                    }
+                  }}
+                >
+                  <UnitOptions
+                    value={unit}
+                    units={units}
+                    onPick={(u) => {
+                      onUnit(u);
+                      setUnitPicking(false);
+                      area.current?.focus();
+                    }}
+                  />
                 </div>
               ) : null}
             </div>

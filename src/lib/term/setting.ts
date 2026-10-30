@@ -534,8 +534,10 @@ export class SettingProgram implements Program {
       if (body.summary) out.push(body.summary);
       if (body.key_points.length) {
         out.push('', paint(C.boldCyan, '개념'));
+        // AI 가 정한 중요도는 설정(note.importance)을 켰을 때만 (앱의 개념 카드와 같게)
+        const showImp = this.api.config().some((c) => c.key === 'note.importance' && c.value === 'on');
         body.key_points.forEach((k, i) => {
-          const mark = k.importance === 'high' ? paint(C.yellow, ' (중요)') : '';
+          const mark = showImp && k.importance === 'high' ? paint(C.yellow, ' (꼭 외우기)') : '';
           out.push(`  ${i + 1}. ${paint(C.bold, k.title)}${k.starred ? paint(C.yellow, ' ★') : ''}${mark}`);
           if (k.explanation) out.push(`     ${k.explanation}`);
         });

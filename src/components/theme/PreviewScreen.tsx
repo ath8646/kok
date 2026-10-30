@@ -282,12 +282,11 @@ function NoteMock() {
           n={1}
           title="광합성의 재료"
           body="물과 이산화탄소가 재료예요. 기공으로 이산화탄소가 들어와요."
-          chip="중요"
           starred={starred}
           onStar={() => setStarred((v) => !v)}
           part="star"
         />
-        <ConceptCard n={2} title="엽록체" body="광합성이 일어나는 곳이에요. 엽록소가 빛을 흡수해요." chip="보통" />
+        <ConceptCard n={2} title="엽록체" body="광합성이 일어나는 곳이에요. 엽록소가 빛을 흡수해요." />
         <section data-part="hero" className="kok-card kok-hero grid gap-3 p-5">
           <p className="text-sm font-semibold text-muted">문제 풀기</p>
           <p className="font-display text-lg leading-snug">광합성이 일어나는 곳은?</p>
@@ -314,7 +313,6 @@ function ConceptCard({
   n,
   title,
   body,
-  chip,
   starred = false,
   onStar,
   part = 'note',
@@ -322,7 +320,6 @@ function ConceptCard({
   n: number;
   title: string;
   body: string;
-  chip: string;
   starred?: boolean;
   onStar?: () => void;
   part?: PreviewPart;
@@ -339,10 +336,7 @@ function ConceptCard({
           {n}
         </span>
         <div className="min-w-0 flex-1 pr-9">
-          <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
-            <h4 className="text-[16px] font-bold">{title}</h4>
-            <Chip tone={chip === '중요' ? 'bad' : 'plain'}>{chip}</Chip>
-          </div>
+          <h4 className="text-[16px] font-bold">{title}</h4>
           <p className="mt-1 text-[15px] leading-relaxed">{body}</p>
         </div>
       </div>

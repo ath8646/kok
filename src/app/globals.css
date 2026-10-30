@@ -455,6 +455,258 @@ body {
   font-variant-numeric: tabular-nums;
 }
 
+/* ------------------------------------------------------------ 노트 고치기 모드 (보이는 그대로 고치기: src/components/edit · NoteView)
+   글 칸(.kok-field)은 읽을 때와 글자 모양이 같다: 둘레 여백은 바깥 여백을 빼서 글자가 움직이지 않는다.
+   누를 수 있는 칸은 옅은 바탕, 켜진 칸은 포인트 색 테두리. 꾸미기 줄은 화면 아래(폰은 키보드 위: FormatBar 가 올린다). */
+.kok-field {
+  position: relative;
+  display: block;
+  min-height: 1.5em;
+  margin: -3px -6px;
+  padding: 3px 6px;
+  border-radius: 10px;
+  cursor: text;
+  outline: none;
+  -webkit-tap-highlight-color: transparent;
+  transition:
+    background-color 150ms ease,
+    box-shadow 150ms ease;
+}
+.kok-note-editing .kok-field {
+  background: color-mix(in srgb, var(--ink) 4.5%, transparent);
+}
+/* 색 상자(시험 포인트·함정·예시) 안의 칸은 옅은 흰 바탕 (회색을 겹치지 않게) */
+.kok-note-editing .kok-linked .kok-field {
+  background: color-mix(in srgb, var(--surface) 55%, transparent);
+}
+@media (hover: hover) {
+  .kok-note-editing .kok-field:hover {
+    background: color-mix(in srgb, var(--accent) 9%, transparent);
+  }
+}
+.kok-note-editing .kok-field:focus-visible,
+.kok-note-editing .kok-field.is-active {
+  background: var(--surface);
+  box-shadow: 0 0 0 2px var(--accent);
+}
+.kok-field-placeholder {
+  color: var(--muted);
+  font-weight: 500;
+}
+/* ProseMirror 가 꼭 쓰는 것 (Tiptap 의 기본 CSS 는 넣지 않는다: injectCSS false) */
+.kok-editor .ProseMirror {
+  position: relative;
+  outline: none;
+  word-wrap: break-word;
+  white-space: pre-wrap;
+  white-space: break-spaces;
+  font-variant-ligatures: none;
+  caret-color: var(--accent);
+}
+.kok-editor .ProseMirror [contenteditable='false'] {
+  white-space: normal;
+}
+.kok-editor .ProseMirror-hideselection *::selection {
+  background: transparent;
+}
+.kok-editor .ProseMirror-hideselection {
+  caret-color: transparent;
+}
+.kok-editor img.ProseMirror-separator {
+  display: inline !important;
+  border: none !important;
+  margin: 0 !important;
+}
+.kok-editor .ProseMirror p {
+  margin: 0;
+}
+.kok-editor .ProseMirror ul,
+.kok-editor .ProseMirror ol {
+  margin: 0;
+  padding: 0;
+}
+.kok-editor .ProseMirror li + li {
+  margin-top: 0.15em;
+}
+.kok-editor .ProseMirror ul {
+  list-style: none;
+}
+.kok-editor .ProseMirror ul > li {
+  position: relative;
+  padding-left: 1.25em;
+}
+.kok-editor .ProseMirror ul > li::before {
+  content: '•';
+  position: absolute;
+  left: 0.25em;
+  color: var(--muted);
+  font-weight: 800;
+}
+.kok-editor .ProseMirror ol {
+  list-style: decimal;
+  padding-left: 1.75em;
+}
+.kok-editor .ProseMirror ol > li::marker {
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+.kok-editor .ProseMirror p.is-editor-empty:first-child::before {
+  content: attr(data-placeholder);
+  float: left;
+  height: 0;
+  color: var(--muted);
+  font-weight: 500;
+  pointer-events: none;
+}
+/* 글 칸 속 수식 조각: 누르면 수식 창 */
+.kok-math-node {
+  cursor: pointer;
+  border-radius: 6px;
+  padding: 0 2px;
+}
+.kok-math-node[data-display='true'] {
+  display: block;
+  text-align: center;
+}
+@media (hover: hover) {
+  .kok-math-node:hover {
+    background: color-mix(in srgb, var(--accent) 12%, transparent);
+  }
+}
+.kok-math-node.is-selected {
+  box-shadow: 0 0 0 2px var(--accent);
+}
+/* 꾸미기 줄 */
+.kok-formatbar {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  /* 내용 위, 시트(z 50) 아래 */
+  z-index: 45;
+  display: flex;
+  justify-content: center;
+  padding: 6px 8px calc(6px + env(safe-area-inset-bottom));
+  background: color-mix(in srgb, var(--surface) 94%, transparent);
+  -webkit-backdrop-filter: blur(14px);
+  backdrop-filter: blur(14px);
+  border-top: 1px solid var(--line);
+  transition:
+    transform 160ms var(--ease-out),
+    opacity 160ms ease;
+  @starting-style {
+    opacity: 0;
+  }
+}
+.kok-formatbar-inner {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  max-width: 100%;
+  overflow-x: auto;
+}
+@media (min-width: 768px) {
+  /* 컴퓨터: 왼쪽 메뉴(w-60) 를 뺀 내용 칸의 가운데에 떠 있다 */
+  .kok-formatbar {
+    left: 240px;
+    bottom: 20px;
+    margin-inline: auto;
+    width: max-content;
+    max-width: calc(100% - 32px);
+    padding: 6px;
+    border: 1px solid var(--line);
+    border-radius: 18px;
+    box-shadow: 0 12px 32px var(--shadow-strong);
+  }
+}
+/* 지운 카드 되돌리기 띠 (꾸미기 줄 위) */
+.kok-undobar {
+  position: fixed;
+  left: 16px;
+  right: 16px;
+  bottom: calc(72px + env(safe-area-inset-bottom));
+  z-index: 46;
+  margin-inline: auto;
+  max-width: 420px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 6px 6px 18px;
+  border-radius: 999px;
+  background: var(--ink);
+  color: var(--surface);
+  font-size: 14px;
+  font-weight: 600;
+  box-shadow: 0 10px 28px var(--shadow-strong);
+  transition:
+    transform 220ms var(--ease-out),
+    opacity 200ms ease;
+  @starting-style {
+    transform: translateY(10px);
+    opacity: 0;
+  }
+}
+.kok-undobar button {
+  background: color-mix(in srgb, var(--surface) 18%, transparent);
+  color: var(--surface);
+}
+@media (min-width: 768px) {
+  .kok-undobar {
+    left: 256px;
+    bottom: 92px;
+  }
+}
+/* 폰 키보드를 여는 숨은 칸 (EditSession) */
+.kok-proxy-input {
+  position: fixed;
+  left: 0;
+  top: 50%;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  border: 0;
+  opacity: 0;
+  pointer-events: none;
+  font-size: 16px;
+  color: transparent;
+  caret-color: transparent;
+  background: transparent;
+}
+/* 고치기 모드의 노트 이름 칸 (큰 제목 자리 그대로) */
+.kok-title-input {
+  display: block;
+  width: 100%;
+  margin: 0;
+  padding: 0 0 2px;
+  border: 0;
+  border-bottom: 2px dashed color-mix(in srgb, var(--accent) 45%, transparent);
+  border-radius: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  letter-spacing: inherit;
+  line-height: inherit;
+  resize: none;
+  overflow: hidden;
+  outline: none;
+}
+.kok-title-input:focus {
+  border-bottom-color: var(--accent);
+}
+/* 끄는 카드는 다른 카드 위로 떠서 지나간다 */
+.kok-edit-item.is-dragging {
+  position: relative;
+  z-index: 5;
+}
+.kok-edit-item.is-dragging > * {
+  box-shadow: 0 18px 40px -8px var(--shadow-strong);
+}
+/* 고치는 동안 아래 메뉴·떠 있는 버튼은 감춘다 (꾸미기 줄이 그 자리를 쓴다) */
+body.kok-editing .kok-tabbar,
+body.kok-editing .kok-fab {
+  display: none;
+}
+
 /* 키보드로 옮겨 다닐 때 보이는 테두리. base 층이라 focus:outline-none 으로 끌 수 있다 */
 @layer base {
   .focus-ring:focus-visible,
@@ -676,26 +928,74 @@ body {
 .kok-aura::before {
   bottom: 0;
   background:
-    radial-gradient(85vw 300px at 0% calc(100% + 70px), var(--aura-3), color-mix(in srgb, var(--aura-3) 55%, transparent) 38%, color-mix(in srgb, var(--aura-3) 18%, transparent) 70%, transparent),
-    radial-gradient(75vw 300px at 100% calc(100% + 70px), var(--aura-4), color-mix(in srgb, var(--aura-4) 55%, transparent) 38%, color-mix(in srgb, var(--aura-4) 18%, transparent) 70%, transparent);
+    radial-gradient(
+      85vw 300px at 0% calc(100% + 70px),
+      var(--aura-3),
+      color-mix(in srgb, var(--aura-3) 55%, transparent) 38%,
+      color-mix(in srgb, var(--aura-3) 18%, transparent) 70%,
+      transparent
+    ),
+    radial-gradient(
+      75vw 300px at 100% calc(100% + 70px),
+      var(--aura-4),
+      color-mix(in srgb, var(--aura-4) 55%, transparent) 38%,
+      color-mix(in srgb, var(--aura-4) 18%, transparent) 70%,
+      transparent
+    );
 }
 .kok-aura::after {
   top: 0;
   background:
-    radial-gradient(85vw 270px at 12% -70px, var(--aura-1), color-mix(in srgb, var(--aura-1) 55%, transparent) 38%, color-mix(in srgb, var(--aura-1) 18%, transparent) 70%, transparent),
-    radial-gradient(75vw 270px at 94% -50px, var(--aura-2), color-mix(in srgb, var(--aura-2) 55%, transparent) 38%, color-mix(in srgb, var(--aura-2) 18%, transparent) 70%, transparent);
+    radial-gradient(
+      85vw 270px at 12% -70px,
+      var(--aura-1),
+      color-mix(in srgb, var(--aura-1) 55%, transparent) 38%,
+      color-mix(in srgb, var(--aura-1) 18%, transparent) 70%,
+      transparent
+    ),
+    radial-gradient(
+      75vw 270px at 94% -50px,
+      var(--aura-2),
+      color-mix(in srgb, var(--aura-2) 55%, transparent) 38%,
+      color-mix(in srgb, var(--aura-2) 18%, transparent) 70%,
+      transparent
+    );
 }
 @media (min-width: 768px) {
   /* 넓은 화면: 큰 제목 머리가 낮고(부제가 위에서 약 125px) 아래 메뉴가 없어서, 위는 낮게·아래는 화면 밖으로 더 내린다 */
   .kok-aura::before {
     background:
-      radial-gradient(min(85vw, 620px) 300px at 0% calc(100% + 150px), var(--aura-3), color-mix(in srgb, var(--aura-3) 55%, transparent) 38%, color-mix(in srgb, var(--aura-3) 18%, transparent) 70%, transparent),
-      radial-gradient(min(75vw, 560px) 300px at 100% calc(100% + 150px), var(--aura-4), color-mix(in srgb, var(--aura-4) 55%, transparent) 38%, color-mix(in srgb, var(--aura-4) 18%, transparent) 70%, transparent);
+      radial-gradient(
+        min(85vw, 620px) 300px at 0% calc(100% + 150px),
+        var(--aura-3),
+        color-mix(in srgb, var(--aura-3) 55%, transparent) 38%,
+        color-mix(in srgb, var(--aura-3) 18%, transparent) 70%,
+        transparent
+      ),
+      radial-gradient(
+        min(75vw, 560px) 300px at 100% calc(100% + 150px),
+        var(--aura-4),
+        color-mix(in srgb, var(--aura-4) 55%, transparent) 38%,
+        color-mix(in srgb, var(--aura-4) 18%, transparent) 70%,
+        transparent
+      );
   }
   .kok-aura::after {
     background:
-      radial-gradient(min(85vw, 620px) 240px at 12% -70px, var(--aura-1), color-mix(in srgb, var(--aura-1) 55%, transparent) 38%, color-mix(in srgb, var(--aura-1) 18%, transparent) 70%, transparent),
-      radial-gradient(min(75vw, 560px) 240px at 94% -50px, var(--aura-2), color-mix(in srgb, var(--aura-2) 55%, transparent) 38%, color-mix(in srgb, var(--aura-2) 18%, transparent) 70%, transparent);
+      radial-gradient(
+        min(85vw, 620px) 240px at 12% -70px,
+        var(--aura-1),
+        color-mix(in srgb, var(--aura-1) 55%, transparent) 38%,
+        color-mix(in srgb, var(--aura-1) 18%, transparent) 70%,
+        transparent
+      ),
+      radial-gradient(
+        min(75vw, 560px) 240px at 94% -50px,
+        var(--aura-2),
+        color-mix(in srgb, var(--aura-2) 55%, transparent) 38%,
+        color-mix(in srgb, var(--aura-2) 18%, transparent) 70%,
+        transparent
+      );
   }
 }
 /* 폰·태블릿: 배경 칸을 따로 그려 두어(합성 층) 스크롤하는 동안 다시 그리거나 글과 같이 밀리지 않게 */
@@ -783,8 +1083,7 @@ body {
   border-radius: calc(var(--tab-float) * 26px);
   background-color: var(--tab-bg);
   background-image:
-    radial-gradient(60% 150% at 0% 100%, var(--tab-glow-1), transparent),
-    radial-gradient(55% 150% at 100% 100%, var(--tab-glow-2), transparent);
+    radial-gradient(60% 150% at 0% 100%, var(--tab-glow-1), transparent), radial-gradient(55% 150% at 100% 100%, var(--tab-glow-2), transparent);
   box-shadow:
     0 -1px 0 var(--tab-line),
     0 16px 36px -16px var(--tab-shadow);

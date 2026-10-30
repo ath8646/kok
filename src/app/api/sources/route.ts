@@ -36,6 +36,8 @@ const Body = z.object({
   parentId: z.string().uuid().nullable().optional(),
   /** 이 노트의 문제를 복습에 넣을지 (자료 넣기 창에서 끌 수 있다. 없으면 넣는다) */
   review: z.boolean().optional(),
+  /** 자료 넣기 창에서 고른 단원 (없으면 단원 없이: 정리가 끝나도 AI 가 단원을 정하지 않는다) */
+  unit: z.string().max(200).optional().catch(undefined),
 });
 
 export async function POST(req: NextRequest) {
@@ -176,6 +178,12 @@ export async function POST(req: NextRequest) {
     if (b.review === false && !parentId && (await getFeatures(admin)).organize) {
       const { error: rErr } = await admin.from('sources').update({ in_review: false }).eq('id', b.id).eq('user_id', acc.userId);
       if (rErr) console.warn('[kok] could not keep the new note out of review', rErr.message);
+    }
+    // 고른 단원 (행을 만드는 DB 함수는 그대로 두고 따로 적는다)
+    const unit = (b.unit ?? '').replace(/\s+/g, ' ').trim().slice(0, 40);
+    if (unit && !parentId) {
+      const { error: uErr } = await admin.from('sources').update({ unit }).eq('id', b.id).eq('user_id', acc.userId);
+      if (uErr) console.warn('[kok] could not set the unit of the new note', uErr.message);
     }
 
     const origin = req.nextUrl.origin;

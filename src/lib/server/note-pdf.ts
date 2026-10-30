@@ -26,6 +26,8 @@ export type NotePdfInput = {
   date: Date;
   /** AI 가 만든 정리인지 (직접 쓴 빈 노트가 아니면): 인공지능기본법의 생성형 AI 결과물 표시 — 쪽마다 'AI 정리'와 파일 정보(Subject·Keywords) */
   aiMade: boolean;
+  /** 설정 note.importance: AI 가 정한 중요도(★★★)를 개념 띠에 (끄면 내가 별표한 개념에만 ★) */
+  showImportance?: boolean;
 };
 
 // ------------------------------------------------------------- 크기·색
@@ -652,7 +654,8 @@ export async function buildNotePdf(input: NotePdfInput): Promise<{ bytes: Uint8A
   const s = new Sheet(doc, p, body, head, extra, kit);
   const note = input.note;
   const date = input.date.toLocaleDateString('ko-KR', { year: 'numeric', month: 'long', day: 'numeric', timeZone: 'Asia/Seoul' });
-  const metaParts = ['@ KOK', input.aiMade ? 'AI가 만든 정리' : '', input.subject, input.unit || note.unit, date].filter(Boolean);
+  // 단원은 학생이 고른 것만 (자료 행의 단원)
+  const metaParts = ['@ KOK', input.aiMade ? 'AI가 만든 정리' : '', input.subject, input.unit, date].filter(Boolean);
   s.title(input.title || note.title || '정리 노트', metaParts.join(' · '));
 
   let n = 0;
@@ -670,7 +673,7 @@ export async function buildNotePdf(input: NotePdfInput): Promise<{ bytes: Uint8A
     const examplesOf = (id: string) => note.examples.filter((x) => x.key_point_id === id);
     note.key_points.forEach((k, i) => {
       const letter = LETTERS[i % LETTERS.length] + (i >= LETTERS.length ? String(Math.floor(i / LETTERS.length)) : '');
-      s.bar(`${letter}. ${k.title}`, IMPORTANCE[k.importance]);
+      s.bar(`${letter}. ${k.title}`, input.showImportance ? IMPORTANCE[k.importance] : k.starred ? '★' : '');
       if (k.explanation.trim()) s.rich(richLines(k.explanation), MARGIN.x + 6, CONTENT_W - 10);
       if (k.why.trim()) s.arrow(k.why);
       for (const x of examplesOf(k.id)) s.callout('example', x.text);

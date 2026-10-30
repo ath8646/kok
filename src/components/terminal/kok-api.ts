@@ -43,6 +43,7 @@ const CONFIG: ConfigDef[] = [
   { key: 'chat.allowQuestions', label: "채팅에서 '문제로 넣어 줘'", kind: 'bool', feature: 'chat' },
   { key: 'chat.allowNote', label: "채팅에서 '노트에 넣어 줘'", kind: 'bool', feature: 'chat' },
   { key: 'notify.done', label: '완료 알림 보이기', kind: 'bool' },
+  { key: 'note.importance', label: '개념 카드에 AI가 정한 중요도 보이기 (꼭 외우기·중요·참고)', kind: 'bool' },
   { key: 'theme.motion', label: '시그니처 테마 움직임', kind: 'bool' },
 ];
 

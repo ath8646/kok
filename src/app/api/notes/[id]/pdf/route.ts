@@ -33,10 +33,11 @@ export async function POST(req: NextRequest, ctx: RouteContext<'/api/notes/[id]/
     const empty = !note.note.key_points.length && !note.note.summary.trim() && !note.note.terms.length;
     if (empty) throw new UserFacingError('empty_note', '노트가 비어 있어요. 정리 탭에서 내용을 먼저 채워 주세요.', 400);
 
-    const [{ count, error: cErr }, { data: subj }, { data: mm }] = await Promise.all([
+    const [{ count, error: cErr }, { data: subj }, { data: mm }, { data: src }] = await Promise.all([
       admin.from('note_pdfs').select('id', { count: 'exact', head: true }).eq('note_id', note.id).eq('user_id', acc.userId),
       admin.from('subjects').select('name').eq('id', note.subject_id).maybeSingle(),
       admin.from('visuals').select('spec').eq('note_id', note.id).eq('type', 'mindmap').maybeSingle(),
+      admin.from('sources').select('unit').eq('id', note.source_id).maybeSingle(),
     ]);
     if (cErr) throw cErr;
     if ((count ?? 0) >= PDF_LIMITS.perNote)
@@ -62,7 +63,7 @@ export async function POST(req: NextRequest, ctx: RouteContext<'/api/notes/[id]/
     const { bytes, pages } = await buildNotePdf({
       title,
       subject: String(subj?.name ?? ''),
-      unit: note.note.unit,
+      unit: String(src?.unit ?? ''),
       note: note.note,
       mindmap,
       figures,
@@ -70,6 +71,7 @@ export async function POST(req: NextRequest, ctx: RouteContext<'/api/notes/[id]/
       date: new Date(),
       // 직접 쓴 빈 노트(자료를 더하지 않음)만 AI 표시를 빼고, 나머지는 AI 가 만든 정리
       aiMade: note.raw.manual !== true || note.version !== null,
+      showImportance: acc.settings.note.importance,
     });
 
     const rowId = crypto.randomUUID();

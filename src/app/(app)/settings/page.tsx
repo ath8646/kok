@@ -370,6 +370,17 @@ export default function SettingsPage() {
         </>
       ) : null}
 
+      <SectionTitle>노트</SectionTitle>
+      <Card className="grid gap-4">
+        <Toggle
+          id="set-importance"
+          label="개념 카드에 AI가 정한 중요도 보이기 (꼭 외우기·중요·참고)"
+          hint="꺼도 복습할 때는 중요한 개념의 문제가 먼저 나와요. 내가 중요하게 여기는 개념은 별표로 표시해요."
+          checked={draft.note.importance}
+          onChange={(v) => set('note', { importance: v })}
+        />
+      </Card>
+
       <SectionTitle>시각화</SectionTitle>
       <Card className="grid gap-4">
         <Field label="기본 표현 방식">

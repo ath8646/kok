@@ -1,10 +1,11 @@
 'use client';
 // 노트: 탭 정리 · 그림 · 문제 · 원본 (처리 중이면 진행 상태). 오른쪽 아래 버튼은 노트 채팅이다.
+// 정리 탭의 '고치기'(위 띠)를 누르면 고치기 모드: 정리·노트 이름·단원을 그 자리에서 고치고 저절로 저장한다(NoteView). '완료'로 끝낸다.
 // 노트에 자료를 더하면(Pro) 버전이 쌓인다. 원본 탭의 버전 기록에서 지난 버전을 열어(?v=번호) 보고 고치거나,
 // 그 버전을 지금 버전으로 쓰거나 지울 수 있다. 지난 버전에서 고친 것은 그 버전에 저장된다.
 // DB 에 버전·채팅 표가 아직 없으면(me.features) 예전처럼 동작한다.
 import { useParams, useRouter, useSearchParams } from 'next/navigation';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useMe } from '@/components/AppShell';
 import { useConfirm } from '@/components/Confirm';
 import { ReportSheet } from '@/components/ReportSheet';
@@ -33,15 +34,14 @@ import {
   LinkButton,
   Menu,
   STICKY_BELOW_TOPBAR,
-  Sheet,
   Spinner,
   api,
   cx,
-  inputClass,
   useToast,
   DONE,
 } from '@/components/ui';
 import { SubjectPickSheet } from '@/components/SubjectPick';
+import { UnitSheet, normalizeUnit } from '@/components/UnitPick';
 import { ORGANIZE_COLS, SOURCE_COLS, fetchSubjects, questionCols, sb, type SourceRowWithUnit } from '@/lib/data';
 import { readMergedMark } from '@/lib/note-merge';
 import { estimateTokens, MERGE_OUT_TOKENS } from '@/lib/append-merge';
@@ -249,7 +249,7 @@ export default function NotePage() {
   const ask = useConfirm();
   // 처음 연 주소의 ?tab= · ?kp= · ?v= (다른 화면에서 눌러 들어오면 그리는 동안 window.location 은 아직 앞 화면 주소라 useSearchParams 로 읽는다)
   const params = useSearchParams();
-  const [opened] = useState(() => ({ tab: params.get('tab'), kp: params.get('kp'), v: params.get('v') }));
+  const [opened] = useState(() => ({ tab: params.get('tab'), kp: params.get('kp'), v: params.get('v'), edit: params.get('edit') === '1' }));
   const versionsOn = !!me?.features.versions;
   const restedOn = !!me?.features.restedHidden;
   const figuresOn = !!me?.features.figures;
@@ -280,16 +280,21 @@ export default function NotePage() {
   const [reporting, setReporting] = useState(false);
   // 자료 그림 다시 찾기 (원본에서 그림 자리를 새 방법으로)
   const [relocating, setRelocating] = useState(false);
-  const [renaming, setRenaming] = useState(false);
-  const [newTitle, setNewTitle] = useState('');
-  const [renameBusy, setRenameBusy] = useState(false);
-  const renameInput = useRef<HTMLInputElement>(null);
-  // 이름 칸을 열면 글을 골라 둔다 (바로 새 이름을 칠 수 있게). 시트가 먼저 자기에게 초점을 두어서 조금 뒤에
+  // 고치기 모드 (정리 탭): 새로 만든 빈 노트는 ?edit=1 로 바로 고치기 모드로 연다
+  const [editMode, setEditMode] = useState(() => opened.edit);
+  const [focusTitle, setFocusTitle] = useState(false);
+  const [unitOpen, setUnitOpen] = useState(false);
+  // 고치는 동안의 저장 상태 (위 띠에 '저장 중'·'저장됨')
+  const [saveState, setSaveState] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
   useEffect(() => {
-    if (!renaming) return;
-    const t = setTimeout(() => renameInput.current?.select(), 60);
-    return () => clearTimeout(t);
-  }, [renaming]);
+    if (opened.edit) setQueryParam('edit', null);
+  }, [opened.edit]);
+  // 다른 탭으로 가면 고치기를 끝낸다
+  const [editTab, setEditTab] = useState(tab);
+  if (editTab !== tab) {
+    setEditTab(tab);
+    if (tab !== 'note') setEditMode(false);
+  }
   const [viewing, setViewing] = useState<number | null>(() => {
     const v = Number(opened.v);
     return Number.isInteger(v) && v >= 1 ? v : null;
@@ -569,31 +574,42 @@ export default function NotePage() {
       toast(REORG_LOCK, 'bad');
       return;
     }
+    setSaveState('saving');
+    const settled = (ok: boolean) => setSaveState(ok ? (savesPending.current > 0 ? 'saving' : 'saved') : 'error');
     if (old) {
       const number = old.number;
       setOldDoc((d) => (d && d.number === number ? { ...d, body: next } : d));
       const r = await queued(() => saveOld(number, { body: next }));
       if (r === false) toast('저장하지 못했어요.', 'bad');
+      settled(r === true);
       return;
     }
     setBundle((b) => (b && b.note ? { ...b, note: { ...b.note, body: next } } : b));
     // 읽은 노트 그대로일 때만 저장한다 (예전 화면이 합친 새 버전이나 다른 탭에서 고친 것을 덮어쓰지 않게)
-    await queued(async () => {
+    const ok = await queued(async () => {
       let q = sb().from('notes').update({ body: next }).eq('id', note.id);
       if (noteToken.current) q = q.eq('updated_at', noteToken.current);
       const { data, error } = await q.select('updated_at');
-      if (error) return toast('저장하지 못했어요.', 'bad');
+      if (error) {
+        toast('저장하지 못했어요.', 'bad');
+        return false;
+      }
       const row = data?.[0];
-      if (!row) return staleReload(STALE_LIVE);
+      if (!row) {
+        staleReload(STALE_LIVE);
+        return false;
+      }
       noteToken.current = String(row.updated_at);
+      return true;
     });
+    settled(ok);
   };
 
   /** 노트 이름 바꾸기 (지금 버전): 노트와 자료 이름을 같이 바꾼다 (자료함·홈은 자료 이름을 보여 준다) */
-  const rename = async () => {
-    const t = newTitle.replace(/\s+/g, ' ').trim().slice(0, 120);
-    if (!note || !t || renameBusy) return;
-    setRenameBusy(true);
+  const rename = async (to: string) => {
+    const t = to.replace(/\s+/g, ' ').trim().slice(0, 120);
+    if (!note || !t) return;
+    setSaveState('saving');
     try {
       // 정리 안의 제목도 같이 (AI 에 보내는 노트 제목). 자료를 더하는 중에는 정리를 건드리지 않는다 (합치기를 다시 하지 않게)
       const withBody = !(versionsOn && kidsActive);
@@ -612,10 +628,12 @@ export default function NotePage() {
       });
       if (r === 'stale') {
         staleReload(STALE_LIVE);
+        setSaveState('error');
         return;
       }
       if (!r) {
         toast('이름을 바꾸지 못했어요.', 'bad');
+        setSaveState('error');
         return;
       }
       await sb().from('sources').update({ title: t }).eq('id', sourceId);
@@ -629,11 +647,27 @@ export default function NotePage() {
           : b,
       );
       window.dispatchEvent(new Event(SOURCES_CHANGED));
-      setRenaming(false);
-      toast('이름을 바꿨어요.', 'ok', DONE);
-    } finally {
-      setRenameBusy(false);
+      setSaveState('saved');
+    } catch {
+      setSaveState('error');
     }
+  };
+
+  /** 단원 바꾸기 (자료 행의 단원: 자료함이 단원마다 묶는다) */
+  const changeUnit = async (to: string) => {
+    const unit = normalizeUnit(to);
+    setUnitOpen(false);
+    if (!source || unit === (source.unit ?? '')) return;
+    setSaveState('saving');
+    const { error } = await sb().from('sources').update({ unit }).eq('id', sourceId);
+    if (error) {
+      toast('단원을 바꾸지 못했어요.', 'bad');
+      setSaveState('error');
+      return;
+    }
+    setBundle((b) => (b && b.source ? { ...b, source: { ...b.source, unit } } : b));
+    window.dispatchEvent(new Event(SOURCES_CHANGED));
+    setSaveState('saved');
   };
 
   /** 지금 버전의 그림 저장: 읽은 그림 행 그대로일 때만 (새 버전이면 행이 새로 생겨 0행) */
@@ -906,6 +940,20 @@ export default function NotePage() {
     rememberPracticeFrom(sourceId, note?.title || source.title || '');
     return practiceHref(sourceId);
   };
+  // 고칠 수 있는지 (자료를 더하는 중·AI 가 다시 정리하는 중에는 지금 버전을 고치지 않는다)
+  const editableNow = !(versionsOn && kidsActive && !old) && !(reorg && !old);
+  const editOn = editMode && tab === 'note' && ready && editableNow;
+  const startEdit = (title = false) => {
+    setTab('note');
+    setSaveState('idle');
+    setEditMode(true);
+    if (title) setFocusTitle(true);
+  };
+  const finishEdit = () => {
+    // 켜져 있는 글 칸의 마지막 글을 먼저 알린다
+    (document.activeElement as HTMLElement | null)?.blur?.();
+    setEditMode(false);
+  };
   const meta = (
     <span className="flex flex-wrap items-center gap-1.5 text-sm">
       {subject ? (
@@ -914,7 +962,20 @@ export default function NotePage() {
           {subject.name}
         </span>
       ) : null}
-      {source.unit ? <Chip>{source.unit}</Chip> : null}
+      {editOn && !old ? (
+        <button
+          type="button"
+          aria-haspopup="dialog"
+          aria-label={`단원: ${source.unit || '단원 없음'} (바꾸기)`}
+          onClick={() => setUnitOpen(true)}
+          className="press inline-flex items-center gap-0.5 rounded-full border border-dashed border-accent px-2.5 py-0.5 text-xs font-semibold text-accent hover:bg-accent-soft"
+        >
+          {source.unit || '단원 없음'}
+          <Icon d={ICONS.chevronDown} size={13} strokeWidth={2.4} />
+        </button>
+      ) : source.unit ? (
+        <Chip>{source.unit}</Chip>
+      ) : null}
       <span>
         ·{' '}
         {manual
@@ -977,41 +1038,66 @@ export default function NotePage() {
         size="compact"
         flush
         back={back}
-        title={title}
+        title={editOn && !old ? <TitleField value={title} onCommit={rename} autoFocus={focusTitle} onFocused={() => setFocusTitle(false)} /> : title}
+        compactTitle={title}
         subtitle={meta}
         actions={
-          <Menu
-            label="노트 메뉴"
-            items={[
-              ...(canPractice ? [{ label: '이 노트 문제 풀기', icon: ICONS.retry, onSelect: () => router.push(openPractice()) }] : []),
-              ...(old
-                ? []
-                : [
-                    {
-                      label: '이름 바꾸기',
-                      icon: ICONS.pen,
-                      onSelect: () => {
-                        setNewTitle(note.title || source.title || '');
-                        setRenaming(true);
-                      },
-                    },
-                  ]),
-              ...(organizeOn && !old
-                ? [
-                    inReview
-                      ? { label: '복습에서 빼기', icon: ICONS.reviewOff, onSelect: () => setInReview(false) }
-                      : { label: '복습에 다시 넣기', icon: ICONS.review, onSelect: () => setInReview(true) },
-                  ]
-                : []),
-              ...(mergedMark ? [{ label: 'AI로 다시 정리', icon: ICONS.sparkle, onSelect: () => (me.canAppend ? reorganize() : router.push('/plan')) }] : []),
-              ...(mergeOn && !old ? [{ label: '다른 과목으로 옮기기', icon: ICONS.move, onSelect: startMove }] : []),
-              ...(versionsOn ? [{ label: versions.length ? '버전 기록' : '자료 더하기', icon: ICONS.file, onSelect: () => setTab('original') }] : []),
-              ...(sourceFiguresOn && !old && !appendRunning && source.kind !== 'text' && docFigures.length
-                ? [{ label: '자료 그림 다시 찾기', icon: ICONS.image, onSelect: () => setRelocating(true) }]
-                : []),
-              ...(reportable ? [{ label: '이상해요 (신고)', icon: ICONS.edit, onSelect: () => setReporting(true) }] : []),
-            ]}
-          />
+          <>
+            {tab === 'note' && !loadingOld ? (
+              editOn ? (
+                <>
+                  <SaveBadge state={saveState} />
+                  <Button size="sm" onClick={finishEdit}>
+                    완료
+                  </Button>
+                </>
+              ) : (
+                <button
+                  type="button"
+                  disabled={!editableNow}
+                  title={editableNow ? '정리를 그 자리에서 고쳐요' : (editLocked ?? undefined)}
+                  onClick={() => startEdit()}
+                  className="press mr-0.5 inline-flex h-9 items-center gap-1.5 rounded-full bg-surface-2 px-3.5 text-sm font-bold text-ink hover:bg-surface-3 disabled:opacity-40"
+                >
+                  <Icon d={ICONS.edit} size={16} />
+                  고치기
+                </button>
+              )
+            ) : null}
+            {editOn ? null : (
+              <Menu
+                label="노트 메뉴"
+                items={[
+                  ...(canPractice ? [{ label: '이 노트 문제 풀기', icon: ICONS.retry, onSelect: () => router.push(openPractice()) }] : []),
+                  ...(old
+                    ? []
+                    : [
+                        {
+                          label: '이름·단원 바꾸기',
+                          icon: ICONS.pen,
+                          onSelect: () => startEdit(true),
+                        },
+                      ]),
+                  ...(organizeOn && !old
+                    ? [
+                        inReview
+                          ? { label: '복습에서 빼기', icon: ICONS.reviewOff, onSelect: () => setInReview(false) }
+                          : { label: '복습에 다시 넣기', icon: ICONS.review, onSelect: () => setInReview(true) },
+                      ]
+                    : []),
+                  ...(mergedMark
+                    ? [{ label: 'AI로 다시 정리', icon: ICONS.sparkle, onSelect: () => (me.canAppend ? reorganize() : router.push('/plan')) }]
+                    : []),
+                  ...(mergeOn && !old ? [{ label: '다른 과목으로 옮기기', icon: ICONS.move, onSelect: startMove }] : []),
+                  ...(versionsOn ? [{ label: versions.length ? '버전 기록' : '자료 더하기', icon: ICONS.file, onSelect: () => setTab('original') }] : []),
+                  ...(sourceFiguresOn && !old && !appendRunning && source.kind !== 'text' && docFigures.length
+                    ? [{ label: '자료 그림 다시 찾기', icon: ICONS.image, onSelect: () => setRelocating(true) }]
+                    : []),
+                  ...(reportable ? [{ label: '이상해요 (신고)', icon: ICONS.edit, onSelect: () => setReporting(true) }] : []),
+                ]}
+              />
+            )}
+          </>
         }
       />
       <div ref={subbarRef} className={cx(STICKY_BELOW_TOPBAR, 'kok-subbar z-20 -mx-4 -mt-4 px-4 pb-2.5 pt-1 md:-mx-6 md:px-6', subbarStuck && 'is-stuck')}>
@@ -1185,6 +1271,9 @@ export default function NotePage() {
                 note={body}
                 kind={source.kind}
                 editable={!appendRunning && !(reorg && !old)}
+                editMode={editOn}
+                onEditMode={(on) => (on ? startEdit() : setEditMode(false))}
+                showImportance={!!me.settings.note?.importance}
                 onChange={(next) => saveBody({ ...raw, ...next })}
                 highlightKeyPoint={kp}
                 onSelectKeyPoint={setKp}
@@ -1344,28 +1433,15 @@ export default function NotePage() {
         }}
       />
 
-      <Sheet open={renaming} onClose={() => setRenaming(false)} title="노트 이름">
-        <form
-          className="grid gap-3"
-          onSubmit={(e) => {
-            e.preventDefault();
-            rename();
-          }}
-        >
-          <input
-            ref={renameInput}
-            aria-label="노트 이름"
-            className={inputClass}
-            value={newTitle}
-            maxLength={120}
-            onChange={(e) => setNewTitle(e.target.value)}
-            placeholder="예: 3단원 광합성"
-          />
-          <Button type="submit" className="justify-self-start" disabled={!newTitle.trim()} busy={renameBusy}>
-            저장
-          </Button>
-        </form>
-      </Sheet>
+      {/* 단원 바꾸기 (고치기 모드에서 단원 칩을 누르면): AI 가 읽은 단원은 'AI 추천'으로만 */}
+      <UnitSheet
+        open={unitOpen}
+        onClose={() => setUnitOpen(false)}
+        subjectId={note.subject_id}
+        value={source.unit ?? ''}
+        suggest={body.unit}
+        onPick={changeUnit}
+      />
 
       {note ? (
         <RelocateFiguresSheet
@@ -1379,6 +1455,75 @@ export default function NotePage() {
 
       <ReportSheet what={reporting ? { kind: 'note', target: note.id } : null} onClose={() => setReporting(false)} />
     </div>
+  );
+}
+
+/** 고치기 모드의 노트 이름 칸: 큰 제목 자리에서 그대로 고친다 (엔터·칸을 떠나면 저장, Esc 는 되돌리기) */
+function TitleField({ value, onCommit, autoFocus, onFocused }: { value: string; onCommit: (t: string) => void; autoFocus: boolean; onFocused: () => void }) {
+  const [v, setV] = useState(value);
+  const [was, setWas] = useState(value);
+  if (was !== value) {
+    setWas(value);
+    setV(value);
+  }
+  const ref = useRef<HTMLTextAreaElement>(null);
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    el.style.height = 'auto';
+    el.style.height = `${el.scrollHeight}px`;
+  }, [v]);
+  useEffect(() => {
+    if (!autoFocus) return;
+    const el = ref.current;
+    if (el) {
+      el.focus({ preventScroll: true });
+      el.select();
+    }
+    onFocused();
+  }, [autoFocus, onFocused]);
+  const commit = () => {
+    const t = v.replace(/\s+/g, ' ').trim().slice(0, 120);
+    if (!t) setV(value);
+    else if (t !== value) onCommit(t);
+  };
+  return (
+    <textarea
+      ref={ref}
+      rows={1}
+      value={v}
+      maxLength={120}
+      aria-label="노트 이름"
+      placeholder="노트 이름"
+      className="kok-title-input"
+      onChange={(e) => setV(e.target.value.replace(/\n/g, ''))}
+      onBlur={commit}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter' && !e.nativeEvent.isComposing && e.keyCode !== 229) {
+          e.preventDefault();
+          e.currentTarget.blur();
+        } else if (e.key === 'Escape') {
+          e.preventDefault();
+          setV(value);
+          requestAnimationFrame(() => ref.current?.blur());
+        }
+      }}
+    />
+  );
+}
+
+/** 고치는 동안 위 띠의 저장 상태 */
+function SaveBadge({ state }: { state: 'idle' | 'saving' | 'saved' | 'error' }) {
+  if (state === 'idle') return null;
+  return (
+    <span
+      className={cx('mr-1.5 inline-flex items-center gap-1 whitespace-nowrap text-xs font-semibold', state === 'error' ? 'text-bad' : 'text-muted')}
+      role="status"
+      aria-live="polite"
+    >
+      {state === 'saving' ? <Spinner className="h-3.5 w-3.5" /> : state === 'saved' ? <Icon d={ICONS.check} size={14} strokeWidth={2.6} /> : null}
+      {state === 'saving' ? '저장 중' : state === 'saved' ? '저장됨' : '저장 못 함'}
+    </span>
   );
 }
 

@@ -98,6 +98,8 @@ export function CoverSheet({
             <CoverArt
               key={drawn}
               cover={cover}
+              tint={tint}
+              reserve={{ w: 0, h: 0 }}
               describe
               className={cx('kok-fade absolute inset-0 h-full w-full p-2 transition-opacity duration-200', busy === 'draw' && 'opacity-30')}
             />
@@ -120,7 +122,7 @@ export function CoverSheet({
           {busy === 'draw' ? '표지를 그리는 중이에요.' : ''}
         </p>
         <p className="text-[15px] leading-relaxed">
-          <span className="font-semibold">{name}</span>의 핵심을 AI가 문제 그림처럼 그려요. 다시 그릴 때마다 새 그림이 나와요.
+          <span className="font-semibold">{name}</span>의 핵심을 AI가 연표·흐름도·비교표 같은 작은 도표로 그려요. 다시 그리면 새로 골라서 그려요.
         </p>
         <p className="text-xs text-muted">자료를 넣을 때 표지를 저절로 그릴지는 설정의 시각화에서 바꿀 수 있어요.</p>
       </div>

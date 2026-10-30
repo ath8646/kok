@@ -144,11 +144,12 @@ export function estimateRedraws(model: ModelId, usdPerEnergy: number): number {
 }
 
 /**
- * Pro 표지 그림 한 장의 예상 에너지: 노트 줄임(약 1500토큰) + 지시·스키마를 보내고 그림 설계도(요소 20개쯤)를 받는다.
+ * Pro 표지 그림 한 장의 예상 에너지: 노트 줄임(약 1500토큰) + 지시·스키마를 보내고 도표의 모양과 짧은 낱말(그래프면 설계도)을 받는다.
  * 자료를 넣을 때 자동으로 그리면 노트 만들기 예상에 더하고, 다시 그리기 화면에도 보인다 (model: 그림 모델)
  */
 export function estimateCover(model: ModelId, usdPerEnergy: number): number {
-  return estimateSmallTask(model, usdPerEnergy, 4000, 2200);
+  // 답 길이는 lib/cover.ts 의 COVER_OUT_TYPICAL 과 같게 (이 파일은 다른 파일을 불러오지 않는다)
+  return estimateSmallTask(model, usdPerEnergy, 4000, 900);
 }
 
 /** 자료를 넣을 때 표지 그림을 그리는지 (Pro 혜택, 설정에서 켜 둠, DB 칸이 있음. 노트에 더하는 자료는 그리지 않는다) */

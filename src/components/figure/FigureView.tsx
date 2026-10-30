@@ -30,8 +30,8 @@ import { TONE_VAR } from '@/components/art/shared';
 
 /** 그림 글도 설정의 글꼴을 따른다 (글 자리는 textWidth 가 한글을 1em 으로 넉넉히 잡아서 다른 글꼴도 넘치지 않는다. 변수가 없는 곳 = 그림 파일로 저장할 때는 뒤의 글꼴) */
 const FONT = 'var(--font-sans, Pretendard, "Apple SD Gothic Neo", "Malgun Gothic", "Noto Sans KR", sans-serif)';
-/** 여러 함수 그래프의 색 (가지 색에서 고른다) */
-const CURVE = ['var(--b1)', 'var(--b3)', 'var(--b5)', 'var(--b2)', 'var(--b6)'];
+/** 여러 함수 그래프의 색 (가지 색에서 고른다. 첫 그래프는 --fig-curve 가 있으면 그 색: 표지 그림이 과목 색으로) */
+const CURVE = ['var(--fig-curve, var(--b1))', 'var(--b3)', 'var(--b5)', 'var(--b2)', 'var(--b6)'];
 
 type LabelDraw = LabelReq & { text: string; size: number; color: string; bold: boolean; cls?: string };
 
@@ -85,6 +85,7 @@ export const FigureView = memo(function FigureView({
   tones,
   fill,
   decorative,
+  bare,
 }: {
   figure: Figure;
   visible?: Set<string>;
@@ -101,6 +102,8 @@ export const FigureView = memo(function FigureView({
   fill?: boolean;
   /** 꾸미는 그림: 화면 읽기 프로그램이 건너뛴다 (옆에 같은 뜻의 글이 있을 때) */
   decorative?: boolean;
+  /** 축의 눈금을 뺀다 (작은 표지 그림: 축과 O·x·y 만) */
+  bare?: boolean;
 }) {
   const uid = useId().replace(/:/g, '');
   // 없는 점을 가리키는 선 같은 것은 그리지 않는다 (그리다가 멈추지 않게)
@@ -535,7 +538,7 @@ export const FigureView = memo(function FigureView({
       );
       const tickStyle: CSSProperties = { fill: 'var(--muted)', fontSize: 10.5, fontWeight: 500 };
       const skipEvery = xs.length > 10 ? 2 : 1;
-      xs.forEach((x, k) => {
+      (bare ? [] : xs).forEach((x, k) => {
         if (Math.abs(x) < 1e-9 || k % skipEvery) return;
         axis.push(<line key={`tx${x}`} x1={f2(m.px(x))} x2={f2(m.px(x))} y1={f2(ax - 3)} y2={f2(ax + 3)} style={axisStyle} />);
         axis.push(
@@ -544,7 +547,7 @@ export const FigureView = memo(function FigureView({
           </text>,
         );
       });
-      ys.forEach((y) => {
+      (bare ? [] : ys).forEach((y) => {
         if (Math.abs(y) < 1e-9) return;
         axis.push(<line key={`ty${y}`} y1={f2(m.py(y))} y2={f2(m.py(y))} x1={f2(ay - 3)} x2={f2(ay + 3)} style={axisStyle} />);
         axis.push(

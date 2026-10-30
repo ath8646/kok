@@ -94,8 +94,16 @@
 }
 
 /* =====================================================================================
-   네온: 어두운 벽돌 벽, 흰빛 도는 네온관 제목, 두 색 네온관 테두리
+   네온: 어두운 벽돌 벽에 네온관. 빛은 '켜진 것'에만 준다 — 큰 카드·누르는 버튼·고른 칩·아래 메뉴 고른 칸·+ 버튼.
+   보통 카드는 빛 없는 무광 판(흰빛 가는 테두리)이라 켜진 것이 눈에 들어온다.
+   네온관은 한 색이다 (실제 네온관처럼): 가운데는 흰빛이 도는 심(core), 둘레로 그 색 빛이 번진다. 두 색 그라데이션은 쓰지 않는다
    ===================================================================================== */
+:root[data-skin='neon'] {
+  /* 관의 심: 그 색에 흰빛을 섞은 것 */
+  --neon-a-core: color-mix(in srgb, var(--skin-a) 58%, #fff);
+  --neon-b-core: color-mix(in srgb, var(--skin-b) 58%, #fff);
+  --neon-hair: rgba(255, 255, 255, 0.075);
+}
 :root[data-skin='neon'] .kok-skin-art::before {
   inset: 0;
   background: var(--skin-art-1);
@@ -110,80 +118,151 @@
   background:
     radial-gradient(80% 42% at 50% 104%, var(--skin-art-2), transparent 72%), radial-gradient(130% 90% at 50% 40%, transparent 55%, rgba(0, 0, 0, 0.55));
 }
+/* 큰 제목: 흰빛 심 + 겹겹이 번지는 빛 (네온 글자) */
 :root[data-skin='neon'] .kok-title {
   color: var(--skin-title);
   text-shadow:
-    0 0 4px var(--skin-glow-a),
-    0 0 14px var(--skin-glow-a),
-    0 0 32px var(--skin-title-2);
+    0 0 1px rgba(255, 255, 255, 0.6),
+    0 0 6px var(--skin-glow-a),
+    0 0 16px var(--skin-glow-a),
+    0 0 38px var(--skin-title-2);
 }
-:root[data-skin='neon'] .kok-section-title {
-  text-shadow: 0 0 12px var(--skin-glow-a);
+/* 오르빗은 띄어쓰기가 넓어서 좁힌다 */
+:root[data-skin='neon']:not([data-font]) :is(.font-display, .kok-title) {
+  word-spacing: -0.22em;
 }
 :root[data-skin='neon'] .kok-card {
   border-radius: 18px;
   box-shadow:
-    inset 0 0 0 1px var(--skin-line),
-    0 0 22px -12px var(--skin-glow-a);
+    inset 0 0 0 1px var(--neon-hair),
+    0 18px 36px -26px rgba(0, 0, 0, 0.95);
 }
-/* 큰 카드: 두 색 네온관 테두리 (숨 쉬듯 밝아졌다 어두워진다) + 바깥으로 번지는 빛 */
+@media (hover: hover) and (pointer: fine) {
+  :root[data-skin='neon'] .kok-card-hover:hover {
+    box-shadow:
+      inset 0 0 0 1px color-mix(in srgb, var(--skin-a) 38%, transparent),
+      0 0 22px -12px var(--skin-glow-a),
+      0 18px 36px -26px rgba(0, 0, 0, 0.95);
+  }
+}
+/* 큰 카드: 켜진 한 색 네온관 테두리 (숨 쉬듯 밝아졌다 어두워진다) + 안팎으로 번지는 빛 */
 :root[data-skin='neon'] .kok-hero {
   box-shadow:
-    0 0 28px -6px var(--skin-glow-a),
-    0 0 60px -18px var(--skin-glow-b);
+    0 0 0 1px color-mix(in srgb, var(--skin-a) 42%, transparent),
+    0 0 18px -3px var(--skin-glow-a),
+    0 0 56px -16px var(--skin-glow-a),
+    inset 0 0 26px -14px var(--skin-glow-a);
+}
+:root[data-skin='neon'] .kok-hero::before {
+  background: none;
 }
 :root[data-skin='neon'] .kok-hero::after {
-  padding: 2px;
-  background: linear-gradient(115deg, var(--skin-a), var(--skin-b));
+  padding: 1.5px;
+  background: var(--neon-a-core);
 }
+/* 누르는 버튼: 불이 들어온 간판 (관 테두리 + 안쪽 빛 + 빛나는 글자) */
 :root[data-skin='neon'] :is(.kok-btn-primary, :is(a, button).bg-accent) {
+  background-color: color-mix(in srgb, var(--skin-a) 15%, var(--surface));
+  background-image: none;
+  color: var(--skin-title);
+  text-shadow: 0 0 10px var(--skin-glow-a);
   box-shadow:
+    inset 0 0 0 1.5px var(--neon-a-core),
+    0 0 0 1px color-mix(in srgb, var(--skin-a) 38%, transparent),
     0 0 18px -3px var(--skin-glow-a),
-    inset 0 0 0 1px rgba(255, 255, 255, 0.35);
+    inset 0 0 16px -6px var(--skin-glow-a);
+}
+:root[data-skin='neon'] :is(.kok-btn-primary, :is(a, button).bg-accent):hover:not(:disabled) {
+  filter: none;
+  background-color: color-mix(in srgb, var(--skin-a) 24%, var(--surface));
 }
 :root[data-skin='neon'] .kok-btn-secondary {
   background: transparent;
-  box-shadow: inset 0 0 0 1.5px var(--skin-line);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.16);
 }
 :root[data-skin='neon'] .kok-btn-secondary:hover {
   box-shadow:
-    inset 0 0 0 1.5px var(--skin-a),
-    0 0 14px -4px var(--skin-glow-a);
+    inset 0 0 0 1px var(--neon-a-core),
+    0 0 14px -5px var(--skin-glow-a);
 }
-:root[data-skin='neon'] .kok-chip-on {
-  box-shadow: 0 0 16px -2px var(--skin-glow-b);
+/* 고른 칩·고른 칸: 둘째 색 관 */
+:root[data-skin='neon'] :is(.kok-chip-on, .kok-pick-on) {
+  background-color: color-mix(in srgb, var(--skin-b) 13%, var(--surface));
+  background-image: none;
+  color: var(--ink);
+  box-shadow:
+    inset 0 0 0 1.5px var(--neon-b-core),
+    0 0 14px -3px var(--skin-glow-b);
+}
+:root[data-skin='neon'] .kok-pick-on :is(.text-accent) {
+  color: var(--skin-b-text);
+}
+:root[data-skin='neon'] :is(.kok-chip-off, .kok-pick:not(.kok-pick-on)) {
+  background: transparent;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.12);
 }
 :root[data-skin='neon'] .kok-input:focus {
-  border-color: var(--skin-a);
+  border-color: var(--neon-a-core);
   box-shadow: 0 0 16px -4px var(--skin-glow-a);
 }
 :root[data-skin='neon'] input:checked + .kok-switch {
   box-shadow: 0 0 14px -2px var(--skin-glow-a);
 }
 :root[data-skin='neon'] .kok-seg-on {
-  box-shadow: inset 0 0 0 1px var(--skin-line);
+  background: rgba(255, 255, 255, 0.09);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.14);
 }
+/* + 버튼: 동그란 관 */
 :root[data-skin='neon'] .kok-fab {
+  background-color: color-mix(in srgb, var(--skin-a) 16%, var(--surface));
+  background-image: none;
+  color: var(--skin-title);
   box-shadow:
-    0 0 0 2px rgba(255, 255, 255, 0.18),
-    0 0 26px -2px var(--skin-glow-a),
-    0 0 40px -10px var(--skin-glow-b);
+    inset 0 0 0 2px var(--neon-a-core),
+    0 0 0 1px color-mix(in srgb, var(--skin-a) 38%, transparent),
+    0 0 24px -2px var(--skin-glow-a),
+    0 0 50px -12px var(--skin-glow-a),
+    inset 0 0 18px -6px var(--skin-glow-a);
+}
+:root[data-skin='neon'] .kok-fab :is(svg, .kok-fab-icon) {
+  color: var(--skin-title);
+  filter: drop-shadow(0 0 4px var(--skin-glow-a));
 }
 :root[data-skin='neon'] .kok-tab-pill.is-on {
-  box-shadow: 0 0 14px -4px var(--skin-glow-a);
+  background-color: color-mix(in srgb, var(--skin-b) 12%, transparent);
+  background-image: none;
+  color: var(--ink);
+  box-shadow:
+    inset 0 0 0 1.5px var(--neon-b-core),
+    0 0 14px -4px var(--skin-glow-b);
+}
+/* AI에게 물어보기: 둘째 색 동그란 관 (보라 그라데이션 대신) */
+:root[data-skin='neon'] .kok-ask {
+  background: color-mix(in srgb, var(--surface) 82%, transparent);
+  box-shadow: inset 0 0 0 1px var(--neon-hair);
+}
+:root[data-skin='neon'] .kok-ask-orb {
+  background: color-mix(in srgb, var(--skin-b) 12%, transparent);
+  color: var(--ink);
+  box-shadow:
+    inset 0 0 0 1.5px var(--neon-b-core),
+    0 0 14px -3px var(--skin-glow-b);
 }
 :root[data-skin='neon'] .kok-sheet {
   box-shadow:
-    0 -1px 0 var(--skin-line),
+    0 -1px 0 var(--neon-hair),
     0 -18px 50px -20px var(--skin-glow-a);
 }
 :root[data-skin='neon'] .kok-pop {
   box-shadow:
-    0 0 0 1px var(--skin-line),
-    0 12px 36px -8px var(--skin-glow-a);
+    0 0 0 1px rgba(255, 255, 255, 0.1),
+    0 12px 36px -8px rgba(0, 0, 0, 0.8),
+    0 0 30px -14px var(--skin-glow-a);
 }
 :root[data-skin='neon'] .kok-nav-link.is-on {
-  box-shadow: inset 0 0 0 1px var(--skin-line);
+  box-shadow:
+    inset 0 0 0 1.5px var(--neon-a-core),
+    0 0 14px -5px var(--skin-glow-a);
 }
 :root[data-skin='neon'] ::selection {
   background: var(--skin-a);
@@ -191,7 +270,8 @@
 }
 
 /* =====================================================================================
-   글리치: 주사선이 흐르는 푸른 검정, 두 색이 어긋난 테두리·제목, 가끔 지직
+   글리치: 주사선이 흐르는 푸른 검정. 모서리가 각진(3px) 칸에 빨강·청록이 1px 어긋난 테두리,
+   큰 카드는 화면 표시기(HUD)처럼 네 모서리에 두 색 괄호, 누르는 것은 딱딱한 둘째 색 그림자, 가끔 지직
    ===================================================================================== */
 :root[data-skin='glitch'] .kok-skin-art::before {
   inset: 0;
@@ -199,7 +279,7 @@
 }
 :root[data-skin='glitch'] .kok-skin-art::after {
   inset: 0;
-  background: radial-gradient(70% 50% at 0% 0%, var(--skin-art-3), transparent 70%), radial-gradient(70% 50% at 100% 100%, var(--skin-art-2), transparent 70%);
+  background: radial-gradient(60% 38% at 0% 0%, var(--skin-art-3), transparent 70%), radial-gradient(60% 38% at 100% 100%, var(--skin-art-2), transparent 70%);
 }
 :root[data-skin='glitch'] .kok-title {
   color: var(--skin-title);
@@ -211,34 +291,45 @@
   display: inline-block;
 }
 :root[data-skin='glitch'] .kok-card {
-  border-radius: 4px;
+  border-radius: 3px;
   box-shadow:
     inset 0 0 0 1px var(--line),
-    -1.5px 0 0 color-mix(in srgb, var(--skin-a) 55%, transparent),
-    1.5px 0 0 color-mix(in srgb, var(--skin-b) 55%, transparent);
+    -1px 0 0 color-mix(in srgb, var(--skin-a) 60%, transparent),
+    1px 0 0 color-mix(in srgb, var(--skin-b) 60%, transparent);
 }
-/* 큰 카드: 두 색 테두리가 어긋나 겹친다 */
+/* 큰 카드: 네 모서리 괄호 (왼쪽 위·오른쪽 아래 첫째 색, 오른쪽 위·왼쪽 아래 둘째 색). 가끔 따로 튄다 */
 :root[data-skin='glitch'] .kok-hero {
-  border-radius: 4px;
-  box-shadow: inset 0 0 0 1px var(--line);
+  border-radius: 3px;
+  box-shadow:
+    inset 0 0 0 1px color-mix(in srgb, var(--skin-b) 40%, var(--line)),
+    0 0 34px -20px var(--skin-glow-b);
 }
 :root[data-skin='glitch'] .kok-hero::before,
 :root[data-skin='glitch'] .kok-hero::after {
-  border-radius: 4px;
-  background: none;
+  inset: -5px;
+  border-radius: 0;
   padding: 0;
   -webkit-mask: none;
   mask: none;
 }
 :root[data-skin='glitch'] .kok-hero::before {
-  inset: -1px;
-  border: 2px solid var(--skin-a);
-  transform: translate(-4px, -3px);
+  background:
+    linear-gradient(var(--skin-a), var(--skin-a)) left top / 18px 2px no-repeat,
+    linear-gradient(var(--skin-a), var(--skin-a)) left top / 2px 18px no-repeat,
+    linear-gradient(var(--skin-a), var(--skin-a)) right bottom / 18px 2px no-repeat,
+    linear-gradient(var(--skin-a), var(--skin-a)) right bottom / 2px 18px no-repeat;
 }
 :root[data-skin='glitch'] .kok-hero::after {
-  inset: -1px;
-  border: 2px solid var(--skin-b);
-  transform: translate(4px, 3px);
+  background:
+    linear-gradient(var(--skin-b), var(--skin-b)) right top / 18px 2px no-repeat,
+    linear-gradient(var(--skin-b), var(--skin-b)) right top / 2px 18px no-repeat,
+    linear-gradient(var(--skin-b), var(--skin-b)) left bottom / 18px 2px no-repeat,
+    linear-gradient(var(--skin-b), var(--skin-b)) left bottom / 2px 18px no-repeat;
+}
+/* 둥근 칸이 남지 않게 (Tailwind rounded-* 모두 3px. 동그라미가 뜻인 고리·별은 SVG 라서 그대로. 빼는 것: 다른 테마의 작은 그림 .kok-mini 안,
+   도는 고리(animate-spin: 네모가 돌면 흔들려 보인다), 하나만 고르는 칸의 동그라미(네모면 여러 개 고르는 칸처럼 보인다)) */
+:root[data-skin='glitch'] [class*='rounded']:not(.kok-mini *, .animate-spin, [role='radio'] > .rounded-full) {
+  border-radius: 3px;
 }
 :root[data-skin='glitch'] :is(.kok-btn, :is(a, button).bg-accent):not(.kok-btn-ghost) {
   border-radius: 3px;
@@ -255,13 +346,24 @@
   background: transparent;
   box-shadow: inset 0 0 0 1px var(--skin-line);
 }
-:root[data-skin='glitch'] :is(.kok-chip, .kok-chip-on, .kok-seg, .kok-seg-on, .kok-tab-pill, .kok-input, .kok-switch, .kok-switch-knob) {
+:root[data-skin='glitch']
+  :is(.kok-chip, .kok-chip-on, .kok-chip-off, .kok-seg, .kok-seg-on, .kok-tab-pill, .kok-input, .kok-switch, .kok-switch-knob, .kok-pick) {
   border-radius: 3px;
 }
 :root[data-skin='glitch'] .kok-chip-on {
   background: var(--skin-a);
   color: var(--skin-a-ink);
   box-shadow: 2px 2px 0 var(--skin-b);
+}
+:root[data-skin='glitch'] :is(.kok-chip-off, .kok-pick:not(.kok-pick-on)) {
+  background: transparent;
+  box-shadow: inset 0 0 0 1px var(--line);
+}
+:root[data-skin='glitch'] .kok-pick-on {
+  background: color-mix(in srgb, var(--skin-a) 12%, var(--surface));
+  box-shadow:
+    inset 0 0 0 1.5px var(--skin-a),
+    2px 2px 0 var(--skin-b);
 }
 :root[data-skin='glitch'] .kok-tabbar {
   border-radius: 0;
@@ -273,14 +375,23 @@
   box-shadow: 2px 2px 0 var(--skin-b);
 }
 :root[data-skin='glitch'] .kok-fab {
-  border-radius: 6px;
+  border-radius: 3px;
   background-image: none;
   box-shadow:
     4px 4px 0 var(--skin-b),
     0 10px 24px -10px rgba(0, 0, 0, 0.8);
 }
+/* AI에게 물어보기: 각진 칸, 첫째 색 네모 (보라 그라데이션 대신) */
+:root[data-skin='glitch'] .kok-ask {
+  box-shadow: inset 0 0 0 1px var(--line);
+}
+:root[data-skin='glitch'] .kok-ask-orb {
+  background: var(--skin-a);
+  color: var(--skin-a-ink);
+  box-shadow: 2px 2px 0 var(--skin-b);
+}
 :root[data-skin='glitch'] :is(.kok-sheet, .kok-pop, .kok-toast, .kok-selbar, .kok-composer) {
-  border-radius: 6px;
+  border-radius: 4px;
 }
 :root[data-skin='glitch'] .kok-sheet {
   box-shadow:
@@ -318,7 +429,8 @@
 }
 
 /* =====================================================================================
-   신스웨이브: 보랏빛 밤하늘, 줄무늬 해, 지평선 너머로 끝없는 격자, 노을빛 제목
+   신스웨이브: 보랏빛 밤하늘, 지평선에 걸린 줄무늬 해와 그 빛, 끝없는 격자, 노을빛 제목.
+   누르는 것은 80년대 크롬처럼: 위에서 아래로 노을 그라데이션(둘째 색 → 첫째 색) + 위 끝 반사광 + 아래 그늘
    ===================================================================================== */
 :root[data-skin='synthwave'] .kok-skin-art {
   /* 지평선(위에서 42%) 쪽이 노을빛으로 밝다 */
@@ -358,7 +470,7 @@
     #000 94%
   );
 }
-/* 격자 바닥: 지평선에서 앞으로 눕힌 판 (먼 곳은 촘촘, 가까운 곳은 넓게) */
+/* 격자 바닥: 지평선에서 앞으로 눕힌 판 (먼 곳은 촘촘, 가까운 곳은 넓게). 지평선에는 가는 빛 줄 */
 :root[data-skin='synthwave'] .kok-skin-art::after {
   left: -70%;
   right: -70%;
@@ -367,10 +479,11 @@
   transform-origin: 50% 0;
   transform: perspective(400px) rotateX(66deg);
   background:
+    linear-gradient(var(--skin-art-2), transparent 2px) 0 0 / 100% 100% no-repeat,
     linear-gradient(var(--skin-art-3) 1.5px, transparent 1.5px) 0 0 / 100% 22px,
     linear-gradient(90deg, var(--skin-art-3) 1.5px, transparent 1.5px) 50% 0 / 34px 100%;
-  -webkit-mask: linear-gradient(to bottom, transparent, #000 22%);
-  mask: linear-gradient(to bottom, transparent, #000 22%);
+  -webkit-mask: linear-gradient(to bottom, #000 0 2px, transparent 3px, #000 22%);
+  mask: linear-gradient(to bottom, #000 0 2px, transparent 3px, #000 22%);
 }
 :root[data-skin='synthwave'] .kok-title-text {
   /* 노을 그라데이션 글자 (두 끝 모두 바탕에서 4.5 이상: skins.ts) */
@@ -387,34 +500,63 @@
   border-radius: 16px;
   box-shadow:
     inset 0 1px 0 color-mix(in srgb, var(--skin-b) 45%, transparent),
-    inset 0 0 0 1px color-mix(in srgb, var(--skin-a) 22%, transparent),
-    0 12px 30px -16px var(--skin-shadow);
+    inset 0 0 0 1px color-mix(in srgb, var(--skin-a) 20%, transparent),
+    0 14px 30px -18px var(--skin-shadow);
 }
 :root[data-skin='synthwave'] .kok-hero {
   box-shadow:
-    0 0 36px -10px var(--skin-glow-a),
+    0 0 38px -10px var(--skin-glow-a),
     0 18px 40px -20px var(--skin-shadow);
 }
 :root[data-skin='synthwave'] .kok-hero::after {
   padding: 1.5px;
   background: linear-gradient(180deg, var(--skin-b), var(--skin-a) 70%, color-mix(in srgb, var(--skin-a) 30%, transparent));
 }
-:root[data-skin='synthwave'] :is(.kok-btn-primary, :is(a, button).bg-accent) {
+/* 크롬 버튼: 노을 그라데이션은 세로로 (끝 색 --btn-2 는 글자가 4.5 이상 읽히게 fx.ts 가 맞춘 색) */
+:root[data-skin='synthwave'] :is(.kok-btn-primary, :is(a, button).bg-accent, .kok-chip-on, .kok-ask-orb) {
+  background-color: var(--accent);
+  background-image: linear-gradient(180deg, var(--btn-2) 0%, var(--accent) 100%);
+  color: var(--accent-ink);
   box-shadow:
-    0 0 22px -6px var(--skin-glow-a),
-    inset 0 1px 0 rgba(255, 255, 255, 0.4);
+    inset 0 1px 0 rgba(255, 255, 255, 0.55),
+    inset 0 -2px 0 rgba(0, 0, 0, 0.16),
+    0 0 22px -6px var(--skin-glow-a);
+}
+:root[data-skin='synthwave'] .kok-chip-on {
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.5),
+    inset 0 -2px 0 rgba(0, 0, 0, 0.14),
+    0 0 16px -6px var(--skin-glow-a);
+}
+:root[data-skin='synthwave'] :is(.kok-chip-off, .kok-pick:not(.kok-pick-on)) {
+  background: color-mix(in srgb, var(--surface-2) 70%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--skin-a) 18%, transparent);
+}
+:root[data-skin='synthwave'] .kok-pick-on {
+  box-shadow:
+    inset 0 0 0 1.5px var(--skin-b),
+    0 0 18px -6px var(--skin-glow-b);
 }
 :root[data-skin='synthwave'] .kok-btn-secondary {
   background: color-mix(in srgb, var(--surface-2) 70%, transparent);
   box-shadow: inset 0 0 0 1px var(--skin-line);
 }
 :root[data-skin='synthwave'] .kok-fab {
+  background-image: linear-gradient(180deg, var(--fab-2), var(--fab));
   box-shadow:
-    0 0 0 2px color-mix(in srgb, var(--skin-b) 50%, transparent),
+    inset 0 1.5px 0 rgba(255, 255, 255, 0.55),
+    inset 0 -3px 0 rgba(0, 0, 0, 0.16),
+    0 0 0 2px color-mix(in srgb, var(--skin-b) 45%, transparent),
     0 0 30px -4px var(--skin-glow-a);
 }
-:root[data-skin='synthwave'] .kok-chip-on {
-  box-shadow: 0 0 18px -4px var(--skin-glow-a);
+:root[data-skin='synthwave'] .kok-tab-pill.is-on {
+  background-image: linear-gradient(180deg, var(--pill-2), var(--pill-1));
+  box-shadow: inset 0 1px 0 color-mix(in srgb, var(--skin-b) 50%, transparent);
+}
+:root[data-skin='synthwave'] .kok-ask {
+  box-shadow:
+    inset 0 1px 0 color-mix(in srgb, var(--skin-b) 35%, transparent),
+    inset 0 0 0 1px color-mix(in srgb, var(--skin-a) 18%, transparent);
 }
 :root[data-skin='synthwave'] .kok-sheet {
   box-shadow:
@@ -551,6 +693,58 @@
 }
 :root[data-skin='terminal'] .kok-bone {
   border-radius: 0;
+}
+/* 둥근 칸이 남지 않게: Tailwind rounded-* 모두 네모 (동그라미가 뜻인 고리·별은 SVG 라서 그대로. 빼는 것은 글리치와 같다:
+   .kok-mini 안, 도는 고리, 하나만 고르는 칸의 동그라미) */
+:root[data-skin='terminal'] [class*='rounded']:not(.kok-mini *, .animate-spin, [role='radio'] > .rounded-full) {
+  border-radius: 0;
+}
+/* 고르기 칸·칩: 가는 테두리 네모, 고른 것은 강조 색 */
+:root[data-skin='terminal'] :is(.kok-chip-off, .kok-pick:not(.kok-pick-on)) {
+  background: transparent;
+  box-shadow: inset 0 0 0 1px var(--line);
+}
+:root[data-skin='terminal'] .kok-pick-on {
+  background: color-mix(in srgb, var(--skin-a) 10%, transparent);
+  box-shadow: inset 0 0 0 1px var(--skin-a);
+}
+:root[data-skin='terminal'] .kok-seg {
+  background: transparent;
+  box-shadow: inset 0 0 0 1px var(--line);
+}
+:root[data-skin='terminal'] .kok-seg-on {
+  background: var(--skin-a);
+  color: var(--skin-a-ink);
+  box-shadow: none;
+}
+/* 누르는 큰 버튼은 [ 대괄호 ] 안에 */
+:root[data-skin='terminal'] .kok-btn-primary::before {
+  content: '[';
+  margin-right: 0.5ch;
+}
+:root[data-skin='terminal'] .kok-btn-primary::after {
+  content: ']';
+  margin-left: 0.5ch;
+}
+/* AI에게 물어보기: 프롬프트 >_ (보라 그라데이션·반짝이 대신) */
+:root[data-skin='terminal'] .kok-ask {
+  background: var(--bg);
+  box-shadow: inset 0 0 0 1px var(--line);
+}
+:root[data-skin='terminal'] .kok-ask-orb {
+  background: transparent;
+  color: var(--skin-a-text);
+  box-shadow: inset 0 0 0 1px var(--skin-line);
+  font-family: var(--skin-font);
+  font-size: 15px;
+  font-weight: 700;
+}
+:root[data-skin='terminal'] .kok-ask-orb svg {
+  display: none;
+}
+:root[data-skin='terminal'] .kok-ask-orb::before {
+  content: '>_';
+  letter-spacing: -0.05em;
 }
 :root[data-skin='terminal'] ::selection {
   background: var(--skin-a);
@@ -1084,6 +1278,32 @@
 :root[data-skin='brutal'] .kok-nav-link.is-on svg {
   color: var(--ink);
 }
+/* 고르기 칩·칸도 다른 것들처럼 굵은 테두리 (고른 것은 강조 색 칠 + 딱딱한 그림자) */
+:root[data-skin='brutal'] :is(.kok-chip-off, .kok-pick:not(.kok-pick-on)) {
+  background: var(--surface);
+  box-shadow: inset 0 0 0 2px var(--skin-line);
+}
+:root[data-skin='brutal'] .kok-pick-on {
+  background: var(--skin-b);
+  color: var(--skin-b-ink);
+  box-shadow:
+    inset 0 0 0 2.5px var(--skin-line),
+    3px 3px 0 var(--skin-shadow);
+}
+:root[data-skin='brutal'] .kok-pick-on :is(.text-accent) {
+  color: var(--skin-b-ink);
+}
+/* AI에게 물어보기: 굵은 테두리 띠 + 채움 색 동그라미 (보라 그라데이션 대신) */
+:root[data-skin='brutal'] .kok-ask {
+  box-shadow:
+    inset 0 0 0 2.5px var(--skin-line),
+    3px 3px 0 var(--skin-shadow);
+}
+:root[data-skin='brutal'] .kok-ask-orb {
+  background: var(--skin-a);
+  color: var(--skin-a-ink);
+  box-shadow: inset 0 0 0 2px var(--skin-line);
+}
 :root[data-skin='brutal'] ::selection {
   background: var(--skin-a);
   color: #000;
@@ -1107,6 +1327,12 @@
     left: 252px;
   }
 }
+/* 종이 결: 아주 옅은 잡티 (한 번 그려 두고 깔기만 한다) */
+:root[data-skin='sketch'] .kok-skin-art::after {
+  inset: 0;
+  background: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 .055 0'/%3E%3C/filter%3E%3Crect width='180' height='180' filter='url(%23n)'/%3E%3C/svg%3E")
+    0 0 / 180px 180px repeat;
+}
 :root[data-skin='sketch'] .kok-title {
   color: var(--skin-title);
 }
@@ -1128,23 +1354,19 @@
   transform: rotate(-0.8deg);
   transform-origin: left center;
 }
-:root[data-skin='sketch'] :is(.kok-card, .kok-composer) {
-  border-radius: 18px 6px 20px 8px / 8px 20px 6px 18px;
-  box-shadow:
-    inset 0 0 0 1.5px var(--skin-line),
-    2px 3px 0 var(--skin-shadow);
-}
-:root[data-skin='sketch'] .kok-card:nth-child(3n + 2) {
-  border-radius: 7px 19px 9px 21px / 20px 7px 18px 9px;
-}
-:root[data-skin='sketch'] .kok-card:nth-child(3n) {
-  border-radius: 20px 9px 16px 6px / 6px 16px 9px 22px;
+/* 카드: 펜으로 그은 테두리 (두 번 그은 듯 모서리에서 선이 조금 삐져나온다). 9조각 그림이라 어떤 크기에도 선 굵기가 같다.
+   그림은 카드 밖 3px 까지 (border-image-outset), 바탕은 그 선 안쪽에 맞게 모서리를 조금만 둥글게.
+   svg 에 width·height 를 꼭 적는다: 없으면 카드 크기로 그려져서 큰 카드일수록 선이 굵어지고 안으로 들어온다 */
+:root[data-skin='sketch'] :is(.kok-card, .kok-composer, .kok-ask) {
+  border: 1px solid transparent;
+  border-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='120' viewBox='0 0 120 120' fill='none' stroke='%231d2026' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M6.5 8.2C30 6.4 60 7.6 88 6.6S112 7.4 113.6 7.8C113.2 30 114.4 60 113.1 88S113.8 110 113.2 113.4C90 114.2 60 112.8 32 113.9S9 113.1 6.9 113.6C7.8 90 6.1 60 7.3 32S6.2 12 6.5 8.2' stroke-width='2.2' stroke-opacity='.86'/%3E%3Cpath d='M2.8 7.6L19 6.7M101 8.7L117.2 7.3M112.7 2.9L113.7 18M114.1 103L113.1 117.3M117.4 113L102 114.3M18 114.6L2.9 113M6.6 117.3L7.5 102M8 17L6.3 2.7' stroke-width='1.5' stroke-opacity='.5'/%3E%3C/svg%3E")
+    30 / 18px / 3px stretch;
+  border-radius: 4px;
+  box-shadow: 2px 3px 0 var(--skin-shadow);
 }
 /* 큰 카드: 위에 마스킹 테이프 */
 :root[data-skin='sketch'] .kok-hero {
-  box-shadow:
-    inset 0 0 0 2px var(--skin-line),
-    3px 4px 0 var(--skin-shadow);
+  box-shadow: 3px 4px 0 var(--skin-shadow);
 }
 :root[data-skin='sketch'] .kok-hero::before {
   inset: -11px auto auto 50%;
@@ -1239,6 +1461,29 @@
 :root[data-skin='sketch'] .kok-nav-link.is-on svg {
   color: var(--ink);
 }
+/* 고르기 칩·칸: 연필 테두리, 고른 것은 형광펜 */
+:root[data-skin='sketch'] :is(.kok-chip-off, .kok-pick:not(.kok-pick-on)) {
+  background: transparent;
+  box-shadow: inset 0 0 0 1.5px color-mix(in srgb, var(--ink) 38%, transparent);
+}
+:root[data-skin='sketch'] .kok-pick-on {
+  background: var(--skin-b);
+  color: var(--ink);
+  box-shadow: inset 0 0 0 1.5px var(--skin-line);
+}
+:root[data-skin='sketch'] .kok-pick-on :is(.text-accent) {
+  color: var(--ink);
+}
+:root[data-skin='sketch'] :is(.kok-chip-off, .kok-pick) {
+  border-radius: 255px 15px 225px 15px / 15px 225px 15px 255px;
+}
+/* AI에게 물어보기: 펜으로 그린 동그라미 (보라 그라데이션 대신) */
+:root[data-skin='sketch'] .kok-ask-orb {
+  background: transparent;
+  color: var(--skin-a-text);
+  border-radius: 58% 42% 55% 45% / 45% 55% 42% 58%;
+  box-shadow: inset 0 0 0 1.5px var(--skin-line);
+}
 :root[data-skin='sketch'] ::selection {
   background: var(--skin-b);
   color: var(--ink);
@@ -1296,32 +1541,32 @@
   0%,
   94%,
   100% {
-    transform: translate(-4px, -3px);
+    transform: none;
   }
   95% {
-    transform: translate(3px, -1px);
+    transform: translate(5px, -2px);
   }
   96% {
-    transform: translate(-7px, 2px);
+    transform: translate(-6px, 2px);
   }
   97% {
-    transform: translate(-4px, -3px);
+    transform: none;
   }
 }
 @keyframes kok-sk-glitch-frame-2 {
   0%,
   94%,
   100% {
-    transform: translate(4px, 3px);
+    transform: none;
   }
   95% {
-    transform: translate(-3px, 2px);
+    transform: translate(-4px, 3px);
   }
   96% {
-    transform: translate(7px, -1px);
+    transform: translate(6px, -1px);
   }
   97% {
-    transform: translate(4px, 3px);
+    transform: none;
   }
 }
 /* 화면을 가로지르는 띠: 11초에 한 번 */

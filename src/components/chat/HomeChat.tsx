@@ -207,7 +207,7 @@ export function HomeAsk() {
   return (
     <>
       {/* 홈 위쪽: 물어보기 줄 (누르면 채팅 창, 카메라는 바로 사진 찍기) */}
-      <div className="kok-rise flex h-[54px] items-center gap-1 rounded-full bg-surface pl-1.5 pr-1.5 shadow-[0_1px_2px_var(--shadow)] ring-1 ring-inset ring-line/70">
+      <div className="kok-ask kok-rise flex h-[54px] items-center gap-1 rounded-full bg-surface pl-1.5 pr-1.5 shadow-[0_1px_2px_var(--shadow)] ring-1 ring-inset ring-line/70">
         <button
           ref={bar}
           type="button"

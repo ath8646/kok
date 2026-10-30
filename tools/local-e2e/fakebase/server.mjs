@@ -1150,59 +1150,29 @@ let cfMode = 'ok';
  * 모든 칸이 있는 납작한 모양 (실제 AI 답처럼). 오른쪽 위(x 11 넘고 y 7.5 넘는 곳)는 비워 둔다
  */
 function fakeCover() {
-  const it = (o) => ({ id: '', type: 'point', refs: [], x: 0, y: 0, w: 0, h: 0, r: 0, expr: '', from: 0, to: 0, label: '', style: 'given', marks: 0, tone: 'ink', ...o });
-  const pt = (id, x, y) => it({ id, x, y, style: 'muted' });
+  // 표지 v2: 도표의 모양과 짧은 낱말만 (자리·색은 앱이 정한다). 번갈아 흐름·비교 (다시 그리면 설명이 바뀐다)
   stats.covers = (stats.covers || 0) + 1;
+  const blank = { view: { x_min: 0, x_max: 0, y_min: 0, y_max: 0 }, axes: false, items: [] };
+  const item = (text, o = {}) => ({ text, sub: '', key: false, side: '', ...o });
   if (stats.covers % 2 === 1) {
-    const rays = [];
-    [30, 120, 210, 300].forEach((deg, k) => {
-      const a = (deg * Math.PI) / 180;
-      rays.push(pt(`ri${k}`, 3.2 + 1.6 * Math.cos(a), 7.2 + 1.6 * Math.sin(a)), pt(`ro${k}`, 3.2 + 2.3 * Math.cos(a), 7.2 + 2.3 * Math.sin(a)));
-      rays.push(it({ id: `ray${k}`, type: 'segment', refs: [`ri${k}`, `ro${k}`], tone: 'orange' }));
-    });
     return {
-      alt: '해와 잎, 이산화탄소와 산소 화살표',
-      view: { x_min: 0, x_max: 15, y_min: 0, y_max: 10 },
-      axes: false,
-      grid: false,
-      items: [
-        pt('S', 3.2, 7.2),
-        it({ id: 'sun', type: 'circle', refs: ['S'], r: 1.2, tone: 'orange' }),
-        ...rays,
-        pt('B', 7.2, 2.4),
-        pt('U', 9.2, 6.2),
-        pt('T', 12.6, 6.4),
-        pt('D', 11.0, 2.6),
-        it({ id: 'leaf', type: 'polygon', refs: ['B', 'U', 'T', 'D'], tone: 'green' }),
-        it({ id: 'rib', type: 'segment', refs: ['B', 'T'], tone: 'green' }),
-        pt('P1', 4.8, 6.2),
-        pt('P2', 8.4, 5.0),
-        it({ id: 'light', type: 'arrow', refs: ['P1', 'P2'], style: 'aux', tone: 'yellow' }),
-        it({ id: 'co2', type: 'text', x: 4.4, y: 2.0, label: '$CO_2$', tone: 'navy' }),
-        it({ id: 'in', type: 'arrow', refs: ['co2', 'B'], tone: 'navy' }),
-        it({ id: 'o2', type: 'text', x: 13.4, y: 1.6, label: '$O_2$', tone: 'teal' }),
-        it({ id: 'out', type: 'arrow', refs: ['D', 'o2'], tone: 'teal' }),
-      ],
+      kind: 'flow',
+      title: '',
+      left: '',
+      right: '',
+      items: [item('빛 흡수'), item('물 분해'), item('ATP 생성'), item('포도당 합성', { key: true })],
+      figure: blank,
+      alt: '빛 흡수부터 포도당 합성까지의 흐름',
     };
   }
   return {
-    alt: '빛이 잎을 지나 포도당이 되는 화살표',
-    view: { x_min: 0, x_max: 15, y_min: 0, y_max: 10 },
-    axes: false,
-    grid: false,
-    items: [
-      it({ id: 'b1', type: 'box', x: 2.4, y: 5, label: '빛', tone: 'yellow' }),
-      pt('L1', 5.8, 4.0),
-      pt('L2', 7.0, 6.6),
-      pt('L3', 9.6, 6.2),
-      pt('L4', 8.6, 3.4),
-      it({ id: 'leaf', type: 'polygon', refs: ['L1', 'L2', 'L3', 'L4'], tone: 'green', style: 'answer' }),
-      it({ id: 'b3', type: 'box', x: 12.4, y: 4.6, label: '포도당', tone: 'orange' }),
-      pt('in', 5.6, 5.0),
-      pt('out', 9.8, 4.8),
-      it({ id: 'a1', type: 'arrow', refs: ['b1', 'in'], tone: 'yellow' }),
-      it({ id: 'a2', type: 'arrow', refs: ['out', 'b3'], tone: 'orange' }),
-    ],
+    kind: 'compare',
+    title: '',
+    left: '광합성',
+    right: '세포 호흡',
+    items: [item('엽록체', { side: 'left' }), item('에너지 저장', { side: 'left' }), item('미토콘드리아', { side: 'right' }), item('에너지 방출', { side: 'right' })],
+    figure: blank,
+    alt: '광합성과 세포 호흡 비교',
   };
 }
 

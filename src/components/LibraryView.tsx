@@ -57,6 +57,7 @@ import { MergeNotesSheet } from './MergeNotesSheet';
 import { CoverArt } from './CoverArt';
 import { CoverSheet } from './CoverSheet';
 import { coverCornerBusy, readCover } from '@/lib/cover';
+import { COVER_RESERVE, COVER_RESERVE_MENU } from '@/lib/cover-layout';
 
 /** manual: AI 없이 직접 만든 노트. cover: 표지 그림 (features.covers 일 때만 읽는다, lib/cover.ts) */
 type LibSource = SourceRowWithUnit & { summary: string | null; manual?: boolean; cover?: unknown };
@@ -1115,7 +1116,7 @@ export function LibraryView() {
                     onClick={() => select(x.id)}
                     className={cx(
                       'press inline-flex h-9 shrink-0 items-center gap-1.5 rounded-full px-3.5 text-sm font-semibold transition-colors duration-200',
-                      x.id === subject.id ? 'kok-chip-on' : 'bg-surface-2 text-ink hover:bg-surface-3',
+                      x.id === subject.id ? 'kok-chip-on' : 'kok-chip-off bg-surface-2 text-ink hover:bg-surface-3',
                     )}
                   >
                     <span className="h-2.5 w-2.5 shrink-0 rounded-full" style={{ background: subjectVar(x.color) }} aria-hidden="true" />
@@ -1251,7 +1252,7 @@ function FolderChip({
       className={cx(
         'press inline-flex h-10 shrink-0 items-center gap-2 rounded-full px-4 text-sm font-semibold transition-colors duration-200',
         // 고른 칩은 테마의 두 색 (화면 꾸미기 C, globals.css .kok-chip-on)
-        on ? 'kok-chip-on' : 'bg-surface text-ink shadow-[0_1px_2px_var(--shadow)] hover:bg-surface-2',
+        on ? 'kok-chip-on' : 'kok-chip-off bg-surface text-ink shadow-[0_1px_2px_var(--shadow)] hover:bg-surface-2',
         mode === 'fill' && 'kok-fill',
       )}
     >
@@ -1461,7 +1462,7 @@ function NoteCard({
                 className={cx('kok-cover absolute inset-0 px-1.5 pt-1.5', startedBusy && 'kok-fade')}
                 style={{ background: `color-mix(in srgb, ${subjectVar(tint)} 8%, transparent)` }}
               >
-                <CoverArt cover={cover} className="h-full w-full" />
+                <CoverArt cover={cover} tint={tint} reserve={organize ? COVER_RESERVE : COVER_RESERVE_MENU} className="h-full w-full" />
               </div>
             ) : (
               // 정리 중이던 카드가 끝나면 미리보기가 번지며 나타난다
@@ -1682,7 +1683,7 @@ function RenameForm({ s, units, onDone }: { s: LibSource; units: string[]; onDon
                 onClick={() => setUnit(u)}
                 className={cx(
                   'press rounded-full px-3 py-1 text-sm font-semibold',
-                  u === unit.trim() ? 'kok-chip-on' : 'bg-surface-2 text-ink hover:bg-surface-3',
+                  u === unit.trim() ? 'kok-chip-on' : 'kok-chip-off bg-surface-2 text-ink hover:bg-surface-3',
                 )}
               >
                 {u}

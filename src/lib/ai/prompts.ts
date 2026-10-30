@@ -2,7 +2,6 @@
 // 한국어판은 "KOK PRD" 15장에 있다. 한쪽을 고치면 다른 쪽도 같이 고친다.
 
 import type { ArtKind } from '@/lib/art/spec';
-import { COVER_VIEW } from '@/lib/cover';
 
 export const COMMON_SYSTEM = [
   'You are KOK, a study assistant in a Korean learning app for students.',
@@ -660,23 +659,32 @@ export function redrawPrompt(o: { kind: ArtKind }): string {
 }
 
 /**
- * 자료함 카드의 표지 그림 (Pro): 노트의 핵심을 문제 그림과 같은 설계도로 그린 작은 그림 (카드에서 한 줄 요약 대신 보인다).
- * 틀은 lib/cover.ts 의 COVER_VIEW (가로 15 × 세로 10), 오른쪽 위는 카드의 별·⋯ 단추 자리라 비운다
+ * 자료함 카드의 표지 그림 (Pro): AI 는 노트의 핵심을 보여 줄 도표의 모양(연표·흐름·순환·구조·비교·핵심어·공식·그래프)과 짧은 낱말만 고르고,
+ * 자리·크기·색은 앱이 카드 크기에 맞춰 정한다 (lib/cover-layout.ts). 낱말 길이·개수는 lib/cover.ts 의 COVER_ITEMS·COVER_TEXT
  */
 export function coverPrompt(): string {
   return [
-    "Draw a small cover picture for the study note in <note>. The app shows it on the note's card in the student's library, in place of a one-line summary, so the student can recognize the note at a glance.",
-    '- Make one simple, creative picture of the core idea of the note, like a clean textbook illustration built from geometric shapes. Show the idea itself, not a list of facts. For example: a sun, a leaf and arrows for photosynthesis; a parabola with its vertex for quadratic functions; a few dated points on a line for a period of history; boxes and arrows in a loop for a cycle; a right triangle with a marked angle for trigonometry; a wave for sound; a nucleus with orbits for atomic structure.',
-    '- The picture should read without words: at most 4 labels in total, each a short keyword (at most 8 characters) or a formula as $...$. No sentences.',
-    `- Frame: view is x_min ${COVER_VIEW.x_min}, x_max ${COVER_VIEW.x_max}, y_min ${COVER_VIEW.y_min}, y_max ${COVER_VIEW.y_max}. Keep everything inside it with a margin of about 1, and fill the frame: the main shape is large and near the middle. Leave the top-right corner (x above 11 and y above 7.5) empty: the card's buttons sit there.`,
-    '- axes and grid: false, unless the note is about graphs of functions and the axes are part of the idea.',
-    '- items: 8 to 24. Build shapes from points, segments, polygons, circles, arcs and functions. Corners and centers you do not want to show are points with style "muted" and label "". Every item has every field; fill the fields its type does not use with 0, "" or [].',
-    '  - id: short and unique. point: x, y. segment, line, ray, vector: refs [start, end] (point ids). polygon: refs are its corners in order. circle: refs [center] with radius r. arc: refs [center, start, end], drawn counterclockwise. angle: refs [a point on one arm, the vertex, a point on the other arm]. function: expr in x, like "sin(x)" or "x^2/4", drawn from "from" to "to". box: a rounded box with one short word (at most 3 characters) centered at x, y, w and h 0; use at most 2 boxes and keep them at least 6 apart, because the card is small. arrow: refs [from, to] (ids of points, boxes or texts). text: a short word at x, y.',
-    '  - style: "given" for the main lines and shapes, "aux" for dashed lines (motion, light rays, helper lines), "answer" for the one thing that should stand out (drawn thicker), "muted" for faint background details.',
-    '  - marks: 0, or 1 to 3 small ticks that show equal lengths or equal angles.',
-    '  - tone: the color of the item: ink (the normal text color) or red, orange, yellow, green, teal, blue, navy, purple, pink, gray. Use 2 to 4 tones that suit the topic (green for plants, blue for water, orange or yellow for the sun, gray for metal). Polygons, circles and boxes get a light fill of their tone.',
-    '- Do not draw people or logos, and do not copy a figure or a question from the material: make your own picture of the idea.',
-    '- alt: one short Korean phrase that describes the picture for screen readers, like "해와 잎, 이산화탄소와 산소 화살표".',
+    "Choose a small cover diagram for the study note in <note>. The app shows it at the top of the note's card in the student's library (about 160 × 110 pixels on a phone) so the student can recognize the note at a glance. You only choose the kind of diagram and its words; the app draws it in its own clean design in the subject's color.",
+    '- kind: the one diagram that best shows the core idea of the whole note.',
+    '  - timeline: dated events in order (history, discoveries). items: 2 to 5 events in time order; text = the event, sub = its date ("1392", "1830년대", "기원전 3세기").',
+    '  - flow: a process or a chain of cause and effect, in order. items: 2 to 4 steps; text = the step, sub = "" or a 2 to 4 character note such as "원인".',
+    '  - cycle: stages that repeat and come back to the start (the water cycle, the cell cycle). title = the name of the cycle; items: 3 to 5 stages in order.',
+    '  - tree: a whole and its parts, kinds or classes. title = the whole; items: 2 to 4 parts.',
+    '  - compare: two things the note contrasts. left and right = their names; items: 1 to 3 features for each side, with side "left" or "right", parallel features in the same order on both sides.',
+    '  - hub: a central concept and its key words (characteristics, elements, related ideas). title = the concept; items: 2 to 5 key words.',
+    '  - formula: one formula is the heart of the note. title = the formula in LaTeX without $ (like "F = ma" or "E_k = \\frac{1}{2}mv^2"); items: 0 to 3 of its symbols, text = the symbol in LaTeX ("m", "v_0", "\\theta"), sub = its meaning in 2 to 4 characters.',
+    '  - figure: only when a graph of a function or a geometric shape is the heart of a math or science note. Fill figure (below) and leave title, left, right and items empty.',
+    '  Use timeline, flow, cycle, tree or compare whenever the note has that structure, and hub when it has none of them. Examples: 조선 건국 (1392) → 임진왜란 (1592, key) → 병자호란 (1636) is a timeline; 빛 흡수 → 물 분해 → ATP 생성 → 포도당 합성 (key) is a flow; 광합성 (엽록체, 빛에너지 저장) vs 세포 호흡 (미토콘드리아, 에너지 방출) is a compare.',
+    '- Words: short keywords from the note, in the language of the note. Each text, title and name has at most 6 Korean characters or 12 Latin letters, in one or two words; each sub has at most 6 characters. No sentences, no ending punctuation, no numbering (the app numbers the steps), no emoji. Write formulas inside a text as $...$.',
+    '- key: true for exactly one item, the most important one (the turning point of a timeline, the result of a flow, the most important part or key word); false for the others. Always false for compare and formula.',
+    '- side: "left" or "right" for compare items, "" otherwise. left and right: "" unless kind is compare. title: "" for timeline, flow and compare.',
+    '- figure: for every kind but figure, set view to all 0, axes false and items []. For kind figure:',
+    '  - view: the visible range in the coordinates of the figure, with a small margin around everything. axes: true for graphs of functions, false for shapes.',
+    '  - items: 2 to 16, simple and large. Corners and centers you do not want to show are points with style "muted" and label "". Every item has every field; fill the fields its type does not use with 0, "" or [].',
+    '  - id: short and unique. point: x, y. segment, line, ray, vector: refs [start, end] (point ids). polygon: refs are its corners in order. circle: refs [center] with radius r. arc: refs [center, start, end], drawn counterclockwise. angle: refs [a point on one arm, the vertex, a point on the other arm]. function: expr in x, like "sin(x)" or "x^2-2x", drawn from "from" to "to".',
+    '  - style: "given" for the main lines and shapes, "aux" for dashed helper lines, "answer" for the one thing that should stand out (drawn in the subject color), "muted" for faint details. marks: 0, or 1 to 3 small ticks that show equal lengths or equal angles.',
+    '  - At most 4 labels in total, each a point name, a short symbol or a keyword. The app leaves out the tick numbers of the axes.',
+    '- alt: one short Korean phrase that describes the diagram for screen readers, like "조선 건국부터 병자호란까지의 연표".',
   ].join('\n');
 }
 

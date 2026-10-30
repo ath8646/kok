@@ -619,8 +619,8 @@ async def answer_any(page):
         await page.get_by_role("button", name="확인").click()
     else:
         await page.locator("main button:has-text('1')").first.click()
-    await expect(page.get_by_role("button", name="다음")).to_be_visible(timeout=15000)
-    await page.get_by_role("button", name="다음").click()
+    await expect(page.get_by_role("button", name="다음", exact=True)).to_be_visible(timeout=15000)
+    await page.get_by_role("button", name="다음", exact=True).click()
 
 
 async def terminal_steps(browser, page):
@@ -1317,8 +1317,8 @@ async def main():
                 await page.get_by_role("button", name="확인").click()
             else:
                 await page.locator("main button:has-text('1')").first.click()
-            await expect(page.get_by_role("button", name="다음")).to_be_visible(timeout=15000)
-            await page.get_by_role("button", name="다음").click()
+            await expect(page.get_by_role("button", name="다음", exact=True)).to_be_visible(timeout=15000)
+            await page.get_by_role("button", name="다음", exact=True).click()
 
         await page.goto(BASE + "/home")
         await quick.click()
@@ -1414,13 +1414,13 @@ async def main():
             else:
                 answered_types.add("mcq")
                 await page.locator("main button:has-text('1')").first.click()
-            await expect(page.get_by_role("button", name="다음")).to_be_visible(timeout=15000)
+            await expect(page.get_by_role("button", name="다음", exact=True)).to_be_visible(timeout=15000)
             if seen == 0:
                 await shot(page, "17-review-graded", full=False)
             if "short" in answered_types and seen < 8 and "AI 채점" in await page.locator("main").inner_text():
                 await shot(page, "18-review-ai-grade", full=False)
             seen += 1
-            await page.get_by_role("button", name="다음").click()
+            await page.get_by_role("button", name="다음", exact=True).click()
             await page.wait_for_timeout(200)
         if not await page.get_by_role("heading", name=re.compile("오늘 할 일 끝|다 풀었어요|다음에 또")).count():
             await shot(page, "debug-review")
@@ -1509,8 +1509,8 @@ async def main():
                 await page.get_by_role("button", name="확인").click()
             else:
                 await page.locator("main button:has-text('1')").first.click()
-            await expect(page.get_by_role("button", name="다음")).to_be_visible(timeout=15000)
-            await page.get_by_role("button", name="다음").click()
+            await expect(page.get_by_role("button", name="다음", exact=True)).to_be_visible(timeout=15000)
+            await page.get_by_role("button", name="다음", exact=True).click()
             await page.wait_for_timeout(150)
 
         # 문제 탭에서: 고르는 화면 없이 바로 그 노트의 첫 문제. 시간 제한·아래 메뉴 없이, 위에 노트 이름
@@ -2512,18 +2512,29 @@ async def main():
         psql(f"delete from public.rate_hits where user_id = '{student_id}'")
         cover_of = lambda sid: psql(f"select coalesce(cover::text, '') from public.sources where id = '{sid}'")  # noqa: E731
         cover_calls = lambda sid: int(psql(f"select count(*) from public.energy_ledger where source_id = '{sid}' and task = 'cover'"))  # noqa: E731
-        # 자료를 넣을 때 그렸다 (설정 기본: 켬). 저장은 작은 모양 (빈 칸 없이)
-        assert cover_of(fig_sid).startswith('{"v": 1') and '"expr": ""' not in cover_of(fig_sid), cover_of(fig_sid)[:200]
+        # 자료를 넣을 때 그렸다 (설정 기본: 켬). 저장은 작은 모양 (빈 칸·빈 그래프 없이)
+        assert cover_of(fig_sid).startswith('{"v": 2') and '"sub": ""' not in cover_of(fig_sid) and '"figure"' not in cover_of(fig_sid), cover_of(fig_sid)[:200]
         assert cover_calls(fig_sid) == 1
         await page.goto(BASE + "/library")
         fig_card = page.locator(f"[data-flip='{fig_sid}']")
         await expect(fig_card.locator(".kok-cover svg")).to_be_visible()
-        # 한 줄 요약 대신 그림: 요소마다 색 (선과 옅은 칠), 글자는 화면 글꼴로
+        # 한 줄 요약 대신 도표 (앱이 카드 크기에 맞춰 배치): 실제 글꼴로 그린 글이 상자 밖·그림 밖·오른쪽 위 단추 자리로 넘치지 않는다
         drawn = await fig_card.evaluate(
-            """(c) => { const s = c.querySelector('.kok-cover svg'); return { paths: s.querySelectorAll('path, ellipse').length, texts: [...s.querySelectorAll('text')].map((t) => t.textContent),
-              summary: !!c.querySelector('p.line-clamp-5'), font: getComputedStyle(s).fontFamily } }"""
+            """(c) => { const s = c.querySelector('.kok-cover svg'); const W = s.width.baseVal.value, H = s.height.baseVal.value; const bad = [];
+              const rects = [...s.querySelectorAll('rect')].map((r) => r.getBBox());
+              for (const el of s.querySelectorAll('rect, circle, path, text')) { const b = el.getBBox(); const name = el.tagName + ':' + (el.textContent || '');
+                if (b.x < -1 || b.y < -1 || b.x + b.width > W + 1 || b.y + b.height > H + 1) bad.push('out ' + name);
+                if (b.x + b.width > W - 70 && b.y < 36) bad.push('corner ' + name);
+                if (el.tagName === 'text') { const cx = b.x + b.width / 2, cy = b.y + b.height / 2;
+                  const box = rects.filter((r) => cx > r.x && cx < r.x + r.width && cy > r.y && cy < r.y + r.height).sort((a, z) => a.width * a.height - z.width * z.height)[0];
+                  if (box && (b.x < box.x - 0.5 || b.x + b.width > box.x + box.width + 0.5)) bad.push('overflow ' + name); } }
+              return { shapes: s.querySelectorAll('rect, circle, path').length, texts: [...s.querySelectorAll('text')].map((t) => t.textContent), bad, W, H,
+                summary: !!c.querySelector('p.line-clamp-5'), font: getComputedStyle(s).fontFamily } }"""
         )
-        assert drawn["paths"] >= 6 and not drawn["summary"] and "Pretendard" in drawn["font"], drawn
+        # 가짜 AI 는 흐름·비교를 번갈아 그린다 (가짜 서버를 띄운 뒤 몇 번째 표지인지에 따라): 비교도 폰 카드에서 특징을 모두 보인다
+        first = json.loads(cover_of(fig_sid))
+        want = ["빛 흡수", "포도당 합성"] if first["kind"] == "flow" else ["광합성", "엽록체", "에너지 저장", "세포 호흡", "미토콘드리아", "에너지 방출"]
+        assert drawn["shapes"] >= 6 and all(w in drawn["texts"] for w in want) and not drawn["bad"] and not drawn["summary"] and "Pretendard" in drawn["font"], drawn
         await shot(page, "57-library-cover", full=False)
         await no_hscroll(page, "library with a cover")
         # 카드 메뉴 → 표지 그림 → 다시 그리기 (번개를 쓰고 그림이 바뀐다)

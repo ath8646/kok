@@ -192,7 +192,7 @@ export function ReviewStart({
                         onKeyDown={(e) => radioKeys(e, i, REVIEW_MINUTES.length, (n) => set({ minutes: REVIEW_MINUTES[n] }))}
                         className={cx(
                           'press grid min-w-0 content-start gap-1.5 rounded-2xl px-3.5 py-3 text-left ring-inset',
-                          on ? 'bg-accent-soft text-accent ring-2 ring-accent' : 'bg-surface-2 text-ink hover:bg-surface-3',
+                          on ? 'kok-pick kok-pick-on bg-accent-soft text-accent ring-2 ring-accent' : 'kok-pick bg-surface-2 text-ink hover:bg-surface-3',
                         )}
                       >
                         <span className="font-display text-[22px] leading-none tabular-nums">
@@ -287,7 +287,7 @@ function ChoiceChip({
       onKeyDown={onKeyDown}
       className={cx(
         'press inline-flex h-9 shrink-0 items-center gap-1.5 rounded-full px-3.5 text-sm font-semibold',
-        on ? 'kok-chip-on' : 'bg-surface-2 text-ink hover:bg-surface-3',
+        on ? 'kok-chip-on' : 'kok-chip-off bg-surface-2 text-ink hover:bg-surface-3',
       )}
     >
       {dot ? <span className="h-2.5 w-2.5 shrink-0 rounded-full" style={{ background: dot }} aria-hidden="true" /> : null}

@@ -2,7 +2,7 @@
 // 테마 고르기의 작은 화면들: 기본·내 테마는 실제 색 칸으로 그린 작은 화면(MiniScreen), 시그니처 테마는 그 모양을 줄여 그린 그림(SkinMini).
 // 시그니처 테마의 모양 CSS(skins.css)는 <html data-skin> 에 붙어서 작은 화면 안에 따로 쓸 수 없다: 여기서 색 칸으로 흉내 낸다.
 import type { CSSProperties } from 'react';
-import type { Mode } from '@/lib/themes/colors';
+import { mix, type Mode } from '@/lib/themes/colors';
 import { imageCss, type ModeLook } from '@/lib/themes/css';
 import { PATTERN_SIZE } from '@/lib/themes/pattern';
 import { buildSkin, type SkinColors, type SkinId } from '@/lib/themes/skins';
@@ -28,7 +28,7 @@ export function lookVars(look: ModeLook): CSSProperties {
 export function MiniScreen({ look }: { look: ModeLook }) {
   const t = look.tokens;
   return (
-    <span className="absolute inset-0 block" style={{ ...lookVars(look), background: t['--bg'] }} aria-hidden="true">
+    <span className="kok-mini absolute inset-0 block" style={{ ...lookVars(look), background: t['--bg'] }} aria-hidden="true">
       {look.image ? (
         <>
           <span
@@ -93,7 +93,8 @@ export function SkinMini({ id, colors, className }: { id: SkinId; colors: SkinCo
   const s = buildSkin(id, colors);
   const t = s.tokens;
   const v = s.vars;
-  const box = cx('absolute inset-0 block overflow-hidden', className);
+  // kok-mini: 지금 쓰는 시그니처 테마(터미널·글리치)의 네모 칸 규칙이 다른 테마의 작은 그림에 번지지 않게 (skins.css)
+  const box = cx('kok-mini absolute inset-0 block overflow-hidden', className);
   const base: CSSProperties = { background: t['--bg'], color: t['--ink'] };
   if (id === 'neon') {
     return (
@@ -113,23 +114,25 @@ export function SkinMini({ id, colors, className }: { id: SkinId; colors: SkinCo
         <span
           className="absolute inset-x-[9%] top-[24%] h-[44%] rounded-[12px]"
           style={{
-            border: '2px solid transparent',
-            background: `linear-gradient(${t['--surface']}, ${t['--surface']}) padding-box, linear-gradient(115deg, ${v['--skin-a']}, ${v['--skin-b']}) border-box`,
-            boxShadow: `0 0 12px -2px ${v['--skin-glow-a']}, 0 0 22px -8px ${v['--skin-glow-b']}`,
+            background: t['--surface'],
+            boxShadow: `inset 0 0 0 1.5px ${mix(v['--skin-a'], '#ffffff', 0.42)}, 0 0 10px -1px ${v['--skin-glow-a']}, 0 0 22px -8px ${v['--skin-glow-a']}`,
           }}
         >
           <span className="absolute left-[12%] top-[18%] h-[9%] w-[62%] rounded-full opacity-50" style={{ background: t['--muted'] }} />
           <span
             className="absolute bottom-[14%] left-[12%] right-[12%] h-[24%] rounded-full"
-            style={{ background: `linear-gradient(135deg, ${v['--skin-a']}, ${v['--skin-b']})`, boxShadow: `0 0 10px -2px ${v['--skin-glow-a']}` }}
+            style={{
+              background: mix(t['--surface'], v['--skin-a'], 0.16),
+              boxShadow: `inset 0 0 0 1px ${mix(v['--skin-a'], '#ffffff', 0.42)}, 0 0 8px -1px ${v['--skin-glow-a']}`,
+            }}
           />
         </span>
         <span
           className="absolute bottom-[7%] right-[8%] grid aspect-square w-[24%] place-items-center rounded-full"
           style={{
-            background: `linear-gradient(140deg, ${v['--skin-a']}, ${v['--skin-b']})`,
-            color: v['--skin-a-ink'],
-            boxShadow: `0 0 12px ${v['--skin-glow-a']}`,
+            background: mix(t['--surface'], v['--skin-a'], 0.16),
+            color: v['--skin-title'],
+            boxShadow: `inset 0 0 0 1.5px ${mix(v['--skin-a'], '#ffffff', 0.42)}, 0 0 12px ${v['--skin-glow-a']}`,
           }}
         >
           {PLUS}
@@ -149,8 +152,22 @@ export function SkinMini({ id, colors, className }: { id: SkinId; colors: SkinCo
           style={{ background: t['--ink'], boxShadow: `-3px 0 ${v['--skin-a']}, 3px 0 ${v['--skin-b']}` }}
         />
         <span className="absolute inset-x-[9%] top-[24%] h-[44%] rounded-[3px]" style={{ background: t['--surface'] }}>
-          <span className="absolute -inset-px rounded-[3px]" style={{ border: `2px solid ${v['--skin-a']}`, transform: 'translate(-4px, -3px)' }} />
-          <span className="absolute -inset-px rounded-[3px]" style={{ border: `2px solid ${v['--skin-b']}`, transform: 'translate(4px, 3px)' }} />
+          <span
+            className="absolute -inset-[3px]"
+            style={{
+              background: [
+                `linear-gradient(${v['--skin-a']}, ${v['--skin-a']}) left top / 22% 2px`,
+                `linear-gradient(${v['--skin-a']}, ${v['--skin-a']}) left top / 2px 30%`,
+                `linear-gradient(${v['--skin-a']}, ${v['--skin-a']}) right bottom / 22% 2px`,
+                `linear-gradient(${v['--skin-a']}, ${v['--skin-a']}) right bottom / 2px 30%`,
+                `linear-gradient(${v['--skin-b']}, ${v['--skin-b']}) right top / 22% 2px`,
+                `linear-gradient(${v['--skin-b']}, ${v['--skin-b']}) right top / 2px 30%`,
+                `linear-gradient(${v['--skin-b']}, ${v['--skin-b']}) left bottom / 22% 2px`,
+                `linear-gradient(${v['--skin-b']}, ${v['--skin-b']}) left bottom / 2px 30%`,
+              ].join(', '),
+              backgroundRepeat: 'no-repeat',
+            }}
+          />
           <span className="absolute left-[12%] top-[18%] h-[9%] w-[62%] rounded-[2px] opacity-50" style={{ background: t['--muted'] }} />
           <span
             className="absolute bottom-[14%] left-[12%] right-[14%] h-[24%] rounded-[2px]"
@@ -201,7 +218,7 @@ export function SkinMini({ id, colors, className }: { id: SkinId; colors: SkinCo
         >
           <span
             className="absolute bottom-[16%] left-[12%] right-[12%] h-[32%] rounded-full"
-            style={{ background: `linear-gradient(135deg, ${v['--skin-a']}, ${v['--skin-b']})` }}
+            style={{ background: `linear-gradient(180deg, ${v['--skin-b']}, ${v['--skin-a']})`, boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.55)' }}
           />
         </span>
       </span>

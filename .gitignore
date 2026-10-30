@@ -50,6 +50,7 @@ next-env.d.ts
 /tools/local-e2e/fakebase/node_modules
 /tools/local-e2e/fakebase/files
 /tools/local-e2e/shots
+/tools/local-e2e/skin-shots
 /tools/local-e2e/tmp
 __pycache__/
 

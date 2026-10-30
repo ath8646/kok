@@ -58,7 +58,8 @@ export const SKINS: Record<SkinId, SkinInfo> = {
     ],
     legacy: 'cherry',
     font: '오르빗',
-    fx: { ...DEFAULT_FX, top: true, hero: false, buttons: true, bottom: true, details: true, floatTab: true, tabSeeThrough: 14 },
+    // 두 색 그라데이션 버튼은 쓰지 않는다 (네온관은 한 색: skins.css 가 켜진 관으로 그린다)
+    fx: { ...DEFAULT_FX, top: true, hero: false, buttons: false, bottom: true, details: true, floatTab: true, tabSeeThrough: 14 },
     motion: true,
   },
   glitch: {
@@ -464,7 +465,8 @@ function synthwave(c: SkinColors): SkinBuild {
   const surface2 = safeBg(fromHsl(h, 0.42, 0.155), 'dark');
   // 지평선 쪽 하늘 (a 색이 비친), 해(b → a)는 옅게, 격자는 a
   const horizon = safeBg(mix(fromHsl(h, 0.6, 0.1), a, 0.12), 'dark');
-  const sun = 0.2;
+  // 해는 노을처럼 또렷하게 (그 앞의 큰 제목·글자는 아래 pageBases 로 맞춘다)
+  const sun = 0.3;
   const grid = 0.3;
   const pageBases = [bg, horizon, mix(bg, b, sun), mix(horizon, a, sun), mix(horizon, a, grid)];
   const tokens = finish(
@@ -638,7 +640,8 @@ function sketch(c: SkinColors): SkinBuild {
   const bg = '#fbfbf8';
   const ruled = '#5b8bd9';
   const margin = '#e0565b';
-  const pageBases = [bg, mix(bg, ruled, 0.2), mix(bg, margin, 0.38)];
+  // 줄·여백 줄·종이 결(검은 잡티 5.5%: skins.css)
+  const pageBases = [bg, mix(bg, ruled, 0.2), mix(bg, margin, 0.38), mix(bg, '#000000', 0.055)];
   const ink = '#1d2026';
   // 형광펜: 그 위 본문 글자가 7 이상
   const b = ensureContrast(tune(c.b, [0.6, 1], [0.58, 0.82]), [ink], 7, 'dark');

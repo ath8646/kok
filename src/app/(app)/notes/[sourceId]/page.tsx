@@ -984,7 +984,7 @@ export default function NotePage() {
         }
       />
       <div ref={subbarRef} className={cx(STICKY_BELOW_TOPBAR, 'kok-subbar z-20 -mx-4 -mt-4 px-4 pb-2.5 pt-1 md:-mx-6 md:px-6', subbarStuck && 'is-stuck')}>
-        <div className={cx('grid gap-1 rounded-full bg-surface-2 p-1', coursesOn ? 'grid-cols-5' : 'grid-cols-4')} role="tablist" aria-label="노트 보기">
+        <div className={cx('kok-seg grid gap-1 rounded-full bg-surface-2 p-1', coursesOn ? 'grid-cols-5' : 'grid-cols-4')} role="tablist" aria-label="노트 보기">
           {TABS.filter((t) => t.id !== 'course' || coursesOn).map((t) => (
             <button
               key={t.id}
@@ -994,7 +994,7 @@ export default function NotePage() {
               onClick={() => setTab(t.id)}
               className={cx(
                 'press min-h-[40px] rounded-full py-2 text-sm font-bold',
-                tab === t.id ? 'bg-raised text-ink shadow-[0_1px_3px_var(--shadow-strong)]' : 'text-muted hover:text-ink',
+                tab === t.id ? 'kok-seg-on bg-raised text-ink shadow-[0_1px_3px_var(--shadow-strong)]' : 'text-muted hover:text-ink',
               )}
             >
               {t.label}

@@ -300,7 +300,7 @@ export default function WrongPage() {
           {weak.length ? (
             <>
               <SectionTitle>
-                <span className="kok-fill block">약점 개념 {weak.length}개</span>
+                <span className="kok-fill inline-block">약점 개념 {weak.length}개</span>
               </SectionTitle>
               {selecting ? <p className="-mt-2 px-1 text-xs text-muted">개념을 고르면 그 개념의 틀린 문제가 모두 골라져요.</p> : null}
               <div className="grid gap-2">

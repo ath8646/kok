@@ -534,6 +534,17 @@ body {
   animation-delay: calc(min(var(--i, 0), 10) * 35ms);
 }
 
+/* 접어 둔 칸을 펼칠 때: 살짝 내려오며 나타난다 (누를 때마다 보니 짧게) */
+@keyframes kok-unfold {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+}
+.kok-unfold {
+  animation: kok-unfold 200ms var(--ease-out) backwards;
+}
+
 /* 탭을 바꿀 때 새 화면이 살짝 떠오른다. 하루에도 여러 번 보니 짧게, 투명도만 (fixed 창의 위치를 흔들지 않게) */
 @keyframes kok-page-in {
   from {

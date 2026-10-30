@@ -1075,7 +1075,8 @@ async def main():
         await expect(fe.locator(".katex-display")).to_be_visible()
         await shot(page, "08-note-formula", full=False)
         await fe.get_by_role("button", name="저장", exact=True).click()
-        assert nbody("{formulas,1,latex}") == "S = \\pi r^{2}", nbody("{formulas,1,latex}")
+        # 저장 요청이 끝날 때까지 기다린다 (누르자마자 읽으면 아직 옛 노트일 수 있다)
+        await poll_db(f"select body #>> '{{formulas,1,latex}}' from public.notes where source_id = '{sid}'", "S = \\pi r^{2}")
         # 순서 바꾸기 (키보드): 별표하지 않은 개념끼리
         kp_sec = page.locator("section", has=page.get_by_role("heading", name=re.compile("^핵심 개념")))
         await kp_sec.get_by_role("button", name="순서 바꾸기").click()
@@ -3312,7 +3313,18 @@ async def main():
 
         step("themes (Pro): signature themes — the whole look changes, the theme sets the brightness, motion can be turned off")
         await page.goto(BASE + "/settings#theme")
+        # 시그니처 테마 칸은 평소에 접혀 있다 (작은 그림 여섯 장만): 누르면 펼쳐지고, 다시 누르면 접힌다
         skins = page.get_by_role("radiogroup", name="시그니처 테마")
+        fold = page.get_by_role("button", name=re.compile("^시그니처 테마"))
+        await expect(fold).to_have_attribute("aria-expanded", "false")
+        await expect(skins).to_have_count(0)
+        await expect(page.get_by_text("시그니처 테마 움직임", exact=True)).to_have_count(0)
+        await fold.click()
+        await expect(fold).to_have_attribute("aria-expanded", "true")
+        await expect(skins.get_by_role("radio")).to_have_count(6)
+        await fold.click()
+        await expect(skins).to_have_count(0)
+        await fold.click()
         await skins.get_by_role("radio", name="네온", exact=True).click()
         await expect(page.locator("html")).to_have_attribute("data-skin", "neon")
         # 네온은 늘 어두운 화면 (설정의 화면 밝기는 그대로 두고, 고르는 칸은 막는다)
@@ -3360,7 +3372,11 @@ async def main():
         # 늦춘 /api/me 가 끝나 화면이 다 그려진 뒤에 늦추기를 푼다 (끝나지 않은 요청을 두고 다른 화면으로 가지 않게)
         await expect(page.locator("main h1").first).to_be_visible(timeout=15000)
         await page.unroute("**/api/me", slow_me)
+        # 접힌 칸에 '네온 쓰는 중', #skins 로 들어오면 펼친 채로
         await page.goto(BASE + "/settings#theme")
+        await expect(fold).to_contain_text("네온 쓰는 중")
+        await page.goto(BASE + "/settings#skins")
+        await expect(fold).to_have_attribute("aria-expanded", "true")
         await page.get_by_text("시그니처 테마 움직임", exact=True).click()
         await expect(page.locator("html")).to_have_attribute("data-motion", "off")
         await wait_saved({"motion": False})
@@ -3387,13 +3403,15 @@ async def main():
 
         await terminal_steps(browser, page)
 
-        await page.goto(BASE + "/settings#theme")
+        await page.goto(BASE + "/settings#skins")
         await skins.get_by_role("radio", name="브루탈", exact=True).click()
         await wait_saved({"light": "skin:brutal", "dark": "skin:brutal"})
-        # 다른 테마에서는 터미널 아이콘이 없고, 주소로 들어와도 안내만
+        # 다른 테마에서는 터미널 아이콘이 없고, 주소로 들어와도 안내만 ('테마 고르러 가기'는 펼친 시그니처 테마 칸으로)
         await page.goto(BASE + "/terminal")
         await expect(page.get_by_text("터미널 테마에서 열려요")).to_be_visible()
         assert await page.locator(".kok-term-win").count() == 0
+        await page.get_by_role("link", name="테마 고르러 가기").click()
+        await expect(skins.get_by_role("radio", name="터미널", exact=True)).to_be_visible()
         await page.goto(BASE + "/home")
         await expect(page.locator("h1.kok-title").first).to_be_visible()
         await expect(page.get_by_role("link", name="터미널 열기")).to_be_hidden()
@@ -3536,7 +3554,7 @@ async def main():
         other_id = USERS["other"][0]
         sql(f"insert into public.user_themes (user_id, name, spec) values ('{other_id}', 'Pro 때 테마', '{json.dumps(spec)}'::jsonb)")
         octx, opage = await new_ctx(browser, "other")
-        await opage.goto(BASE + "/settings#theme")
+        await opage.goto(BASE + "/settings#skins")
         await expect(opage.get_by_role("radiogroup", name="기본 테마", exact=True).get_by_role("radio", name="블루", exact=True)).to_be_disabled()
         await expect(opage.get_by_role("radiogroup", name="시그니처 테마").get_by_role("radio", name="네온", exact=True)).to_be_disabled()
         await expect(opage.get_by_role("slider", name="별표 빛 세기")).to_be_disabled()

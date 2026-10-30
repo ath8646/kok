@@ -2,7 +2,8 @@
 // 설정 > 테마 (Pro).
 // - 지금 테마: 큰 미리보기와 이름, 그 테마를 고치거나 그 테마로 내 테마를 만드는 단추
 // - 화면 밝기 (시그니처 테마는 그 테마가 정한다)
-// - 시그니처 테마 6가지 (모양까지 바뀐다: themes/skins.ts·skins.css), 움직임 스위치
+// - 시그니처 테마 6가지 (모양까지 바뀐다: themes/skins.ts·skins.css), 움직임 스위치. 평소에는 접어 두고(작은 그림 여섯 장만),
+//   눌러서 펼친다. 다른 화면에서 /settings#skins 로 오면 펼친 채로 그 자리까지 내려간다
 // - 기본 테마 9가지·내 테마 (밝을 때·어두울 때 따로 고를 수도 있다). 내 테마의 '+' → 새 테마, 고른 내 테마의 연필 → 테마 만들기 화면(ThemeStudio)
 // - 별표 빛, 글꼴, 노트 종이
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
@@ -111,6 +112,25 @@ export function ThemeSettings({ me, theme, onChange }: { me: MeResponse; theme: 
   const [adding, setAdding] = useState(false);
   const [useFor, setUseFor] = useState<Mode | 'both'>('both');
   const [making, setMaking] = useState(false);
+  // 시그니처 테마 칸: 평소에는 접어 둔다. #skins 로 들어오면(설정 화면에 있다가 주소만 바뀌어도) 펼치고 그 자리로.
+  // 주소는 effect 안에서만 읽는다
+  const [skinsOpen, setSkinsOpen] = useState(false);
+  useEffect(() => {
+    let go = 0;
+    const openFromHash = () => {
+      if (window.location.hash !== '#skins') return;
+      setSkinsOpen(true);
+      window.clearTimeout(go);
+      go = window.setTimeout(() => document.getElementById('skins')?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 350);
+    };
+    const first = window.setTimeout(openFromHash, 0);
+    window.addEventListener('hashchange', openFromHash);
+    return () => {
+      window.clearTimeout(first);
+      window.clearTimeout(go);
+      window.removeEventListener('hashchange', openFromHash);
+    };
+  }, []);
   // 시간이 걸리는 일(AI 만들기·그리기)이 끝난 뒤에도 그때의 옛 값이 아니라 지금 값을 쓰게
   const latest = useRef({ theme, separate, onChange });
   useEffect(() => {
@@ -441,23 +461,49 @@ export function ThemeSettings({ me, theme, onChange }: { me: MeResponse; theme: 
         </div>
       </Field>
 
-      {/* 시그니처 테마 */}
-      <section className="grid gap-3" aria-labelledby="theme-skin-title">
-        <GroupHead id="theme-skin-title" title="시그니처 테마" value={skinNow && lightRef.startsWith('skin:') ? SKINS[skinNow.id].label : undefined} />
-        <p className="-mt-1.5 text-xs text-muted">색만이 아니라 카드·버튼·글꼴·바탕 그림까지 통째로 바뀌는 테마예요. 밝기는 테마가 정해요.</p>
-        <SkinGrid
-          selected={!separate && lightRef === darkRef && lightRef.startsWith('skin:') ? (lightRef.slice(5) as SkinId) : null}
-          disabled={!canTheme}
-          onPick={pickSkin}
-        />
-        {SKIN_IDS.some((id) => SKINS[id].motion) ? (
-          <Toggle
-            label="시그니처 테마 움직임"
-            hint="네온관 깜빡임·글리치 지직거림·터미널 커서처럼 가끔 살짝 움직여요. 기기에서 ‘동작 줄이기’를 켜면 늘 멈춰요."
-            checked={theme.motion !== false}
-            disabled={!canTheme}
-            onChange={(v) => (canTheme ? latest.current.onChange({ motion: v }) : toast(PRO_ONLY))}
-          />
+      {/* 시그니처 테마: 평소에는 접어 두고 작은 그림 여섯 장만, 누르면 펼친다 */}
+      <section id="skins" className="grid scroll-mt-24 gap-3" aria-labelledby="theme-skin-title">
+        <h3 id="theme-skin-title" className="text-sm font-semibold">
+          <button
+            type="button"
+            aria-expanded={skinsOpen}
+            aria-controls="theme-skin-panel"
+            onClick={() => setSkinsOpen((v) => !v)}
+            className="press flex w-full items-center gap-3 rounded-2xl bg-surface-2 py-2.5 pl-3.5 pr-3 text-left hover:bg-surface-3"
+          >
+            <span className="grid min-w-0 flex-1 gap-0.5">
+              <span>시그니처 테마</span>
+              <span className="truncate text-xs font-normal text-muted">
+                {skinNow && lightRef.startsWith('skin:') ? `${SKINS[skinNow.id].label} 쓰는 중` : '카드·버튼·글꼴까지 바뀌는 테마'}
+              </span>
+            </span>
+            {!skinsOpen ? <SkinStack /> : null}
+            <Icon
+              d={ICONS.chevronDown}
+              size={18}
+              strokeWidth={2.4}
+              className={cx('shrink-0 text-muted transition-transform duration-200', skinsOpen && 'rotate-180')}
+            />
+          </button>
+        </h3>
+        {skinsOpen ? (
+          <div id="theme-skin-panel" className="kok-unfold grid gap-3">
+            <p className="text-xs text-muted">색만이 아니라 카드·버튼·글꼴·바탕 그림까지 통째로 바뀌는 테마예요. 밝기는 테마가 정해요.</p>
+            <SkinGrid
+              selected={!separate && lightRef === darkRef && lightRef.startsWith('skin:') ? (lightRef.slice(5) as SkinId) : null}
+              disabled={!canTheme}
+              onPick={pickSkin}
+            />
+            {SKIN_IDS.some((id) => SKINS[id].motion) ? (
+              <Toggle
+                label="시그니처 테마 움직임"
+                hint="네온관 깜빡임·글리치 지직거림·터미널 커서처럼 가끔 살짝 움직여요. 기기에서 ‘동작 줄이기’를 켜면 늘 멈춰요."
+                checked={theme.motion !== false}
+                disabled={!canTheme}
+                onChange={(v) => (canTheme ? latest.current.onChange({ motion: v }) : toast(PRO_ONLY))}
+              />
+            ) : null}
+          </div>
         ) : null}
       </section>
 
@@ -657,6 +703,22 @@ export function ThemeSettings({ me, theme, onChange }: { me: MeResponse; theme: 
         />
       ) : null}
     </div>
+  );
+}
+
+/** 접힌 시그니처 테마 칸의 작은 그림 여섯 장 (겹쳐 놓은 카드처럼). 꾸미는 그림이라 화면 읽기 프로그램은 건너뛴다 */
+function SkinStack() {
+  return (
+    <span className="flex shrink-0 items-center pl-2" aria-hidden="true">
+      {SKIN_IDS.map((id) => (
+        <span
+          key={id}
+          className="relative -ml-2 block h-[30px] w-[23px] overflow-hidden rounded-[7px] shadow-[0_0_0_2px_var(--surface-2),0_2px_6px_-2px_var(--shadow-strong)]"
+        >
+          <SkinMini id={id} colors={skinDefaults(id)} />
+        </span>
+      ))}
+    </span>
   );
 }
 

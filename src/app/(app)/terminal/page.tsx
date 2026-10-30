@@ -35,7 +35,7 @@ export default function TerminalPage() {
           title="터미널 테마에서 열려요"
           body="설정 > 테마에서 시그니처 테마 '터미널'을 고르면 홈 위에 터미널 아이콘이 생겨요."
           action={
-            <LinkButton href="/settings#theme" variant="secondary">
+            <LinkButton href="/settings#skins" variant="secondary">
               테마 고르러 가기
             </LinkButton>
           }

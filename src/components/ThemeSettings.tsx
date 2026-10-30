@@ -29,6 +29,7 @@ import {
   THEME_PAPER_INFO,
   activeSkin,
   applyTheme,
+  baseLook,
   currentMode,
   customId,
   customIds,
@@ -37,6 +38,7 @@ import {
   lookFor,
   presetLookFx,
   rememberCustomThemes,
+  settleLook,
   skinPickLook,
   specLookFx,
   themeRef,
@@ -171,7 +173,10 @@ export function ThemeSettings({ me, theme, onChange }: { me: MeResponse; theme: 
   // 지금 쓰는 시그니처 테마 (두 모드에 같이 쓸 때만). customs 가 바뀌면 다시 본다 (내 테마를 읽은 뒤)
   const skinNow = useMemo(() => activeSkin(theme), [theme, customs]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  /** 테마 고르기: 둘 다 같게 또는 한 모드만. 내가 만든 테마를 새로 고르면 그 테마의 글꼴·종이로도 바꾼다 */
+  /**
+   * 테마 고르기: 둘 다 같게 또는 한 모드만. 글꼴·종이는 새로 고른 내 테마가 정한 것으로, 정하지 않았거나 기본·시그니처 테마면
+   * 내 글꼴·종이(base)로 돌아온다 (그래서 내 테마의 글꼴이 기본 테마에 남지 않는다)
+   */
   const pick = (which: Mode | 'both', ref: string) => {
     if (!canTheme) return toast(PRO_ONLY);
     const t = latest.current.theme;
@@ -183,10 +188,11 @@ export function ThemeSettings({ me, theme, onChange }: { me: MeResponse; theme: 
     if (which === 'both' && ref.startsWith('skin:')) patch.color = SKINS[ref.slice('skin:'.length) as SkinId].legacy;
     // 이미 쓰는 테마를 다시 고를 때는 내가 따로 고른 글꼴·종이를 되돌리지 않는다
     if (fresh) {
-      const id = customId(ref);
-      const spec = id ? knownCustomTheme(id)?.spec : null;
-      if (spec?.font) patch.font = spec.font;
-      if (spec?.paper) patch.paper = spec.paper;
+      const base = baseLook(t);
+      const look = settleLook({ ...t, ...patch }, which === 'both' ? 'light' : which, base);
+      patch.font = look.font;
+      patch.paper = look.paper;
+      patch.base = base;
     }
     latest.current.onChange(patch);
   };
@@ -222,6 +228,8 @@ export function ThemeSettings({ me, theme, onChange }: { me: MeResponse; theme: 
 
   const removed = (id: string) => {
     const gone = customsRef.current?.find((t) => t.id === id)?.spec ?? null;
+    // 지우기 전에 내 글꼴·종이를 정한다 (지운 테마가 정한 글꼴을 내 것으로 착각하지 않게)
+    const base = baseLook(latest.current.theme, (x) => (x === id ? gone : knownCustomTheme(x)?.spec));
     forgetCustomTheme(id);
     setCustoms((list) => list.filter((t) => t.id !== id));
     // Pro 가 끝났으면 설정은 그대로 둔다 (다시 Pro 가 되면 없는 테마는 기본 색으로 보인다)
@@ -230,10 +238,12 @@ export function ThemeSettings({ me, theme, onChange }: { me: MeResponse; theme: 
     const patch: Partial<Theme> = {};
     if (customId(themeRef(t, 'light')) === id) patch.light = 'preset:default';
     if (customId(themeRef(t, 'dark')) === id) patch.dark = 'preset:default';
-    // 쓰던 테마를 지우면 그 테마가 정한 글꼴·종이도 기본으로 (테마를 고를 때 같이 바뀐 것이라)
-    if ((patch.light || patch.dark) && gone) {
-      if (gone.font && t.font === gone.font) patch.font = 'default';
-      if (gone.paper && t.paper === gone.paper) patch.paper = 'none';
+    // 쓰던 테마를 지우면 그 테마가 정한 글꼴·종이도 두고 내 글꼴·종이로 (남은 다른 쪽 내 테마가 정했으면 그것으로)
+    if (patch.light || patch.dark) {
+      const look = settleLook({ ...t, ...patch }, 'light', base);
+      patch.font = look.font;
+      patch.paper = look.paper;
+      patch.base = base;
     }
     if (Object.keys(patch).length) latest.current.onChange(patch);
   };
@@ -259,8 +269,11 @@ export function ThemeSettings({ me, theme, onChange }: { me: MeResponse; theme: 
   );
   const changeLook = (patch: { font?: ThemeFont; paper?: ThemePaper }) => {
     if (!canTheme) return toast(PRO_ONLY);
-    latest.current.onChange(patch);
-    const ids = themesOn ? customIds(latest.current.theme) : [];
+    const t = latest.current.theme;
+    const ids = themesOn ? customIds(t) : [];
+    // 바꾸기 전의 내 글꼴·종이 (내 테마를 쓰는 중이면 바꾼 것은 그 테마에 저장하고 내 것은 그대로, 아니면 내 것을 바꾼다)
+    const base = baseLook(t);
+    latest.current.onChange(ids.length ? { ...patch, base } : { ...patch, base: { ...base, ...patch } });
     if (!ids.length) return;
     lookPending.current = { ids, patch: { ...(lookPending.current?.patch ?? {}), ...patch } };
     if (lookTimer.current) clearTimeout(lookTimer.current);
@@ -643,6 +656,12 @@ export function ThemeSettings({ me, theme, onChange }: { me: MeResponse; theme: 
             );
           })}
         </div>
+        {/* 내 테마를 쓰는 중이면 바꾼 글꼴·종이는 그 테마에 저장된다 (changeLook): 다른 테마로 가면 바뀌는 까닭을 미리 알린다 */}
+        {themesOn && customIds(theme).length > 0 ? (
+          <p className="text-xs text-muted">
+            내 테마를 쓰는 동안 바꾼 글꼴·종이는 그 테마에만 저장돼요. 기본 테마로 바꾸면 기본 테마에서 쓰던 글꼴·종이로 돌아와요.
+          </p>
+        ) : null}
       </Field>
       <p className="text-xs text-muted">테마는 이 계정의 모든 기기에 같이 적용돼요. Pro가 끝나면 기본 모양으로 돌아가고, 고른 테마는 남아 있어요.</p>
 
@@ -679,17 +698,24 @@ export function ThemeSettings({ me, theme, onChange }: { me: MeResponse; theme: 
           me={me}
           start={studio}
           glow={glow}
-          userFont={theme.font}
-          userPaper={theme.paper}
+          // '그대로'(테마가 정하지 않음) = 내 글꼴·종이
+          userFont={baseLook(theme).font}
+          userPaper={baseLook(theme).paper}
           motion={theme.motion !== false}
           onClose={() => setStudio(null)}
           onSaved={(row, apply) => {
+            // 내 글꼴·종이는 고치기 전 테마로 정한다 (저장한 테마의 새 글꼴을 내 것으로 착각하지 않게)
+            const base = baseLook(latest.current.theme);
             saved(row);
             if (!apply) return;
             const ref = `custom:${row.id}`;
             const t = latest.current.theme;
-            // 이미 쓰는 테마면 밝을 때·어두울 때 자리는 그대로 (saved 가 새 색을 바로 붙였다)
-            if (themeRef(t, 'light') === ref || themeRef(t, 'dark') === ref) return;
+            // 이미 쓰는 테마면 밝을 때·어두울 때 자리는 그대로 (saved 가 새 색을 바로 붙였다). 글꼴·종이를 고쳤으면 바로 그것으로
+            if (themeRef(t, 'light') === ref || themeRef(t, 'dark') === ref) {
+              const look = settleLook(t, themeRef(t, 'light') === ref ? 'light' : 'dark', base);
+              if (look.font !== t.font || look.paper !== t.paper) latest.current.onChange({ ...look, base });
+              return;
+            }
             // 시그니처 스타일로 만든 테마는 두 모드에 같이. 따로 고르는 중이면 '+'·연필을 누른 쪽에 (모르면 지금 보이는 쪽)
             const skinTheme = !!readSpec(row.spec)?.skin;
             if (skinTheme) {

@@ -10,7 +10,7 @@ import { classifyCfError } from '@/lib/themes/cf-errors';
 import { sniffImage } from '@/lib/themes/image-sniff';
 import { DEFAULT_GLOW, GLOW_TONES, THEME_COLORS, zUserSettings } from '@/lib/settings';
 import { BRANCH_TEXT, GLOW_TOKENS, SEMANTIC_TEXT, glowPair, glowTokens, type GlowMap } from '@/lib/themes/glow';
-import { customIds, lookFor, rememberCustomThemes, resolveTheme, themeRef, type Theme } from '@/lib/theme';
+import { baseLook, customIds, lookFor, rememberCustomThemes, resolveTheme, settleLook, themeRef, type Theme } from '@/lib/theme';
 
 const MODES: Mode[] = ['light', 'dark'];
 
@@ -614,5 +614,67 @@ describe('색 고르기 창의 HSV (themes/colors.ts)', () => {
     expect(toHsv('#808080')[1]).toBe(0);
     expect(fromHsv(720, 2, -1)).toBe('#000000');
     expect(fromHsv(-120, 1, 1)).toBe('#0000ff');
+  });
+});
+
+describe('글꼴·종이: 내 테마가 정한 것과 내 것 (lib/theme.ts baseLook·settleLook)', () => {
+  const t0: Theme = { color: 'default', font: 'default', paper: 'none', mode: 'system', light: null, dark: null, glow: { ...DEFAULT_GLOW }, motion: true };
+  const handId = '2b1c2d3e-4f50-4a61-8b72-9c8d7e6f5a4b';
+  const plainId = '3b1c2d3e-4f50-4a61-8b72-9c8d7e6f5a4b';
+  const specs: Record<string, ReturnType<typeof readSpec>> = {
+    [handId]: { ...readSpec(goodSpec)!, font: 'hand', paper: 'dots' },
+    [plainId]: { ...readSpec(goodSpec)!, font: null, paper: null },
+  };
+  const specOf = (id: string) => specs[id] ?? null;
+  const hand = `custom:${handId}`;
+  const plain = `custom:${plainId}`;
+
+  it('글꼴을 정한 내 테마에서 기본 테마로 가면 그 글꼴이 남지 않고 내 글꼴로 돌아온다', () => {
+    // 기본 테마에서 둥근 글씨·줄 노트를 고른 뒤 손글씨 테마를 고름
+    const onPreset: Theme = { ...t0, light: 'preset:ocean', dark: 'preset:ocean', font: 'round', paper: 'lined' };
+    const base = baseLook(onPreset, specOf);
+    expect(base).toEqual({ font: 'round', paper: 'lined' });
+    const onHand: Theme = { ...onPreset, light: hand, dark: hand };
+    expect(settleLook(onHand, 'light', base, specOf)).toEqual({ font: 'hand', paper: 'dots' });
+    // 손글씨 테마를 쓰는 중: 기억해 둔 내 글꼴이 있으면 그것
+    const using: Theme = { ...onHand, font: 'hand', paper: 'dots', base };
+    expect(baseLook(using, specOf)).toEqual({ font: 'round', paper: 'lined' });
+    // 기본 테마로 가면 내 글꼴·종이
+    expect(settleLook({ ...using, light: 'preset:mint', dark: 'preset:mint' }, 'light', baseLook(using, specOf), specOf)).toEqual({
+      font: 'round',
+      paper: 'lined',
+    });
+    // 글꼴을 정하지 않은 내 테마('그대로')도 내 글꼴
+    expect(settleLook({ ...using, light: plain, dark: plain }, 'light', baseLook(using, specOf), specOf)).toEqual({ font: 'round', paper: 'lined' });
+    // 시그니처 테마도
+    expect(settleLook({ ...using, light: 'skin:neon', dark: 'skin:neon' }, 'light', baseLook(using, specOf), specOf)).toEqual({
+      font: 'round',
+      paper: 'lined',
+    });
+  });
+
+  it('예전 설정(내 글꼴을 적어 두지 않음): 지금 글꼴이 쓰는 내 테마가 정한 것이면 기본으로 본다', () => {
+    const old: Theme = { ...t0, light: hand, dark: hand, font: 'hand', paper: 'dots' };
+    expect(baseLook(old, specOf)).toEqual({ font: 'default', paper: 'none' });
+    // 내가 따로 고른 글꼴(테마가 정한 것과 다름)은 내 것
+    expect(baseLook({ ...old, font: 'serif' }, specOf)).toEqual({ font: 'serif', paper: 'none' });
+    expect(baseLook({ ...t0, light: plain, dark: plain, font: 'round' }, specOf)).toEqual({ font: 'round', paper: 'none' });
+    // 기본 테마를 쓰는 중이면 지금 것이 내 것
+    expect(baseLook({ ...t0, font: 'hand', paper: 'grid' }, specOf)).toEqual({ font: 'hand', paper: 'grid' });
+  });
+
+  it('밝을 때·어두울 때를 따로 고르면 방금 고른 쪽 → 다른 쪽 내 테마 → 내 글꼴 차례', () => {
+    const base = { font: 'round' as const, paper: 'none' as const };
+    // 밝을 때 손글씨 테마, 어두울 때 기본 테마를 새로 고름: 밝을 때 테마가 정한 글꼴이 남는다
+    expect(settleLook({ ...t0, light: hand, dark: 'preset:night' }, 'dark', base, specOf)).toEqual({ font: 'hand', paper: 'dots' });
+    // 손글씨 테마를 모두 내려놓으면 내 글꼴
+    expect(settleLook({ ...t0, light: 'preset:mint', dark: 'preset:night' }, 'light', base, specOf)).toEqual(base);
+  });
+
+  it('설정 칸: 예전 설정에는 없고, 이상한 값은 버린다', () => {
+    expect(zUserSettings.parse({ theme: { font: 'hand' } }).theme.base).toBeUndefined();
+    expect(zUserSettings.parse({ theme: { base: { font: 'serif', paper: 'grid' } } }).theme.base).toEqual({ font: 'serif', paper: 'grid' });
+    expect(zUserSettings.parse({ theme: { base: { font: 'comic', paper: 3 } } }).theme.base).toEqual({ font: 'default', paper: 'none' });
+    expect(zUserSettings.parse({ theme: { base: 'x' } }).theme.base).toBeUndefined();
   });
 });

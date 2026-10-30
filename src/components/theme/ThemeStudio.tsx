@@ -1463,7 +1463,7 @@ function TextPanel({
         hint={
           spec.skin
             ? `큰 제목은 ${SKINS[spec.skin.id].font} 글꼴로 정해져 있어요. 여기서는 본문 글꼴을 골라요.`
-            : '이 테마를 고르면 글꼴도 같이 바뀌어요. ‘그대로’면 지금 쓰는 글꼴을 써요.'
+            : '이 테마를 고르면 글꼴도 같이 바뀌어요. ‘그대로’면 기본 테마에서 쓰는 글꼴을 써요.'
         }
         hover={hoverProps('title')}
       >

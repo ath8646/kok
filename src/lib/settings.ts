@@ -170,6 +170,12 @@ export const zUserSettings = z.object({
         .catch({ ...DEFAULT_GLOW }),
       // 시그니처 테마의 움직임 (네온 빛 숨쉬기·글리치 지직거림·터미널 커서 …). 기기의 '동작 줄이기'를 켜면 늘 멈춘다
       motion: z.boolean().catch(true),
+      // 내 글꼴·종이: 기본·시그니처 테마나 글꼴·종이를 정하지 않은 내 테마에서 쓰는 것 (font·paper 는 지금 쓰는 것).
+      // 내 테마가 정한 글꼴·종이를 쓰는 동안 기억해 두었다가 다른 테마로 가면 이것으로 돌아온다 (lib/theme.ts baseLook). 예전 설정에는 없다
+      base: z
+        .object({ font: z.enum(THEME_FONTS).catch('default'), paper: z.enum(THEME_PAPERS).catch('none') })
+        .optional()
+        .catch(undefined),
     })
     .catch({ ...DEFAULT_THEME, glow: { ...DEFAULT_GLOW } }),
   visual: z

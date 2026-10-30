@@ -133,6 +133,45 @@ export function knownCustomTheme(id: string): { name: string; spec: ThemeSpec | 
   return known.get(id);
 }
 
+// ------------------------------------------------------------- 글꼴·종이: 내 테마가 정한 것과 내 것
+/** 글꼴과 노트 종이 */
+export type ThemeLook = { font: ThemeFont; paper: ThemePaper };
+type SpecOf = (id: string) => ThemeSpec | null | undefined;
+const knownSpec: SpecOf = (id) => known.get(id)?.spec;
+
+/** 테마가 정한 글꼴·종이 (내 테마의 spec 에 적힌 것. 기본·시그니처 테마나 '그대로'인 칸은 null) */
+function ownLook(ref: string, specOf: SpecOf): { font: ThemeFont | null; paper: ThemePaper | null } {
+  const id = customId(ref);
+  const spec = id ? specOf(id) : null;
+  return { font: spec?.font ?? null, paper: spec?.paper ?? null };
+}
+
+/**
+ * 내 글꼴·종이: 기본·시그니처 테마나 글꼴·종이를 정하지 않은 내 테마에서 쓰는 것 (기본·시그니처 테마를 쓸 때 설정에서 고른 것).
+ * 예전 설정에는 적혀 있지 않다: 지금 글꼴·종이가 쓰는 중인 내 테마가 정한 것과 같으면 그 테마가 바꾼 것으로 보고 기본으로 돌린다
+ */
+export function baseLook(t: Theme, specOf: SpecOf = knownSpec): ThemeLook {
+  if (t.base) return { font: t.base.font, paper: t.base.paper };
+  const own = (['light', 'dark'] as const).map((m) => ownLook(themeRef(t, m), specOf));
+  return {
+    font: own.some((o) => o.font !== null && o.font === t.font) ? 'default' : t.font,
+    paper: own.some((o) => o.paper !== null && o.paper === t.paper) ? 'none' : t.paper,
+  };
+}
+
+/**
+ * 테마를 고른 뒤 쓸 글꼴·종이: 방금 고른 쪽(first) 테마가 정한 것 → 다른 쪽(밝을 때·어두울 때를 따로 고를 때) 내 테마가 정한 것 →
+ * 내 글꼴·종이 (base). 그래서 글꼴을 정한 내 테마에서 기본 테마로 가면 그 테마의 글꼴이 남지 않는다
+ */
+export function settleLook(t: Theme, first: Mode, base: ThemeLook, specOf: SpecOf = knownSpec): ThemeLook {
+  const order: Mode[] = first === 'light' ? ['light', 'dark'] : ['dark', 'light'];
+  const own = order.map((m) => ownLook(themeRef(t, m), specOf));
+  return {
+    font: own.find((o) => o.font)?.font ?? base.font,
+    paper: own.find((o) => o.paper)?.paper ?? base.paper,
+  };
+}
+
 const DEFAULT_DIM = 0.6;
 
 /** 기본 테마 한 모드의 모습 (꾸미기는 기본값, 빛 색은 테마마다 맞춘 짝) */

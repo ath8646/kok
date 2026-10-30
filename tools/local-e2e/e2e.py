@@ -3233,11 +3233,24 @@ async def main():
         await fonts.get_by_role("radio", name=re.compile("손글씨")).click()
         await expect(page.locator("html")).to_have_attribute("data-font", "hand")
         await poll_db(f"select spec->>'font' from public.user_themes where id = '{ai_theme}'", "hand")
+        look_hint = page.get_by_text(re.compile("^내 테마를 쓰는 동안 바꾼 글꼴·종이는 그 테마에만 저장돼요"))
+        await expect(look_hint).to_be_visible()
+        # 기본 테마로 가면 내 테마가 정한 글꼴·종이(손글씨·점)는 두고 내 글꼴·종이(앞에서 기본 테마일 때 고른 둥근 글씨·줄 노트)로 돌아온다
         await page.get_by_role("radiogroup", name="기본 테마", exact=True).get_by_role("radio", name="블루", exact=True).click()
+        await expect(page.locator("html")).to_have_attribute("data-font", "round")
+        await expect(page.locator("html")).to_have_attribute("data-paper", "lined")
+        await expect(look_hint).to_be_hidden()
+        await wait_saved({"light": "preset:ocean", "dark": "preset:ocean", "font": "round", "paper": "lined"})
+        # 기본 테마에서 고른 글꼴은 내 글꼴: 다른 기본 테마로 가도 그대로
         await fonts.get_by_role("radio", name=re.compile("기본$")).click()
         await wait_js(page, "!document.documentElement.hasAttribute('data-font')")
+        await page.get_by_role("radiogroup", name="기본 테마", exact=True).get_by_role("radio", name="라벤더", exact=True).click()
+        await wait_saved({"light": "preset:lavender", "dark": "preset:lavender", "font": "default", "paper": "lined"})
+        assert await page.evaluate("document.documentElement.getAttribute('data-font')") is None
+        # 내 테마로 돌아오면 그 테마가 정한 글꼴·종이
         await page.get_by_role("radiogroup", name="내 테마", exact=True).get_by_role("radio", name=ai_name, exact=True).click()
         await expect(page.locator("html")).to_have_attribute("data-font", "hand")
+        await expect(page.locator("html")).to_have_attribute("data-paper", "dots")
         await wait_saved({"light": f"custom:{ai_theme}", "dark": f"custom:{ai_theme}", "font": "hand"})
         # 어두울 때 바탕: AI 가 밝은 색을 보내도 서버가 어둡게 맞춘다
         await brightness.get_by_role("radio", name="어둡게").click()

@@ -2,7 +2,8 @@
 import { createServerClient } from '@supabase/ssr';
 import { NextResponse, type NextRequest } from 'next/server';
 
-const PUBLIC_EXACT = new Set(['/', '/terms', '/privacy', '/ai-guide', '/offline']);
+// 계정 삭제 안내(/delete-account)는 로그인 없이 열려야 한다 (Google Play 의 '계정 삭제 웹 주소')
+const PUBLIC_EXACT = new Set(['/', '/terms', '/privacy', '/ai-guide', '/delete-account', '/offline']);
 const PUBLIC_PREFIX = ['/auth/'];
 
 export function isPublicPath(pathname: string): boolean {

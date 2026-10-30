@@ -299,7 +299,8 @@ AUTO_CONFIRM_JS = """
   if (window.__kokAutoConfirm) return;
   window.__kokAutoConfirm = true;
   const tick = () => document.querySelector('[data-kok-confirm] [data-confirm="ok"]')?.click();
-  new MutationObserver(tick).observe(document.documentElement, { childList: true, subtree: true });
+  // document 를 본다 (init script 가 도는 때는 아직 <html> 이 없을 수 있다)
+  new MutationObserver(tick).observe(document, { childList: true, subtree: true });
 })();
 """
 
@@ -950,13 +951,15 @@ async def main():
         await no_hscroll(page, "landing")
         await page.goto(BASE + "/home")
         assert "/?next=%2Fhome" in page.url or page.url.endswith("/?next=/home"), page.url
-        for path in ["/terms", "/privacy", "/ai-guide", "/offline"]:
+        for path in ["/terms", "/privacy", "/ai-guide", "/delete-account", "/offline"]:
             r = await page.goto(BASE + path)
             assert r.status == 200, (path, r.status)
             await no_hscroll(page, path)
         await shot(page, "02-offline")
         await page.goto(BASE + "/privacy")
         await expect(page.get_by_text("카카오로 로그인하면")).to_be_visible()
+        # 국외 이전: 받는 곳마다 연락처·옮기는 정보·보관 기간 (Cloudflare 도)
+        await expect(page.get_by_text("privacyquestions@cloudflare.com", exact=False)).to_be_visible()
         await shot(page, "03-privacy-phone")
         await ctx.close()
         ctx, page = await new_ctx(browser, width=1280, scheme="dark")
@@ -4566,6 +4569,54 @@ async def main():
         r = await apage2.request.post(BASE + "/api/reports", headers={"origin": BASE}, data={"kind": "chat", "reason": "   "})
         assert r.status == 400, (r.status, await r.text())
         await actx2.close()
+
+        step("theme studio: colours are picked in the app's colour box (not the browser's) — keyboard, drag, code; the preview follows; Esc closes only the box")
+        cctx, cpage = await new_ctx(browser, "student")
+        await cpage.goto(BASE + "/settings")
+        await cpage.get_by_role("button", name="이 테마로 내 테마 만들기").first.click()
+        cstudio = cpage.locator(".kok-studio")
+        await expect(cstudio).to_be_visible(timeout=15000)
+        await expect(cpage.frame_locator("iframe[title^='테마 미리보기']").locator("[data-part='hero']")).to_be_visible(timeout=60000)
+        assert await cpage.locator("input[type=color]").count() == 0, "no browser colour box"
+        await cstudio.get_by_role("tab", name="색").click()
+        pick = cstudio.get_by_role("button", name="포인트 색 직접 고르기")
+        await pick.click()
+        await expect(pick).to_have_attribute("aria-expanded", "true")
+        area = cstudio.get_by_role("slider", name="포인트 색의 채도와 밝기")
+        hue = cstudio.get_by_role("slider", name="포인트 색의 색상")
+        code = cstudio.get_by_label("포인트 색 코드")
+        accent0 = await cpage.evaluate("() => [...document.querySelectorAll('iframe')].map((f) => f.contentWindow && getComputedStyle(f.contentDocument.documentElement).getPropertyValue('--accent').trim()).find(Boolean)")
+        before = await code.input_value()
+        # 키보드: 색상 띠를 Shift+→ 로 60도, 네모를 Shift+↓ 로 조금 어둡게
+        await hue.focus()
+        for _ in range(6):
+            await cpage.keyboard.press("Shift+ArrowRight")
+        await area.focus()
+        await cpage.keyboard.press("Shift+ArrowDown")
+        after = await code.input_value()
+        assert re.fullmatch(r"#[0-9a-f]{6}", after) and after != before, (before, after)
+        # 끌기: 네모의 오른쪽 위 근처 (진하고 밝은 색)
+        box = await area.bounding_box()
+        await cpage.mouse.move(box["x"] + box["width"] * 0.7, box["y"] + box["height"] * 0.3)
+        await cpage.mouse.down()
+        await cpage.mouse.move(box["x"] + box["width"] * 0.9, box["y"] + box["height"] * 0.12, steps=5)
+        await cpage.mouse.up()
+        dragged = await code.input_value()
+        assert dragged != after, (after, dragged)
+        # 코드 칸에 직접: 미리보기의 포인트 색이 따라온다 (글자가 잘 보이게 조금 맞출 수 있어서 처음 색과 다른지만 본다)
+        await code.fill("#2e7d32")
+        await wait_frame_js(cpage, f"getComputedStyle(document.documentElement).getPropertyValue('--accent').trim() !== {json.dumps(accent0)}")
+        await shot(cpage, "114-color-picker", full=False)
+        # Esc 는 색 칸만 닫고 (테마 만들기 창은 그대로) 연 단추로 초점이 돌아온다
+        await cpage.keyboard.press("Escape")
+        await expect(area).to_have_count(0)
+        await expect(cstudio).to_be_visible()
+        await expect(pick).to_be_focused()
+        # 바꾼 것이 있어서 닫으려면 묻는다 → 저장하지 않고 닫기
+        await cpage.keyboard.press("Escape")
+        await cpage.get_by_role("dialog", name="저장하지 않고 닫을까요?").get_by_role("button", name="저장하지 않고 닫기").click()
+        await expect(cstudio).to_be_hidden()
+        await cctx.close()
 
         await figure_steps(browser)
         await tab_steps(browser)

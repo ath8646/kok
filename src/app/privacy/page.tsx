@@ -1,4 +1,5 @@
 import type { Metadata } from 'next';
+import type { ReactNode } from 'react';
 import { LegalPage, Sec } from '@/components/LegalPage';
 import { getSiteInfo } from '@/lib/server/site';
 import { APPLE_LOGIN, KAKAO_LOGIN } from '@/lib/login';
@@ -96,78 +97,28 @@ export default async function PrivacyPage() {
           서비스를 운영하려고 아래 회사에 정보 처리를 맡겨요. {KAKAO_LOGIN ? '카카오를 빼면 모두 해외 회사라서' : '모두 해외 회사라서'} 정보가 나라 밖으로
           옮겨져요(국외 이전). 서비스를 쓸 때마다 그때 필요한 정보만 암호화한 인터넷 통신(HTTPS)으로 보내요.
         </p>
-        <div className="overflow-x-auto">
-          <table className="w-full min-w-[560px] border-collapse text-sm">
-            <thead>
-              <tr className="border-b border-line text-left">
-                <th className="py-2 pr-3">받는 곳 (나라 · 연락처)</th>
-                <th className="py-2 pr-3">맡기는 일과 옮기는 정보</th>
-                <th className="py-2 pr-3">보관 기간</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr className="border-b border-line align-top">
-                <td className="py-2 pr-3">
-                  <b>Supabase, Inc.</b> (미국) · privacy@supabase.com
-                </td>
-                <td className="py-2 pr-3">로그인, 데이터베이스, 파일 저장 · 위 1번의 정보 모두 (데이터는 서울 지역 서버에 저장)</td>
-                <td className="py-2 pr-3">탈퇴할 때까지</td>
-              </tr>
-              <tr className="border-b border-line align-top">
-                <td className="py-2 pr-3">
-                  <b>Vercel Inc.</b> (미국) · privacy@vercel.com
-                </td>
-                <td className="py-2 pr-3">웹사이트와 서버 실행(서울 지역) · 요청 내용, 접속 기록(IP 주소, 브라우저 정보)</td>
-                <td className="py-2 pr-3">요청을 처리하는 동안, 서버 로그는 짧은 기간</td>
-              </tr>
-              <tr className="border-b border-line align-top">
-                <td className="py-2 pr-3">
-                  <b>Anthropic PBC</b> (미국) · privacy@anthropic.com
-                </td>
-                <td className="py-2 pr-3">
-                  AI(Claude)로 정리·문제·채점·채팅 답·레슨·표지 그림·테마 만들기 · 넣은 공부 자료와 노트 내용, 채팅에 보낸 말과 사진·파일, 테마 부탁 글
-                  (이메일·이름 같은 계정 정보는 보내지 않아요)
-                </td>
-                <td className="py-2 pr-3">받은 뒤 30일 안에 지워요 (이용 정책 위반으로 표시된 것은 최대 2년)</td>
-              </tr>
-              <tr className="border-b border-line align-top">
-                <td className="py-2 pr-3">
-                  <b>Cloudflare, Inc.</b> (미국) · privacyquestions@cloudflare.com
-                </td>
-                <td className="py-2 pr-3">AI 테마의 배경 그림 그리기 (Workers AI) · AI가 내 부탁 글로 만든 그림 설명(영어 글)만</td>
-                <td className="py-2 pr-3">그림을 만드는 동안만 (저장하거나 AI 학습에 쓰지 않아요)</td>
-              </tr>
-              <tr className={KAKAO_LOGIN || APPLE_LOGIN ? 'border-b border-line align-top' : 'align-top'}>
-                <td className="py-2 pr-3">
-                  <b>Google LLC</b> (미국) ·{' '}
-                  <a className="underline" href="https://support.google.com/policies/contact/general_privacy_form">
-                    개인정보 문의 양식
-                  </a>
-                </td>
-                <td className="py-2 pr-3">구글 로그인 · 구글로 로그인할 때 로그인 요청</td>
-                <td className="py-2 pr-3">구글의 개인정보처리방침에 따라</td>
-              </tr>
-              {KAKAO_LOGIN ? (
-                <tr className={APPLE_LOGIN ? 'border-b border-line align-top' : 'align-top'}>
-                  <td className="py-2 pr-3">
-                    <b>(주)카카오</b> (대한민국)
-                  </td>
-                  <td className="py-2 pr-3">카카오 로그인 · 카카오로 로그인할 때 로그인 요청</td>
-                  <td className="py-2 pr-3">카카오의 개인정보처리방침에 따라</td>
-                </tr>
-              ) : null}
-              {APPLE_LOGIN ? (
-                <tr className="align-top">
-                  <td className="py-2 pr-3">
-                    <b>Apple Inc.</b> (미국)
-                  </td>
-                  <td className="py-2 pr-3">Apple 로그인 · Apple로 로그인할 때 로그인 요청</td>
-                  <td className="py-2 pr-3">Apple의 개인정보처리방침에 따라</td>
-                </tr>
-              ) : null}
-            </tbody>
-          </table>
-        </div>
+        {/* 폰에서도 옆으로 밀지 않고 읽게 표 대신 회사마다 칸 하나 */}
+        <ul className="grid gap-3">
+          {transfers().map((t) => (
+            <li key={t.name} className="rounded-2xl border border-line p-4">
+              <p>
+                <b>{t.name}</b>{' '}
+                <span className="text-sm text-muted">
+                  ({t.where}
+                  {t.contact ? <> · {t.contact}</> : null})
+                </span>
+              </p>
+              <dl className="mt-2 grid grid-cols-[5.5rem_1fr] gap-x-3 gap-y-1.5 text-sm">
+                <dt className="font-semibold text-muted">맡기는 일</dt>
+                <dd>{t.job}</dd>
+                <dt className="font-semibold text-muted">옮기는 정보</dt>
+                <dd>{t.items}</dd>
+                <dt className="font-semibold text-muted">보관 기간</dt>
+                <dd>{t.keep}</dd>
+              </dl>
+            </li>
+          ))}
+        </ul>
         <p>
           <b>거부하려면</b>: 국외 이전을 원하지 않으면 가입하지 않거나 언제든{' '}
           <a className="underline" href="/delete-account">
@@ -224,4 +175,80 @@ export default async function PrivacyPage() {
       </Sec>
     </LegalPage>
   );
+}
+
+type Transfer = { name: string; where: string; contact: ReactNode; job: string; items: string; keep: string };
+
+/** 처리를 맡기는 곳 (국외 이전: 받는 곳·나라·연락처·맡기는 일·옮기는 정보·보관 기간). 새 회사를 쓰면 여기에 더한다 */
+function transfers(): Transfer[] {
+  return [
+    {
+      name: 'Supabase, Inc.',
+      where: '미국',
+      contact: 'privacy@supabase.com',
+      job: '로그인, 데이터베이스, 파일 저장 (데이터는 서울 지역 서버에 저장)',
+      items: '위 1번의 정보 모두',
+      keep: '탈퇴할 때까지',
+    },
+    {
+      name: 'Vercel Inc.',
+      where: '미국',
+      contact: 'privacy@vercel.com',
+      job: '웹사이트와 서버 실행 (서울 지역)',
+      items: '요청 내용, 접속 기록(IP 주소, 브라우저 정보)',
+      keep: '요청을 처리하는 동안, 서버 로그는 짧은 기간',
+    },
+    {
+      name: 'Anthropic PBC',
+      where: '미국',
+      contact: 'privacy@anthropic.com',
+      job: 'AI(Claude)로 정리·문제·채점·채팅 답·레슨·표지 그림·테마 만들기',
+      items: '넣은 공부 자료와 노트 내용, 채팅에 보낸 말과 사진·파일, 테마 부탁 글 (이메일·이름 같은 계정 정보는 보내지 않아요)',
+      keep: '받은 뒤 30일 안에 지워요 (이용 정책 위반으로 표시된 것은 최대 2년)',
+    },
+    {
+      name: 'Cloudflare, Inc.',
+      where: '미국',
+      contact: 'privacyquestions@cloudflare.com',
+      job: 'AI 테마의 배경 그림 그리기 (Workers AI)',
+      items: 'AI가 내 부탁 글로 만든 그림 설명(영어 글)만',
+      keep: '그림을 만드는 동안만 (저장하거나 AI 학습에 쓰지 않아요)',
+    },
+    {
+      name: 'Google LLC',
+      where: '미국',
+      contact: (
+        <a className="underline" href="https://support.google.com/policies/contact/general_privacy_form">
+          개인정보 문의 양식
+        </a>
+      ),
+      job: '구글 로그인',
+      items: '구글로 로그인할 때 로그인 요청',
+      keep: '구글의 개인정보처리방침에 따라',
+    },
+    ...(KAKAO_LOGIN
+      ? [
+          {
+            name: '(주)카카오',
+            where: '대한민국',
+            contact: null,
+            job: '카카오 로그인',
+            items: '카카오로 로그인할 때 로그인 요청',
+            keep: '카카오의 개인정보처리방침에 따라',
+          },
+        ]
+      : []),
+    ...(APPLE_LOGIN
+      ? [
+          {
+            name: 'Apple Inc.',
+            where: '미국',
+            contact: null,
+            job: 'Apple 로그인',
+            items: 'Apple로 로그인할 때 로그인 요청',
+            keep: 'Apple의 개인정보처리방침에 따라',
+          },
+        ]
+      : []),
+  ];
 }

@@ -1,0 +1,194 @@
+{
+  "questions": [
+    {
+      "type": "mcq",
+      "prompt": "정규 표현식에서 `.` 의 설명으로 옳은 것은?",
+      "choices": [
+        "줄바꿈을 뺀 글자 한 개와 맞는다",
+        "문자열의 맨 끝 위치와 맞는다",
+        "0번 이상 반복된다는 뜻이다",
+        "줄바꿈까지 포함한 모든 글자와 맞는다"
+      ],
+      "answer_index": 0,
+      "answer_bool": false,
+      "answer_text": "",
+      "accepted": [],
+      "explanation": "`.` 은 줄바꿈을 뺀 글자 한 개와 맞는다. 문자열의 맨 끝 위치는 `$` 이고, 0번 이상 반복은 `*` 라서 헷갈리지 말자.",
+      "key_point_id": "k1",
+      "difficulty": "easy",
+      "pages": []
+    },
+    {
+      "type": "ox",
+      "prompt": "대괄호 맨 앞에 오는 `^` 는 문자열의 맨 앞이라는 뜻이다.",
+      "choices": [],
+      "answer_index": -1,
+      "answer_bool": false,
+      "answer_text": "",
+      "accepted": [],
+      "explanation": "대괄호 밖의 `^` 는 문자열의 맨 앞을 뜻한다. 하지만 `[^abc]` 처럼 대괄호 맨 앞에 오면 이 글자들이 아닌 것이라는 뜻이 된다.",
+      "key_point_id": "k1",
+      "difficulty": "medium",
+      "pages": []
+    },
+    {
+      "type": "mcq",
+      "prompt": "다음 중 `^\\d{3}-\\d{4}$` 와 맞는 문자열은?",
+      "choices": [
+        "`a010-1234`",
+        "`010-12345`",
+        "`010-1234`",
+        "`0101234`"
+      ],
+      "answer_index": 2,
+      "answer_bool": false,
+      "answer_text": "",
+      "accepted": [],
+      "explanation": "`^` 와 `$` 는 앞뒤에 다른 글자가 없어야 한다는 뜻이고, `{4}` 는 정확히 네 번이다. 그래서 `010-1234` 만 맞는다.",
+      "key_point_id": "k2",
+      "difficulty": "easy",
+      "pages": []
+    },
+    {
+      "type": "cloze",
+      "prompt": "`{3,}` 는 세 번 ____ 반복된다는 뜻이다.",
+      "choices": [],
+      "answer_index": -1,
+      "answer_bool": false,
+      "answer_text": "이상",
+      "accepted": [],
+      "explanation": "`{3,}` 는 세 번 이상, `{3}` 은 정확히 세 번이다. 쉼표의 위치가 뜻을 바꾸므로 구분해서 기억하자.",
+      "key_point_id": "k2",
+      "difficulty": "medium",
+      "pages": []
+    },
+    {
+      "type": "mcq",
+      "prompt": "다음 코드를 실행했을 때 출력은?\n\n```python\nimport re\nprint(re.match(r\"\\d+\", \"abc123\"))\n```",
+      "choices": [
+        "`None`",
+        "`123` 이 들어 있는 일치 객체",
+        "`abc123`",
+        "오류가 난다"
+      ],
+      "answer_index": 0,
+      "answer_bool": false,
+      "answer_text": "",
+      "accepted": [],
+      "explanation": "`re.match` 는 문자열의 맨 앞에서부터 맞아야 하므로 맨 앞의 `a` 에서 실패해서 `None` 이 나온다. 가운데에 있는 숫자를 찾으려면 `re.search` 를 써야 한다.",
+      "key_point_id": "k3",
+      "difficulty": "medium",
+      "pages": []
+    },
+    {
+      "type": "cloze",
+      "prompt": "다음 코드의 빈칸에 들어갈 번호를 쓰시오. 출력이 `31` 이 되어야 한다.\n\n```python\nimport re\ntext = \"2026-10-31\"\nm = re.fullmatch(r\"(\\d{4})-(\\d{2})-(\\d{2})\", text)\nprint(m.group(____))\n```",
+      "choices": [],
+      "answer_index": -1,
+      "answer_bool": false,
+      "answer_text": "3",
+      "accepted": [],
+      "explanation": "괄호 묶음은 여는 괄호의 순서대로 1번부터 붙는다. 세 번째 묶음 `(\\d{2})` 이 `31` 이므로 `group(3)` 이 된다.",
+      "key_point_id": "k3",
+      "difficulty": "hard",
+      "pages": []
+    },
+    {
+      "type": "mcq",
+      "prompt": "JavaScript 에서 이름 붙은 묶음을 쓰는 문법으로 옳은 것은?",
+      "choices": [
+        "`(?P<이름>...)`",
+        "`(?<이름>...)`",
+        "`(?name:...)`",
+        "`{이름}`"
+      ],
+      "answer_index": 1,
+      "answer_bool": false,
+      "answer_text": "",
+      "accepted": [],
+      "explanation": "JavaScript 는 `(?<이름>...)` 으로 쓰고, Python 은 `(?P<이름>...)` 으로 쓴다. 두 문법을 헷갈리지 않도록 구분해서 기억하자.",
+      "key_point_id": "k4",
+      "difficulty": "medium",
+      "pages": []
+    },
+    {
+      "type": "mcq",
+      "prompt": "다음 코드를 실행했을 때 출력은?\n\n```javascript\nconst s = \"<a><b>\";\nconsole.log(s.match(/<.*>/)[0]);\n```",
+      "choices": [
+        "`<a>`",
+        "`<a><b>`",
+        "`<b>`",
+        "`<`"
+      ],
+      "answer_index": 1,
+      "answer_bool": false,
+      "answer_text": "",
+      "accepted": [],
+      "explanation": "`<.*>` 는 가능한 한 길게 맞추는 탐욕 방식이라 `<a><b>` 전체와 맞는다. `<a>` 만 맞추려면 `<.*?>` 처럼 뒤에 `?` 를 붙여야 한다.",
+      "key_point_id": "k5",
+      "difficulty": "hard",
+      "pages": []
+    },
+    {
+      "type": "short",
+      "prompt": "`<.*?>` 처럼 `*` 뒤에 `?` 를 붙여 짧게 맞추는 방식의 이름을 쓰시오.",
+      "choices": [],
+      "answer_index": -1,
+      "answer_bool": false,
+      "answer_text": "게으름",
+      "accepted": [
+        "lazy",
+        "게으름(lazy)",
+        "게으름 방식"
+      ],
+      "explanation": "짧게 맞추고 싶으면 `?` 를 뒤에 붙이는데, 이것이 게으름(lazy) 방식이다. 같은 `<.*?>` 는 `<a><b>` 에서 `<a>` 만 맞춘다.",
+      "key_point_id": "k5",
+      "difficulty": "medium",
+      "pages": []
+    },
+    {
+      "type": "ox",
+      "prompt": "`*` 는 기본적으로 가능한 한 짧게 맞춘다.",
+      "choices": [],
+      "answer_index": -1,
+      "answer_bool": false,
+      "answer_text": "",
+      "accepted": [],
+      "explanation": "`*` 와 `+` 는 기본적으로 가능한 한 길게 맞추는 탐욕 방식이다. 짧게 맞추려면 `?` 를 뒤에 붙여야 한다.",
+      "key_point_id": "k5",
+      "difficulty": "easy",
+      "pages": []
+    },
+    {
+      "type": "ox",
+      "prompt": "이론 수업에 따르면 정규 언어만으로는 괄호 짝 맞추기처럼 중첩된 구조를 검사할 수 없다.",
+      "choices": [],
+      "answer_index": -1,
+      "answer_bool": true,
+      "answer_text": "",
+      "accepted": [],
+      "explanation": "정규 언어만으로는 중첩된 구조를 검사할 수 없다고 이론 수업에서 배운다. 그래서 HTML 같은 중첩 구조를 정규 표현식으로 파싱하면 안 된다.",
+      "key_point_id": "k6",
+      "difficulty": "medium",
+      "pages": []
+    },
+    {
+      "type": "mcq",
+      "prompt": "`\\d` 에 대한 설명으로 옳은 것은?",
+      "choices": [
+        "언어와 옵션에 따라 `[0-9]` 보다 더 많은 글자를 맞출 수 있다",
+        "항상 `[0-9]` 보다 적은 글자만 맞춘다",
+        "영문자 한 개와 맞는다",
+        "줄바꿈 한 개와 맞는다"
+      ],
+      "answer_index": 0,
+      "answer_bool": false,
+      "answer_text": "",
+      "accepted": [],
+      "explanation": "`\\d` 는 보통 `[0-9]` 와 같지만, 언어와 옵션에 따라 더 많은 글자를 맞출 수 있다. Python 3 의 `str` 패턴이 그런 예다.",
+      "key_point_id": "k6",
+      "difficulty": "easy",
+      "pages": []
+    }
+  ]
+}

@@ -1,0 +1,223 @@
+{
+  "title": "운영체제 5주차 강의 정리",
+  "unit": "프로세스·스레드·동기화",
+  "summary": "프로세스와 스레드의 차이, fork와 exec, 좀비와 고아 프로세스, 세마포어로 경쟁 조건을 막는 방법을 정리했다.",
+  "key_points": [
+    {
+      "id": "k1",
+      "title": "프로세스와 스레드",
+      "explanation": "프로세스는 실행 중인 프로그램 한 개이고 각자 독립된 주소 공간을 가진다. 스레드는 한 프로세스 안의 실행 흐름이라서 코드, 전역 변수, 힙을 같이 쓰고 스택만 따로 가진다.",
+      "why": "스레드가 전역 변수를 같이 쓰기 때문에 동기화가 필요하다는 설명의 출발점이기 때문이다.",
+      "importance": "high",
+      "pages": []
+    },
+    {
+      "id": "k2",
+      "title": "PCB와 ps로 확인하기",
+      "explanation": "운영체제는 프로세스마다 PCB(프로세스 제어 블록)에 상태, PID, 레지스터 값을 기록하고, 문맥 교환 때 이 정보를 저장하고 읽어 온다. 실행 중인 프로세스는 `ps` 로 보고, 직전 명령의 종료 상태는 `echo $?` 로 본다.",
+      "why": "문맥 교환이 무엇을 저장하고 읽는지 설명하려면 PCB가 무엇을 기록하는지 알아야 하기 때문이다.",
+      "importance": "medium",
+      "pages": []
+    },
+    {
+      "id": "k3",
+      "title": "fork와 exec",
+      "explanation": "`fork()` 는 호출한 프로세스를 그대로 복제하고, 부모에게는 자식의 PID 를, 자식에게는 0 을 돌려준다. `exec` 계열 함수가 성공하면 원래 코드로 돌아오지 않는다.",
+      "why": "fork 의 반환값으로 부모와 자식이 할 일을 나누는 코드를 읽을 수 있어야 하기 때문이다.",
+      "importance": "high",
+      "pages": []
+    },
+    {
+      "id": "k4",
+      "title": "wait, 좀비와 고아 프로세스",
+      "explanation": "부모는 `wait(NULL)` 로 자식이 끝날 때까지 기다려야 한다. 자식이 먼저 끝났는데 `wait` 를 하지 않으면 좀비 프로세스가 되고, 부모가 먼저 끝나면 자식은 고아 프로세스가 된다.",
+      "why": "시험 포인트에 `wait` 를 빼먹으면 좀비가 생긴다고 적혀 있기 때문이다.",
+      "importance": "high",
+      "pages": []
+    },
+    {
+      "id": "k5",
+      "title": "pthread_create와 pthread_join",
+      "explanation": "스레드는 `pthread_create` 로 만들고, 인자는 차례로 스레드 핸들, 속성, 시작 함수, 함수 인자다. 끝날 때까지 기다리는 것은 `pthread_join` 이다.",
+      "why": "스레드를 만드는 함수와 기다리는 함수를 구분하고 인자 순서를 읽을 수 있어야 하기 때문이다.",
+      "importance": "medium",
+      "pages": []
+    },
+    {
+      "id": "k6",
+      "title": "경쟁 조건과 세마포어",
+      "explanation": "`count++` 는 읽고, 더하고, 쓰는 세 단계라서 두 스레드가 동시에 하면 결과가 틀릴 수 있다. 세마포어 `s` 를 1로 두고 `sem_wait` 와 `sem_post` 로 임계 구역을 감싸면 한 번에 한 스레드만 들어간다.",
+      "why": "스레드가 전역 변수를 공유하므로 동기화가 필요하다는 시험 포인트의 핵심이기 때문이다.",
+      "importance": "high",
+      "pages": []
+    }
+  ],
+  "terms": [
+    {
+      "term": "프로세스",
+      "meaning": "실행 중인 프로그램 한 개. 각자 독립된 주소 공간을 가진다."
+    },
+    {
+      "term": "스레드",
+      "meaning": "한 프로세스 안의 실행 흐름. 코드, 전역 변수, 힙은 같이 쓰고 스택만 따로 가진다."
+    },
+    {
+      "term": "주소 공간",
+      "meaning": "프로세스가 쓰는 메모리 영역. 프로세스마다 독립되어 있다."
+    },
+    {
+      "term": "PCB(프로세스 제어 블록)",
+      "meaning": "운영체제가 프로세스마다 두고 상태, PID, 레지스터 값을 기록하는 블록."
+    },
+    {
+      "term": "문맥 교환",
+      "meaning": "현재 프로세스의 정보를 PCB에 저장하고 다음 프로세스의 정보를 읽어 오는 일."
+    },
+    {
+      "term": "PID",
+      "meaning": "프로세스 번호."
+    },
+    {
+      "term": "PPID",
+      "meaning": "부모 프로세스 번호."
+    },
+    {
+      "term": "`ps`",
+      "meaning": "실행 중인 프로세스 목록을 보는 명령."
+    },
+    {
+      "term": "`fork()`",
+      "meaning": "호출한 프로세스를 그대로 복제하는 함수."
+    },
+    {
+      "term": "`exec` 계열 함수",
+      "meaning": "실행 중인 프로세스의 내용을 다른 프로그램으로 바꾸는 함수들. 예: `execlp`."
+    },
+    {
+      "term": "`wait`",
+      "meaning": "자식 프로세스가 끝날 때까지 부모를 기다리게 하는 함수."
+    },
+    {
+      "term": "좀비 프로세스",
+      "meaning": "끝났지만 부모가 `wait` 로 거두지 않은 자식 프로세스."
+    },
+    {
+      "term": "고아 프로세스",
+      "meaning": "부모가 먼저 끝나서 남겨진 자식 프로세스. 시스템 프로세스가 맡는다."
+    },
+    {
+      "term": "`pthread_create`",
+      "meaning": "스레드를 만드는 함수."
+    },
+    {
+      "term": "`pthread_join`",
+      "meaning": "스레드가 끝날 때까지 기다리는 함수."
+    },
+    {
+      "term": "경쟁 조건(race condition)",
+      "meaning": "여러 스레드가 같은 자료를 동시에 읽고 쓰다가 결과가 틀려지는 상황."
+    },
+    {
+      "term": "임계 구역",
+      "meaning": "한 번에 한 스레드만 들어가야 하는 코드 부분."
+    },
+    {
+      "term": "세마포어",
+      "meaning": "값을 가지고 임계 구역에 들어갈 수 있는 스레드를 조절하는 동기화 도구."
+    },
+    {
+      "term": "`sem_wait`",
+      "meaning": "세마포어 값이 0이면 기다리고, 0보다 크면 값을 1 줄이고 들어간다."
+    },
+    {
+      "term": "`sem_post`",
+      "meaning": "세마포어 값을 1 늘리고 기다리던 스레드를 깨운다."
+    },
+    {
+      "term": "`sem_init`",
+      "meaning": "세마포어를 초기화하는 함수. 예: `sem_init(&s, 0, 1)`."
+    },
+    {
+      "term": "종료 상태 (`$?`)",
+      "meaning": "직전 명령이 끝난 상태 값. 0이면 정상 종료다."
+    }
+  ],
+  "formulas": [],
+  "pitfalls": [
+    {
+      "text": "스레드도 프로세스처럼 독립된 주소 공간을 가진다고 생각하면 틀린다. 스레드는 전역 변수와 힙을 같이 쓴다.",
+      "key_point_id": "k1"
+    },
+    {
+      "text": "`fork()` 의 반환값은 부모에게 자식 PID, 자식에게 0, 실패하면 -1 이다. 두 쪽에 같은 값이 돌아온다고 생각하면 안 된다.",
+      "key_point_id": "k3"
+    },
+    {
+      "text": "`exec` 가 성공하면 그 뒤의 코드는 실행되지 않는다.",
+      "key_point_id": "k3"
+    },
+    {
+      "text": "`wait(NULL)` 을 빼먹으면 자식이 좀비 프로세스로 남는다.",
+      "key_point_id": "k4"
+    },
+    {
+      "text": "부모가 먼저 끝나면 자식은 좀비가 아니라 고아 프로세스가 된다.",
+      "key_point_id": "k4"
+    },
+    {
+      "text": "`pthread_join` 은 스레드를 만드는 함수가 아니라 끝날 때까지 기다리는 함수다.",
+      "key_point_id": "k5"
+    },
+    {
+      "text": "`count++` 는 한 줄이라도 읽기, 더하기, 쓰기 세 단계라서 동시에 실행하면 중간에 끼어들 수 있다.",
+      "key_point_id": "k6"
+    },
+    {
+      "text": "세마포어 값을 1로 두면 한 번에 한 스레드만 임계 구역에 들어간다. 값이 0이면 `sem_wait` 에서 기다린다.",
+      "key_point_id": "k6"
+    }
+  ],
+  "examples": [
+    {
+      "text": "`fork()` 와 `execlp` 를 쓰는 코드다.\n```c\n#include <stdio.h>\n#include <unistd.h>\n#include <sys/wait.h>\n\nint main(void) {\n    pid_t pid = fork();\n    if (pid == 0) {\n        execlp(\"ls\", \"ls\", \"-l\", NULL);\n        perror(\"execlp\");\n        return 1;\n    }\n    wait(NULL);\n    printf(\"자식 종료\\n\");\n    return 0;\n}\n```",
+      "key_point_id": "k3"
+    },
+    {
+      "text": "스레드를 만들고 기다리는 코드다.\n```c\npthread_t t;\npthread_create(&t, NULL, worker, NULL);\npthread_join(t, NULL);\n```",
+      "key_point_id": "k5"
+    },
+    {
+      "text": "세마포어로 임계 구역을 감싼 코드다.\n```c\nsem_t s;\nint count = 0;\n\nvoid *worker(void *arg) {\n    for (int i = 0; i < 100000; i++) {\n        sem_wait(&s); count++; sem_post(&s);\n    }\n    return NULL;\n}\n```",
+      "key_point_id": "k6"
+    },
+    {
+      "text": "셸에서 확인하는 명령이다.\n```bash\n$ ./a.out &\n$ ps -ef | grep a.out\n$ echo $?\n```",
+      "key_point_id": "k2"
+    }
+  ],
+  "checks": [
+    {
+      "text": "원문은 `ps` 명령의 각 줄에 PPID 가 나온다고 적는다. 그런데 `ps` 를 옵션 없이 쓰면 PPID 는 보이지 않고, `ps -f` 나 `ps -ef` 를 써야 보인다. 옵션을 붙인다는 설명이 맞는지 확인할 것."
+    }
+  ],
+  "changes": [
+    {
+      "text": "1~5절과 시험 포인트를 핵심 6개로 나누었다."
+    },
+    {
+      "text": "ps 설명은 PCB 항목(k2)에 합치고, echo 로 보는 종료 상태도 같은 항목에 넣었다."
+    },
+    {
+      "text": "fork 와 exec 은 k3, wait 와 좀비·고아 프로세스는 k4로 나누었다."
+    },
+    {
+      "text": "시험 포인트의 네 줄은 함정(pitfalls) 항목으로 옮겼다."
+    },
+    {
+      "text": "코드 네 덩어리는 원문 그대로 예시(examples)로 옮기고, 본문에는 짧게 인용만 남겼다."
+    },
+    {
+      "text": "설명은 원문 문장을 살려 두 문장 이내로 줄였다."
+    }
+  ]
+}

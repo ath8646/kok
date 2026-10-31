@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { MIN_TEXT_CHARS, checkText, fileKind, groupFiles, isSubmitKey, splitComposer, titleFromName, type PlanLimits } from '@/lib/quick-add';
+import { MIN_TEXT_CHARS, checkText, fileKind, groupFiles, isSubmitKey, splitComposer, splitForLimit, titleFromName, type PlanLimits } from '@/lib/quick-add';
 
 const FREE: PlanLimits = { pdfPages: 20, images: 5, textChars: 20000, fileMb: 20, fileDays: 7 };
 const MB = 1024 * 1024;
@@ -48,14 +48,43 @@ describe('quick-add: 파일 묶기', () => {
 
   it('못 읽는 파일과 너무 큰 파일은 이유와 함께 뺀다', () => {
     const g = groupFiles(
-      [f('big.pdf', 'application/pdf', 21 * MB), f('empty.pdf', 'application/pdf', 0), f('x.hwp'), f('y.zip'), f('huge.jpg', 'image/jpeg', 41 * MB)],
+      [
+        f('big.pdf', 'application/pdf', 21 * MB),
+        f('empty.pdf', 'application/pdf', 0),
+        f('x.doc'),
+        f('y.zip'),
+        f('huge.jpg', 'image/jpeg', 41 * MB),
+        f('s.xlsx'),
+      ],
       FREE,
     );
     expect(g.pdfs).toEqual([]);
     expect(g.imageGroups).toEqual([]);
-    expect(g.rejected.map((r) => r.name)).toEqual(['big.pdf', 'empty.pdf', 'x.hwp', 'y.zip', 'huge.jpg']);
+    expect(g.rejected.map((r) => r.name)).toEqual(['big.pdf', 'empty.pdf', 'x.doc', 'y.zip', 'huge.jpg', 's.xlsx']);
     expect(g.rejected[0].reason).toContain('20MB');
-    expect(g.rejected[2].reason).toContain('PDF로 저장');
+    expect(g.rejected[2].reason).toContain('.docx나 PDF로 저장');
+    expect(g.rejected[5].reason).toContain('엑셀');
+  });
+
+  it('한글·워드·PPT 는 글을 꺼내 넣는다 (80MB 까지)', () => {
+    const g = groupFiles([f('학습지.hwp'), f('정리.hwpx'), f('강의.docx'), f('발표.pptx'), f('큰.pptx', '', 81 * MB)], FREE);
+    expect(g.officeFiles.map((x) => x.name)).toEqual(['학습지.hwp', '정리.hwpx', '강의.docx', '발표.pptx']);
+    expect(g.rejected.map((r) => r.name)).toEqual(['큰.pptx']);
+  });
+
+  it('긴 글은 한도 안의 조각으로: 슬라이드 경계에서 끊고, 나뉜 코드 블록은 닫았다가 다시 연다', () => {
+    const slides = Array.from({ length: 6 }, (_, i) => `## ${i + 1}. 슬라이드\n${'가'.repeat(300)}`).join('\n\n');
+    const parts = splitForLimit(slides, 700);
+    expect(parts.length).toBeGreaterThan(2);
+    expect(parts.every((p) => p.length <= 700)).toBe(true);
+    expect(parts.every((p) => p.startsWith('## '))).toBe(true);
+    expect(parts.join('\n\n').replace(/\s/g, '')).toBe(slides.replace(/\s/g, ''));
+    const code = `설명\n\`\`\`\`py\n${Array.from({ length: 60 }, (_, i) => `x${i} = ${i}`).join('\n')}\n\`\`\`\``;
+    const cp = splitForLimit(code, 400);
+    expect(cp.length).toBeGreaterThan(1);
+    for (const p of cp) expect((p.match(/^````/gm) ?? []).length % 2).toBe(0);
+    expect(cp[1].startsWith('````py\n')).toBe(true);
+    expect(splitForLimit('짧은 글', 700)).toEqual(['짧은 글']);
   });
 
   it('사진은 줄여서 올리므로 파일 한도보다 커도 40MB 까지 받는다', () => {

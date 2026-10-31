@@ -1,8 +1,9 @@
 // 노트 글(쉬운 꾸미기 기호) ↔ 보이는 그대로 고치는 칸의 문서(Tiptap 문서 JSON).
-// 저장 형식은 그대로다: **굵게**·==형광펜==·!!빨간 글씨!!·줄 앞 '- '·'1. '·$수식$ (src/lib/richtext.ts 의 parseRich 가 읽는 그대로).
+// 저장 형식은 그대로다: **굵게**·==형광펜==·!!빨간 글씨!!·줄 앞 '- '·'1. '·$수식$·`코드`·``` 코드 블록 (src/lib/richtext.ts 의 parseRich 가 읽는 그대로).
+// 코드는 문서에서 'code' 표시(다른 꾸미기와 같이 쓸 수 있다)와 'codeBlock' 덩이다.
 // 문서 → 글은 만든 글을 다시 읽어(parseRich) 같은지 확인하고, 기호로 적을 수 없는 꾸미기(영어·숫자 바로 뒤에서 여는 굵게 등)는
 // 그 꾸미기만 뺀다: 글자는 잃지 않는다. 고치지 않은 칸은 이 변환을 거치지 않는다(칸이 문서가 바뀐 때만 저장).
-import { parseRich, type Inline } from './richtext';
+import { codeBlock, codeSpan, parseRich, richBlocks, type Inline } from './richtext';
 
 export type RichMarkName = 'bold' | 'highlight' | 'red';
 export type DocMark = { type: string; attrs?: Record<string, unknown> };
@@ -17,25 +18,29 @@ const BULLET_PREFIX = /^\s*[-•]\s+/;
 const NUMBER_PREFIX = /^\s*(\d{1,3})[.)]\s+/;
 
 // ------------------------------------------------------------------ 글 → 문서
-function marksOf(names: readonly RichMarkName[]): DocMark[] | undefined {
-  return names.length ? MARK_ORDER.filter((m) => names.includes(m)).map((type) => ({ type })) : undefined;
+function marksOf(names: readonly RichMarkName[], code = false): DocMark[] | undefined {
+  const marks: DocMark[] = MARK_ORDER.filter((m) => names.includes(m)).map((type) => ({ type }));
+  if (code) marks.push({ type: 'code' });
+  return marks.length ? marks : undefined;
 }
 
-function pushText(out: DocNode[], text: string, names: readonly RichMarkName[]) {
+function pushText(out: DocNode[], text: string, names: readonly RichMarkName[], code = false) {
   if (!text) return;
   const last = out[out.length - 1];
-  const key = MARK_ORDER.filter((m) => names.includes(m)).join(',');
-  if (last?.type === 'text' && (last.marks ?? []).map((m) => m.type).join(',') === key) {
+  const key = (marksOf(names, code) ?? []).map((m) => m.type).join(',');
+  // 코드 조각은 따로 둔다 (붙어 있는 두 코드 조각을 하나로 합치지 않게)
+  if (!code && last?.type === 'text' && (last.marks ?? []).map((m) => m.type).join(',') === key) {
     last.text = (last.text ?? '') + text;
     return;
   }
-  const marks = marksOf(names);
+  const marks = marksOf(names, code);
   out.push(marks ? { type: 'text', text, marks } : { type: 'text', text });
 }
 
 function inlineDoc(ns: Inline[], names: RichMarkName[], out: DocNode[]) {
   for (const n of ns) {
     if (n.t === 'text') pushText(out, n.v, names);
+    else if (n.t === 'code') pushText(out, n.v, names, true);
     else if (n.t === 'math') {
       const marks = marksOf(names);
       out.push({ type: 'math', attrs: { tex: n.tex, display: n.display }, ...(marks ? { marks } : {}) });
@@ -55,13 +60,13 @@ export function richToDoc(text: string, opts: { single?: boolean } = {}): DocNod
   const src = text ?? '';
   const lines = parseRich(src);
   if (opts.single) {
-    // 줄 앞 목록 표시는 글자로 (읽을 때 나눈 줄과 글의 줄이 같을 때는 적힌 그대로)
+    // 줄 앞 목록 표시는 글자로 (읽을 때 나눈 줄과 글의 줄이 같을 때는 적힌 그대로). 코드 블록 줄은 코드 조각으로
     const raw = src.split('\n');
     const same = raw.length === lines.length;
     const out: DocNode[] = [];
     lines.forEach((l, i) => {
       if (i) pushText(out, ' ', []);
-      if (l.list) {
+      if (l.list && !l.code) {
         const m = same ? raw[i].match(l.list === 'bullet' ? BULLET_PREFIX : NUMBER_PREFIX) : null;
         pushText(out, m ? m[0] : l.list === 'bullet' ? '- ' : `${l.n}. `, []);
       }
@@ -71,7 +76,14 @@ export function richToDoc(text: string, opts: { single?: boolean } = {}): DocNod
   }
   const blocks: DocNode[] = [];
   let list: DocNode | null = null;
-  for (const l of lines) {
+  for (const b of richBlocks(lines)) {
+    if (b.code) {
+      list = null;
+      const body = b.lines.join('\n');
+      blocks.push({ type: 'codeBlock', attrs: { language: b.lang || null }, ...(body ? { content: [{ type: 'text', text: body }] } : {}) });
+      continue;
+    }
+    const l = b.line;
     const inl: DocNode[] = [];
     inlineDoc(l.c, [], inl);
     if (!l.list) {
@@ -90,8 +102,8 @@ export function richToDoc(text: string, opts: { single?: boolean } = {}): DocNod
 }
 
 // ------------------------------------------------------------------ 문서 → 글
-/** 한 줄의 조각: 글자 하나(꾸미기와 함께) 또는 수식 하나 */
-type Atom = { ch: string; marks: Set<RichMarkName> } | { math: string; display: boolean; marks: Set<RichMarkName> };
+/** 한 줄의 조각: 글자 하나(꾸미기와 함께, code 면 코드 조각의 글자) 또는 수식 하나 */
+type Atom = { ch: string; marks: Set<RichMarkName>; code?: boolean } | { math: string; display: boolean; marks: Set<RichMarkName> };
 
 const KNOWN = new Set<string>(MARK_ORDER);
 
@@ -100,15 +112,16 @@ function atomsOf(nodes: DocNode[]): Atom[][] {
   const lines: Atom[][] = [[]];
   for (const n of nodes) {
     const marks = new Set((n.marks ?? []).map((m) => m.type).filter((t): t is RichMarkName => KNOWN.has(t)));
+    const code = (n.marks ?? []).some((m) => m.type === 'code');
     if (n.type === 'hardBreak') lines.push([]);
     else if (n.type === 'math') {
       const tex = String(n.attrs?.tex ?? '').trim();
       if (tex) lines[lines.length - 1].push({ math: tex, display: n.attrs?.display === true, marks });
     } else if (typeof n.text === 'string') {
-      // 수식 자리표로 쓰는 글자(개인용 영역)는 읽을 때 사라지니 처음부터 뺀다
-      for (const ch of Array.from(n.text.replace(/[-]/g, ''))) {
+      // 수식·코드 자리표로 쓰는 글자(개인용 영역)는 읽을 때 사라지니 처음부터 뺀다
+      for (const ch of Array.from(n.text.replace(/[\ue000-\uf8ff\u{f0000}-\u{ffffd}]/gu, ''))) {
         if (ch === '\n') lines.push([]);
-        else lines[lines.length - 1].push({ ch, marks: new Set(marks) });
+        else lines[lines.length - 1].push(code ? { ch, marks: new Set(marks), code: true } : { ch, marks: new Set(marks) });
       }
     } else if (n.content) {
       const inner = atomsOf(n.content);
@@ -119,7 +132,9 @@ function atomsOf(nodes: DocNode[]): Atom[][] {
   return lines;
 }
 
-const isSpace = (a: Atom) => 'ch' in a && /\s/.test(a.ch);
+const isSpace = (a: Atom) => 'ch' in a && !a.code && /\s/.test(a.ch);
+const isCode = (a: Atom | undefined): a is { ch: string; marks: Set<RichMarkName>; code: true } => !!a && 'ch' in a && a.code === true;
+const sameMarks = (a: Atom, b: Atom) => a.marks.size === b.marks.size && [...a.marks].every((m) => b.marks.has(m));
 
 /** 꾸미기는 빈칸으로 열거나 닫을 수 없다: 꾸민 곳의 양 끝 빈칸은 꾸미기 밖으로 */
 function trimEdges(atoms: Atom[]) {
@@ -141,11 +156,12 @@ function trimEdges(atoms: Atom[]) {
   }
 }
 
-function emit(atoms: Atom[], prefix: string, escapeDollar: boolean): string {
+function emit(atoms: Atom[], prefix: string, escape: boolean): string {
   let s = prefix;
   const stack: RichMarkName[] = [];
   let afterMath = false;
-  for (const a of atoms) {
+  for (let i = 0; i < atoms.length; i++) {
+    const a = atoms[i];
     // 열려 있는 것 중 이 조각에도 있는 앞부분만 두고 닫은 뒤, 없는 것을 연다
     let keep = 0;
     while (keep < stack.length && a.marks.has(stack[keep])) keep++;
@@ -158,10 +174,16 @@ function emit(atoms: Atom[], prefix: string, escapeDollar: boolean): string {
         afterMath = false;
       }
     }
-    if ('ch' in a) {
+    if (isCode(a)) {
+      // 이어진 코드 글자(꾸미기가 같은 것)를 한 조각으로
+      let text = a.ch;
+      while (isCode(atoms[i + 1]) && sameMarks(a, atoms[i + 1])) text += (atoms[++i] as { ch: string }).ch;
+      s += codeSpan(text);
+      afterMath = false;
+    } else if ('ch' in a) {
       // 수식 바로 뒤의 숫자는 수식을 닫지 못하게 해서($x$2) 빈칸 하나를 둔다
       if (afterMath && /[0-9]/.test(a.ch)) s += ' ';
-      s += escapeDollar && a.ch === '$' ? '\\$' : a.ch;
+      s += escape && (a.ch === '$' || a.ch === '`') ? `\\${a.ch}` : a.ch;
       afterMath = false;
     } else {
       s += a.display ? `$$${a.math}$$` : `$${a.math}$`;
@@ -174,10 +196,13 @@ function emit(atoms: Atom[], prefix: string, escapeDollar: boolean): string {
 
 type Flat = { ch: string; marks: string; at: number };
 
+/** 비교용 꾸미기 이름 (코드 조각의 글자는 끝에 '|code') */
+const markKey = (names: Iterable<RichMarkName>, code: boolean) => MARK_ORDER.filter((m) => [...names].includes(m)).join(',') + (code ? '|code' : '');
+
 function flatAtoms(prefix: string, atoms: Atom[]): Flat[] {
   const out: Flat[] = Array.from(prefix, (ch) => ({ ch, marks: '', at: -1 }));
   atoms.forEach((a, at) => {
-    const marks = MARK_ORDER.filter((m) => a.marks.has(m)).join(',');
+    const marks = markKey(a.marks, isCode(a));
     if ('ch' in a) out.push({ ch: a.ch, marks, at });
     else for (const ch of Array.from(a.math)) out.push({ ch, marks, at });
   });
@@ -186,19 +211,21 @@ function flatAtoms(prefix: string, atoms: Atom[]): Flat[] {
 
 function flatParsed(s: string): Flat[] {
   const out: Flat[] = [];
-  const walk = (ns: Inline[], names: RichMarkName[]) => {
+  const walk = (ns: Inline[], names: RichMarkName[], code: boolean) => {
     for (const n of ns) {
-      const marks = MARK_ORDER.filter((m) => names.includes(m)).join(',');
-      if (n.t === 'text') for (const ch of Array.from(n.v)) out.push({ ch, marks, at: -1 });
+      const marks = markKey(names, code || n.t === 'code');
+      if (n.t === 'text' || n.t === 'code') for (const ch of Array.from(n.v)) out.push({ ch, marks, at: -1 });
       else if (n.t === 'math') for (const ch of Array.from(n.tex)) out.push({ ch, marks, at: -1 });
-      else walk(n.c, names.includes(FROM_INLINE[n.t]) ? names : [...names, FROM_INLINE[n.t]]);
+      else walk(n.c, names.includes(FROM_INLINE[n.t]) ? names : [...names, FROM_INLINE[n.t]], code);
     }
   };
   parseRich(s).forEach((l, i) => {
     if (i) out.push({ ch: '\n', marks: '', at: -1 });
     const p = l.list === 'bullet' ? '- ' : l.list === 'number' ? `${l.n}. ` : '';
     for (const ch of p) out.push({ ch, marks: '', at: -1 });
-    walk(l.c, []);
+    // 코드 블록으로 읽힌 줄(글 줄이 ``` 처럼 보인 것)은 다른 꾸미기로 세어서 다시 적게 한다
+    walk(l.c, [], !!l.code);
+    if (l.code && !l.c.length) out.push({ ch: '', marks: '|block', at: -1 });
   });
   return out;
 }
@@ -211,8 +238,14 @@ function firstDiff(want: Flat[], got: Flat[]): { i: number; lost: RichMarkName[]
     const g = got[i];
     if (!w || !g || w.ch !== g.ch) return { i, lost: [] };
     if (w.marks !== g.marks) {
-      const have = new Set(g.marks.split(','));
-      return { i, lost: w.marks.split(',').filter((m): m is RichMarkName => !!m && !have.has(m)) };
+      const have = new Set(g.marks.split('|')[0].split(','));
+      return {
+        i,
+        lost: w.marks
+          .split('|')[0]
+          .split(',')
+          .filter((m): m is RichMarkName => !!m && !have.has(m)),
+      };
     }
   }
   return null;
@@ -257,8 +290,8 @@ function serializeLine(atoms: Atom[], prefix = ''): string {
     else {
       const c = culprit(atoms, want, d.i);
       if (c) dropSpan(atoms, c.at, c.m);
-      // 글 속의 $ 가 수식으로 읽히면 \$ 로 적는다
-      else if (!escape && atoms.some((a) => 'ch' in a && a.ch === '$')) escape = true;
+      // 글 속의 $·` 가 수식·코드로 읽히면 \$ · \` 로 적는다
+      else if (!escape && atoms.some((a) => 'ch' in a && !isCode(a) && (a.ch === '$' || a.ch === '`'))) escape = true;
       else return s;
     }
     trimEdges(atoms);
@@ -294,6 +327,13 @@ export function docToRich(doc: DocNode, opts: { single?: boolean } = {}): string
       }
     } else if (block.type === 'paragraph') {
       lines.push(...paragraphLines(block).map((l) => serializeLine(l)));
+    } else if (block.type === 'codeBlock') {
+      const body = (block.content ?? []).map((c) => c.text ?? '').join('');
+      const lang = String(block.attrs?.language ?? '')
+        .replace(/[`\n]/g, '')
+        .trim();
+      if (opts.single) lines.push(body.replace(/\n/g, ' '));
+      else lines.push(...codeBlock(body.split('\n'), lang).split('\n'));
     } else if (block.content) {
       const inner = docToRich({ type: 'doc', content: block.content });
       lines.push(...inner.split('\n'));
@@ -328,7 +368,7 @@ function normalizeDoc(n: DocNode): unknown {
   };
 }
 
-/** 문서가 비었는지 (글자도 수식도 없음) */
+/** 문서가 비었는지 (글자도 수식도 없음. 빈 코드 블록도 비었다고 본다) */
 export function docIsEmpty(doc: DocNode): boolean {
   const walk = (n: DocNode): boolean => (n.type === 'math' ? false : n.text ? !n.text.trim() : (n.content ?? []).every(walk));
   return walk(doc);

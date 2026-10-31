@@ -40,7 +40,7 @@ import {
   useToast,
   DONE,
 } from '@/components/ui';
-import { SubjectPickSheet } from '@/components/SubjectPick';
+import { NoteInfoSheet, type NoteInfo } from '@/components/NoteInfoSheet';
 import { UnitSheet, normalizeUnit } from '@/components/UnitPick';
 import { ORGANIZE_COLS, SOURCE_COLS, fetchSubjects, questionCols, sb, type SourceRowWithUnit } from '@/lib/data';
 import { readMergedMark } from '@/lib/note-merge';
@@ -305,7 +305,8 @@ export default function NotePage() {
   const [verBusy, setVerBusy] = useState<string | null>(null);
   // 합친 노트를 AI 로 다시 정리하는 중 (노트 → 그림 차례), 다른 과목으로 옮기기 (고를 과목 목록)
   const [reorg, setReorg] = useState<'note' | 'visual' | null>(null);
-  const [moveSubjects, setMoveSubjects] = useState<SubjectRow[] | null>(null);
+  /** 노트 정보(이름·과목·단원) 시트: 열 때 읽은 과목 목록 */
+  const [infoSubjects, setInfoSubjects] = useState<SubjectRow[] | null>(null);
   const reload = useCallback(() => setTick((v) => v + 1), []);
   // 저장할 때 '읽은 그대로인지' 확인하는 값 (노트·그림 행·지난 버전 행의 updated_at). 저장하면 새 값으로 바꾼다
   const noteToken = useRef<string | null>(null);
@@ -903,12 +904,36 @@ export default function NotePage() {
     }
   };
 
-  /** 다른 과목으로 옮기기: 고를 과목 목록을 읽고 시트를 연다 */
-  const startMove = async () => {
+  /** 노트 정보(이름·과목·단원): 고를 과목 목록을 읽고 시트를 연다 */
+  const openInfo = async () => {
     try {
-      setMoveSubjects(await fetchSubjects());
+      setInfoSubjects(await fetchSubjects());
     } catch {
       toast('과목 목록을 불러오지 못했어요.', 'bad');
+    }
+  };
+
+  /**
+   * 노트 정보 저장: 이름(노트·자료 같이)·단원을 먼저 고치고, 과목을 바꿨으면 마지막에 옮긴다
+   * (옮기면 노트 행이 바뀌어서, 그 전에 이름을 읽은 그대로 저장한다). 옮긴 뒤에는 새로 읽는다
+   */
+  const saveInfo = async (next: NoteInfo, moveTo: SubjectRow | null): Promise<boolean> => {
+    if (next.title !== (note?.title ?? source?.title ?? '')) await rename(next.title);
+    if (next.unit !== (source?.unit ?? '')) await changeUnit(next.unit);
+    if (!moveTo) {
+      toast('저장했어요.', 'plain', DONE);
+      return true;
+    }
+    try {
+      await api('/api/sources/move', { method: 'POST', body: JSON.stringify({ ids: [sourceId], subject: moveTo.id }) });
+      toast(`'${moveTo.name}' 과목으로 옮겼어요.`, 'plain', DONE);
+      window.dispatchEvent(new Event(SOURCES_CHANGED));
+      window.dispatchEvent(new Event(SUBJECTS_CHANGED));
+      reload();
+      return true;
+    } catch (e) {
+      toast((e as Error).message, 'bad');
+      return false;
     }
   };
 
@@ -1069,15 +1094,7 @@ export default function NotePage() {
                 label="노트 메뉴"
                 items={[
                   ...(canPractice ? [{ label: '이 노트 문제 풀기', icon: ICONS.retry, onSelect: () => router.push(openPractice()) }] : []),
-                  ...(old
-                    ? []
-                    : [
-                        {
-                          label: '이름·단원 바꾸기',
-                          icon: ICONS.pen,
-                          onSelect: () => startEdit(true),
-                        },
-                      ]),
+                  ...(old ? [] : [{ label: '이름·과목·단원 바꾸기', icon: ICONS.pen, onSelect: () => void openInfo() }]),
                   ...(organizeOn && !old
                     ? [
                         inReview
@@ -1088,7 +1105,6 @@ export default function NotePage() {
                   ...(mergedMark
                     ? [{ label: 'AI로 다시 정리', icon: ICONS.sparkle, onSelect: () => (me.canAppend ? reorganize() : router.push('/plan')) }]
                     : []),
-                  ...(mergeOn && !old ? [{ label: '다른 과목으로 옮기기', icon: ICONS.move, onSelect: startMove }] : []),
                   ...(versionsOn ? [{ label: versions.length ? '버전 기록' : '자료 더하기', icon: ICONS.file, onSelect: () => setTab('original') }] : []),
                   ...(sourceFiguresOn && !old && !appendRunning && source.kind !== 'text' && docFigures.length
                     ? [{ label: '자료 그림 다시 찾기', icon: ICONS.image, onSelect: () => setRelocating(true) }]
@@ -1408,30 +1424,18 @@ export default function NotePage() {
         />
       ) : null}
 
-      {/* 다른 과목으로 옮기기: 노트·문제·복습 기록이 함께 옮겨진다 */}
-      <SubjectPickSheet
-        open={!!moveSubjects}
-        onClose={() => setMoveSubjects(null)}
-        title="다른 과목으로 옮기기"
-        intro="이 노트를 옮길 과목을 골라요. 노트·문제·복습 기록이 함께 옮겨져요."
-        subjects={moveSubjects ?? []}
-        exclude={[note.subject_id]}
-        allowNew
-        actionLabel={(name) => (name ? `'${name}' 과목으로 옮기기` : '옮길 과목을 골라 주세요')}
-        onConfirm={async (target) => {
-          try {
-            await api('/api/sources/move', { method: 'POST', body: JSON.stringify({ ids: [sourceId], subject: target.id }) });
-            toast(`'${target.name}' 과목으로 옮겼어요.`, 'plain', DONE);
-            window.dispatchEvent(new Event(SOURCES_CHANGED));
-            window.dispatchEvent(new Event(SUBJECTS_CHANGED));
-            reload();
-            return true;
-          } catch (e) {
-            toast((e as Error).message, 'bad');
-            return false;
-          }
-        }}
-      />
+      {/* 노트 정보: 이름·과목·단원을 한 화면에서 (과목을 바꾸면 노트·문제·복습 기록이 함께 옮겨진다) */}
+      {infoSubjects ? (
+        <NoteInfoSheet
+          open
+          onClose={() => setInfoSubjects(null)}
+          value={{ title: note.title || source.title || '', subjectId: note.subject_id, unit: source.unit ?? '' }}
+          subjects={infoSubjects}
+          canMove={mergeOn}
+          suggestUnit={body.unit}
+          onSave={saveInfo}
+        />
+      ) : null}
 
       {/* 단원 바꾸기 (고치기 모드에서 단원 칩을 누르면): AI 가 읽은 단원은 'AI 추천'으로만 */}
       <UnitSheet

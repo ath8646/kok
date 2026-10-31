@@ -1,0 +1,224 @@
+{
+  "title": "6주차 파이썬 클래스 기초",
+  "unit": "파이썬 클래스 기초",
+  "summary": "`__init__` 생성자, 비공개 속성과 `@property`, 상속과 `super()`, 던더 메서드를 정리한 6주차 파이썬 클래스 강의 자료다.",
+  "key_points": [
+    {
+      "id": "k1",
+      "title": "클래스와 생성자",
+      "explanation": "클래스는 객체를 찍어 내는 설계도이고, 객체가 만들어질 때 가장 먼저 실행되는 메서드가 `__init__` 이다. 첫 번째 인자 `self` 는 지금 만들어지는 객체 자기 자신을 가리킨다.",
+      "why": "객체를 만드는 기본 구조라서 모든 클래스 문제의 바탕이 되고, `self` 를 빼먹는 실수가 시험에 나온다고 강조하셨다.",
+      "importance": "high",
+      "pages": []
+    },
+    {
+      "id": "k2",
+      "title": "가변 인자 `*` 와 `**`",
+      "explanation": "`*scores` 는 남는 위치 인자를 튜플로 모으고, `**options` 는 남는 키워드 인자를 딕셔너리로 모은다. `Student(\"민수\", 90, 85, pin=1234)` 로 부르면 scores 는 `(90, 85)`, options 는 `{\"pin\": 1234}` 가 된다.",
+      "why": "여러 인자를 받는 생성자가 각 인자를 어떤 자료형으로 받는지 알아야 코드 결과를 맞힐 수 있다.",
+      "importance": "medium",
+      "pages": []
+    },
+    {
+      "id": "k3",
+      "title": "비공개 속성과 `@property`",
+      "explanation": "`self.__secret` 처럼 이름 앞에 밑줄 두 개를 붙이면 바깥에서 바로 꺼내기 어렵고, 파이썬은 이름을 `_Student__secret` 으로 바꿔 저장한다. `@property` 를 붙인 메서드는 괄호 없이 속성처럼 읽는다.",
+      "why": "비공개 속성과 `@property` 의 차이는 코드를 읽고 결과를 맞히는 문제로 나올 수 있다.",
+      "importance": "medium",
+      "pages": []
+    },
+    {
+      "id": "k4",
+      "title": "`@staticmethod` 와 타입 힌트",
+      "explanation": "`@staticmethod` 는 `self` 를 받지 않는 함수를 클래스 안에 둘 때 쓰고, 객체 없이 클래스 이름으로 부른다. `xs: list[float]` 나 `-> float` 같은 타입 힌트는 적어 둔 표시일 뿐이라 실행할 때 검사하지 않는다.",
+      "why": "타입 힌트가 실행을 막는다고 오해하기 쉬워서 함정 문제로 나올 수 있다.",
+      "importance": "low",
+      "pages": []
+    },
+    {
+      "id": "k5",
+      "title": "상속과 `super()`",
+      "explanation": "클래스가 다른 클래스를 물려받는 것을 상속이라고 하며, `Dog(Animal)` 처럼 괄호 안에 부모 클래스를 적는다. 자식의 `__init__` 안에서 `super().__init__()` 을 부르면 부모의 생성자가 먼저 실행된다.",
+      "why": "부모 생성자가 먼저 실행되는 순서를 코드의 출력으로 묻는 문제가 나올 수 있다.",
+      "importance": "medium",
+      "pages": []
+    },
+    {
+      "id": "k6",
+      "title": "던더 메서드",
+      "explanation": "`__str__` 과 `__eq__` 처럼 앞뒤에 밑줄 두 개가 붙은 메서드를 던더(dunder) 메서드라고 부른다. `__str__` 은 `print(객체)` 를 했을 때 보일 글을, `__eq__` 는 `==` 비교의 기준을 정한다.",
+      "why": "`print` 와 `==` 가 던더 메서드를 어떻게 부르는지 묻는 문제가 나올 수 있다.",
+      "importance": "medium",
+      "pages": []
+    }
+  ],
+  "terms": [
+    {
+      "term": "클래스",
+      "meaning": "객체를 찍어 내는 설계도다."
+    },
+    {
+      "term": "생성자 (`__init__`)",
+      "meaning": "객체가 만들어질 때 가장 먼저 실행되는 메서드다."
+    },
+    {
+      "term": "`self`",
+      "meaning": "지금 만들어지는 객체 자기 자신을 가리키는 첫 번째 인자다."
+    },
+    {
+      "term": "클래스 변수",
+      "meaning": "클래스 안에 두어 모든 객체가 함께 쓰는 변수다. 예제의 `school` 이 그렇다."
+    },
+    {
+      "term": "가변 인자 (`*scores`, `**options`)",
+      "meaning": "남는 위치 인자는 튜플로, 남는 키워드 인자는 딕셔너리로 모으는 인자다."
+    },
+    {
+      "term": "튜플",
+      "meaning": "여러 값을 순서대로 묶어 둔 자료형이다. 예를 들어 `(90, 85)` 가 있다."
+    },
+    {
+      "term": "딕셔너리",
+      "meaning": "키와 값을 짝지어 담는 자료형이다. 예를 들어 `{\"pin\": 1234}` 가 있다."
+    },
+    {
+      "term": "비공개 속성",
+      "meaning": "이름 앞에 밑줄 두 개를 붙인 속성이다. 바깥에서 바로 꺼내기 어렵다."
+    },
+    {
+      "term": "이름 맹글링",
+      "meaning": "비공개 이름을 `_클래스이름__이름` 꼴로 바꾸어 저장하는 것이다."
+    },
+    {
+      "term": "`@property`",
+      "meaning": "메서드를 괄호 없이 속성처럼 읽게 해 주는 표시(데코레이터)다."
+    },
+    {
+      "term": "타입 힌트",
+      "meaning": "인자와 반환값의 자료형을 적어 둔 표시다. 실행할 때 파이썬이 검사하지 않는다."
+    },
+    {
+      "term": "`@staticmethod`",
+      "meaning": "`self` 를 받지 않는 메서드를 클래스 안에 둘 때 쓰는 표시다."
+    },
+    {
+      "term": "상속",
+      "meaning": "한 클래스가 다른 클래스를 물려받는 것이다."
+    },
+    {
+      "term": "부모 클래스와 자식 클래스",
+      "meaning": "물려주는 쪽이 부모 클래스, 물려받는 쪽이 자식 클래스다. 예를 들어 `Dog(Animal)` 에서 `Animal` 이 부모다."
+    },
+    {
+      "term": "`super()`",
+      "meaning": "자식 클래스에서 부모 클래스의 메서드를 부를 때 쓴다."
+    },
+    {
+      "term": "던더(dunder) 메서드",
+      "meaning": "앞뒤에 밑줄 두 개가 붙은 메서드다. 예를 들어 `__str__`, `__eq__` 가 있다."
+    },
+    {
+      "term": "`__str__`",
+      "meaning": "`print(객체)` 를 했을 때 보일 글을 정하는 던더 메서드다."
+    },
+    {
+      "term": "`__eq__`",
+      "meaning": "`==` 비교의 기준을 정하는 던더 메서드다."
+    },
+    {
+      "term": "`__hash__`",
+      "meaning": "`__eq__` 를 정의할 때 같이 봐야 하는 던더 메서드다. 자세한 내용은 다음 주에 다룬다."
+    }
+  ],
+  "formulas": [],
+  "pitfalls": [
+    {
+      "text": "메서드의 첫 번째 인자 `self` 를 빼고 쓰는 실수는 시험에 나온다고 강조하셨다.",
+      "key_point_id": "k1"
+    },
+    {
+      "text": "자바와 달리 파이썬에서는 메서드의 첫 번째 인자로 `self` 를 직접 적어야 한다.",
+      "key_point_id": "k1"
+    },
+    {
+      "text": "`*scores` 는 튜플, `**options` 는 딕셔너리로 모이므로 두 자료형을 헷갈리지 않도록 하자.",
+      "key_point_id": "k2"
+    },
+    {
+      "text": "`__secret` 은 완전히 막는 것이 아니라 `_Student__secret` 으로 바뀌어 저장되는 것이다. 건드리지 말라는 약속에 가깝다.",
+      "key_point_id": "k3"
+    },
+    {
+      "text": "`s.average` 처럼 쓰면 평균이 나오고, `s.average()` 처럼 괄호를 붙이면 오류가 난다.",
+      "key_point_id": "k3"
+    },
+    {
+      "text": "타입 힌트는 적어 둔 표시일 뿐이라서 실행할 때 파이썬이 자료형을 검사하지 않는다.",
+      "key_point_id": "k4"
+    },
+    {
+      "text": "`@staticmethod` 함수는 `self` 를 받지 않으므로 객체의 값을 쓸 수 없다.",
+      "key_point_id": "k4"
+    },
+    {
+      "text": "`Dog(Animal)` 의 괄호 안에는 부모 클래스를 적는다.",
+      "key_point_id": "k5"
+    },
+    {
+      "text": "자식의 `__init__` 에서 `super().__init__()` 을 어디에 쓰느냐에 따라 출력 순서가 달라진다.",
+      "key_point_id": "k5"
+    },
+    {
+      "text": "`__eq__` 를 정의하면 `__hash__` 도 같이 봐야 한다고 하셨는데, 자세한 내용은 다음 주에 다룬다.",
+      "key_point_id": "k6"
+    }
+  ],
+  "examples": [
+    {
+      "text": "```python\nclass Student:\n    school = \"동성중\"                          # 클래스 변수: 모든 학생이 공유\n\n    def __init__(self, name, *scores, **options):\n        self.name = name                        # 공개 속성\n        self.__secret = options.get(\"pin\", 0)   # 비공개 속성\n        self.scores = list(scores)\n```",
+      "key_point_id": "k1"
+    },
+    {
+      "text": "`Student(\"민수\", 90, 85, pin=1234)` 로 부르면 scores 는 `(90, 85)`, options 는 `{\"pin\": 1234}` 가 된다.",
+      "key_point_id": "k2"
+    },
+    {
+      "text": "```python\n    def avg(xs: list[float]) -> float:\n        return sum(xs) / len(xs)\n\n    @property\n    def average(self):\n        return avg(self.scores)\n\n    @staticmethod\n    def is_valid(score: float) -> bool:\n        return 0 <= score <= 100\n```",
+      "key_point_id": "k3"
+    },
+    {
+      "text": "`Student.is_valid(95)` 처럼 객체를 만들지 않고 클래스 이름으로 부른다.",
+      "key_point_id": "k4"
+    },
+    {
+      "text": "```python\nclass Animal:\n    def __init__(self):\n        print(\"동물 생성\")\n\nclass Dog(Animal):\n    def __init__(self):\n        super().__init__()\n        print(\"강아지 생성\")\n```",
+      "key_point_id": "k5"
+    },
+    {
+      "text": "```python\n    def __str__(self):\n        return f\"{self.name} ({len(self.scores)}과목)\"\n\n    def __eq__(self, other):\n        return isinstance(other, Student) and self.name == other.name\n```",
+      "key_point_id": "k6"
+    }
+  ],
+  "checks": [
+    {
+      "text": "슬라이드 코드에서 `avg` 는 클래스 안에 `self` 없이 정의되어 있는데, `average` 가 `avg(self.scores)` 로 그냥 부르면 이름을 찾지 못해 오류가 날 것으로 보인다. 슬라이드에서 `avg` 를 어디에 두었는지, 또는 `@staticmethod` 을 붙여야 하는지 확인할 것."
+    }
+  ],
+  "changes": [
+    {
+      "text": "제목을 '6주차 파이썬 클래스 기초'로 줄였다."
+    },
+    {
+      "text": "첫 문단의 자바 비교는 함정 항목으로 옮기고, 과제 안내는 뺐다."
+    },
+    {
+      "text": "목록 기호 없이 문장으로 정리하고, 코드·기호는 백틱으로 감쌌다."
+    },
+    {
+      "text": "들여 쓴 슬라이드 코드 두 개는 메서드 모양 그대로 들여쓰기를 둔 채 코드 블록으로 옮겼다."
+    },
+    {
+      "text": "핵심을 여섯 개로 나눴다. 클래스와 생성자, 가변 인자, 비공개 속성과 `@property`, `@staticmethod` 와 타입 힌트, 상속과 `super()`, 던더 메서드."
+    }
+  ]
+}

@@ -1,0 +1,229 @@
+{
+  "questions": [
+    {
+      "type": "mcq",
+      "prompt": "8비트에서 -1 을 2의 보수로 나타낸 것은 무엇인가요?",
+      "choices": [
+        "1000 0001",
+        "1111 1110",
+        "1111 1111",
+        "0000 0001"
+      ],
+      "answer_index": 2,
+      "answer_bool": false,
+      "answer_text": "",
+      "accepted": [],
+      "explanation": "8비트로 -1 을 쓰면 1111 1111 이고 16진수로는 0xFF 이다. 부호만 바꾸거나 뒤집기만 하면 틀리고, 모든 비트를 뒤집은 뒤 1 을 더해야 한다.",
+      "key_point_id": "k1",
+      "difficulty": "medium",
+      "pages": []
+    },
+    {
+      "type": "short",
+      "prompt": "16진수 한 자리는 2진수 몇 자리와 딱 맞아떨어지나요?",
+      "choices": [],
+      "answer_index": -1,
+      "answer_bool": false,
+      "answer_text": "4",
+      "accepted": ["4자리", "네 자리", "4비트", "네 비트"],
+      "explanation": "16진수 한 자리는 2진수 4자리와 딱 맞아떨어진다. 예를 들어 0x1F 는 2진수로 11111 이다.",
+      "key_point_id": "k1",
+      "difficulty": "easy",
+      "pages": []
+    },
+    {
+      "type": "ox",
+      "prompt": "$-x$ 를 2진수로 나타낼 때는 모든 비트를 뒤집기만 하면 된다.",
+      "choices": [],
+      "answer_index": -1,
+      "answer_bool": false,
+      "answer_text": "",
+      "accepted": [],
+      "explanation": "$-x$ 는 모든 비트를 뒤집고 1 을 더한 값이다. 그래서 뒤집기만 하면 답이 틀린다.",
+      "key_point_id": "k1",
+      "difficulty": "medium",
+      "pages": []
+    },
+    {
+      "type": "mcq",
+      "prompt": "$x \\& (x - 1) = 0$ 이라는 결과만으로 x 가 2의 거듭제곱이라고 말할 수 없는 이유는 무엇인가요?",
+      "choices": [
+        "x 가 홀수일 수도 있어서",
+        "x 가 0 일 때도 이 결과가 0 이 되기 때문에",
+        "x 가 음수면 연산이 정의되지 않아서",
+        "x 가 1 이면 결과가 1 이 되어서"
+      ],
+      "answer_index": 1,
+      "answer_bool": false,
+      "answer_text": "",
+      "accepted": [],
+      "explanation": "$x \\& (x - 1)$ 은 x 가 0 이 아닐 때 2의 거듭제곱을 판별하는 식이다. x 가 0 이면 이 결과도 0 이 되므로, $x \\neq 0$ 조건을 같이 확인해야 한다.",
+      "key_point_id": "k2",
+      "difficulty": "hard",
+      "pages": []
+    },
+    {
+      "type": "cloze",
+      "prompt": "$x \\& (x - 1)$ 은 가장 오른쪽에 있는 켜진 비트를 ____.",
+      "choices": [],
+      "answer_index": -1,
+      "answer_bool": false,
+      "answer_text": "지운다",
+      "accepted": ["지우다", "없앤다", "제거한다"],
+      "explanation": "$x \\& (x - 1)$ 은 x 에서 가장 오른쪽에 있는 켜진 비트(1)를 지운다. x 가 0 이 아닐 때 이 식의 값이 0 이면 x 는 2의 거듭제곱이다.",
+      "key_point_id": "k2",
+      "difficulty": "easy",
+      "pages": []
+    },
+    {
+      "type": "mcq",
+      "prompt": "$x \\mid (1 \\ll k)$ 를 계산했을 때의 설명으로 맞는 것은?",
+      "choices": [
+        "k 번째 비트를 0 으로 끄고 나머지는 모두 뒤집는다",
+        "모든 비트를 뒤집은 뒤 1 을 더한다",
+        "k 번째 비트만 1 로 켜고 나머지는 그대로 둔다",
+        "가장 오른쪽의 켜진 비트를 지운다"
+      ],
+      "answer_index": 2,
+      "answer_bool": false,
+      "answer_text": "",
+      "accepted": [],
+      "explanation": "$x \\mid (1 \\ll k)$ 는 k 번째 비트만 1 로 켠다. 나머지 비트는 바꾸지 않으므로, 가장 오른쪽 비트를 지우는 $x \\& (x - 1)$ 과 헷갈리면 안 된다.",
+      "key_point_id": "k2",
+      "difficulty": "medium",
+      "pages": []
+    },
+    {
+      "type": "mcq",
+      "prompt": "add r1, r2, r3 명령의 설명으로 맞는 것은?",
+      "choices": [
+        "r2 와 r3 을 더해서 r1 에 넣는다",
+        "x86 의 add 처럼 r1 에 r2 를 더해 두 개만 쓴다",
+        "r1 에서 r2 를 빼서 r3 에 넣는다",
+        "r3 의 값을 r1 에 복사만 한다"
+      ],
+      "answer_index": 0,
+      "answer_bool": false,
+      "answer_text": "",
+      "accepted": [],
+      "explanation": "add r1, r2, r3 는 r2 와 r3 을 더해서 r1 에 넣는다. 피연산자가 세 개인 이 형식은 ARM 에서 쓰고, x86 의 add 는 두 개만 쓴다.",
+      "key_point_id": "k3",
+      "difficulty": "medium",
+      "pages": []
+    },
+    {
+      "type": "ox",
+      "prompt": "mov eax, 1 은 eax 레지스터에 1 을 넣는 명령이다.",
+      "choices": [],
+      "answer_index": -1,
+      "answer_bool": true,
+      "answer_text": "",
+      "accepted": [],
+      "explanation": "mov eax, 1 은 eax 레지스터에 1 을 넣는다. 레지스터는 CPU 안에 있는 아주 작고 빠른 저장 공간이다.",
+      "key_point_id": "k3",
+      "difficulty": "easy",
+      "pages": []
+    },
+    {
+      "type": "cloze",
+      "prompt": "$\\neg (A \\cdot B) = \\neg A + \\neg B$ 는 ____ 법칙이다.",
+      "choices": [],
+      "answer_index": -1,
+      "answer_bool": false,
+      "answer_text": "드모르간",
+      "accepted": ["드 모르간", "드모르간 법칙", "De Morgan"],
+      "explanation": "드모르간 법칙은 AND 와 OR 를 서로 바꾸는 법칙이다. 식으로는 $\\neg (A \\cdot B) = \\neg A + \\neg B$ 이다.",
+      "key_point_id": "k4",
+      "difficulty": "easy",
+      "pages": []
+    },
+    {
+      "type": "ox",
+      "prompt": "$A = 0$ 일 때 $A \\cdot B + \\neg A$ 의 값은 0 이다.",
+      "choices": [],
+      "answer_index": -1,
+      "answer_bool": false,
+      "answer_text": "",
+      "accepted": [],
+      "explanation": "$A = 0$ 이면 $A \\cdot B + \\neg A$ 의 값은 1 이다. 불 대수에서 $A \\cdot B + \\neg A$ 는 $B + \\neg A$ 로 정리된다.",
+      "key_point_id": "k4",
+      "difficulty": "medium",
+      "pages": []
+    },
+    {
+      "type": "mcq",
+      "prompt": "1000 개의 항목을 구분하려면 최소 몇 비트가 필요한가요?",
+      "choices": [
+        "9.97 비트",
+        "9 비트",
+        "10 비트",
+        "1000 비트"
+      ],
+      "answer_index": 2,
+      "answer_bool": false,
+      "answer_text": "",
+      "accepted": [],
+      "explanation": "$\\log_2 1000 \\approx 9.97$ 이라고 해서 9.97 비트가 필요한 것은 아니다. 정수로 올려서 최소 10 비트가 필요하다.",
+      "key_point_id": "k5",
+      "difficulty": "hard",
+      "pages": []
+    },
+    {
+      "type": "cloze",
+      "prompt": "32비트 주소는 $2^{32}$ 바이트, 즉 ____ GB 까지 가리킬 수 있다.",
+      "choices": [],
+      "answer_index": -1,
+      "answer_bool": false,
+      "answer_text": "4",
+      "accepted": ["4GB", "4 GB", "4기가바이트"],
+      "explanation": "32비트 주소는 $2^{32}$ 바이트를 가리킬 수 있고, 이는 4GB 이다. $n$ 비트로 표현할 수 있는 값의 개수는 $2^{n}$ 이다.",
+      "key_point_id": "k5",
+      "difficulty": "medium",
+      "pages": []
+    },
+    {
+      "type": "mcq",
+      "prompt": "명령어 수가 $10^{9}$ 개, CPI 가 1.5, 클럭이 2GHz 인 프로그램의 CPU 시간은 얼마인가요?",
+      "choices": [
+        "0.75 ns",
+        "0.75 초",
+        "1.5 초",
+        "0.5 초"
+      ],
+      "answer_index": 1,
+      "answer_bool": false,
+      "answer_text": "",
+      "accepted": [],
+      "explanation": "$\\text{CPU 시간} = \\text{명령어 수} \\times \\text{CPI} \\times \\text{클럭 주기}$ 로 계산하고, 클럭 주기는 $\\frac{1}{2 \\times 10^{9}}$ 초, 즉 0.5 ns 이다. 그래서 CPU 시간은 $10^{9} \\times 1.5 \\times 0.5$ ns, 즉 0.75 초가 된다.",
+      "key_point_id": "k6",
+      "difficulty": "medium",
+      "pages": []
+    },
+    {
+      "type": "ox",
+      "prompt": "명령어 수가 $10^{9}$ 개이고 클럭이 2GHz 일 때, CPI 를 1.5 에서 1.0 으로 줄이면 CPU 시간은 0.5 초가 된다.",
+      "choices": [],
+      "answer_index": -1,
+      "answer_bool": true,
+      "answer_text": "",
+      "accepted": [],
+      "explanation": "$\\text{CPU 시간} = \\text{명령어 수} \\times \\text{CPI} \\times \\text{클럭 주기}$ 로 계산한다. 2GHz 의 클럭 주기는 0.5 ns 이므로 CPI 가 1.0 이면 CPU 시간은 0.5 초이다.",
+      "key_point_id": "k6",
+      "difficulty": "easy",
+      "pages": []
+    },
+    {
+      "type": "short",
+      "prompt": "클럭 속도가 2GHz 일 때 클럭 주기는 몇 ns 인가요?",
+      "choices": [],
+      "answer_index": -1,
+      "answer_bool": false,
+      "answer_text": "0.5",
+      "accepted": ["0.5ns", "0.5 ns", "0.5 나노초"],
+      "explanation": "클럭 주기는 클럭 속도의 역수이므로 $\\frac{1}{2 \\times 10^{9}}$ 초, 즉 0.5 ns 이다. GHz 와 ns 단위를 섞어 계산하면 답이 틀린다.",
+      "key_point_id": "k6",
+      "difficulty": "hard",
+      "pages": []
+    }
+  ]
+}

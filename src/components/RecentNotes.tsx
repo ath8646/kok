@@ -168,18 +168,11 @@ export function RecentNotes({
               </IconButton>
             </span>
           ) : (
-            <span className="flex items-center gap-1.5">
-              <button
-                type="button"
-                className="press rounded-full bg-surface px-3 py-1 text-sm font-semibold text-ink shadow-[0_1px_2px_var(--shadow)] hover:bg-surface-2"
-                onClick={() => startSelect()}
-              >
-                고르기
-              </button>
-              <Link href="/library" className="press rounded-full bg-accent-soft px-3 py-1 text-sm font-semibold text-accent hover:brightness-95">
-                자료함 →
-              </Link>
-            </span>
+            // 화면 바탕 위 글자는 본문·흐린 글자만(화면 빛 위에서 읽히게, fx.ts): 포인트 글자는 연한 알약 안에.
+            // 여러 개 고르기는 카드를 꾹 누르면 (키보드는 메뉴 키·Shift+F10)
+            <Link href="/library" className="press rounded-full bg-accent-soft px-3 py-1 text-sm font-semibold text-accent hover:brightness-95">
+              자료함 →
+            </Link>
           )
         }
       >

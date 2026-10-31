@@ -340,7 +340,7 @@ function AddMaterial({ me, busyHint, onAdd }: { me: MeResponse; busyHint: boolea
       ) : (
         <>
           <p className="text-sm text-muted">
-            Pro에서는 지금 노트에 PDF·사진·글을 더할 수 있어요. AI가 지금 노트와 합쳐 새 버전을 만들고, 버전마다 정리·그림·문제가 따로 남아요.
+            Pro에서는 지금 노트에 PDF·사진·글·한글·워드·PPT를 더할 수 있어요. AI가 지금 노트와 합쳐 새 버전을 만들고, 버전마다 정리·그림·문제가 따로 남아요.
           </p>
           <LinkButton href="/plan" size="sm" variant="secondary" className="justify-self-start">
             요금제 보기

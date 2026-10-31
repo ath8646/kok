@@ -1,0 +1,158 @@
+{
+  "questions": [
+    {
+      "type": "mcq",
+      "prompt": "다음 중 `7 // 2` 의 결과로 옳은 것은?",
+      "choices": [
+        "3.5",
+        "3",
+        "4",
+        "2"
+      ],
+      "answer_index": 1,
+      "answer_bool": false,
+      "answer_text": "",
+      "accepted": [],
+      "explanation": "`//` 는 소수점 아래를 버린 몫을 구하는 연산자라서 `7 // 2` 는 3 이다. `7 / 2` 는 항상 실수인 3.5 가 되므로 두 연산자를 헷갈리면 안 된다.",
+      "key_point_id": "k1",
+      "difficulty": "easy",
+      "pages": []
+    },
+    {
+      "type": "ox",
+      "prompt": "`-7 // 2` 의 결과는 `-3` 이다.",
+      "choices": [],
+      "answer_index": -1,
+      "answer_bool": false,
+      "answer_text": "",
+      "accepted": [],
+      "explanation": "음수에서 `//` 는 0 쪽이 아니라 더 작은 쪽으로 내림한다. 그래서 `-7 // 2` 의 결과는 `-3` 이 아니라 `-4` 다.",
+      "key_point_id": "k1",
+      "difficulty": "medium",
+      "pages": []
+    },
+    {
+      "type": "short",
+      "prompt": "다음 코드를 실행했을 때 출력되는 값을 쓰시오.\n\n```python\nprint(-7 // 2)\n```",
+      "choices": [],
+      "answer_index": -1,
+      "answer_bool": false,
+      "answer_text": "-4",
+      "accepted": [],
+      "explanation": "음수의 `//` 는 더 작은 쪽으로 내림하므로 `-4` 가 나온다. 노트의 예시에도 `print(-7 // 2)` 의 출력이 `-4` 로 적혀 있다.",
+      "key_point_id": "k1",
+      "difficulty": "hard",
+      "pages": []
+    },
+    {
+      "type": "mcq",
+      "prompt": "다음 코드의 출력으로 옳은 것은?\n\n```python\nprint(\"a\", \"b\", \"c\")\n```",
+      "choices": [
+        "`abc`",
+        "`a,b,c`",
+        "`a b c`",
+        "`print` 에 값 세 개를 넣으면 오류가 난다"
+      ],
+      "answer_index": 2,
+      "answer_bool": false,
+      "answer_text": "",
+      "accepted": [],
+      "explanation": "`print` 는 값을 여러 개 넣으면 기본으로 공백 한 칸을 두고 이어서 출력한다. 구분 기호를 다르게 하려면 `sep` 옵션을 쓴다.",
+      "key_point_id": "k2",
+      "difficulty": "easy",
+      "pages": []
+    },
+    {
+      "type": "cloze",
+      "prompt": "별표(`*`)를 리스트 앞에 붙이면 리스트 안의 ____ 를 하나씩 풀어서 넘겨준다.",
+      "choices": [],
+      "answer_index": -1,
+      "answer_bool": false,
+      "answer_text": "원소",
+      "accepted": [
+        "요소"
+      ],
+      "explanation": "노트에 따르면 별표(`*`)를 앞에 붙이면 리스트 안의 원소를 하나씩 풀어서 넘겨준다. `print(*items, sep=\", \")` 처럼 쓰는 모양과 함께 기억해 두면 좋다.",
+      "key_point_id": "k2",
+      "difficulty": "medium",
+      "pages": []
+    },
+    {
+      "type": "mcq",
+      "prompt": "다음 코드의 출력으로 옳은 것은?\n\n```python\nscore = 91.456\nprint(f\"{score:.1f}\")\n```",
+      "choices": [
+        "91",
+        "91.5",
+        "91.456",
+        "91.46"
+      ],
+      "answer_index": 1,
+      "answer_bool": false,
+      "answer_text": "",
+      "accepted": [],
+      "explanation": "콜론 뒤의 `.1f` 는 소수 한 자리까지만 출력하라는 뜻이라 `91.456` 은 `91.5` 가 된다. 노트의 예시 `민수님 91.5점` 도 같은 방식으로 나온 결과다.",
+      "key_point_id": "k3",
+      "difficulty": "medium",
+      "pages": []
+    },
+    {
+      "type": "ox",
+      "prompt": "`\\n` 은 줄바꿈을, `\\t` 는 탭을 뜻한다.",
+      "choices": [],
+      "answer_index": -1,
+      "answer_bool": true,
+      "answer_text": "",
+      "accepted": [],
+      "explanation": "이스케이프 문자는 역슬래시 뒤의 글자 하나가 특별한 뜻을 갖는 것이다. 그래서 `\\n` 은 줄바꿈, `\\t` 는 탭이 된다.",
+      "key_point_id": "k3",
+      "difficulty": "easy",
+      "pages": []
+    },
+    {
+      "type": "cloze",
+      "prompt": "다음 코드에서 출력이 `yth` 가 되도록 빈칸에 들어갈 수를 쓰시오.\n\n```python\nword = \"python\"\nprint(word[1:____])\n```",
+      "choices": [],
+      "answer_index": -1,
+      "answer_bool": false,
+      "answer_text": "4",
+      "accepted": [],
+      "explanation": "끝 번호는 포함되지 않아서 `word[1:4]` 는 `yth` 가 된다. 출력이 `yth` 이려면 끝 번호가 4 여야 하므로 빈칸에는 4 가 들어간다.",
+      "key_point_id": "k4",
+      "difficulty": "medium",
+      "pages": []
+    },
+    {
+      "type": "mcq",
+      "prompt": "다음 코드의 출력으로 옳은 것은?\n\n```python\nword = \"python\"\nprint(word[1:4][::-1])\n```",
+      "choices": [
+        "`yth`",
+        "`hty`",
+        "`nohtyp`",
+        "`ytho`"
+      ],
+      "answer_index": 1,
+      "answer_bool": false,
+      "answer_text": "",
+      "accepted": [],
+      "explanation": "`word[1:4]` 는 `yth` 이고, 뒤의 `[::-1]` 는 글자 순서를 뒤집어 `hty` 가 된다. `ytho` 는 끝 번호를 포함했을 때, `yth` 는 뒤집기를 빼먹었을 때의 선택지다.",
+      "key_point_id": "k4",
+      "difficulty": "hard",
+      "pages": []
+    },
+    {
+      "type": "cloze",
+      "prompt": "변수 이름은 `x_1`, `max_value` 처럼 ____ 와 밑줄로 짓는다.",
+      "choices": [],
+      "answer_index": -1,
+      "answer_bool": false,
+      "answer_text": "소문자",
+      "accepted": [
+        "영문 소문자"
+      ],
+      "explanation": "변수 이름은 소문자와 밑줄로 짓는 것이 파이썬 관례다. 공백이나 하이픈은 변수 이름에 쓸 수 없다.",
+      "key_point_id": "k5",
+      "difficulty": "medium",
+      "pages": []
+    }
+  ]
+}

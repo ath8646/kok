@@ -68,6 +68,14 @@ async def shot(page, name, full=True):
     await page.screenshot(path=str(OUT / f"{name}.png"), full_page=full)
 
 
+async def long_press(page, target):
+    """카드를 꾹 누르기 (마우스 0.65초): 여러 개 고르기를 시작한다 (카드 메뉴에는 '여러 개 고르기'가 없다)"""
+    await target.hover()
+    await page.mouse.down()
+    await page.wait_for_timeout(650)
+    await page.mouse.up()
+
+
 async def no_hscroll(page, where):
     sw = await page.evaluate("document.documentElement.scrollWidth")
     cw = await page.evaluate("document.documentElement.clientWidth")
@@ -695,6 +703,131 @@ TRACE_JS = r"""
   take();
 })();
 """
+
+
+def make_office_files():
+    """한글(.hwpx)·워드(.docx)·PPT(.pptx) 시험 파일 (코드·표·수식이 든 강의 자료)"""
+    import zipfile
+    from docx import Document
+    from docx.shared import Pt
+    from pptx import Presentation
+    from pptx.util import Inches, Pt as PPt
+
+    d = Document()
+    d.add_heading("6주차 연결 리스트", level=1)
+    d.add_paragraph("노드는 값과 다음 노드의 주소를 가진다.")
+    for line in ["struct Node {", "    int value;", "    struct Node *next;", "};"]:
+        r = d.add_paragraph().add_run(line)
+        r.font.name = "Consolas"
+        r.font.size = Pt(9)
+    t = d.add_table(rows=2, cols=2)
+    t.cell(0, 0).text, t.cell(0, 1).text, t.cell(1, 0).text, t.cell(1, 1).text = "연산", "시간", "맨 앞 삽입", "O(1)"
+    b = io.BytesIO()
+    d.save(b)
+    docx = b.getvalue()
+
+    prs = Presentation()
+    sl = prs.slides.add_slide(prs.slide_layouts[1])
+    sl.shapes.title.text = "스택과 큐"
+    sl.placeholders[1].text_frame.text = "스택은 나중에 넣은 것을 먼저 꺼낸다 (LIFO)"
+    tb = sl.shapes.add_textbox(Inches(1), Inches(4), Inches(6), Inches(1)).text_frame
+    for i, line in enumerate(["stack.append(3)", "stack.pop()  # 3"]):
+        par = tb.paragraphs[0] if i == 0 else tb.add_paragraph()
+        r = par.add_run()
+        r.text = line
+        r.font.name = "Consolas"
+        r.font.size = PPt(14)
+    sl.notes_slide.notes_text_frame.text = "pop 은 맨 위를 꺼낸다"
+    b = io.BytesIO()
+    prs.save(b)
+    pptx = b.getvalue()
+
+    sec = (
+        '<?xml version="1.0"?><hs:sec xmlns:hs="http://www.hancom.co.kr/hwpml/2011/section" xmlns:hp="http://www.hancom.co.kr/hwpml/2011/paragraph">'
+        '<hp:p><hp:run><hp:t>2. 이차방정식의 근의 공식</hp:t></hp:run></hp:p>'
+        '<hp:p><hp:run><hp:t>근의 공식: </hp:t><hp:equation><hp:script>x = {-b +- sqrt {b^2 - 4ac}} over {2a}</hp:script></hp:equation></hp:run></hp:p>'
+        '<hp:p><hp:run><hp:t>판별식이 0 보다 크면 서로 다른 두 실근을 가진다.</hp:t></hp:run></hp:p></hs:sec>'
+    )
+    b = io.BytesIO()
+    with zipfile.ZipFile(b, "w") as z:
+        z.writestr("mimetype", "application/hwp+zip")
+        z.writestr("Contents/section0.xml", sec)
+    hwpx = b.getvalue()
+    return docx, pptx, hwpx
+
+
+async def office_code_steps(browser):
+    """한글·워드·PPT 파일 넣기와 코드(`코드`·``` 블록) 보기·고치기·PDF (따로 돌리기: python3 e2e_office.py)"""
+    step("office files: hwpx/docx/pptx are read in the browser and become text notes with code, tables and formulas kept")
+    me_id = USERS["student"][0]
+    docx, pptx, hwpx = make_office_files()
+    ctx, page = await new_ctx(browser, "student")
+    since = db(f"select coalesce(max(created_at), now() - interval '1 day')::text from public.sources where user_id = '{me_id}'")
+    await page.goto(BASE + "/library")
+    await expect(page.get_by_role("button", name="자료 넣기", exact=True)).to_be_visible()
+    await page.get_by_role("button", name="자료 넣기", exact=True).click()
+    composer = page.get_by_role("dialog", name="자료 넣기")
+    await composer.locator("input[type=file][multiple]").set_input_files(
+        files=[
+            {"name": "6주차 연결리스트.docx", "mimeType": "application/vnd.openxmlformats-officedocument.wordprocessingml.document", "buffer": docx},
+            {"name": "스택 발표.pptx", "mimeType": "application/vnd.openxmlformats-officedocument.presentationml.presentation", "buffer": pptx},
+            {"name": "근의 공식.hwpx", "mimeType": "application/hwp+zip", "buffer": hwpx},
+        ]
+    )
+    chips = composer.get_by_role("list", name="붙인 파일").locator("li")
+    await expect(chips).to_have_count(3)
+    await expect(chips.nth(0)).to_contain_text("워드")
+    await expect(chips.nth(1)).to_contain_text("PPT")
+    await expect(chips.nth(2)).to_contain_text("한글")
+    await shot(page, "150-composer-office", full=False)
+    await composer.get_by_role("button", name="AI 정리 시작").click()
+    await expect(composer).to_be_hidden()
+    q = f"from public.sources where user_id = '{me_id}' and kind = 'text' and parent_id is null and created_at > '{since}'"
+    await poll_db(f"select count(*) {q}", "3", timeout=40)
+    texts = {r.split("\t")[0]: r.split("\t", 1)[1] for r in db(f"select title || E'\\t' || replace(text_content, E'\\n', '⏎') {q}").splitlines()}
+    assert set(texts) == {"6주차 연결리스트", "스택 발표", "근의 공식"}, texts
+    assert "```⏎struct Node {⏎    int value;⏎    struct Node *next;⏎};⏎```" in texts["6주차 연결리스트"], texts["6주차 연결리스트"]
+    assert "| 맨 앞 삽입 | O(1) |" in texts["6주차 연결리스트"], texts["6주차 연결리스트"]
+    assert "## 1. 스택과 큐⏎- 스택은 나중에 넣은 것을 먼저 꺼낸다 (LIFO)⏎```⏎stack.append(3)⏎stack.pop()  # 3⏎```⏎(발표자 노트) pop 은 맨 위를 꺼낸다" in texts["스택 발표"], texts["스택 발표"]
+    assert "$x = \\frac{- b \\pm \\sqrt{b^{2} - 4 ac}}{2 a}$" in texts["근의 공식"], texts["근의 공식"]
+    for sid_ in db(f"select id {q}").splitlines():
+        await poll_db(f"select status from public.sources where id = '{sid_}'", "ready", timeout=120)
+
+    step("code in a note: `code` and ``` blocks render in mono, survive edit mode, previews and the PDF")
+    csid = db(f"select id {q} and title = '6주차 연결리스트'")
+    expl = "노드는 `next` 로 다음 노드를 가리키고 `**kwargs`·`__init__`·`$HOME` 은 글자 그대로예요."
+    ex = "```c\nstruct Node *p = head;\nwhile (p != NULL) {\n    p = p->next;\n}\n```"
+    db(
+        "update public.notes set body = jsonb_set(jsonb_set(body, '{key_points,0,explanation}', to_jsonb($t$" + expl + "$t$::text)), "
+        "'{examples}', jsonb_build_array(jsonb_build_object('text', $t$" + ex + "$t$::text, 'key_point_id', body->'key_points'->0->>'id'))) "
+        f"where source_id = '{csid}'"
+    )
+    assert db(f"select body->'examples'->0->>'text' from public.notes where source_id = '{csid}'") == ex
+    await page.goto(BASE + f"/notes/{csid}")
+    assert await wait_ready(page)
+    kp = page.locator("#kp-k1")
+    for w in ["next", "**kwargs", "__init__", "$HOME"]:
+        await expect(kp.locator("code.kok-code", has_text=w)).to_have_count(1)
+    block = page.locator(".kok-code-block").first
+    await expect(block).to_contain_text("p = p->next;")
+    # 코드 블록은 옆으로 넘기는 칸(고정폭 글꼴)이고 화면은 옆으로 밀리지 않는다
+    assert await block.evaluate("(e) => getComputedStyle(e).whiteSpace === 'pre' && /mono/i.test(getComputedStyle(e).fontFamily)")
+    await no_hscroll(page, "note with code")
+    await kp.scroll_into_view_if_needed()
+    await shot(page, "151-note-code", full=False)
+    # 고치기 모드: `코드` 를 치면 코드 칸이 되고, 다른 칸의 코드 블록은 그대로 저장된다
+    await edit_on(page)
+    pm = await edit_text(page, "1번 개념 설명", "")
+    await pm.press_sequentially("노드는 `next` 로 가리켜요")
+    await expect(pm.locator("code.kok-code", has_text="next")).to_have_count(1)
+    # 코드 칸을 닫은 뒤 친 글은 코드가 아니다 (꾸미기 줄의 '코드' 단추도 꺼져 있다)
+    await expect(page.get_by_role("toolbar", name="글 꾸미기").get_by_role("button", name="코드", exact=True)).to_have_attribute("aria-pressed", "false")
+    await shot(page, "152-edit-code", full=False)
+    await page.keyboard.press("Escape")
+    await poll_db(f"select body->'key_points'->0->>'explanation' from public.notes where source_id = '{csid}'", "노드는 `next` 로 가리켜요", timeout=10)
+    assert db(f"select body->'examples'->0->>'text' from public.notes where source_id = '{csid}'") == ex
+    await edit_off(page)
+    await ctx.close()
 
 
 async def answer_any(page):
@@ -1836,7 +1969,8 @@ async def main():
         step("unsupported file is refused with a reason")
         await page.goto(BASE + "/library")
         await expect(page.locator("main a[href^='/notes/']").first).to_be_visible()
-        await drag_files(page, [("발표.pptx", "application/vnd.openxmlformats-officedocument.presentationml.presentation", b"PK fake")])
+        # 예전 PPT 형식(.ppt)은 받지 않고 .pptx·PDF 로 저장하라고 알린다 (.pptx·.docx·.hwp 는 office_code_steps)
+        await drag_files(page, [("발표.ppt", "application/vnd.ms-powerpoint", b"\xd0\xcf\x11\xe0 fake")])
         await drop_files(page)
         await expect(page.get_by_text(re.compile("PDF로 저장해서 넣어 주세요"))).to_be_visible()
 
@@ -1968,21 +2102,22 @@ async def main():
         await page.get_by_role("tab", name="원본").click()
         await expect(page.get_by_text("직접 만든 노트라 원본이 없어요")).to_be_visible()
         await page.get_by_role("tab", name="정리").click()
-        # 이름·단원 바꾸기: 노트 메뉴 → 고치기 모드의 큰 제목 칸 (노트와 자료함 이름이 같이), 단원 칩 → 단원 창
+        # 이름·과목·단원 바꾸기: 노트 메뉴 → '노트 정보' 한 화면 (노트와 자료함 이름이 같이), 새 단원은 칩으로 적는다
         await page.get_by_role("button", name="노트 메뉴").click()
-        await page.get_by_role("menuitem", name="이름·단원 바꾸기").click()
-        title_box = page.get_by_role("textbox", name="노트 이름")
-        await expect(title_box).to_be_focused()
-        await title_box.fill("세포 호흡 노트")
-        await title_box.press("Enter")
+        await page.get_by_role("menuitem", name="이름·과목·단원 바꾸기").click()
+        info = page.get_by_role("dialog", name="노트 정보")
+        await expect(info.get_by_role("button", name="저장")).to_be_disabled()
+        await info.get_by_label("이름", exact=True).fill("세포 호흡 노트")
+        await expect(info.get_by_role("radio", name="단원 없음")).to_have_attribute("aria-checked", "true")
+        await info.get_by_role("button", name="새 단원").click()
+        await info.get_by_label("새 단원 이름").fill("3. 세포 호흡")
+        await info.get_by_label("새 단원 이름").press("Enter")
+        await expect(info.get_by_role("radio", name="3. 세포 호흡")).to_have_attribute("aria-checked", "true")
+        await shot(page, "41-note-info", full=False)
+        await info.get_by_role("button", name="저장").click()
+        await expect(info).to_be_hidden()
         await poll_db(f"select title from public.sources where id = '{bsid}'", "세포 호흡 노트")
-        await page.get_by_role("button", name=re.compile("^단원: 단원 없음")).click()
-        unit_sheet = page.get_by_role("dialog", name="단원")
-        await unit_sheet.get_by_label("새 단원 이름").fill("3. 세포 호흡")
-        await unit_sheet.get_by_role("button", name="쓰기").click()
-        await expect(unit_sheet).to_be_hidden()
         await poll_db(f"select unit from public.sources where id = '{bsid}'", "3. 세포 호흡")
-        await edit_off(page)
         await expect(page.get_by_role("heading", name="세포 호흡 노트", exact=True)).to_be_visible()
         assert db(f"select title from public.sources where id = '{bsid}'") == "세포 호흡 노트"
         assert db(f"select title from public.notes where source_id = '{bsid}'") == "세포 호흡 노트"
@@ -2969,9 +3104,13 @@ async def main():
         assert await wait_ready(page)
         pdf_sec = page.get_by_role("region", name="PDF 요약 정리")
         await expect(pdf_sec.get_by_role("listitem")).to_have_count(2)
+        # 줄 메뉴에는 '여러 개 고르기'가 없다: 꾹 누르면 (이름 위에서도) 고르기
         await pdf_sec.get_by_role("button", name="광합성 정리 v1 메뉴").click()
-        await page.get_by_role("menuitem", name="여러 개 고르기").click()
+        await expect(page.get_by_role("menuitem", name="여러 개 고르기")).to_have_count(0)
+        await page.keyboard.press("Escape")
+        await long_press(page, pdf_sec.get_by_role("button", name="광합성 정리 v1 보기"))
         await expect(pdf_sec.get_by_role("checkbox")).to_have_count(2)
+        await expect(page.get_by_role("dialog", name=re.compile("^PDF 보기"))).to_have_count(0)
         await pdf_sec.get_by_role("button", name="모두 고르기").click()
         await expect(page.get_by_role("toolbar", name="고른 PDF 2개")).to_be_visible()
         await shot(page, "105-pdf-select", full=False)
@@ -3910,8 +4049,13 @@ async def main():
         cards = page.locator("main [data-flip]")
         await expect(card(oldest)).to_be_visible()
         assert await cards.first.get_attribute("data-flip") != oldest
+        # 카드 메뉴에는 별표·여러 개 고르기가 없다 (별 단추·꾹 누르기로)
         await card(oldest).get_by_role("button", name=re.compile(" 메뉴$")).click()
-        await page.get_by_role("menuitem", name="별표", exact=True).click()
+        await expect(page.get_by_role("menuitem", name="이름·과목·단원 바꾸기")).to_be_visible()
+        await expect(page.get_by_role("menuitem", name=re.compile("^별표"))).to_have_count(0)
+        await expect(page.get_by_role("menuitem", name="여러 개 고르기")).to_have_count(0)
+        await page.keyboard.press("Escape")
+        await card(oldest).get_by_role("button", name=re.compile(" 별표$")).click()
         await expect(cards.first).to_have_attribute("data-flip", oldest)
         # 별표는 별과 빛으로 보여서 아래 알림을 띄우지 않는다
         await expect(page.locator(".kok-toast", has_text="별표")).to_have_count(0)
@@ -3996,8 +4140,9 @@ async def main():
         await expect(page.get_by_text("2개 노트를 복습에서 뺐어요.")).to_be_visible()
         await poll_db(f"select count(*) from public.sources where id in ('{a_id}', '{b_id}') and not in_review", "2")
         await expect(card(a_id)).to_contain_text("복습 끔")
-        await card(a_id).get_by_role("button", name=re.compile(" 메뉴$")).click()
-        await page.get_by_role("menuitem", name="여러 개 고르기").click()
+        # 키보드: 카드에서 메뉴 키(Shift+F10)를 누르면 꾹 누르기와 같다
+        await card(a_id).get_by_role("link").focus()
+        await page.keyboard.press("Shift+F10")
         await expect(page.get_by_role("heading", name="1개 선택", exact=True)).to_be_visible()
         await card(b_id).click()
         await bar.get_by_role("button", name="복습 켜기").click()
@@ -4354,13 +4499,10 @@ async def main():
         await drawer.get_by_role("searchbox", name="과목 찾기").fill("지울과목")
         tile = lambda n: drawer.locator(f'[data-tile="{made_subjects[n]}"]')  # noqa: E731
 
-        async def long_press(loc):
-            await loc.hover()
-            await page.mouse.down()
-            await page.wait_for_timeout(650)
-            await page.mouse.up()
+        async def press_tile(loc):
+            await long_press(page, loc)
 
-        await long_press(tile("지울과목1"))
+        await press_tile(tile("지울과목1"))
         await expect(drawer).to_have_attribute("aria-label", "과목 고르기")
         await expect(tile("지울과목1")).to_have_attribute("aria-checked", "true")
         await tile("지울과목2").click()
@@ -4371,12 +4513,12 @@ async def main():
         await bar.get_by_role("button", name="위에 고정").click()
         await expect(drawer).to_have_attribute("aria-label", "모든 과목")
         await poll_db(f"select count(*) from public.subjects where id in ('{made_subjects['지울과목1']}', '{made_subjects['지울과목2']}') and pinned", "2")
-        await long_press(tile("지울과목1"))
+        await press_tile(tile("지울과목1"))
         await tile("지울과목2").click()
         await bar.get_by_role("button", name="고정 풀기").click()
         await poll_db(f"select count(*) from public.subjects where id in ('{made_subjects['지울과목1']}', '{made_subjects['지울과목2']}') and pinned", "0")
         # Esc 는 고르기만 끝낸다
-        await long_press(tile("지울과목1"))
+        await press_tile(tile("지울과목1"))
         await expect(drawer).to_have_attribute("aria-label", "과목 고르기")
         await page.keyboard.press("Escape")
         await expect(drawer).to_have_attribute("aria-label", "모든 과목")
@@ -4390,7 +4532,7 @@ async def main():
         await expect(drawer).to_have_attribute("aria-label", "모든 과목")
         await poll_db(f"select archived from public.subjects where id = '{made_subjects['지울과목3']}'", "t")
         # 셋을 골라 지우기: 확인 화면에서 뒤로 가도 고른 것은 그대로, 지우면 과목과 자료가 모두 없어진다
-        await long_press(tile("지울과목1"))
+        await press_tile(tile("지울과목1"))
         await tile("지울과목2").click()
         await tile("지울과목3").click()
         await expect(drawer.get_by_text("과목 3개를 골랐어요")).to_be_visible()
@@ -4468,9 +4610,23 @@ async def main():
         await page.goto(BASE + "/library")
         lib_cards = page.locator("main [data-flip]")
         await expect(lib_cards.first).to_be_visible()
-        await page.evaluate("window.scrollTo(0, document.documentElement.scrollHeight)")
+        # 카드의 ⋮ 를 아래 메뉴 바로 위(60px)까지 내려 둔다: 아래 자리가 메뉴보다 작으니 위로 열려야 한다
+        # (맨 끝 카드는 아래 여백 때문에 메뉴가 아래에 들어갈 수 있어서, 스크롤로 거기까지 내릴 수 있는 카드를 고른다)
+        card_menus = lib_cards.get_by_role("button", name=re.compile("메뉴$"))
+        picked = await card_menus.evaluate_all(
+            """(btns) => {
+              const tab = document.querySelector('.kok-tabbar').getBoundingClientRect().top;
+              const max = document.documentElement.scrollHeight - innerHeight;
+              for (let i = btns.length - 1; i >= 0; i--) {
+                const want = btns[i].getBoundingClientRect().bottom + scrollY - (tab - 60);
+                if (want >= 0 && want <= max) { document.documentElement.style.scrollBehavior = 'auto'; scrollTo(0, want); return i; }
+              }
+              return -1;
+            }"""
+        )
+        assert picked >= 0, "no card can be scrolled near the tab bar"
         await page.wait_for_timeout(300)
-        last_menu = lib_cards.last.get_by_role("button", name=re.compile("메뉴$"))
+        last_menu = card_menus.nth(picked)
         await last_menu.click()
         menu = page.get_by_role("menu")
         await expect(menu).to_be_visible()
@@ -4486,7 +4642,7 @@ async def main():
             [mb["x"] + mb["width"] / 2, mb["y"] + mb["height"] - 6],
         )
         assert hit, "menu bottom is covered"
-        item_h = (await page.get_by_role("menuitem", name="다른 과목으로 옮기기").bounding_box())["height"]
+        item_h = (await page.get_by_role("menuitem", name="이름·과목·단원 바꾸기").bounding_box())["height"]
         assert item_h < 48, item_h
         await shot(page, "96-menu-bottom", full=False)
         await expect(page.get_by_role("menuitem").first).to_be_focused()
@@ -4550,10 +4706,13 @@ async def main():
         await poll_db(f"select count(*) from public.sources where id in ('{two_ids[0]}', '{two_ids[1]}') and starred", "2" if to_star else "0")
         await expect(rbar).to_have_count(0)
         await expect(page.get_by_role("heading", name="최근 노트")).to_be_visible()
-        # 키보드: '고르기'로 시작, 스페이스로 고르기, 모두 고르기, Esc 로 끝
-        await page.get_by_role("button", name="고르기", exact=True).click()
-        await expect(page.get_by_role("heading", name="노트 고르기", exact=True)).to_be_visible()
+        # '고르기' 단추는 없다 (꾹 누르기로). 키보드: 메뉴 키(Shift+F10)로 시작, 스페이스로 고르기·풀기, 모두 고르기, Esc 로 끝
+        await expect(page.get_by_role("button", name="고르기", exact=True)).to_have_count(0)
         await rcards.first.focus()
+        await page.keyboard.press("Shift+F10")
+        await expect(page.get_by_role("heading", name="1개 선택", exact=True)).to_be_visible()
+        await page.keyboard.press("Space")
+        await expect(page.get_by_role("heading", name="노트 고르기", exact=True)).to_be_visible()
         await page.keyboard.press("Space")
         await expect(page.get_by_role("heading", name="1개 선택", exact=True)).to_be_visible()
         await page.get_by_role("button", name="모두 고르기").click()
@@ -4564,27 +4723,39 @@ async def main():
             db(f"update public.sources set starred = {'true' if v == 't' else 'false'} where id = '{x}'")
         await ctx.close()
 
-        step("library: move notes to another subject (card menu, several at once into a new subject) — questions and cards follow")
+        step("library: move notes to another subject ('노트 정보' from the card menu — name, subject and unit in one place; several at once into a new subject) — questions and cards follow")
         math = db(f"select id from public.subjects where user_id = '{me_id}' and name = '수학'")
         ctx, page = await new_ctx(browser, "student")
         await page.goto(BASE + f"/library/{sci}")
         cards = page.locator("main [data-flip]")
         sid = await cards.first.get_attribute("data-flip")
+        unit_before = db(f"select unit from public.sources where id = '{sid}'")
         await cards.first.get_by_role("button", name=re.compile("메뉴$")).click()
-        await page.get_by_role("menuitem", name="다른 과목으로 옮기기").click()
-        sheet = page.get_by_role("dialog", name="다른 과목으로 옮기기")
-        await expect(sheet.get_by_role("radio", name=re.compile("^과학"))).to_have_count(0)
-        await sheet.get_by_role("radio", name=re.compile("^수학")).click()
-        await sheet.get_by_role("button", name="'수학' 과목으로 옮기기").click()
+        await page.get_by_role("menuitem", name="이름·과목·단원 바꾸기").click()
+        sheet = page.get_by_role("dialog", name="노트 정보")
+        subj = sheet.get_by_role("radiogroup", name="과목")
+        await expect(subj.get_by_role("radio", name=re.compile("^과학"))).to_have_attribute("aria-checked", "true")
+        await subj.get_by_role("radio", name=re.compile("^수학")).click()
+        # 다른 과목을 고르면 그 과목의 단원 (단원 없음부터), 무엇이 같이 옮겨지는지 알려 준다
+        await expect(sheet.get_by_role("radio", name="단원 없음")).to_have_attribute("aria-checked", "true")
+        await expect(sheet.get_by_role("status")).to_contain_text("과학 → 수학 과목으로 옮겨요")
+        await shot(page, "97a-note-info-move", full=False)
+        # 지금 과목으로 돌아오면 원래 단원
+        await subj.get_by_role("radio", name=re.compile("^과학")).click()
+        if unit_before:
+            await expect(sheet.get_by_role("radio", name=unit_before)).to_have_attribute("aria-checked", "true")
+        await expect(sheet.get_by_role("button", name="저장")).to_be_disabled()
+        await subj.get_by_role("radio", name=re.compile("^수학")).click()
+        await sheet.get_by_role("button", name="저장하고 '수학' 과목으로 옮기기").click()
         await expect(sheet).to_be_hidden()
+        await expect(page.get_by_text("'수학' 과목으로 옮겼어요.")).to_be_visible()
         await poll_db(f"select subject_id from public.sources where id = '{sid}'", math)
         moved_q = f"from public.questions q join public.notes n on n.id = q.note_id where n.source_id = '{sid}'"
         assert db(f"select count(*) {moved_q} and q.subject_id <> '{math}'") == "0"
         assert db(f"select count(*) from public.cards c where c.question_id in (select q.id {moved_q}) and c.subject_id <> '{math}'") == "0"
         await expect(page.locator(f'main [data-flip="{sid}"]')).to_have_count(0)
-        # 여러 개 골라 새 과목으로
-        await cards.first.get_by_role("button", name=re.compile("메뉴$")).click()
-        await page.get_by_role("menuitem", name="여러 개 고르기").click()
+        # 여러 개 골라 새 과목으로 (꾹 눌러 고르기)
+        await long_press(page, cards.first)
         await cards.nth(1).click()
         two = [await cards.nth(i).get_attribute("data-flip") for i in range(2)]
         bar = page.get_by_role("toolbar", name=re.compile("^고른 자료"))
@@ -4615,8 +4786,7 @@ async def main():
         cards = page.locator("main [data-flip]")
         await expect(cards).to_have_count(2)
         ids = [await cards.nth(i).get_attribute("data-flip") for i in range(2)]
-        await cards.first.get_by_role("button", name=re.compile("메뉴$")).click()
-        await page.get_by_role("menuitem", name="여러 개 고르기").click()
+        await long_press(page, cards.first)
         bar = page.get_by_role("toolbar", name=re.compile("^고른 자료"))
         await expect(bar.get_by_role("button", name="합치기")).to_be_disabled()
         await cards.nth(1).click()
@@ -4751,8 +4921,7 @@ async def main():
         keep_title = db(f"select title from public.sources where id = '{keep}'") or "제목 없는 자료"
         await page.goto(BASE + f"/library/{bio}")
         card = lambda sid: page.locator(f'main [data-flip="{sid}"]')  # noqa: E731
-        await card(keep).get_by_role("button", name=re.compile("메뉴$")).click()
-        await page.get_by_role("menuitem", name="여러 개 고르기").click()
+        await long_press(page, card(keep))
         await card(old_src).click()
         bar = page.get_by_role("toolbar", name=re.compile("^고른 자료"))
         await bar.get_by_role("button", name="합치기").click()
@@ -4913,6 +5082,7 @@ async def main():
 
         await figure_steps(browser)
         await tab_steps(browser)
+        await office_code_steps(browser)
         await browser.close()
 
     # 실제 Claude 처럼 가짜 서버도 속성이 42개를 넘는 답 모양은 거절한다: 시험 내내 한 번도 없어야 하고, 채팅 풀이 그림은 두 번째 호출로 받았다

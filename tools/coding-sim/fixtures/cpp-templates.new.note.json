@@ -1,0 +1,216 @@
+{
+  "title": "9주차 템플릿과 연산자 오버로딩",
+  "unit": "템플릿과 연산자 오버로딩",
+  "summary": "`template` 으로 자료형을 바꿔 쓰는 함수와 클래스, 연산자 오버로딩과 `<<` 출력 연산자, 템플릿 오류를 정리한 9주차 C++ 강의 자료다.",
+  "key_points": [
+    {
+      "id": "k1",
+      "title": "함수 템플릿과 인스턴스화",
+      "explanation": "같은 모양의 함수를 자료형만 바꿔 쓰고 싶을 때 `template <typename T>` 로 자리 표시자 `T` 를 적고, 호출될 때 컴파일러가 `T` 를 정해서 코드를 찍어 낸다. 이것을 인스턴스화라고 하며, `maxOf(3, 7)` 은 `T` 가 `int` 로 찍힌다.",
+      "why": "`typename` 과 `class` 의 뜻이 같다는 점과 템플릿은 설계도라는 점이 시험에 자주 나온다고 적혀 있다.",
+      "importance": "high",
+      "pages": []
+    },
+    {
+      "id": "k2",
+      "title": "클래스 템플릿과 `std::vector`",
+      "explanation": "클래스도 템플릿으로 만들 수 있고, `std::vector<int>` 는 `int` 를 원소로 가지는 동적 배열이다. 클래스 템플릿은 `Box b;` 처럼 꺾쇠 없이 쓰면 오류가 나므로 `Box<double> b;` 처럼 자료형을 꼭 적어야 한다.",
+      "why": "`vector`, `map` 같은 표준 라이브러리 컨테이너가 모두 이 방식으로 만들어져 있다고 적혀 있다.",
+      "importance": "medium",
+      "pages": []
+    },
+    {
+      "id": "k3",
+      "title": "연산자 오버로딩",
+      "explanation": "연산자도 `operator` 뒤에 기호를 붙여 함수처럼 다시 정의할 수 있다. `Point` 의 `operator+` 를 멤버 함수로 만들면 `a + b` 가 `a.operator+(b)` 로 풀리고, 함수 이름 뒤의 `const` 는 왼쪽 객체를 바꾸지 않는다는 약속이다.",
+      "why": "멤버 함수로 만든 연산자의 왼쪽 피연산자 규칙이 `<<` 와 `2 * p` 문제의 바탕이 된다.",
+      "importance": "medium",
+      "pages": []
+    },
+    {
+      "id": "k4",
+      "title": "`<<` 는 전역 함수로 만든다",
+      "explanation": "`std::cout` 이 왼쪽에 와야 하므로 `<<` 를 멤버 함수로 만들면 `std::cout << p` 를 쓸 수 없고, 그래서 `<<` 는 전역 함수나 `friend` 로 만든다. 반환형이 `std::ostream &` 인 이유는 `std::cout << a << b` 처럼 이어서 쓰기 위해서다.",
+      "why": "`<<` 를 멤버 함수로 만들 수 없다는 점은 시험에 자주 나온다고 적혀 있다.",
+      "importance": "high",
+      "pages": []
+    },
+    {
+      "id": "k5",
+      "title": "템플릿 오류와 링크 오류",
+      "explanation": "템플릿은 실제로 쓰일 때 검사되므로 `twice(\"hi\")` 처럼 연산이 안 되는 자료형을 넣으면 템플릿 정의가 아니라 호출한 곳에서 오류가 난다. 템플릿 정의는 보통 헤더 파일에 두며, 정의가 보이지 않는 곳에서 부르면 링크 오류가 난다.",
+      "why": "헤더 파일에 정의를 두는 이유와 링크 오류가 시험에 자주 나온다고 적혀 있다.",
+      "importance": "high",
+      "pages": []
+    }
+  ],
+  "terms": [
+    {
+      "term": "템플릿 (`template`)",
+      "meaning": "자료형을 자리 표시자로 적어 두고 여러 자료형에 쓰는 틀이다."
+    },
+    {
+      "term": "자리 표시자 (`T`)",
+      "meaning": "템플릿에서 나중에 정해질 자료형을 적어 두는 이름이다."
+    },
+    {
+      "term": "인스턴스화 (instantiation)",
+      "meaning": "호출될 때 `T` 를 정해서 실제 코드를 찍어 내는 것이다."
+    },
+    {
+      "term": "함수 템플릿",
+      "meaning": "함수에 템플릿을 씌운 것이다. 인자를 보고 `T` 를 스스로 알아낸다."
+    },
+    {
+      "term": "클래스 템플릿",
+      "meaning": "클래스에 템플릿을 씌운 것이다. 예를 들어 `Box<int>` 처럼 꺾쇠에 자료형을 적는다."
+    },
+    {
+      "term": "`std::vector<int>`",
+      "meaning": "`int` 를 원소로 가지는 동적 배열이다."
+    },
+    {
+      "term": "컨테이너",
+      "meaning": "`vector`, `map` 처럼 원소를 모아 두는 자료 구조다."
+    },
+    {
+      "term": "`std::endl`",
+      "meaning": "줄을 바꾸면서 출력 버퍼도 비우는 것이다."
+    },
+    {
+      "term": "연산자 오버로딩",
+      "meaning": "연산자를 함수처럼 다시 정의하는 것이다."
+    },
+    {
+      "term": "`operator`",
+      "meaning": "연산자 함수의 이름을 만들 때 쓰는 키워드다. 예를 들어 `operator+` 가 있다."
+    },
+    {
+      "term": "`this`",
+      "meaning": "멤버 함수 안에서 호출한 객체 자기 자신을 가리킨다."
+    },
+    {
+      "term": "`const` (멤버 함수 뒤)",
+      "meaning": "이 함수가 왼쪽 객체를 바꾸지 않는다는 약속이다."
+    },
+    {
+      "term": "전역 함수",
+      "meaning": "클래스 밖에 정의한 함수다."
+    },
+    {
+      "term": "`friend`",
+      "meaning": "클래스가 자기 멤버에 접근하도록 허락한 바깥 함수다."
+    },
+    {
+      "term": "`std::ostream &`",
+      "meaning": "출력 스트림을 참조로 돌려주는 반환형이다. 이 덕분에 `<<` 를 이어서 쓸 수 있다."
+    },
+    {
+      "term": "헤더 파일",
+      "meaning": "선언과 정의를 담아 여러 파일에서 가져다 쓰는 파일이다."
+    },
+    {
+      "term": "링크 오류",
+      "meaning": "정의를 찾지 못해 여러 파일을 하나로 묶을 때 나는 오류다."
+    }
+  ],
+  "formulas": [],
+  "pitfalls": [
+    {
+      "text": "`maxOf(1, 2.5)` 는 `int` 와 `double` 이 섞여서 `T` 를 하나로 정하지 못해 오류가 난다.",
+      "key_point_id": "k1"
+    },
+    {
+      "text": "`maxOf<double>(1, 2.5)` 처럼 꺾쇠에 자료형을 직접 적으면 `T` 를 정할 수 있다.",
+      "key_point_id": "k1"
+    },
+    {
+      "text": "템플릿 자체는 실행되는 코드가 아니라 설계도이고, 실제 코드는 호출될 때 생긴다.",
+      "key_point_id": "k1"
+    },
+    {
+      "text": "`Box b;` 처럼 꺾쇠 없이 쓰면 오류가 난다. C++17 부터는 일부 경우에 추론도 된다.",
+      "key_point_id": "k2"
+    },
+    {
+      "text": "`Box<int>` 와 `Box<double>` 은 서로 다른 자료형이라 대입할 수 없다.",
+      "key_point_id": "k2"
+    },
+    {
+      "text": "`'\\n'` 은 글자 한 개짜리 문자이고, `\"\\n\"` 은 문자열이다. 둘 다 줄바꿈이지만 자료형이 다르다.",
+      "key_point_id": "k2"
+    },
+    {
+      "text": "`std::endl` 은 줄을 바꾸면서 출력 버퍼도 비우므로 `'\\n'` 보다 느릴 수 있다.",
+      "key_point_id": "k2"
+    },
+    {
+      "text": "멤버 함수로 만들면 왼쪽 피연산자가 항상 `this` 가 된다.",
+      "key_point_id": "k3"
+    },
+    {
+      "text": "`<<` 를 멤버 함수로 만들면 `std::cout << p` 가 안 된다.",
+      "key_point_id": "k4"
+    },
+    {
+      "text": "왼쪽 피연산자가 `int` 인 `2 * p` 같은 식은 멤버 함수로 만들 수 없다. 이때는 전역 함수로 만든다.",
+      "key_point_id": "k4"
+    },
+    {
+      "text": "`twice(\"hi\")` 는 `const char *` 와 `int` 사이에 `*` 를 쓸 수 없어서 오류가 난다. 메시지에 `invalid operands` 가 있으면 자료형이 연산자와 맞지 않는다는 뜻이다.",
+      "key_point_id": "k5"
+    },
+    {
+      "text": "정의가 보이지 않는 곳에서 템플릿을 부르면 링크 오류가 난다.",
+      "key_point_id": "k5"
+    }
+  ],
+  "examples": [
+    {
+      "text": "```cpp\ntemplate <typename T>\nT maxOf(T a, T b) {\n    return (a > b) ? a : b;\n}\n```",
+      "key_point_id": "k1"
+    },
+    {
+      "text": "```cpp\ntemplate <typename T>\nclass Box {\npublic:\n    T value;\n};\n\nBox<int> a;       // T 가 int 로 찍힌다\nBox<double> b;    // T 가 double 로 찍힌다, a 와는 다른 자료형이다\n```",
+      "key_point_id": "k2"
+    },
+    {
+      "text": "```cpp\n#include <iostream>\n#include <vector>\n\nint main() {\n    std::vector<int> v = {3, 1, 4};\n    v.push_back(1);\n    for (int x : v) {\n        std::cout << x << '\\n';\n    }\n    return 0;\n}\n```",
+      "key_point_id": "k2"
+    },
+    {
+      "text": "```cpp\nstruct Point {\n    int x, y;\n    Point operator+(const Point &other) const {\n        return Point{x + other.x, y + other.y};\n    }\n};\n```",
+      "key_point_id": "k3"
+    },
+    {
+      "text": "```cpp\nstd::ostream &operator<<(std::ostream &os, const Point &p) {\n    return os << \"(\" << p.x << \", \" << p.y << \")\";\n}\n```",
+      "key_point_id": "k4"
+    },
+    {
+      "text": "```cpp\ntemplate <typename T>\nT twice(T x) {\n    return x * 2;\n}\n\nint main() {\n    std::cout << twice(\"hi\") << '\\n';   // 오류\n    return 0;\n}\n```",
+      "key_point_id": "k5"
+    }
+  ],
+  "checks": [
+    {
+      "text": "\"템플릿은 실제로 쓰일 때 검사된다\"는 말은 `x * 2` 처럼 자료형에 따라 달라지는 연산에 해당한다. 세미콜론 빠짐 같은 문법 오류는 정의할 때 바로 잡히므로, 설명이 이 구분을 담고 있는지 확인할 것."
+    }
+  ],
+  "changes": [
+    {
+      "text": "제목을 '9주차 템플릿과 연산자 오버로딩'으로 줄였다."
+    },
+    {
+      "text": "번호 붙은 다섯 절을 핵심 다섯 개로 옮겼다. 1절은 함수 템플릿, 2절은 클래스 템플릿과 `std::vector`, 3절은 연산자 오버로딩, 3절 뒤쪽의 `<<` 부분은 따로 떼어 전역 함수 항목으로, 4절과 5절은 템플릿 오류와 링크 오류 항목으로 두었다."
+    },
+    {
+      "text": "들여 쓴 `Box` 예제는 들여쓰기를 걷어 코드 블록으로 옮겼다."
+    },
+    {
+      "text": "5절의 시험 포인트는 각 핵심의 함정 칸으로 나눠 옮겼다."
+    },
+    {
+      "text": "목록 기호 없이 문장으로 정리했고, 코드·기호는 백틱으로 감쌌다."
+    }
+  ]
+}

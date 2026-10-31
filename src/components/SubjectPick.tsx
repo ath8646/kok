@@ -12,6 +12,23 @@ import { Button, ICONS, Icon, Sheet, cx, inputClass, useToast } from './ui';
 /** 이만큼 넘으면 찾기 칸을 보인다 */
 const SEARCH_FROM = 7;
 
+/** 새 과목 만들기 (색은 있는 과목 수로 돌려 가며). 못 만들면 알림을 띄우고 null */
+export async function createSubject(
+  name: string,
+  subjects: SubjectRow[],
+  toast: (text: string, tone?: 'plain' | 'ok' | 'bad') => void,
+): Promise<SubjectRow | null> {
+  const n = name.replace(/\s+/g, ' ').trim().slice(0, 40);
+  if (!n) return null;
+  const color = SUBJECT_COLORS[subjects.length % SUBJECT_COLORS.length];
+  const { data, error } = await sb().from('subjects').insert({ name: n, color, position: subjects.length }).select('*').single();
+  if (error || !data) {
+    toast(/kok_row_limit/.test(error?.message ?? '') ? '과목은 100개까지 만들 수 있어요.' : '과목을 만들지 못했어요.', 'bad');
+    return null;
+  }
+  return data as SubjectRow;
+}
+
 export function SubjectPickList({
   subjects,
   value,
@@ -47,19 +64,14 @@ export function SubjectPickList({
   const many = subjects.length - exclude.length >= SEARCH_FROM;
 
   const create = async () => {
-    const n = name.replace(/\s+/g, ' ').trim().slice(0, 40);
-    if (!n || busy || !onCreated) return;
+    if (!name.trim() || busy || !onCreated) return;
     setBusy(true);
-    const color = SUBJECT_COLORS[subjects.length % SUBJECT_COLORS.length];
-    const { data, error } = await sb().from('subjects').insert({ name: n, color, position: subjects.length }).select('*').single();
+    const made = await createSubject(name, subjects, toast);
     setBusy(false);
-    if (error || !data) {
-      toast(/kok_row_limit/.test(error?.message ?? '') ? '과목은 100개까지 만들 수 있어요.' : '과목을 만들지 못했어요.', 'bad');
-      return;
-    }
+    if (!made) return;
     setName('');
     setMaking(false);
-    onCreated(data as SubjectRow);
+    onCreated(made);
   };
 
   return (

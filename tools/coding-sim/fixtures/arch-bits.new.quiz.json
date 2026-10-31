@@ -1,0 +1,217 @@
+{
+  "questions": [
+    {
+      "type": "mcq",
+      "prompt": "16진수 `0x1F` 를 10진수로 바꾸면 얼마인가?",
+      "choices": [
+        "15",
+        "16",
+        "31",
+        "32"
+      ],
+      "answer_index": 2,
+      "answer_bool": false,
+      "answer_text": "",
+      "accepted": [],
+      "explanation": "노트에 `0x1F` 는 $1 \\times 16 + 15 = 31$ 이라고 적혀 있다. F 는 15 이므로 앞자리 1 이 나타내는 16 과 더해 31 이 된다.",
+      "key_point_id": "k1",
+      "difficulty": "easy",
+      "pages": []
+    },
+    {
+      "type": "cloze",
+      "prompt": "16진수 한 자리는 2진수 ____ 자리와 딱 맞아떨어진다.",
+      "choices": [],
+      "answer_index": -1,
+      "answer_bool": false,
+      "answer_text": "4",
+      "accepted": [
+        "4자리",
+        "네 자리"
+      ],
+      "explanation": "노트에 16진수 한 자리는 2진수 4자리와 맞아떨어지고, `1` 은 0001 이라고 적혀 있다. 그래서 한 자리씩 4자리로 바꿔 이어 붙이면 된다.",
+      "key_point_id": "k1",
+      "difficulty": "easy",
+      "pages": []
+    },
+    {
+      "type": "ox",
+      "prompt": "16진수 `0x1F` 는 2진수로 11111 이다.",
+      "choices": [],
+      "answer_index": -1,
+      "answer_bool": true,
+      "answer_text": "",
+      "accepted": [],
+      "explanation": "노트에 `0x1F` 는 2진수로 11111 이라고 적혀 있다. 앞의 0 은 값을 바꾸지 않으므로 0001 1111 과 같은 값이다.",
+      "key_point_id": "k1",
+      "difficulty": "easy",
+      "pages": []
+    },
+    {
+      "type": "mcq",
+      "prompt": "8비트에서 `-1` 을 16진수로 나타내면 무엇인가?",
+      "choices": [
+        "`0x01`",
+        "`0x0F`",
+        "`0xFF`",
+        "`0x80`"
+      ],
+      "answer_index": 2,
+      "answer_bool": false,
+      "answer_text": "",
+      "accepted": [],
+      "explanation": "노트에 8비트로 `-1` 은 1111 1111 이고 16진수로는 `0xFF` 라고 적혀 있다. 2의 보수는 모든 비트를 뒤집고 1 을 더한 값이다.",
+      "key_point_id": "k2",
+      "difficulty": "medium",
+      "pages": []
+    },
+    {
+      "type": "ox",
+      "prompt": "8비트 2의 보수로는 128 을 양수로 쓸 수 있다.",
+      "choices": [],
+      "answer_index": -1,
+      "answer_bool": false,
+      "answer_text": "",
+      "accepted": [],
+      "explanation": "노트에 8비트의 범위는 $-2^7$ 부터 $2^7 - 1$ 까지, 즉 -128 ~ 127 이라고 적혀 있다. 128 은 $2^7$ 이므로 이 범위에 들어가지 않는다.",
+      "key_point_id": "k2",
+      "difficulty": "medium",
+      "pages": []
+    },
+    {
+      "type": "cloze",
+      "prompt": "음수를 2의 보수로 저장할 때는 모든 비트를 뒤집고 ____ 을 더한다.",
+      "choices": [],
+      "answer_index": -1,
+      "answer_bool": false,
+      "answer_text": "1",
+      "accepted": [
+        "1을",
+        "하나"
+      ],
+      "explanation": "노트에 n 비트에서 $-x$ 는 $x$ 의 모든 비트를 뒤집고 1 을 더한 값이라고 적혀 있다. 그래서 빈칸에는 1 이 들어간다.",
+      "key_point_id": "k2",
+      "difficulty": "easy",
+      "pages": []
+    },
+    {
+      "type": "mcq",
+      "prompt": "다음 함수에서 `is_pow2(12)` 를 호출하면 무엇을 돌려주는가?\n\n```c\nint is_pow2(unsigned int x) {\n    return x != 0 && (x & (x - 1)) == 0;\n}\n```",
+      "choices": [
+        "`0`",
+        "`1`",
+        "`8`",
+        "`12`"
+      ],
+      "answer_index": 0,
+      "answer_bool": false,
+      "answer_text": "",
+      "accepted": [],
+      "explanation": "노트 예시처럼 `12 & 11` 은 1000, 즉 8 이라서 `(x & (x - 1)) == 0` 이 거짓이다. 그래서 함수는 `0` 을 돌려준다.",
+      "key_point_id": "k3",
+      "difficulty": "hard",
+      "pages": []
+    },
+    {
+      "type": "short",
+      "prompt": "다음 코드의 빈칸에 들어갈 비트 연산자는 무엇인가?\n\n```c\nx = x ____ (1 << k);   /* k번째 비트만 1로 켠다 */\n```",
+      "choices": [],
+      "answer_index": -1,
+      "answer_bool": false,
+      "answer_text": "|",
+      "accepted": [
+        "`|`",
+        "OR",
+        "비트 OR"
+      ],
+      "explanation": "노트에 `x | (1 << k)` 는 나머지 비트는 그대로 두고 k 번째 비트만 1 로 켠다고 적혀 있다. 그래서 빈칸에는 OR 연산자인 `|` 가 들어간다.",
+      "key_point_id": "k3",
+      "difficulty": "medium",
+      "pages": []
+    },
+    {
+      "type": "ox",
+      "prompt": "`x | (1 << k)` 를 쓰면 k 번째 비트 말고 나머지 비트도 모두 1 로 바뀐다.",
+      "choices": [],
+      "answer_index": -1,
+      "answer_bool": false,
+      "answer_text": "",
+      "accepted": [],
+      "explanation": "노트에 나머지 비트는 그대로 두고 k 번째 비트만 켜진다고 적혀 있다. 그래서 이 연산은 특정 자리만 골라 켜는 데 쓴다.",
+      "key_point_id": "k3",
+      "difficulty": "medium",
+      "pages": []
+    },
+    {
+      "type": "mcq",
+      "prompt": "`add eax, ebx` 처럼 피연산자를 두 개만 쓰는 명령 형식은 어느 프로세서 종류인가?",
+      "choices": [
+        "ARM",
+        "x86",
+        "둘 다 두 개만 쓴다",
+        "둘 다 세 개를 쓴다"
+      ],
+      "answer_index": 1,
+      "answer_bool": false,
+      "answer_text": "",
+      "accepted": [],
+      "explanation": "노트 용어에 x86 은 `add eax, ebx` 처럼 피연산자 두 개만 쓰는 프로세서 종류라고 적혀 있다. ARM 은 `add r1, r2, r3` 처럼 세 개를 쓴다.",
+      "key_point_id": "k4",
+      "difficulty": "medium",
+      "pages": []
+    },
+    {
+      "type": "mcq",
+      "prompt": "변수가 세 개인 진리표는 몇 줄이 필요한가?",
+      "choices": [
+        "3",
+        "6",
+        "8",
+        "9"
+      ],
+      "answer_index": 2,
+      "answer_bool": false,
+      "answer_text": "",
+      "accepted": [],
+      "explanation": "노트 용어에 진리표는 변수가 $n$ 개면 $2^n$ 줄이 필요하다고 적혀 있다. 변수가 3개이면 $2^3 = 8$ 줄이다.",
+      "key_point_id": "k5",
+      "difficulty": "medium",
+      "pages": []
+    },
+    {
+      "type": "short",
+      "prompt": "1000 가지를 구분하려면 최소 몇 비트가 필요한가?",
+      "choices": [],
+      "answer_index": -1,
+      "answer_bool": false,
+      "answer_text": "10",
+      "accepted": [
+        "10비트",
+        "10 비트",
+        "열 비트"
+      ],
+      "explanation": "노트에 $\\log_2 1000 \\approx 9.97$ 이므로 1000 개를 구분하려면 최소 10 비트가 필요하다고 적혀 있다. 소수로 나온 9.97 을 그대로 답하지 않고 올림한 10 을 쓴다.",
+      "key_point_id": "k5",
+      "difficulty": "hard",
+      "pages": []
+    },
+    {
+      "type": "mcq",
+      "prompt": "클럭 속도가 2GHz 인 CPU 의 클럭 주기는 얼마인가?",
+      "choices": [
+        "0.5 ns",
+        "2 ns",
+        "0.5 초",
+        "2 GHz"
+      ],
+      "answer_index": 0,
+      "answer_bool": false,
+      "answer_text": "",
+      "accepted": [],
+      "explanation": "노트 예시에서 클럭 주기는 $\\dfrac{1}{2 \\times 10^{9}} = 0.5\\ \\text{ns}$ 로 계산한다. 클럭 주기는 클럭 속도의 역수라는 점을 기억하면 된다.",
+      "key_point_id": "k6",
+      "difficulty": "medium",
+      "pages": []
+    }
+  ]
+}

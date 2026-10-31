@@ -1,0 +1,206 @@
+{
+  "questions": [
+    {
+      "type": "ox",
+      "prompt": "스레드는 한 프로세스 안에서 전역 변수와 힙을 다른 스레드와 함께 쓴다.",
+      "choices": [],
+      "answer_index": -1,
+      "answer_bool": true,
+      "answer_text": "",
+      "accepted": [],
+      "explanation": "스레드는 한 프로세스 안의 실행 흐름으로 코드, 전역 변수, 힙을 함께 쓰고 스택만 따로 가진다. 그래서 스레드끼리 같은 전역 변수를 고치면 동기화가 필요하다.",
+      "key_point_id": "k1",
+      "difficulty": "easy",
+      "pages": []
+    },
+    {
+      "type": "mcq",
+      "prompt": "프로세스와 스레드를 비교한 설명으로 옳은 것은?",
+      "choices": [
+        "프로세스는 한 프로그램 안의 실행 흐름이고, 스레드는 독립된 주소 공간을 가진다.",
+        "스레드는 한 프로세스 안에서 코드, 전역 변수, 힙을 함께 쓰고 스택만 따로 가진다.",
+        "프로세스는 전역 변수를 공유하므로 항상 동기화가 필요하다.",
+        "스레드를 새로 만드는 비용이 프로세스를 새로 만드는 비용보다 훨씬 크다."
+      ],
+      "answer_index": 1,
+      "answer_bool": false,
+      "answer_text": "",
+      "accepted": [],
+      "explanation": "스레드는 한 프로세스 안의 실행 흐름이라 코드, 전역 변수, 힙을 함께 쓰고 스택만 따로 가진다. 프로세스는 각자 독립된 주소 공간을 가지며, 새로 만드는 비용은 프로세스가 스레드보다 크다.",
+      "key_point_id": "k1",
+      "difficulty": "medium",
+      "pages": []
+    },
+    {
+      "type": "short",
+      "prompt": "fork()를 호출했을 때 자식 프로세스가 돌려받는 반환값은?",
+      "choices": [],
+      "answer_index": -1,
+      "answer_bool": false,
+      "answer_text": "0",
+      "accepted": ["영", "zero"],
+      "explanation": "fork()는 호출한 프로세스를 그대로 복제하고, 부모에게는 자식의 PID를, 자식에게는 0을 돌려준다. 이 반환값으로 두 프로세스가 할 일을 나눈다.",
+      "key_point_id": "k2",
+      "difficulty": "easy",
+      "pages": []
+    },
+    {
+      "type": "mcq",
+      "prompt": "부모 프로세스가 fork()의 반환값으로 받는 것은?",
+      "choices": [
+        "0",
+        "자기 자신의 PPID",
+        "자식 프로세스의 PID",
+        "실행할 프로그램의 이름"
+      ],
+      "answer_index": 2,
+      "answer_bool": false,
+      "answer_text": "",
+      "accepted": [],
+      "explanation": "부모는 fork()의 반환값으로 자식의 PID를 받고, 자식은 0을 받는다. 두 값을 거꾸로 기억하면 안 된다.",
+      "key_point_id": "k2",
+      "difficulty": "medium",
+      "pages": []
+    },
+    {
+      "type": "ox",
+      "prompt": "fork()를 한 번 호출하면 부모와 자식이 같은 값을 돌려받아서 두 프로세스가 같은 일을 한다.",
+      "choices": [],
+      "answer_index": -1,
+      "answer_bool": false,
+      "answer_text": "",
+      "accepted": [],
+      "explanation": "부모는 자식의 PID를, 자식은 0을 돌려받는다. 이 차이로 반환값에 따라 두 프로세스가 할 일을 나눈다.",
+      "key_point_id": "k2",
+      "difficulty": "hard",
+      "pages": []
+    },
+    {
+      "type": "cloze",
+      "prompt": "부모는 ____(NULL)로 자식이 끝날 때까지 기다려야 좀비 프로세스가 생기지 않는다.",
+      "choices": [],
+      "answer_index": -1,
+      "answer_bool": false,
+      "answer_text": "wait",
+      "accepted": ["wait()", "wait(NULL)"],
+      "explanation": "부모는 wait(NULL)로 자식이 끝날 때까지 기다린다. 기다리지 않으면 자식이 끝난 뒤에도 좀비 프로세스로 남는다.",
+      "key_point_id": "k3",
+      "difficulty": "easy",
+      "pages": []
+    },
+    {
+      "type": "mcq",
+      "prompt": "자식은 execlp로 ls를 실행하고 부모는 wait(NULL)를 부르는 코드에서, 좀비 프로세스가 남지 않는 이유는?",
+      "choices": [
+        "자식의 PID가 0이기 때문이다",
+        "부모가 wait(NULL)로 자식이 끝날 때까지 기다리기 때문이다",
+        "execlp가 자식을 부모의 자식으로 다시 등록하기 때문이다",
+        "fork가 두 번 호출되어 자식이 둘이기 때문이다"
+      ],
+      "answer_index": 1,
+      "answer_bool": false,
+      "answer_text": "",
+      "accepted": [],
+      "explanation": "부모는 wait(NULL)로 자식이 끝날 때까지 기다려야 좀비 프로세스가 생기지 않는다. 자식이 먼저 끝났는데 부모가 wait를 하지 않으면 자식은 좀비로 남는다.",
+      "key_point_id": "k3",
+      "difficulty": "hard",
+      "pages": []
+    },
+    {
+      "type": "ox",
+      "prompt": "execlp가 성공해도 원래 코드로 돌아와 그 뒤의 코드를 이어서 실행한다.",
+      "choices": [],
+      "answer_index": -1,
+      "answer_bool": false,
+      "answer_text": "",
+      "accepted": [],
+      "explanation": "execlp가 성공하면 그 뒤 코드는 실행되지 않는다고 정리되어 있다. 원래 코드로 돌아오는 것은 exec가 실패했을 때뿐이다.",
+      "key_point_id": "k3",
+      "difficulty": "medium",
+      "pages": []
+    },
+    {
+      "type": "short",
+      "prompt": "예제의 $pthread\\_create$(&t, NULL, worker, NULL)에서 worker는 몇 번째 인자인가?",
+      "choices": [],
+      "answer_index": -1,
+      "answer_bool": false,
+      "answer_text": "3",
+      "accepted": ["세 번째", "셋째", "3번째"],
+      "explanation": "$pthread\\_create$의 인자는 차례로 스레드 핸들, 속성, 시작 함수, 함수 인자다. 그래서 worker는 세 번째 인자인 시작 함수다.",
+      "key_point_id": "k4",
+      "difficulty": "medium",
+      "pages": []
+    },
+    {
+      "type": "mcq",
+      "prompt": "두 스레드가 count++를 동시에 실행할 때 생길 수 있는 문제는?",
+      "choices": [
+        "wait를 빼먹어서 좀비 프로세스가 된다",
+        "프로세스가 끝나지 않는다",
+        "count 값이 틀릴 수 있다",
+        "fork가 실패해서 PID가 -1이 된다"
+      ],
+      "answer_index": 2,
+      "answer_bool": false,
+      "answer_text": "",
+      "accepted": [],
+      "explanation": "count++는 읽기, 더하기, 쓰기 세 단계라서 두 스레드가 동시에 하면 값이 틀릴 수 있다. 이런 상황을 경쟁 조건이라고 한다.",
+      "key_point_id": "k5",
+      "difficulty": "medium",
+      "pages": []
+    },
+    {
+      "type": "short",
+      "prompt": "초깃값이 1인 세마포어에 $sem\\_wait$를 한 번 호출하면 세마포어 값은 얼마가 되는가?",
+      "choices": [],
+      "answer_index": -1,
+      "answer_bool": false,
+      "answer_text": "0",
+      "accepted": ["영", "zero"],
+      "explanation": "$sem\\_wait$는 값이 0보다 크면 값을 1 줄이고 들어간다. 값이 1이면 1을 줄여 0이 되고, 그 스레드가 임계 구역에 들어간다.",
+      "key_point_id": "k5",
+      "difficulty": "hard",
+      "pages": []
+    },
+    {
+      "type": "short",
+      "prompt": "ps 명령의 각 줄에 나오는 부모 프로세스 번호의 약자는?",
+      "choices": [],
+      "answer_index": -1,
+      "answer_bool": false,
+      "answer_text": "PPID",
+      "accepted": ["ppid", "parent pid"],
+      "explanation": "ps 명령으로 보면 각 줄에 PID와 PPID가 나온다. PID는 프로세스 번호이고, PPID는 부모 프로세스 번호다.",
+      "key_point_id": "k6",
+      "difficulty": "easy",
+      "pages": []
+    },
+    {
+      "type": "ox",
+      "prompt": "종료 상태가 0이면 그 명령이 정상적으로 끝났다는 뜻이다.",
+      "choices": [],
+      "answer_index": -1,
+      "answer_bool": true,
+      "answer_text": "",
+      "accepted": [],
+      "explanation": "직전 명령의 종료 상태는 셸에서 확인한다. 0이면 정상 종료라는 것이 이 값의 기본 뜻이다.",
+      "key_point_id": "k6",
+      "difficulty": "medium",
+      "pages": []
+    },
+    {
+      "type": "ox",
+      "prompt": "세마포어로 임계 구역을 감싸면 모든 스레드가 동시에 그 구역에 들어갈 수 있다.",
+      "choices": [],
+      "answer_index": -1,
+      "answer_bool": false,
+      "answer_text": "",
+      "accepted": [],
+      "explanation": "$sem\\_wait$와 $sem\\_post$로 임계 구역을 감싸면 한 번에 한 스레드만 들어간다. 그래서 여러 스레드가 동시에 들어가는 것을 막는 것이 세마포어의 역할이다.",
+      "key_point_id": "k5",
+      "difficulty": "medium",
+      "pages": []
+    }
+  ]
+}

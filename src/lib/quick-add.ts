@@ -1,4 +1,5 @@
 // 빠른 추가: 끌어 놓거나 고른 파일, 입력한 글을 "자료" 단위로 나누는 규칙 (화면 없이 계산만)
+import { OFFICE_READABLE, officeNameProblem } from './office/names';
 import type { MeResponse } from './types';
 
 export type PlanLimits = MeResponse['plan'];
@@ -44,18 +45,23 @@ export type FileGroups<F extends FileLike = FileLike> = {
   pdfs: F[];
   imageGroups: F[][];
   textFiles: F[];
+  /** 한글·워드·PPT: 브라우저에서 글을 꺼내 글 자료로 */
+  officeFiles: F[];
   rejected: Rejected[];
 };
+
+/** 한글·워드·PPT 파일의 가장 큰 크기 (브라우저에서 읽고 글만 보낸다) */
+export const OFFICE_MAX_MB = 80;
 
 /**
  * 파일을 자료 단위로 나눈다.
  * - PDF 는 하나씩 자료가 된다
  * - 사진은 한 번에 넣은 것끼리 한 자료(학습지 여러 장)로 묶는다. 요금제 한도를 넘으면 나눠 묶는다
  * - 글 파일(.txt, .md)은 글 자료가 된다
- * - 한글·워드·PPT 는 아직 못 읽는다 (PDF로 저장해 넣도록 안내)
+ * - 한글(.hwp·.hwpx)·워드(.docx)·PPT(.pptx)는 글을 꺼내 글 자료가 된다. 예전 형식(.doc·.ppt)·엑셀·애플 문서는 PDF로 저장해 넣도록 안내
  */
 export function groupFiles<F extends FileLike>(files: F[], plan: PlanLimits): FileGroups<F> {
-  const out: FileGroups<F> = { pdfs: [], imageGroups: [], textFiles: [], rejected: [] };
+  const out: FileGroups<F> = { pdfs: [], imageGroups: [], textFiles: [], officeFiles: [], rejected: [] };
   const maxBytes = plan.fileMb * 1024 * 1024;
   const images: F[] = [];
   for (const f of files) {
@@ -72,9 +78,13 @@ export function groupFiles<F extends FileLike>(files: F[], plan: PlanLimits): Fi
       if (f.size > 2 * 1024 * 1024) out.rejected.push({ name: f.name, reason: '글 파일이 너무 커요' });
       else out.textFiles.push(f);
     } else if (kind === 'office') {
-      out.rejected.push({ name: f.name, reason: '한글·워드·PPT는 아직 못 읽어요. PDF로 저장해서 넣어 주세요' });
+      const problem = officeNameProblem(f.name);
+      if (problem || !OFFICE_READABLE.test(f.name)) out.rejected.push({ name: f.name, reason: problem ?? 'PDF로 저장해서 넣어 주세요' });
+      else if (f.size > OFFICE_MAX_MB * 1024 * 1024) out.rejected.push({ name: f.name, reason: '파일이 너무 커요. PDF로 저장해서 넣어 주세요' });
+      else if (f.size === 0) out.rejected.push({ name: f.name, reason: '빈 파일이에요' });
+      else out.officeFiles.push(f);
     } else {
-      out.rejected.push({ name: f.name, reason: 'PDF, 사진, 글 파일만 넣을 수 있어요' });
+      out.rejected.push({ name: f.name, reason: 'PDF, 사진, 글, 한글·워드·PPT 파일만 넣을 수 있어요' });
     }
   }
   const per = Math.max(1, plan.images);
@@ -83,6 +93,37 @@ export function groupFiles<F extends FileLike>(files: F[], plan: PlanLimits): Fi
 }
 
 export type TextCheck = { ok: true; text: string } | { ok: false; reason: string };
+
+/** 문서에서 꺼낸 글이 한 자료의 한도보다 길 때 나누는 가장 많은 조각 수 */
+export const MAX_TEXT_PARTS = 5;
+
+/**
+ * 긴 글을 한도(limit 자) 안의 조각으로 나눈다: 슬라이드·제목(## ) → 빈 줄 → 줄 끝에서 끊는다.
+ * 코드 블록 가운데서 나뉘면 앞 조각에서 블록을 닫고 뒤 조각에서 다시 연다
+ */
+export function splitForLimit(text: string, limit: number): string[] {
+  if (text.length <= limit) return [text];
+  const budget = Math.max(MIN_TEXT_CHARS * 10, limit - 40);
+  const parts: string[] = [];
+  let rest = text;
+  while (rest.length > budget) {
+    let cut = rest.lastIndexOf('\n## ', budget);
+    if (cut < budget * 0.5) cut = rest.lastIndexOf('\n\n', budget);
+    if (cut < budget * 0.5) cut = rest.lastIndexOf('\n', budget);
+    if (cut < budget * 0.5) cut = budget;
+    parts.push(rest.slice(0, cut).trim());
+    rest = rest.slice(cut).trim();
+  }
+  if (rest) parts.push(rest);
+  for (let i = 0; i < parts.length - 1; i++) {
+    const fences = parts[i].match(/^[ \t]*`{3,}.*$/gm) ?? [];
+    if (fences.length % 2 === 0) continue;
+    const open = fences[fences.length - 1].trim();
+    parts[i] += `\n${/`{3,}/.exec(open)![0]}`;
+    parts[i + 1] = `${open}\n${parts[i + 1]}`;
+  }
+  return parts;
+}
 
 /** 입력한 글을 자료로 넣을 수 있는지 */
 export function checkText(raw: string, plan: PlanLimits): TextCheck {

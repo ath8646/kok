@@ -1,0 +1,196 @@
+{
+  "title": "정렬 알고리즘과 시간 복잡도",
+  "unit": "5주차: 정렬과 시간 복잡도",
+  "summary": "정렬의 뜻과 시간 복잡도, 삽입·병합·퀵 정렬의 동작과 시간을 비교해 정리한 내용이다.",
+  "key_points": [
+    {
+      "id": "k1",
+      "title": "정렬과 시간 복잡도",
+      "explanation": "정렬은 자료를 작은 값부터 큰 값 순서로 늘어놓는 일이다. 시간 복잡도는 입력 크기 $n$ 이 커질 때 실행 시간이 얼마나 늘어나는지를 나타내며, $O(1)$, $O(n)$, $O(n \\log n)$, $O(n^2)$ 등으로 쓴다.",
+      "why": "알고리즘을 비교하는 기준이 시간 복잡도라서 표기를 읽을 수 있어야 한다.",
+      "importance": "medium",
+      "pages": []
+    },
+    {
+      "id": "k2",
+      "title": "삽입 정렬",
+      "explanation": "앞부분은 이미 정렬되어 있다고 보고, 두 번째 원소(인덱스 1)부터 새 원소를 알맞은 자리에 끼워 넣는다. 입력이 이미 정렬되어 있으면 $O(n)$, 거꾸로 정렬되어 있으면 $O(n^2)$ 이다.",
+      "why": "삽입 정렬은 시작 위치와 입력 상태별 시간을 함께 알아야 한다.",
+      "importance": "medium",
+      "pages": []
+    },
+    {
+      "id": "k3",
+      "title": "병합 정렬",
+      "explanation": "구간을 가운데에서 둘로 나눠 각각 정렬한 뒤 합치는 분할 정복 방식이다. 한 단계마다 합치는 데 $n$ 개를 보므로 점화식은 $T(n) = 2T(n/2) + n$ 이고, 이를 풀면 $O(n \\log n)$ 이다.",
+      "why": "점화식을 직접 풀어 $O(n \\log n)$ 을 끌어내는 능력이 시험 포인트다.",
+      "importance": "high",
+      "pages": []
+    },
+    {
+      "id": "k4",
+      "title": "퀵 정렬",
+      "explanation": "기준값(pivot)보다 작은 것은 왼쪽, 큰 것은 오른쪽으로 옮기는 파티션을 하고, 나뉜 두 쪽을 다시 정렬한다. 평균 시간은 $O(n \\log n)$, 최악은 $O(n^2)$ 이다.",
+      "why": "파티션과 재귀 구조를 알아야 평균과 최악의 차이를 설명할 수 있다.",
+      "importance": "high",
+      "pages": []
+    },
+    {
+      "id": "k5",
+      "title": "퀵 정렬의 최악",
+      "explanation": "퀵 정렬의 최악은 pivot 이 계속 한쪽 끝에 몰릴 때다. 정렬된 배열에 맨 끝 원소를 pivot 으로 쓰면 이런 경우가 된다.",
+      "why": "평균과 최악을 구분하려면 최악이 언제 생기는지 알아야 한다.",
+      "importance": "medium",
+      "pages": []
+    },
+    {
+      "id": "k6",
+      "title": "세 정렬 한눈에 비교",
+      "explanation": "삽입 정렬은 평균 $O(n^2)$ 이고 정렬된 입력이면 $O(n)$ 이다. 병합 정렬은 항상 $O(n \\log n)$ 이지만 합칠 때 추가 공간이 필요하고, 퀵 정렬은 평균 $O(n \\log n)$ 에 최악 $O(n^2)$ 이다.",
+      "why": "세 정렬을 시간과 공간 기준으로 나란히 비교할 수 있어야 한다.",
+      "importance": "high",
+      "pages": []
+    }
+  ],
+  "terms": [
+    {
+      "term": "정렬 (sorting)",
+      "meaning": "자료를 작은 값부터 큰 값 순서로 늘어놓는 일이다."
+    },
+    {
+      "term": "시간 복잡도",
+      "meaning": "입력 크기 $n$ 이 커질 때 실행 시간이 얼마나 늘어나는지를 나타내는 기준이다."
+    },
+    {
+      "term": "인덱스 (index)",
+      "meaning": "배열에서 원소의 위치 번호다. 두 번째 원소는 인덱스 1 이다."
+    },
+    {
+      "term": "삽입 정렬 (Insertion Sort)",
+      "meaning": "정렬된 앞부분에 새 원소를 알맞은 자리에 끼워 넣는 정렬이다."
+    },
+    {
+      "term": "병합 정렬 (Merge Sort)",
+      "meaning": "구간을 둘로 나눠 각각 정렬한 뒤 합치는 정렬이다."
+    },
+    {
+      "term": "퀵 정렬 (Quick Sort)",
+      "meaning": "pivot 을 기준으로 나눈 뒤 나뉜 두 쪽을 다시 정렬하는 정렬이다."
+    },
+    {
+      "term": "분할 정복 (divide and conquer)",
+      "meaning": "문제를 절반으로 나눠 각각 해결한 뒤 합치는 방식이다."
+    },
+    {
+      "term": "피벗 (pivot)",
+      "meaning": "기준값이다. 이보다 작은 것은 왼쪽, 큰 것은 오른쪽으로 옮긴다."
+    },
+    {
+      "term": "파티션 (partition)",
+      "meaning": "pivot 을 기준으로 값들을 왼쪽과 오른쪽으로 나누는 과정이다."
+    },
+    {
+      "term": "구간 (`[lo, hi)`)",
+      "meaning": "`lo` 부터 `hi` 바로 앞까지의 칸 범위다."
+    },
+    {
+      "term": "점화식 (recurrence)",
+      "meaning": "재귀 알고리즘의 시간을 더 작은 입력의 시간으로 나타낸 식이다. 예: $T(n) = 2T(n/2) + n$"
+    },
+    {
+      "term": "의사코드 (pseudocode)",
+      "meaning": "실제 언어 문법 없이 알고리즘의 흐름만 적은 코드다."
+    }
+  ],
+  "formulas": [
+    {
+      "latex": "T(n) = 2T(n/2) + n",
+      "label": "병합 정렬의 점화식"
+    },
+    {
+      "latex": "O(n \\log n)",
+      "label": "병합 정렬은 항상, 퀵 정렬은 평균의 시간"
+    },
+    {
+      "latex": "O(n^2)",
+      "label": "삽입 정렬은 평균, 퀵 정렬은 최악의 시간"
+    },
+    {
+      "latex": "O(n)",
+      "label": "정렬된 입력에서 삽입 정렬의 시간"
+    }
+  ],
+  "pitfalls": [
+    {
+      "text": "퀵 정렬은 평균 $O(n \\log n)$ 이지만 최악은 $O(n^2)$ 이다. 평균만 외우고 최악을 빼먹으면 틀린다.",
+      "key_point_id": "k4"
+    },
+    {
+      "text": "정렬된 입력에서 삽입 정렬이 $O(n)$ 인 것은 이미 정렬된 경우의 시간이다. 이것을 모든 입력의 시간으로 착각하면 안 된다.",
+      "key_point_id": "k2"
+    },
+    {
+      "text": "병합 정렬은 항상 $O(n \\log n)$ 이지만, 합칠 때 추가 공간이 필요하다는 점을 빼먹으면 안 된다.",
+      "key_point_id": "k6"
+    },
+    {
+      "text": "병합 정렬 점화식 $T(n) = 2T(n/2) + n$ 은 결과만 외우지 말고 직접 풀 수 있어야 한다.",
+      "key_point_id": "k3"
+    },
+    {
+      "text": "퀵 정렬의 최악은 pivot 이 계속 한쪽 끝에 몰릴 때다.",
+      "key_point_id": "k5"
+    }
+  ],
+  "examples": [
+    {
+      "text": "삽입 정렬 코드\n```python\ndef insertion_sort(a):\n    for i in range(1, len(a)):\n        key = a[i]\n        j = i - 1\n        while j >= 0 and a[j] > key:\n            a[j + 1] = a[j]\n            j -= 1\n        a[j + 1] = key\n    return a\n```",
+      "key_point_id": "k2"
+    },
+    {
+      "text": "병합 정렬의 구간 나누기 (재귀 부분)\n```python\n    def sort(lo, hi):\n        if hi - lo <= 1:\n            return\n        mid = (lo + hi) // 2\n        sort(lo, mid)\n        sort(mid, hi)\n```",
+      "key_point_id": "k3"
+    },
+    {
+      "text": "병합 정렬의 합치기 부분\n```python\n        merged = []\n        i, j = lo, mid\n        while i < mid and j < hi:\n            if a[i] <= a[j]:\n                merged.append(a[i])\n                i += 1\n            else:\n                merged.append(a[j])\n                j += 1\n        merged += a[i:mid] + a[j:hi]\n        a[lo:hi] = merged\n```",
+      "key_point_id": "k3"
+    },
+    {
+      "text": "퀵 정렬 의사코드\n```\nQUICKSORT(A, p, r)\n    if p < r then\n        q = PARTITION(A, p, r)\n        QUICKSORT(A, p, q - 1)\n        QUICKSORT(A, q + 1, r)\n```",
+      "key_point_id": "k4"
+    },
+    {
+      "text": "파티션 코드\n```python\ndef partition(a, lo, hi):\n    pivot = a[hi]\n    i = lo - 1\n    for j in range(lo, hi):\n        if a[j] <= pivot:\n            i += 1\n            a[i], a[j] = a[j], a[i]\n    a[i + 1], a[hi] = a[hi], a[i + 1]\n    return i + 1\n```",
+      "key_point_id": "k4"
+    },
+    {
+      "text": "정렬된 배열에 맨 끝 원소를 pivot 으로 쓰면 최악의 경우가 된다.",
+      "key_point_id": "k5"
+    },
+    {
+      "text": "삽입 정렬은 평균 $O(n^2)$, 병합 정렬은 항상 $O(n \\log n)$, 퀵 정렬은 평균 $O(n \\log n)$ 이고 최악 $O(n^2)$ 이다.",
+      "key_point_id": "k6"
+    }
+  ],
+  "checks": [],
+  "changes": [
+    {
+      "text": "제목 머리말 '5주차 정리:' 을 떼고 짧은 제목으로 줄였다."
+    },
+    {
+      "text": "■ 번호와 '- ' 목록을 떼고 절마다 핵심을 `key_points` 로 나눴다. 퀵 정렬의 최악 조건과 세 정렬 비교를 따로 떼었다."
+    },
+    {
+      "text": "들여쓴 Python 코드, 파티션 코드와 의사코드를 코드 블록으로 옮기고 코드 안의 들여쓰기는 그대로 두었다."
+    },
+    {
+      "text": "문장 속 코드(`a[i], a[j] = a[j], a[i]`, `[lo, hi)` 등)는 백틱으로 감쌌고, 표기와 점화식은 $...$ 수식으로 바꿨다."
+    },
+    {
+      "text": "'※ 시험 포인트' 두 줄은 pitfalls 와 `key_points` 설명에 나눠 옮겼다."
+    },
+    {
+      "text": "요약 문장은 새로 썼다. 본문 문장은 최대한 그대로 두었다."
+    }
+  ]
+}

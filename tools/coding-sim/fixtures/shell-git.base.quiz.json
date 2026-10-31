@@ -1,0 +1,216 @@
+{
+  "questions": [
+    {
+      "type": "mcq",
+      "prompt": "export 로 PATH 에 폴더를 더한 뒤 터미널을 새로 열면 그 변경은 어떻게 되나요?",
+      "choices": [
+        "새 터미널에서도 그대로 유지된다",
+        "지금 열려 있는 셸에서만 적용되고 새 터미널에서는 사라진다",
+        "PATH 가 더한 폴더 하나로 덮어써진다",
+        "자동으로 ~/.bashrc 파일에 저장된다"
+      ],
+      "answer_index": 1,
+      "answer_bool": false,
+      "answer_text": "",
+      "accepted": [],
+      "explanation": "export 로 바꾼 값은 지금 열려 있는 셸에서만 유지된다. 터미널을 새로 열면 사라지므로 계속 쓰려면 ~/.bashrc 파일에 적어야 한다.",
+      "key_point_id": "k1",
+      "difficulty": "easy",
+      "pages": []
+    },
+    {
+      "type": "short",
+      "prompt": "export 로 바꾼 값을 터미널을 새로 열어도 계속 쓰려면 어느 파일에 적어야 하나요?",
+      "choices": [],
+      "answer_index": -1,
+      "answer_bool": false,
+      "answer_text": "~/.bashrc",
+      "accepted": [".bashrc", "bashrc"],
+      "explanation": "export 로 바꾼 값은 터미널을 새로 열면 사라진다. 그래서 계속 쓰려면 ~/.bashrc 파일에 따로 적어야 한다.",
+      "key_point_id": "k1",
+      "difficulty": "medium",
+      "pages": []
+    },
+    {
+      "type": "cloze",
+      "prompt": "PATH 는 명령어를 찾아갈 ____ 들의 목록이다.",
+      "choices": [],
+      "answer_index": -1,
+      "answer_bool": false,
+      "answer_text": "폴더",
+      "accepted": ["디렉터리", "디렉토리", "directory"],
+      "explanation": "PATH 는 명령어를 찾아갈 폴더들의 목록이다. 폴더 경로는 콜론(:)으로 이어 적는다.",
+      "key_point_id": "k1",
+      "difficulty": "medium",
+      "pages": []
+    },
+    {
+      "type": "mcq",
+      "prompt": "ls -al | grep \"*.py\" 에서 따옴표 안의 * 는 어떻게 받아들여지나요?",
+      "choices": [
+        "따옴표를 빼도 같은 결과가 나온다",
+        "파이프 기호와 같은 뜻으로 쓰인다",
+        "grep 이 찾을 글자 그대로 받아들여진다",
+        "셸이 파일 이름 패턴으로 바꿔서 grep 이 .py 파일을 찾는다"
+      ],
+      "answer_index": 2,
+      "answer_bool": false,
+      "answer_text": "",
+      "accepted": [],
+      "explanation": "따옴표 안의 * 는 셸이 파일 이름 패턴으로 바꾸지 않고, grep 이 찾을 글자로 받아들인다. 파일 이름으로 거르려면 따옴표 없이 ls *.py 라고 쓴다.",
+      "key_point_id": "k2",
+      "difficulty": "hard",
+      "pages": []
+    },
+    {
+      "type": "short",
+      "prompt": "앞 명령의 출력 가운데 원하는 글자가 든 줄만 골라 주는 명령은 무엇인가요?",
+      "choices": [],
+      "answer_index": -1,
+      "answer_bool": false,
+      "answer_text": "grep",
+      "accepted": ["Grep", "그렙"],
+      "explanation": "grep 은 입력받은 줄 가운데 원하는 글자가 들어 있는 줄만 골라 준다. 파이프 | 는 왼쪽 명령의 출력을 오른쪽 명령의 입력으로 넘긴다.",
+      "key_point_id": "k2",
+      "difficulty": "easy",
+      "pages": []
+    },
+    {
+      "type": "ox",
+      "prompt": "chmod 755 로 바꾼 파일은 소유자만 쓰기 권한을 가진다.",
+      "choices": [],
+      "answer_index": -1,
+      "answer_bool": true,
+      "answer_text": "",
+      "accepted": [],
+      "explanation": "첫 자리 7 은 $7 = 4+2+1$ 이라서 소유자에게 rwx 가 있다. 나머지 두 자리 5 는 $5 = 4+1$ 이라서 쓰기(w)가 빠져 있다.",
+      "key_point_id": "k3",
+      "difficulty": "medium",
+      "pages": []
+    },
+    {
+      "type": "cloze",
+      "prompt": "권한 숫자 5 는 읽기(4)와 ____(1)의 합으로 만들어진다.",
+      "choices": [],
+      "answer_index": -1,
+      "answer_bool": false,
+      "answer_text": "실행",
+      "accepted": ["실행 권한", "x", "execute"],
+      "explanation": "권한 숫자 5 는 $5 = 4+1$ 이라서 읽기(4)와 실행(1)을 더한 값이다. 실행 x 는 1 이므로 쓰기 2 가 빠진 r-x 권한이다.",
+      "key_point_id": "k3",
+      "difficulty": "medium",
+      "pages": []
+    },
+    {
+      "type": "mcq",
+      "prompt": "run.sh 가 현재 폴더에 있고 PATH 에는 없을 때, 실행하려면 어떻게 입력해야 하나요?",
+      "choices": [
+        "run.sh 라고만 입력한다",
+        "chmod 755 run.sh 만 입력하면 바로 실행된다",
+        "export PATH=run.sh 로 먼저 등록한다",
+        "./run.sh 처럼 ./ 를 앞에 붙여 입력한다"
+      ],
+      "answer_index": 3,
+      "answer_bool": false,
+      "answer_text": "",
+      "accepted": [],
+      "explanation": "현재 폴더의 실행 파일은 PATH 에 없으므로 ./ 를 앞에 붙여야 한다. ./ 를 빼고 run.sh 만 치면 실행되지 않는다.",
+      "key_point_id": "k3",
+      "difficulty": "hard",
+      "pages": []
+    },
+    {
+      "type": "mcq",
+      "prompt": "./run.sh 2>&1 | tee log.txt 를 실행하면 어떻게 되나요?",
+      "choices": [
+        "표준 에러를 표준 출력이 가는 곳으로 보내고, 화면에 보이면서 같은 내용을 log.txt 에도 남긴다",
+        "오류 메시지는 화면에만 나오고 log.txt 에는 남지 않는다",
+        "표준 출력을 표준 에러로 보내고 log.txt 에만 저장한다",
+        "log.txt 의 내용을 run.sh 의 입력으로 넘긴다"
+      ],
+      "answer_index": 0,
+      "answer_bool": false,
+      "answer_text": "",
+      "accepted": [],
+      "explanation": "2>&1 은 표준 에러(2)를 표준 출력(1)이 가는 곳으로 보낸다. tee 는 받은 내용을 화면에 보여 주면서 같은 내용을 파일에도 써서 log.txt 에 남긴다.",
+      "key_point_id": "k4",
+      "difficulty": "medium",
+      "pages": []
+    },
+    {
+      "type": "ox",
+      "prompt": "cd ~/project && make 에서 cd 가 실패하면 make 는 실행되지 않는다.",
+      "choices": [],
+      "answer_index": -1,
+      "answer_bool": true,
+      "answer_text": "",
+      "accepted": [],
+      "explanation": "&& 는 앞 명령이 성공해야 뒤 명령을 실행한다. 그래서 cd 가 실패하면 make 는 실행되지 않는다.",
+      "key_point_id": "k5",
+      "difficulty": "easy",
+      "pages": []
+    },
+    {
+      "type": "mcq",
+      "prompt": "git checkout -b feature/login 을 실행한 결과로 맞는 것은?",
+      "choices": [
+        "main 브랜치의 이름이 feature/login 으로 바뀐다",
+        "feature/login 브랜치가 목록에만 생기고 옮겨 가지는 않는다",
+        "feature/login 브랜치를 원격 저장소에 올린다",
+        "feature/login 브랜치를 만들고 바로 그 브랜치로 옮겨 간다"
+      ],
+      "answer_index": 3,
+      "answer_bool": false,
+      "answer_text": "",
+      "accepted": [],
+      "explanation": "git checkout -b 는 새 브랜치를 만들고 바로 그 브랜치로 옮겨 간다. 브랜치 목록만 보려면 git branch 를 쓰고, 원격 저장소에 올리는 것은 git push 이다.",
+      "key_point_id": "k5",
+      "difficulty": "medium",
+      "pages": []
+    },
+    {
+      "type": "mcq",
+      "prompt": "git log --oneline 의 역할로 맞는 것은?",
+      "choices": [
+        "바뀐 파일을 저장소에 기록한다",
+        "새 브랜치를 만들고 그 브랜치로 옮긴다",
+        "커밋 기록을 한 줄씩 보여 준다",
+        "커밋한 내용을 원격 저장소에 올린다"
+      ],
+      "answer_index": 2,
+      "answer_bool": false,
+      "answer_text": "",
+      "accepted": [],
+      "explanation": "git log --oneline 은 커밋 기록을 한 줄씩 보여 준다. 기록을 남기는 것은 git commit 이다.",
+      "key_point_id": "k6",
+      "difficulty": "easy",
+      "pages": []
+    },
+    {
+      "type": "cloze",
+      "prompt": "git commit -m 뒤의 따옴표 안에 적는 글은 ____ 이다.",
+      "choices": [],
+      "answer_index": -1,
+      "answer_bool": false,
+      "answer_text": "커밋 메시지",
+      "accepted": ["커밋메시지", "메시지", "commit message"],
+      "explanation": "git commit -m 뒤의 따옴표 안이 커밋 메시지이다. 메시지 앞의 fix: 는 버그를 고쳤다는 뜻의 관례이다.",
+      "key_point_id": "k6",
+      "difficulty": "medium",
+      "pages": []
+    },
+    {
+      "type": "ox",
+      "prompt": "커밋하기 전에는 git log 로 바뀐 파일을 먼저 확인하라고 강조하셨다.",
+      "choices": [],
+      "answer_index": -1,
+      "answer_bool": false,
+      "answer_text": "",
+      "accepted": [],
+      "explanation": "커밋하기 전에 바뀐 파일을 확인하는 명령은 git status 이다. git log 는 이미 쌓인 커밋 기록을 한 줄씩 보여 준다.",
+      "key_point_id": "k6",
+      "difficulty": "hard",
+      "pages": []
+    }
+  ]
+}

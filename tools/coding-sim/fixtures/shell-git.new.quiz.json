@@ -1,0 +1,206 @@
+{
+  "questions": [
+    {
+      "type": "mcq",
+      "prompt": "셸 변수의 값을 읽을 때 이름 앞에 붙이는 기호는 무엇인가?",
+      "choices": [
+        "`#`",
+        "`$`",
+        "`&`",
+        "`%`"
+      ],
+      "answer_index": 1,
+      "answer_bool": false,
+      "answer_text": "",
+      "accepted": [],
+      "explanation": "노트에 셸 변수의 값은 이름 앞에 `$` 를 붙여 읽는다고 적혀 있다. 예시 `echo $HOME` 에서도 HOME 앞에 이 기호가 붙어 있다.",
+      "key_point_id": "k1",
+      "difficulty": "easy",
+      "pages": []
+    },
+    {
+      "type": "mcq",
+      "prompt": "`export` 로 `PATH` 에 새 폴더를 추가한 뒤 터미널을 새로 열었다. 이때 어떻게 되는가?",
+      "choices": [
+        "추가한 폴더가 그대로 남아 있다.",
+        "추가한 값은 사라지므로 `~/.bashrc` 에 적어야 계속 쓸 수 있다.",
+        "`export` 는 파일 권한을 바꾸므로 폴더가 사라진다.",
+        "추가한 값이 모든 사용자에게 바로 적용된다."
+      ],
+      "answer_index": 1,
+      "answer_bool": false,
+      "answer_text": "",
+      "accepted": [],
+      "explanation": "`export` 로 바꾼 값은 지금 열려 있는 셸에서만 유지된다. 계속 쓰려면 `~/.bashrc` 파일에 적어야 한다고 노트에 적혀 있다.",
+      "key_point_id": "k1",
+      "difficulty": "medium",
+      "pages": []
+    },
+    {
+      "type": "short",
+      "prompt": "같은 이름의 프로그램이 여러 폴더에 있을 때, `PATH` 에서 어느 쪽 폴더의 프로그램이 먼저 실행되는가?",
+      "choices": [],
+      "answer_index": -1,
+      "answer_bool": false,
+      "answer_text": "앞쪽 폴더",
+      "accepted": [
+        "앞에 있는 폴더",
+        "앞쪽"
+      ],
+      "explanation": "노트에 같은 이름의 프로그램이 여러 폴더에 있으면 `PATH` 에서 앞에 있는 폴더의 것이 먼저 실행된다고 강조되어 있다. `PATH` 의 순서가 어떤 프로그램을 실행할지 정하므로 시험에서도 순서를 기억해야 한다.",
+      "key_point_id": "k1",
+      "difficulty": "hard",
+      "pages": []
+    },
+    {
+      "type": "mcq",
+      "prompt": "실습에서 다음 명령을 쳤더니 아무것도 나오지 않았다.\n\n```bash\nls -al | grep \"*.py\"\n```\n\n이유로 옳은 것은?",
+      "choices": [
+        "`grep` 이 `*` 를 파일 이름 패턴으로 바꿔 버리기 때문이다.",
+        "따옴표 안의 `*` 는 파일 이름 패턴이 되지 않고 글자 `*` 자체를 찾기 때문이다.",
+        "`ls -al` 은 숨김 파일을 보여 주지 않기 때문이다.",
+        "파이프는 두 명령을 순서대로만 돌리기 때문이다."
+      ],
+      "answer_index": 1,
+      "answer_bool": false,
+      "answer_text": "",
+      "accepted": [],
+      "explanation": "따옴표 안의 `*` 는 셸이 파일 이름 패턴으로 바꾸지 않아서 `grep` 은 `*` 라는 글자를 찾는다. 파일 이름으로 거르려면 `ls *.py` 처럼 따옴표 없이 쓰라고 노트에 적혀 있다.",
+      "key_point_id": "k2",
+      "difficulty": "medium",
+      "pages": []
+    },
+    {
+      "type": "cloze",
+      "prompt": "`chmod 755 run.sh` 에서 소유자의 `7` 은 읽기 4, 쓰기 2, 실행 1 을 더한 값이라서 소유자는 ____ 권한을 가진다.",
+      "choices": [],
+      "answer_index": -1,
+      "answer_bool": false,
+      "answer_text": "rwx",
+      "accepted": [
+        "r w x",
+        "읽기 쓰기 실행",
+        "읽고 쓰고 실행"
+      ],
+      "explanation": "노트에 읽기는 4, 쓰기는 2, 실행은 1 로 셈한다고 적혀 있으므로 7 은 셋을 모두 더한 값이다. 그래서 소유자는 `rwx`, 즉 읽기와 쓰기와 실행을 모두 가진다.",
+      "key_point_id": "k3",
+      "difficulty": "easy",
+      "pages": []
+    },
+    {
+      "type": "ox",
+      "prompt": "`755` 는 소유자 말고 다른 사용자에게도 쓰기 권한을 준다.",
+      "choices": [],
+      "answer_index": -1,
+      "answer_bool": false,
+      "answer_text": "",
+      "accepted": [],
+      "explanation": "노트에 `755` 는 소유자가 `rwx`, 나머지는 `r-x` 라는 뜻이라고 적혀 있다. 나머지 사용자에게는 읽기와 실행만 있고 쓰기는 없다.",
+      "key_point_id": "k3",
+      "difficulty": "hard",
+      "pages": []
+    },
+    {
+      "type": "short",
+      "prompt": "현재 폴더에 있는 `run.sh` 를 실행할 때 파일 이름 앞에 `./` 를 붙여야 하는 이유는, 그 파일이 무엇에 없기 때문인가?",
+      "choices": [],
+      "answer_index": -1,
+      "answer_bool": false,
+      "answer_text": "PATH",
+      "accepted": [
+        "`PATH`",
+        "PATH 환경 변수"
+      ],
+      "explanation": "노트에 현재 폴더의 파일은 `PATH` 에 없으므로 `./` 를 앞에 붙여야 실행된다고 적혀 있다. `PATH` 는 명령어를 찾아갈 폴더 목록이다.",
+      "key_point_id": "k3",
+      "difficulty": "medium",
+      "pages": []
+    },
+    {
+      "type": "mcq",
+      "prompt": "다음 명령에 대한 설명으로 옳은 것은?\n\n```bash\n./run.sh 2>&1 | tee log.txt\n```",
+      "choices": [
+        "실행 결과는 화면에만 나오고 파일에는 남지 않는다.",
+        "표준 에러를 표준 출력이 가는 곳으로 보내고, `tee` 가 화면과 `log.txt` 에 함께 쓴다.",
+        "표준 출력을 표준 에러 자리로 보내고 파일에는 쓰지 않는다.",
+        "`log.txt` 를 실행 파일로 바꾼다."
+      ],
+      "answer_index": 1,
+      "answer_bool": false,
+      "answer_text": "",
+      "accepted": [],
+      "explanation": "`2>&1` 은 표준 에러(2)를 표준 출력(1)이 가는 곳으로 보낸다. `tee` 는 받은 내용을 화면에 보여 주면서 파일에도 쓰므로 실행 로그가 `log.txt` 에 남는다.",
+      "key_point_id": "k4",
+      "difficulty": "medium",
+      "pages": []
+    },
+    {
+      "type": "mcq",
+      "prompt": "`git checkout -b feature/login` 을 실행한 결과로 옳은 것은?",
+      "choices": [
+        "`feature/login` 브랜치만 만들고 지금 브랜치는 그대로 둔다.",
+        "`feature/login` 브랜치를 만들고 바로 그 브랜치로 옮겨 간다.",
+        "`main` 브랜치를 지우고 새로 만든다.",
+        "커밋 기록을 한 줄씩 보여 준다."
+      ],
+      "answer_index": 1,
+      "answer_bool": false,
+      "answer_text": "",
+      "accepted": [],
+      "explanation": "노트에 `git checkout -b` 는 새 브랜치를 만들고 바로 그 브랜치로 옮겨 간다고 적혀 있다. 최신 Git 에서는 `git switch -c` 가 같은 일을 한다.",
+      "key_point_id": "k5",
+      "difficulty": "easy",
+      "pages": []
+    },
+    {
+      "type": "short",
+      "prompt": "지금 있는 브랜치 앞에 `*` 가 붙은 채로 브랜치 목록을 보여 주는 명령은 무엇인가?",
+      "choices": [],
+      "answer_index": -1,
+      "answer_bool": false,
+      "answer_text": "git branch",
+      "accepted": [
+        "`git branch`",
+        "git branch 명령"
+      ],
+      "explanation": "노트에 `git branch` 를 치면 브랜치 목록이 나오고, 지금 있는 브랜치 앞에 `*` 가 붙는다고 적혀 있다. 이 목록으로 지금 어느 브랜치에 있는지 확인할 수 있다.",
+      "key_point_id": "k5",
+      "difficulty": "medium",
+      "pages": []
+    },
+    {
+      "type": "mcq",
+      "prompt": "커밋하기 전에 어떤 파일이 바뀌었는지 확인하려면 무엇을 쓰는가?",
+      "choices": [
+        "`git log --oneline`",
+        "`git status`",
+        "`git push -u origin feature/login`",
+        "`git checkout -b`"
+      ],
+      "answer_index": 1,
+      "answer_bool": false,
+      "answer_text": "",
+      "accepted": [],
+      "explanation": "노트에 커밋하기 전에는 `git status` 로 바뀐 파일을 확인한다고 적혀 있다. `git log --oneline` 은 커밋 기록을 한 줄씩 보여 주는 명령이라서 헷갈리지 말아야 한다.",
+      "key_point_id": "k6",
+      "difficulty": "medium",
+      "pages": []
+    },
+    {
+      "type": "cloze",
+      "prompt": "`git commit -m` 뒤의 따옴표 안에 적는 글은 ____ 이다.",
+      "choices": [],
+      "answer_index": -1,
+      "answer_bool": false,
+      "answer_text": "커밋 메시지",
+      "accepted": [
+        "커밋메시지",
+        "메시지"
+      ],
+      "explanation": "노트에 `git commit -m` 뒤 따옴표 안이 커밋 메시지라고 적혀 있다. 예시 `git commit -m \"fix: 로그인 오류\"` 에서 따옴표 안의 글이 그 메시지다.",
+      "key_point_id": "k6",
+      "difficulty": "easy",
+      "pages": []
+    }
+  ]
+}

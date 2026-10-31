@@ -1,0 +1,161 @@
+{
+  "questions": [
+    {
+      "type": "mcq",
+      "prompt": "다음 코드를 실행한 뒤 `x` 의 값은?\n\n```c\nint x = 10;\nint *p = &x;\n*p = 20;\n```",
+      "choices": [
+        "10",
+        "20",
+        "`p` 에 들어 있는 주소",
+        "오류가 난다"
+      ],
+      "answer_index": 1,
+      "answer_bool": false,
+      "answer_text": "",
+      "accepted": [],
+      "explanation": "`*p = 20;` 은 `p` 가 가리키는 곳, 즉 `x` 에 20 을 넣는다. 그래서 `x` 의 값은 20 이 되고, `p` 에는 `x` 의 주소가 들어 있다.",
+      "key_point_id": "k1",
+      "difficulty": "easy",
+      "pages": []
+    },
+    {
+      "type": "cloze",
+      "prompt": "같은 기호 `*` 라도 선언할 때는 ____ 를 만들고, 식 안에서는 주소가 가리키는 곳을 본다.",
+      "choices": [],
+      "answer_index": -1,
+      "answer_bool": false,
+      "answer_text": "포인터 변수",
+      "accepted": [
+        "포인터"
+      ],
+      "explanation": "선언할 때의 `*` 는 포인터 변수를 만든다는 뜻이고, 식 안의 `*` 는 주소가 가리키는 곳을 본다는 뜻이다. 같은 기호라도 자리에 따라 뜻이 달라서 시험에 자주 나온다.",
+      "key_point_id": "k1",
+      "difficulty": "medium",
+      "pages": []
+    },
+    {
+      "type": "mcq",
+      "prompt": "다음 코드에서 `sizeof(int) * n` 을 `sizeof(int)` 로만 바꾸면 어떻게 되는가?\n\n```c\nint n = 5;\nint *p = malloc(sizeof(int) * n);\n```",
+      "choices": [
+        "5칸짜리 메모리가 잡힌다",
+        "한 칸짜리 메모리가 잡힌다",
+        "`NULL` 이 되어 항상 실패한다",
+        "메모리가 자동으로 해제된다"
+      ],
+      "answer_index": 1,
+      "answer_bool": false,
+      "answer_text": "",
+      "accepted": [],
+      "explanation": "`sizeof(int)` 만 쓰면 한 칸짜리 메모리가 된다. 개수 `n` 을 곱해야 `n` 칸짜리 메모리를 얻을 수 있다.",
+      "key_point_id": "k2",
+      "difficulty": "medium",
+      "pages": []
+    },
+    {
+      "type": "cloze",
+      "prompt": "`malloc` 뒤에 ____ 를 빼먹으면 메모리 누수가 생긴다.",
+      "choices": [],
+      "answer_index": -1,
+      "answer_bool": false,
+      "answer_text": "`free`",
+      "accepted": [],
+      "explanation": "다 쓴 메모리는 `free` 로 해제해야 하고, 해제하지 않으면 메모리 누수가 생긴다. 해제한 뒤에는 `p = NULL` 로 두는 습관을 들이라고 노트에 적혀 있다.",
+      "key_point_id": "k2",
+      "difficulty": "easy",
+      "pages": []
+    },
+    {
+      "type": "mcq",
+      "prompt": "다음 코드에서 마지막 노드의 `next` 가 `NULL` 이면 반복문은 어떻게 되는가?\n\n```c\nstruct Node *cur = head;\nwhile (cur != NULL) {\n    printf(\"%d\\n\", cur->data);\n    cur = cur->next;\n}\n```",
+      "choices": [
+        "마지막 노드를 출력한 뒤 반복문이 끝난다",
+        "반복문이 영원히 계속된다",
+        "처음 노드만 출력하고 멈춘다",
+        "마지막 노드에서 오류가 난다"
+      ],
+      "answer_index": 0,
+      "answer_bool": false,
+      "answer_text": "",
+      "accepted": [],
+      "explanation": "마지막 노드의 `next` 는 `NULL` 이므로 `cur` 가 `NULL` 이 되는 순간 `cur != NULL` 이 거짓이 되어 반복이 끝난다. 그래서 `while (cur != NULL)` 로 연결 리스트를 끝까지 돌 수 있다.",
+      "key_point_id": "k3",
+      "difficulty": "medium",
+      "pages": []
+    },
+    {
+      "type": "ox",
+      "prompt": "`a[i]` 는 `*(a + i)` 와 같은 값을 갖는다.",
+      "choices": [],
+      "answer_index": -1,
+      "answer_bool": true,
+      "answer_text": "",
+      "accepted": [],
+      "explanation": "배열 이름 `a` 는 첫 원소의 주소라서 `a[i]` 와 `*(a + i)` 는 같은 값을 갖는다. 포인터 덧셈은 바이트가 아니라 원소 크기 단위로 움직인다.",
+      "key_point_id": "k4",
+      "difficulty": "easy",
+      "pages": []
+    },
+    {
+      "type": "mcq",
+      "prompt": "다음 코드의 출력은?\n\n```c\nint a[3] = {10, 20, 30};\nprintf(\"%d\\n\", *(a + 2) + a[0]);\n```",
+      "choices": [
+        "30",
+        "20",
+        "40",
+        "오류가 난다"
+      ],
+      "answer_index": 2,
+      "answer_bool": false,
+      "answer_text": "",
+      "accepted": [],
+      "explanation": "`*(a + 2)` 는 `a[2]` 와 같아서 30 이고, `a[0]` 은 10 이므로 합은 40 이다. `a + 2` 는 주소를 원소 두 칸 뒤로 옮긴다.",
+      "key_point_id": "k4",
+      "difficulty": "hard",
+      "pages": []
+    },
+    {
+      "type": "short",
+      "prompt": "`x << 2` 는 `x` 에 몇을 곱한 것과 같은가? 숫자로 쓰시오.",
+      "choices": [],
+      "answer_index": -1,
+      "answer_bool": false,
+      "answer_text": "4",
+      "accepted": [],
+      "explanation": "`x << 2` 는 비트를 왼쪽으로 2칸 옮기는 것이고, 이것은 4를 곱한 것과 같다. 2를 곱하는 것으로 착각하기 쉬우니 주의하자.",
+      "key_point_id": "k5",
+      "difficulty": "medium",
+      "pages": []
+    },
+    {
+      "type": "ox",
+      "prompt": "`!flag` 는 `flag` 가 0이 아닐 때만 1이다.",
+      "choices": [],
+      "answer_index": -1,
+      "answer_bool": false,
+      "answer_text": "",
+      "accepted": [],
+      "explanation": "`!flag` 는 `flag` 가 0일 때만 1이 된다. 0이 아닌 값에서는 0이 되므로 이 문장은 거짓이다.",
+      "key_point_id": "k5",
+      "difficulty": "medium",
+      "pages": []
+    },
+    {
+      "type": "mcq",
+      "prompt": "다음 코드를 실행한 뒤 출력되는 값은?\n\n```c\nint x = 0;\nint y = (x != 0) && (x = 5);\nprintf(\"%d\\n\", x);\n```",
+      "choices": [
+        "0",
+        "5",
+        "1",
+        "오류가 난다"
+      ],
+      "answer_index": 0,
+      "answer_bool": false,
+      "answer_text": "",
+      "accepted": [],
+      "explanation": "`x != 0` 이 거짓이라서 `&&` 는 왼쪽만 보고 결과가 정해지고, 오른쪽의 `x = 5` 는 계산되지 않는다. 그래서 `x` 는 0 그대로 출력된다.",
+      "key_point_id": "k5",
+      "difficulty": "hard",
+      "pages": []
+    }
+  ]
+}

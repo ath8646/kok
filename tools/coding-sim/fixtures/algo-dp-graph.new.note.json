@@ -1,0 +1,225 @@
+{
+  "title": "알고리즘 8주차 강의 정리",
+  "unit": "동적 계획법과 그래프 탐색",
+  "summary": "격자 최소 비용 경로를 동적 계획법으로 구하고, 그래프에서 BFS와 다익스트라로 최단 거리를 찾는 방법을 정리했다.",
+  "key_points": [
+    {
+      "id": "k1",
+      "title": "동적 계획법(DP)",
+      "explanation": "큰 문제를 같은 모양의 작은 문제로 나눈다. 작은 문제의 답은 한 번만 구해서 저장해 두고 다시 쓴다.",
+      "why": "같은 계산이 반복되는 문제(겹치는 부분 문제)에 효과가 크기 때문이다.",
+      "importance": "high",
+      "pages": []
+    },
+    {
+      "id": "k2",
+      "title": "DP 설계의 세 가지",
+      "explanation": "설계할 때는 항상 상태 정의, 점화식, 초깃값과 답이 있는 칸을 먼저 정한다. 상태 정의는 $dp_{i,j}$ 가 무엇을 뜻하는지 정하는 것이다.",
+      "why": "점화식을 말로 먼저 쓸 수 있어야 하고, 상태 정의가 틀리면 식도 틀리기 때문이다.",
+      "importance": "high",
+      "pages": []
+    },
+    {
+      "id": "k3",
+      "title": "격자 최소 비용 경로",
+      "explanation": "$n \\times m$ 격자에서 오른쪽과 아래로만 움직여 지나간 칸의 비용 합이 가장 작은 경로를 찾는다. 위에서 오는 값과 왼쪽에서 오는 값 중 작은 것을 고르고 현재 칸 비용을 더한다.",
+      "why": "점화식을 세우고 표를 채우는 DP의 기본 형태이기 때문이다.",
+      "importance": "high",
+      "pages": []
+    },
+    {
+      "id": "k4",
+      "title": "그래프 표현: 인접 리스트",
+      "explanation": "간선이 적은 그래프는 인접 리스트로 저장한다. 정점 $u$ 에서 나가는 간선 $(v, w)$ 를 `graph[u]` 에 넣는다.",
+      "why": "BFS와 다익스트라가 모두 이 리스트에서 이웃 정점을 찾기 때문이다.",
+      "importance": "medium",
+      "pages": []
+    },
+    {
+      "id": "k5",
+      "title": "BFS (너비 우선 탐색)",
+      "explanation": "시작점에서 가까운 정점부터 층 단위로 방문하고, 큐를 쓴다. 간선에 가중치가 없을 때 최단 거리를 구할 수 있다.",
+      "why": "가중치가 없는 그래프는 BFS, 가중치가 있으면 다익스트라로 구분해야 하기 때문이다.",
+      "importance": "high",
+      "pages": []
+    },
+    {
+      "id": "k6",
+      "title": "다익스트라 (가중치가 음수가 아닐 때)",
+      "explanation": "간선에 가중치가 있으면 BFS로는 최단 거리를 보장할 수 없다. 확정되지 않은 정점 중 거리가 가장 짧은 것을 우선순위 큐에서 꺼낸다.",
+      "why": "음수 간선이 있으면 쓸 수 없다는 조건과 시간 복잡도를 함께 알아야 하기 때문이다.",
+      "importance": "high",
+      "pages": []
+    }
+  ],
+  "terms": [
+    {
+      "term": "동적 계획법(DP)",
+      "meaning": "큰 문제를 작은 문제로 나누고, 작은 문제의 답을 저장해 다시 쓰는 방법."
+    },
+    {
+      "term": "겹치는 부분 문제",
+      "meaning": "같은 계산이 여러 번 반복해서 나오는 문제의 구조."
+    },
+    {
+      "term": "상태 정의",
+      "meaning": "DP 표의 칸이 무엇을 뜻하는지 정하는 일."
+    },
+    {
+      "term": "점화식",
+      "meaning": "상태끼리 어떤 관계인지를 식으로 쓴 것."
+    },
+    {
+      "term": "초깃값",
+      "meaning": "계산을 시작하기 전에 미리 정해 두는 칸의 값."
+    },
+    {
+      "term": "`INF`",
+      "meaning": "아주 큰 값(무한대)으로, 아직 도달하지 못한 칸을 뜻한다. 코드에서는 `float('inf')` 로 정의한다."
+    },
+    {
+      "term": "정점",
+      "meaning": "그래프에서 점에 해당하는 것. 코드에서는 번호로 나타낸다."
+    },
+    {
+      "term": "간선",
+      "meaning": "두 정점을 잇는 선. 이 자료에서는 $(v, w)$ 처럼 도착 정점과 가중치로 나타낸다."
+    },
+    {
+      "term": "가중치",
+      "meaning": "간선마다 붙는 비용이나 거리."
+    },
+    {
+      "term": "무방향 그래프",
+      "meaning": "간선에 방향이 없어서 양쪽 모두 오갈 수 있는 그래프."
+    },
+    {
+      "term": "인접 리스트",
+      "meaning": "정점마다 나가는 간선을 리스트에 모아 저장하는 방식."
+    },
+    {
+      "term": "BFS (너비 우선 탐색)",
+      "meaning": "시작점에서 가까운 정점부터 층 단위로 방문하는 탐색."
+    },
+    {
+      "term": "DFS",
+      "meaning": "스택(재귀)을 써서 깊이 먼저 탐색하는 방법."
+    },
+    {
+      "term": "큐",
+      "meaning": "먼저 넣은 것을 먼저 꺼내는 자료구조."
+    },
+    {
+      "term": "스택",
+      "meaning": "나중에 넣은 것을 먼저 꺼내는 자료구조."
+    },
+    {
+      "term": "다익스트라",
+      "meaning": "가중치가 음수가 아닐 때 최단 거리를 구하는 알고리즘."
+    },
+    {
+      "term": "우선순위 큐",
+      "meaning": "우선순위가 가장 높은 것을 먼저 꺼내는 자료구조. 다익스트라에서는 거리가 가장 짧은 정점을 꺼낸다."
+    },
+    {
+      "term": "`heapq`",
+      "meaning": "파이썬에서 우선순위 큐를 구현할 때 쓰는 모듈."
+    },
+    {
+      "term": "시간 복잡도",
+      "meaning": "입력이 커질 때 연산 수가 얼마나 늘어나는지 나타내는 척도. 예: $O(V+E)$."
+    },
+    {
+      "term": "벨만-포드",
+      "meaning": "다음 주 강의에서 다룬다고 적힌 알고리즘."
+    }
+  ],
+  "formulas": [
+    {
+      "latex": "dp_{i,j} = \\min(dp_{i-1,j}, dp_{i,j-1}) + cost_{i,j}",
+      "label": "격자 최소 비용 점화식"
+    },
+    {
+      "latex": "O(nm)",
+      "label": "격자 DP 시간 복잡도"
+    },
+    {
+      "latex": "O(V+E)",
+      "label": "BFS 시간 복잡도"
+    },
+    {
+      "latex": "O((V+E)\\log V)",
+      "label": "다익스트라 시간 복잡도"
+    }
+  ],
+  "pitfalls": [
+    {
+      "text": "상태 정의가 틀리면 점화식도 틀린다. 식을 쓰기 전에 $dp_{i,j}$ 가 무엇을 뜻하는지 말로 먼저 설명해 본다.",
+      "key_point_id": "k2"
+    },
+    {
+      "text": "시작점 바로 위의 가상 칸 `dp[0][1]` 을 0 으로 두어야 첫 칸이 계산된다.",
+      "key_point_id": "k3"
+    },
+    {
+      "text": "무방향 그래프는 `graph[u]` 에만 넣으면 안 되고 `graph[v]` 에도 같은 간선을 넣어야 한다.",
+      "key_point_id": "k4"
+    },
+    {
+      "text": "BFS는 큐, DFS는 스택(재귀)이다. 둘 다 $O(V+E)$ 이다.",
+      "key_point_id": "k5"
+    },
+    {
+      "text": "리스트 맨 앞을 `pop(0)` 으로 빼면 $O(n)$ 이 걸리니, 앞에서 뺄 때는 `q.popleft()` 를 쓴다.",
+      "key_point_id": "k5"
+    },
+    {
+      "text": "간선에 가중치가 있으면 BFS로는 최단 거리를 보장할 수 없다. 이때는 다익스트라를 쓴다.",
+      "key_point_id": "k6"
+    },
+    {
+      "text": "다익스트라는 음수 간선이 있으면 안 된다.",
+      "key_point_id": "k6"
+    }
+  ],
+  "examples": [
+    {
+      "text": "격자 최소 비용 경로를 구하는 코드다.\n```python\nINF = float('inf')\n\ndef min_cost(cost):\n    n, m = len(cost), len(cost[0])\n    dp = [[INF] * (m + 1) for _ in range(n + 1)]\n    dp[0][1] = 0  # 시작점 바로 위의 가상 칸\n    for i in range(1, n + 1):\n        for j in range(1, m + 1):\n            dp[i][j] = min(dp[i-1][j], dp[i][j-1]) + cost[i-1][j-1]\n    return dp[n][m]\n```",
+      "key_point_id": "k3"
+    },
+    {
+      "text": "인접 리스트를 만드는 코드다.\n```python\nn, m = map(int, input().split())\ngraph = [[] for _ in range(n)]\nfor _ in range(m):\n    u, v, w = map(int, input().split())\n    graph[u].append((v, w))\n```",
+      "key_point_id": "k4"
+    },
+    {
+      "text": "BFS 코드다.\n```python\nfrom collections import deque\n\ndef bfs(graph, start):\n    dist = {start: 0}\n    q = deque([start])\n    while q:\n        u = q.popleft()\n        for v, _ in graph[u]:\n            if v not in dist:\n                dist[v] = dist[u] + 1\n                q.append(v)\n    return dist\n```",
+      "key_point_id": "k5"
+    },
+    {
+      "text": "다익스트라 코드다.\n```python\nimport heapq\n\ndef dijkstra(graph, src, n):\n    dist = [INF] * n\n    dist[src] = 0\n    pq = [(0, src)]\n    while pq:\n        cur, u = heapq.heappop(pq)\n        if cur > dist[u]:  # 더 짧은 거리로 이미 처리한 정점\n            continue\n        for v, w in graph[u]:\n            d = cur + w\n            if d < dist[v]:\n                dist[v] = d\n                heapq.heappush(pq, (d, v))\n    return dist\n```",
+      "key_point_id": "k6"
+    }
+  ],
+  "checks": [
+    {
+      "text": "인접 리스트 입력 코드는 `graph[u]` 에만 넣어서 방향 그래프 기준이다. 무방향 그래프에서 `graph[v]` 에도 넣는다는 설명과 코드가 맞는지 확인할 것."
+    }
+  ],
+  "changes": [
+    {
+      "text": "1~5절의 내용을 핵심 6개로 나누었다."
+    },
+    {
+      "text": "점화식과 시간 복잡도 식을 수식(formulas)으로 옮겼다."
+    },
+    {
+      "text": "시험 포인트의 세 줄을 함정(pitfalls) 항목으로 나누었다."
+    },
+    {
+      "text": "코드 네 덩어리는 원문 그대로 예시(examples)로 옮기고, 본문에는 짧게 인용만 남겼다."
+    },
+    {
+      "text": "설명은 원문 문장을 살려 두 문장 이내로 줄였다."
+    }
+  ]
+}

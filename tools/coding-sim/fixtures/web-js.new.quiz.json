@@ -1,0 +1,202 @@
+{
+  "questions": [
+    {
+      "type": "mcq",
+      "prompt": "버튼을 누르면 화면을 바꾸는 동작을 맡는 언어는 무엇인가?",
+      "choices": [
+        "HTML",
+        "CSS",
+        "JavaScript",
+        "DOM"
+      ],
+      "answer_index": 2,
+      "answer_bool": false,
+      "answer_text": "",
+      "accepted": [],
+      "explanation": "노트에서 HTML 은 구조와 내용, CSS 는 모양, JavaScript 는 동작을 맡는다고 나눠 적었다. 클릭하면 화면을 바꾸는 일은 JavaScript 의 몫이다.",
+      "key_point_id": "k1",
+      "difficulty": "easy",
+      "pages": []
+    },
+    {
+      "type": "ox",
+      "prompt": "CSS 는 태그로 문단과 제목의 구조를 만든다.",
+      "choices": [],
+      "answer_index": -1,
+      "answer_bool": false,
+      "answer_text": "",
+      "accepted": [],
+      "explanation": "태그로 구조와 내용을 만드는 것은 HTML 이다. CSS 는 색, 크기, 배치처럼 모양을 맡는다.",
+      "key_point_id": "k1",
+      "difficulty": "medium",
+      "pages": []
+    },
+    {
+      "type": "ox",
+      "prompt": "id 는 한 페이지에 여러 요소에 붙여도 된다.",
+      "choices": [],
+      "answer_index": -1,
+      "answer_bool": false,
+      "answer_text": "",
+      "accepted": [],
+      "explanation": "노트에는 id 는 페이지에 딱 하나만 있어야 한다고 적혀 있다. 여러 요소에 붙여도 되는 것은 class 이다.",
+      "key_point_id": "k2",
+      "difficulty": "easy",
+      "pages": []
+    },
+    {
+      "type": "cloze",
+      "prompt": "`#`은 id, `.`은 ____ 를 뜻한다.",
+      "choices": [],
+      "answer_index": -1,
+      "answer_bool": false,
+      "answer_text": "class",
+      "accepted": [
+        "클래스",
+        "class 선택자"
+      ],
+      "explanation": "CSS 선택자에서 점(`.`)은 class 를, 샵(`#`)은 id 를 뜻한다. 노트의 두 번째 줄에 그 대응이 적혀 있다.",
+      "key_point_id": "k2",
+      "difficulty": "easy",
+      "pages": []
+    },
+    {
+      "type": "mcq",
+      "prompt": "다음 CSS 규칙은 어떤 요소의 글자색을 빨갛게 바꾸는가?\n\n```css\n#app { color: red; }\n```",
+      "choices": [
+        "`class` 가 app 인 요소",
+        "`id` 가 app 인 요소",
+        "`app` 이라는 태그",
+        "모든 `p` 태그"
+      ],
+      "answer_index": 1,
+      "answer_bool": false,
+      "answer_text": "",
+      "accepted": [],
+      "explanation": "`#` 은 id 를 뜻하므로 `#app` 은 id 가 app 인 요소를 고른다. 점(`.`)을 쓰면 class 선택자가 된다.",
+      "key_point_id": "k2",
+      "difficulty": "medium",
+      "pages": []
+    },
+    {
+      "type": "mcq",
+      "prompt": "다음 코드를 실행하면 무엇이 출력되는가?\n\n```js\nconsole.log(0 === \"\");\n```",
+      "choices": [
+        "`true`",
+        "`false`",
+        "`undefined`",
+        "`0`"
+      ],
+      "answer_index": 1,
+      "answer_bool": false,
+      "answer_text": "",
+      "accepted": [],
+      "explanation": "`===` 는 타입까지 같아야 참이므로 숫자 0 과 빈 문자열은 거짓이다. 노트 예제도 `// false` 로 적혀 있다.",
+      "key_point_id": "k3",
+      "difficulty": "medium",
+      "pages": []
+    },
+    {
+      "type": "mcq",
+      "prompt": "`const price = 0;` 일 때 `price || 10` 과 `price ?? 10` 의 결과를 순서대로 고르면?",
+      "choices": [
+        "둘 다 `10`",
+        "`||` 는 `10`, `??` 는 `0`",
+        "`||` 는 `0`, `??` 는 `10`",
+        "둘 다 `0`"
+      ],
+      "answer_index": 1,
+      "answer_bool": false,
+      "answer_text": "",
+      "accepted": [],
+      "explanation": "`??` 는 null 이나 undefined 일 때만 오른쪽 값을 준다. `||` 는 0 도 거짓으로 보기 때문에 오른쪽 값인 `10` 이 나온다.",
+      "key_point_id": "k3",
+      "difficulty": "hard",
+      "pages": []
+    },
+    {
+      "type": "mcq",
+      "prompt": "정규식 `/^\\d{3}-\\d{4}$/` 에서 `^` 와 `$` 를 빼면 어떤 문제가 생기는가?",
+      "choices": [
+        "문자열 맨 앞이나 맨 뒤에 다른 글자가 있으면 항상 실패한다.",
+        "문자열 중간에 맞는 부분만 있어도 통과한다.",
+        "숫자 세 개와 네 개의 순서를 바꿔도 통과한다.",
+        "하이픈은 무시하고 숫자만 검사한다."
+      ],
+      "answer_index": 1,
+      "answer_bool": false,
+      "answer_text": "",
+      "accepted": [],
+      "explanation": "`^` 는 문자열의 처음, `$` 는 끝을 뜻한다. 둘을 빼면 패턴이 문자열 중간 어디에든 맞기만 해도 통과하므로, 처음부터 끝까지 맞는지 보려면 둘 다 필요하다.",
+      "key_point_id": "k3",
+      "difficulty": "hard",
+      "pages": []
+    },
+    {
+      "type": "mcq",
+      "prompt": "다음 코드가 출력하는 결과는 무엇인가?\n\n```js\nconst name = '철수';\nconsole.log(`Hello ${name}`);\n```",
+      "choices": [
+        "`Hello ${name}`",
+        "Hello 철수",
+        "Hello name",
+        "철수"
+      ],
+      "answer_index": 1,
+      "answer_bool": false,
+      "answer_text": "",
+      "accepted": [],
+      "explanation": "백틱으로 감싼 템플릿 리터럴 안의 `${ }` 는 변수 값으로 바뀐다. 그래서 `${name}` 자리에 변수 name 의 값인 철수가 들어간다.",
+      "key_point_id": "k4",
+      "difficulty": "medium",
+      "pages": []
+    },
+    {
+      "type": "cloze",
+      "prompt": "화살표 함수는 ____ 키워드 없이 짧게 쓴다.",
+      "choices": [],
+      "answer_index": -1,
+      "answer_bool": false,
+      "answer_text": "function",
+      "accepted": [
+        "function 키워드",
+        "`function`"
+      ],
+      "explanation": "노트 예제 `const add = (a, b) => a + b;` 에서 보듯 화살표 함수는 `function` 키워드를 쓰지 않는다. 이 짧은 표기가 화살표 함수의 특징이다.",
+      "key_point_id": "k4",
+      "difficulty": "easy",
+      "pages": []
+    },
+    {
+      "type": "short",
+      "prompt": "요소 안의 글자를 읽거나 바꾸는 속성은 무엇인가?",
+      "choices": [],
+      "answer_index": -1,
+      "answer_bool": false,
+      "answer_text": "textContent",
+      "accepted": [
+        "text content",
+        "textContent 속성"
+      ],
+      "explanation": "노트에 따르면 찾은 요소의 `textContent` 를 바꾸면 화면이 바로 바뀐다. 글자를 읽을 때도 같은 속성을 쓴다.",
+      "key_point_id": "k5",
+      "difficulty": "medium",
+      "pages": []
+    },
+    {
+      "type": "short",
+      "prompt": "`document.querySelector` 가 요소를 찾을 때 쓰는 문법은 무엇인가?",
+      "choices": [],
+      "answer_index": -1,
+      "answer_bool": false,
+      "answer_text": "CSS 선택자",
+      "accepted": [
+        "CSS 선택자 문법",
+        "css 선택자"
+      ],
+      "explanation": "노트에 `document.querySelector` 는 CSS 선택자 문법으로 요소를 찾아 준다고 적혀 있다. 그래서 `#app` 처럼 `#` 이나 `.` 을 붙인 이름을 그대로 넣을 수 있다.",
+      "key_point_id": "k5",
+      "difficulty": "medium",
+      "pages": []
+    }
+  ]
+}

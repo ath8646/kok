@@ -9,7 +9,8 @@ import { coverWanted, estimateCover, estimateEnergy, estimateFigures, estimateRe
 import { clientModel } from '@/lib/client-model';
 import { energyWindow, refillText } from '@/lib/plans';
 import { shrinkImage } from '@/lib/image';
-import { MIN_TEXT_CHARS, checkText, fileKind, groupFiles, isSubmitKey, splitComposer, titleFromName } from '@/lib/quick-add';
+import { MAX_TEXT_PARTS, MIN_TEXT_CHARS, checkText, fileKind, groupFiles, isSubmitKey, splitComposer, splitForLimit, titleFromName } from '@/lib/quick-add';
+import { officeLabel, officeTextHeader } from '@/lib/office/names';
 import { SUBJECT_COLORS } from '@/lib/settings';
 import { subjectVar } from '@/lib/colors';
 import { matchesSubject, pickerOrder } from '@/lib/subject-order';
@@ -23,12 +24,33 @@ const MAX_PARALLEL = 3;
 /** 이보다 큰 PDF 는 브라우저에서 쪽수를 세지 않는다 (폰 메모리를 아끼고, 쪽수는 서버가 센다) */
 const BIG_PDF_BYTES = 30 * 1024 * 1024;
 const MB = 1024 * 1024;
+/** 파일 고르기 창에 보일 파일 (한글 파일은 기기마다 MIME 이 달라서 확장자와 MIME 을 같이) */
+const FILE_ACCEPT = [
+  'application/pdf',
+  '.pdf',
+  'image/*',
+  '.txt',
+  '.md',
+  '.hwp',
+  '.hwpx',
+  '.docx',
+  '.pptx',
+  'application/x-hwp',
+  'application/haansofthwp',
+  'application/vnd.hancom.hwp',
+  'application/vnd.hancom.hwpx',
+  'application/hwp+zip',
+  'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+].join(',');
 /** 자료 목록·과목이 바뀌었다고 화면들에 알리는 이벤트 */
 export { SOURCES_CHANGED, SUBJECTS_CHANGED };
 
 type Job =
   | { kind: 'text'; text: string; title: string }
   | { kind: 'textfile'; file: File; title: string }
+  /** 한글·워드·PPT: 브라우저에서 글을 꺼내 글 자료로 (길면 여러 자료로 나눈다) */
+  | { kind: 'office'; file: File; title: string }
   | { kind: 'pdf'; file: File; title: string }
   | { kind: 'image'; files: File[]; title: string };
 
@@ -150,7 +172,7 @@ function jobLabel(job: Job): string {
 }
 
 function jobIcon(job: Job): string {
-  return job.kind === 'pdf' ? ICONS.file : job.kind === 'image' ? ICONS.image : ICONS.pen;
+  return job.kind === 'pdf' || job.kind === 'office' ? ICONS.file : job.kind === 'image' ? ICONS.image : ICONS.pen;
 }
 
 function statusText(it: Item): string {
@@ -158,7 +180,13 @@ function statusText(it: Item): string {
     case 'waiting':
       return '차례를 기다려요';
     case 'preparing':
-      return it.job.kind === 'image' ? `사진 줄이는 중 ${it.done}/${it.total}` : it.job.kind === 'pdf' ? 'PDF 확인하는 중' : '준비하는 중';
+      return it.job.kind === 'image'
+        ? `사진 줄이는 중 ${it.done}/${it.total}`
+        : it.job.kind === 'pdf'
+          ? 'PDF 확인하는 중'
+          : it.job.kind === 'office'
+            ? `${officeLabel(it.job.file.name)} 문서 읽는 중`
+            : '준비하는 중';
     case 'slot':
       return '정리 중인 자료가 끝나면 시작해요';
     case 'appendWait':
@@ -320,6 +348,51 @@ export function QuickAddProvider({
         if (!c.ok) throw new Error(`'${job.file.name}': ${c.reason}`);
         return { kind: 'text', text: c.text, pages: 0, blobs: [] };
       }
+      if (job.kind === 'office') {
+        // 문서 읽기 코드는 이때만 불러온다
+        const { extractOfficeText } = await import('@/lib/office');
+        let text: string;
+        try {
+          text = (await extractOfficeText(job.file)).text;
+        } catch (e) {
+          throw new Error(`'${job.file.name}': ${(e as Error).message || '문서를 읽지 못했어요.'}`);
+        }
+        // 한 자료의 글 한도보다 길면 여러 자료로 나눈다 (뒤 조각은 같은 과목·단원·복습 설정의 새 글 자료).
+        // 조각마다 첫 줄에 어느 파일인지 적는다 (원본 탭에 보이고, 정리는 학생이 직접 쓴 글이 아닌 자료로 다룬다)
+        const header = officeTextHeader(job.file.name);
+        const parts = splitForLimit(text.replace(/\r\n/g, '\n').trim(), m.plan.textChars - header.length).map((t) => header + t);
+        if (parts.length > MAX_TEXT_PARTS)
+          throw new Error(
+            `'${job.file.name}': 글이 ${text.length.toLocaleString()}자라 한 번에 넣기엔 너무 길어요. 문서를 ${MAX_TEXT_PARTS}개 이하로 나눠서 넣어 주세요.`,
+          );
+        if (parts.length > 1) {
+          const it = itemsRef.current.find((i) => i.key === key);
+          const base = job.title || titleFromName(job.file.name) || '문서';
+          const name = (i: number) => `${base} (${i + 1}/${parts.length})`.slice(0, 120);
+          if (it) {
+            update(key, { job: { ...job, title: name(0) } });
+            const rest: Item[] = parts.slice(1).map((t, i) => ({
+              key: newId(),
+              sourceId: newId(),
+              job: { kind: 'text', text: t, title: name(i + 1) },
+              subjectId: it.subjectId,
+              status: 'waiting',
+              done: 0,
+              total: 0,
+              ...(it.parentId ? { parentId: it.parentId, noteTitle: it.noteTitle } : {}),
+              ...(it.review === false ? { review: false } : {}),
+              ...(it.unit ? { unit: it.unit } : {}),
+            }));
+            // 이 자료 바로 뒤에 차례대로
+            const at = itemsRef.current.findIndex((i) => i.key === key);
+            commit([...itemsRef.current.slice(0, at + 1), ...rest, ...itemsRef.current.slice(at + 1)]);
+            toast(`'${job.file.name}'은 글이 길어서 ${parts.length}개 자료로 나눠 넣어요.`);
+          }
+        }
+        const c = checkText(parts[0], m.plan);
+        if (!c.ok) throw new Error(`'${job.file.name}': ${c.reason}`);
+        return { kind: 'text', text: c.text, pages: 0, blobs: [] };
+      }
       if (job.kind === 'pdf') {
         // 아주 큰 PDF 는 여기서 열지 않는다 (쪽수 검사는 서버가 한다)
         const pages = job.file.size > BIG_PDF_BYTES ? 0 : await countPdfPages(job.file);
@@ -333,7 +406,7 @@ export function QuickAddProvider({
       }
       return { kind: 'image', text: '', pages: 0, blobs };
     },
-    [update],
+    [update, commit, toast],
   );
 
   /** 한 번짜리 올리기 주소를 받아 파일을 올린다 → 올린 경로 */
@@ -373,6 +446,8 @@ export function QuickAddProvider({
       let rateWaits = 0;
       for (;;) {
         update(it.key, { status: 'starting' });
+        // 제목은 지금 것으로 (긴 문서를 나누면 준비하는 동안 '(1/3)' 이 붙는다)
+        const title = (itemsRef.current.find((i) => i.key === it.key) ?? it).job.title;
         try {
           await api('/api/sources', {
             method: 'POST',
@@ -380,7 +455,7 @@ export function QuickAddProvider({
               id: sourceId,
               subjectId: it.subjectId,
               kind: prep.kind,
-              title: it.job.title,
+              title,
               text: prep.kind === 'text' ? prep.text : undefined,
               files,
               ...(it.parentId ? { parentId: it.parentId } : {}),
@@ -543,7 +618,7 @@ export function QuickAddProvider({
       if (!it) return;
       // 파일을 다 올렸거나 글이면 같은 번호로 다시 (이미 만들어졌으면 서버가 duplicate 로 알려 준다),
       // 올리다 멈췄으면 그 번호의 올리기 표가 남아 있으니 새 번호로 처음부터
-      const sameId = !!it.files || it.job.kind === 'text' || it.job.kind === 'textfile';
+      const sameId = !!it.files || it.job.kind === 'text' || it.job.kind === 'textfile' || it.job.kind === 'office';
       update(key, { status: 'waiting', error: undefined, done: 0, ...(sameId ? {} : { sourceId: newId(), files: undefined }) });
       pump();
     },
@@ -558,7 +633,7 @@ export function QuickAddProvider({
     [remove],
   );
 
-  /** 파일 → 할 일 (PDF 하나씩, 사진 묶음, 글 파일) */
+  /** 파일 → 할 일 (PDF 하나씩, 사진 묶음, 글 파일, 한글·워드·PPT) */
   const filesToJobs = useCallback(
     (files: File[], titleForFiles = ''): Job[] => {
       const g = groupFiles(files, meRef.current.plan);
@@ -567,6 +642,7 @@ export function QuickAddProvider({
         ...g.pdfs.map((file): Job => ({ kind: 'pdf', file, title: titleForFiles || titleFromName(file.name) })),
         ...g.imageGroups.map((group): Job => ({ kind: 'image', files: group, title: titleForFiles })),
         ...g.textFiles.map((file): Job => ({ kind: 'textfile', file, title: titleForFiles || titleFromName(file.name) })),
+        ...g.officeFiles.map((file): Job => ({ kind: 'office', file, title: titleForFiles || titleFromName(file.name) })),
       ];
     },
     [toast],
@@ -1378,7 +1454,7 @@ function Composer({
                 ref={fileInput}
                 type="file"
                 multiple
-                accept="application/pdf,.pdf,image/*,.txt,.md"
+                accept={FILE_ACCEPT}
                 className="sr-only"
                 tabIndex={-1}
                 onChange={(e) => {
@@ -1402,6 +1478,7 @@ function Composer({
                 type="button"
                 className="press grid h-10 w-10 place-items-center rounded-full text-muted hover:bg-surface-2 hover:text-ink"
                 aria-label="파일 붙이기"
+                title="PDF·사진·한글·워드·PPT·글 파일 붙이기"
                 onClick={() => fileInput.current?.click()}
               >
                 <Icon d={ICONS.clip} size={21} />
@@ -1410,6 +1487,7 @@ function Composer({
                 type="button"
                 className="press grid h-10 w-10 place-items-center rounded-full text-muted hover:bg-surface-2 hover:text-ink"
                 aria-label="사진 찍기"
+                title="교과서·학습지를 사진으로 찍어 넣기"
                 onClick={() => cameraInput.current?.click()}
               >
                 <Icon d={ICONS.camera} size={21} />
@@ -1475,15 +1553,16 @@ function AttachmentChip({ file, onRemove }: { file: File; onRemove: () => void }
           <span
             className={cx(
               'grid h-11 w-11 shrink-0 place-items-center rounded-xl',
-              kind === 'pdf' ? 'bg-bad-soft text-bad' : kind === 'text' ? 'bg-accent-soft text-accent' : 'bg-surface-3 text-muted',
+              kind === 'pdf' ? 'bg-bad-soft text-bad' : kind === 'text' || kind === 'office' ? 'bg-accent-soft text-accent' : 'bg-surface-3 text-muted',
             )}
           >
-            <Icon d={kind === 'pdf' ? ICONS.file : ICONS.pen} size={20} />
+            <Icon d={kind === 'pdf' || kind === 'office' ? ICONS.file : ICONS.pen} size={20} />
           </span>
           <span className="min-w-0">
             <span className="block truncate text-xs font-semibold">{file.name}</span>
             <span className="block text-[11px] text-muted">
-              {kind === 'pdf' ? 'PDF' : kind === 'text' ? '글 파일' : '파일'} · {Math.max(1, Math.round(file.size / 1024))}KB
+              {kind === 'pdf' ? 'PDF' : kind === 'text' ? '글 파일' : kind === 'office' ? officeLabel(file.name) : '파일'} ·{' '}
+              {Math.max(1, Math.round(file.size / 1024))}KB
             </span>
           </span>
         </>
@@ -1583,7 +1662,7 @@ function DropOverlay({ subjectName, intoComposer, note }: { subjectName: string;
           {intoComposer ? '여기에 놓으면 입력창에 붙여요' : note ? '여기에 놓으면 이 노트에 더해요' : '여기에 놓으면 KOK이 정리해요'}
         </p>
         <p className="text-sm text-muted">
-          PDF · 사진 · 글 파일
+          PDF · 사진 · 한글 · 워드 · PPT · 글 파일
           {note ? (
             <>
               {' '}

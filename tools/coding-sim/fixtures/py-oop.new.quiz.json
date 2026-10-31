@@ -1,0 +1,166 @@
+{
+  "questions": [
+    {
+      "type": "mcq",
+      "prompt": "파이썬에서 클래스 메서드의 첫 번째 인자로 직접 적어야 하는 이름은?",
+      "choices": [
+        "`this`",
+        "`self`",
+        "`me`",
+        "`object`"
+      ],
+      "answer_index": 1,
+      "answer_bool": false,
+      "answer_text": "",
+      "accepted": [],
+      "explanation": "파이썬은 메서드의 첫 번째 인자로 `self` 를 직접 적어야 한다. 이 점이 자바와 다르다고 하셨다.",
+      "key_point_id": "k1",
+      "difficulty": "easy",
+      "pages": []
+    },
+    {
+      "type": "short",
+      "prompt": "객체가 만들어질 때 가장 먼저 실행되는 메서드의 이름을 쓰시오.",
+      "choices": [],
+      "answer_index": -1,
+      "answer_bool": false,
+      "answer_text": "`__init__`",
+      "accepted": [],
+      "explanation": "객체가 만들어질 때 가장 먼저 실행되는 메서드가 `__init__` 이다. 노트의 클래스 예시에서도 `def __init__(self, name, *scores, **options):` 가 이 역할을 한다.",
+      "key_point_id": "k1",
+      "difficulty": "medium",
+      "pages": []
+    },
+    {
+      "type": "cloze",
+      "prompt": "다음 코드에서 객체 자기 자신을 가리키는 첫 번째 인자가 들어갈 빈칸을 쓰시오.\n\n```python\nclass Student:\n    def __init__(____, name):\n        self.name = name\n```",
+      "choices": [],
+      "answer_index": -1,
+      "answer_bool": false,
+      "answer_text": "`self`",
+      "accepted": [],
+      "explanation": "메서드의 첫 번째 인자는 지금 만들어지는 객체 자기 자신을 가리키며 이름은 `self` 로 적는다. 아래 줄의 `self.name = name` 에서도 같은 `self` 로 객체의 속성을 만든다.",
+      "key_point_id": "k1",
+      "difficulty": "easy",
+      "pages": []
+    },
+    {
+      "type": "mcq",
+      "prompt": "다음 코드에서 `Student(...)` 를 부르면 `options` 는 어떤 자료형이 되는가?\n\n```python\nclass Student:\n    def __init__(self, name, *scores, **options):\n        self.name = name\n\ns = Student(\"민수\", 90, 85, pin=1234)\n```",
+      "choices": [
+        "리스트",
+        "튜플",
+        "딕셔너리",
+        "문자열"
+      ],
+      "answer_index": 2,
+      "answer_bool": false,
+      "answer_text": "",
+      "accepted": [],
+      "explanation": "`**options` 는 남는 키워드 인자를 딕셔너리로 모은다. `pin=1234` 가 키와 값의 짝으로 모여 `{\"pin\": 1234}` 가 된다.",
+      "key_point_id": "k2",
+      "difficulty": "medium",
+      "pages": []
+    },
+    {
+      "type": "ox",
+      "prompt": "`self.__secret` 처럼 이름 앞에 밑줄 두 개를 붙인 속성은 바깥에서 완전히 막혀 있어서 꺼낼 수 없다.",
+      "choices": [],
+      "answer_index": -1,
+      "answer_bool": false,
+      "answer_text": "",
+      "accepted": [],
+      "explanation": "노트에 따르면 이름 맹글링으로 `_Student__secret` 이 되어 저장될 뿐, 완전히 막는 것이 아니고 건드리지 말라는 약속에 가깝다. 그래서 이 문장은 거짓이다.",
+      "key_point_id": "k3",
+      "difficulty": "hard",
+      "pages": []
+    },
+    {
+      "type": "cloze",
+      "prompt": "`@property` 를 붙인 메서드는 ____ 없이 속성처럼 읽는다.",
+      "choices": [],
+      "answer_index": -1,
+      "answer_bool": false,
+      "answer_text": "괄호",
+      "accepted": [
+        "소괄호"
+      ],
+      "explanation": "`@property` 를 붙이면 `s.average` 처럼 괄호 없이 속성처럼 읽을 수 있다. 같은 메서드에 `s.average()` 처럼 괄호를 붙이면 오류가 난다.",
+      "key_point_id": "k3",
+      "difficulty": "medium",
+      "pages": []
+    },
+    {
+      "type": "mcq",
+      "prompt": "`self` 를 받지 않는 함수를 클래스 안에 두고 객체 없이 `Student.is_valid(95)` 처럼 클래스 이름으로 부를 때 붙이는 표시는?",
+      "choices": [
+        "`@property`",
+        "`@staticmethod`",
+        "`__eq__`",
+        "`super()`"
+      ],
+      "answer_index": 1,
+      "answer_bool": false,
+      "answer_text": "",
+      "accepted": [],
+      "explanation": "`@staticmethod` 는 `self` 를 받지 않는 함수를 클래스 안에 둘 때 쓰고, 객체를 만들지 않고 클래스 이름으로 부른다. `@property` 는 괄호 없이 속성처럼 읽을 때 쓰는 표시라서 헷갈리면 안 된다.",
+      "key_point_id": "k4",
+      "difficulty": "medium",
+      "pages": []
+    },
+    {
+      "type": "mcq",
+      "prompt": "다음 코드를 실행했을 때 출력 순서로 옳은 것은?\n\n```python\nclass Animal:\n    def __init__(self):\n        print(\"동물 생성\")\n\nclass Dog(Animal):\n    def __init__(self):\n        super().__init__()\n        print(\"강아지 생성\")\n\nDog()\n```",
+      "choices": [
+        "강아지 생성이 먼저 찍힌 뒤 동물 생성이 찍힌다",
+        "동물 생성이 먼저 찍힌 뒤 강아지 생성이 찍힌다",
+        "동물 생성만 찍힌다",
+        "아무것도 찍히지 않는다"
+      ],
+      "answer_index": 1,
+      "answer_bool": false,
+      "answer_text": "",
+      "accepted": [],
+      "explanation": "자식의 `__init__` 에서 `super().__init__()` 을 부르면 부모의 생성자가 먼저 실행되므로 동물 생성이 먼저 찍힌다. 노트에 적힌 실행 결과와 같다.",
+      "key_point_id": "k5",
+      "difficulty": "medium",
+      "pages": []
+    },
+    {
+      "type": "mcq",
+      "prompt": "다음 코드에서 `Dog()` 를 만들면 출력 순서는?\n\n```python\nclass Animal:\n    def __init__(self):\n        print(\"동물 생성\")\n\nclass Dog(Animal):\n    def __init__(self):\n        print(\"강아지 생성\")\n        super().__init__()\n\nDog()\n```",
+      "choices": [
+        "동물 생성이 먼저 찍힌 뒤 강아지 생성이 찍힌다",
+        "강아지 생성이 먼저 찍힌 뒤 동물 생성이 찍힌다",
+        "강아지 생성만 찍힌다",
+        "오류가 나서 아무것도 찍히지 않는다"
+      ],
+      "answer_index": 1,
+      "answer_bool": false,
+      "answer_text": "",
+      "accepted": [],
+      "explanation": "`print` 는 적힌 순서대로 실행되므로 `강아지 생성` 이 먼저 찍힌다. 그다음 `super().__init__()` 에서 부모의 생성자가 실행되어 `동물 생성` 이 찍힌다.",
+      "key_point_id": "k5",
+      "difficulty": "hard",
+      "pages": []
+    },
+    {
+      "type": "mcq",
+      "prompt": "`__str__` 메서드는 무엇을 정하는가?",
+      "choices": [
+        "`print(객체)` 를 했을 때 보일 글",
+        "`==` 비교의 기준",
+        "객체가 만들어질 때 실행되는 순서",
+        "비공개 속성의 이름"
+      ],
+      "answer_index": 0,
+      "answer_bool": false,
+      "answer_text": "",
+      "accepted": [],
+      "explanation": "`__str__` 은 `print(객체)` 를 했을 때 보일 글을 정하는 던더 메서드다. `==` 비교의 기준을 정하는 것은 `__eq__` 이므로 헷갈리지 말자.",
+      "key_point_id": "k6",
+      "difficulty": "easy",
+      "pages": []
+    }
+  ]
+}

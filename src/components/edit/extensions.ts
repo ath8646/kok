@@ -1,9 +1,10 @@
 // 보이는 그대로 고치는 칸의 문서 모양(Tiptap). 저장 형식(src/lib/rich-doc.ts)이 적을 수 있는 것만 둔다:
-// 문단·줄바꿈·목록·번호 목록, 굵게·형광펜·빨간 글씨, 수식(고칠 때는 창으로). 기호를 직접 쳐도 바뀐다(**굵게** · ==형광펜== · !!빨강!! · $수식$ · '- ' · '1. ').
+// 문단·줄바꿈·목록·번호 목록·코드 블록, 굵게·형광펜·빨간 글씨·코드, 수식(고칠 때는 창으로).
+// 기호를 직접 쳐도 바뀐다(**굵게** · ==형광펜== · !!빨강!! · $수식$ · `코드` · 줄 앞 ``` · '- ' · '1. '). 코드 안에서는 기호가 바뀌지 않는다.
 // 꾸미기 규칙은 읽을 때(parseRich)와 같다: 여는 기호 뒤·닫는 기호 앞은 빈칸이 아니고, 영어·숫자 바로 뒤에서는 안에 한글 같은 글자가 있을 때만.
-import { Extension, InputRule, Mark, Node, mergeAttributes, type Editor, type Extensions } from '@tiptap/core';
+import { Extension, InputRule, Mark, Node, markInputRule, mergeAttributes, textblockTypeInputRule, type Editor, type Extensions } from '@tiptap/core';
 import type { MarkType, NodeType } from '@tiptap/pm/model';
-import { NodeSelection } from '@tiptap/pm/state';
+import { NodeSelection, Selection } from '@tiptap/pm/state';
 import { Document } from '@tiptap/extension-document';
 import { Paragraph } from '@tiptap/extension-paragraph';
 import { Text } from '@tiptap/extension-text';
@@ -58,6 +59,91 @@ function richMark(name: string, symbol: string, tag: string, cls: string, shortc
 }
 
 export const RichBold = richMark('bold', '**', 'strong', 'font-bold', 'Mod-b');
+
+/** 글 속 코드 (`코드`): 다른 꾸미기와 같이 쓸 수 있다. 안에서는 기호가 바뀌지 않는다(code) */
+export const RichCode = Mark.create({
+  name: 'code',
+  code: true,
+  parseHTML() {
+    return [{ tag: 'code' }];
+  },
+  renderHTML({ HTMLAttributes }) {
+    return ['code', mergeAttributes(HTMLAttributes, { class: 'kok-code' }), 0];
+  },
+  addKeyboardShortcuts() {
+    return { 'Mod-e': () => this.editor.commands.toggleMark(this.name) };
+  },
+  addInputRules() {
+    return [markInputRule({ find: /(?<!`)`([^`]+)`(?!`)$/, type: this.type })];
+  },
+});
+
+/** 코드 블록 (줄 앞에 ``` 를 치고 빈칸·엔터): 안에서 엔터는 줄바꿈, 끝에서 엔터 두 번·아래 화살표는 블록 밖으로 */
+export const RichCodeBlock = Node.create({
+  name: 'codeBlock',
+  content: 'text*',
+  marks: '',
+  group: 'block',
+  code: true,
+  defining: true,
+  addAttributes() {
+    return {
+      language: {
+        default: null,
+        parseHTML: (el) => (el as HTMLElement).dataset.lang || null,
+        renderHTML: (attrs) => (attrs.language ? { 'data-lang': attrs.language } : {}),
+      },
+    };
+  },
+  parseHTML() {
+    return [{ tag: 'pre', preserveWhitespace: 'full' }];
+  },
+  renderHTML({ HTMLAttributes }) {
+    return ['pre', mergeAttributes(HTMLAttributes, { class: 'kok-code-block' }), ['code', 0]];
+  },
+  addKeyboardShortcuts() {
+    const atEnd = () => {
+      const { $from, empty } = this.editor.state.selection;
+      return empty && $from.parent.type === this.type && $from.parentOffset === $from.parent.nodeSize - 2 ? $from : null;
+    };
+    return {
+      'Mod-Alt-c': () => this.editor.commands.toggleNode(this.name, 'paragraph'),
+      // 빈 코드 블록에서 지우기 → 문단으로
+      Backspace: () => {
+        const { $anchor, empty } = this.editor.state.selection;
+        if (!empty || $anchor.parent.type !== this.type || $anchor.parent.textContent.length) return false;
+        return this.editor.commands.clearNodes();
+      },
+      // 끝에서 빈 줄 둘 다음 엔터 → 블록 밖 새 문단
+      Enter: ({ editor }) => {
+        const $from = atEnd();
+        if (!$from || !$from.parent.textContent.endsWith('\n\n')) return false;
+        return editor
+          .chain()
+          .command(({ tr }) => {
+            tr.delete($from.pos - 2, $from.pos);
+            return true;
+          })
+          .exitCode()
+          .run();
+      },
+      ArrowDown: ({ editor }) => {
+        const $from = atEnd();
+        if (!$from) return false;
+        const after = $from.after();
+        if (editor.state.doc.nodeAt(after))
+          return editor.commands.command(({ tr }) => {
+            tr.setSelection(Selection.near(tr.doc.resolve(after)));
+            return true;
+          });
+        return editor.commands.exitCode();
+      },
+    };
+  },
+  addInputRules() {
+    return [textblockTypeInputRule({ find: /^```([^`\s]*)[\s]$/, type: this.type, getAttributes: (m) => ({ language: m[1] || null }) })];
+  },
+});
 export const RichHighlight = richMark('highlight', '==', 'mark', 'kok-mark', 'Mod-Shift-h');
 export const RichRed = richMark('red', '!!', 'span', 'kok-red');
 
@@ -212,9 +298,11 @@ export function buildExtensions(o: { single: boolean; placeholder: string }): Ex
     Paragraph,
     Text,
     ...(o.single ? [] : [HardBreak, BulletList, OrderedList, FlatListItem]),
+    ...(o.single ? [] : [RichCodeBlock]),
     RichBold,
     RichHighlight,
     RichRed,
+    RichCode,
     MathNode,
     UndoRedo.configure({ depth: 200 }),
     Placeholder.configure({ placeholder: o.placeholder, showOnlyWhenEditable: false }),

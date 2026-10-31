@@ -1,0 +1,217 @@
+{
+  "questions": [
+    {
+      "type": "mcq",
+      "prompt": "HTML 문서의 맨 앞에 적어서 문서가 시작된다는 것을 알리는 선언은 무엇인가?",
+      "choices": [
+        "`<!DOCTYPE html>`",
+        "`<meta charset=\"UTF-8\">`",
+        "`<a href=\"#top\">`",
+        "`<div class=\"card\">`"
+      ],
+      "answer_index": 0,
+      "answer_bool": false,
+      "answer_text": "",
+      "accepted": [],
+      "explanation": "노트 용어에 `<!DOCTYPE html>` 은 HTML 문서가 시작된다는 것을 알리는 선언이라고 적혀 있다. 예제 코드도 문서의 첫 줄에 이 선언을 두고 있다.",
+      "key_point_id": "k1",
+      "difficulty": "easy",
+      "pages": []
+    },
+    {
+      "type": "ox",
+      "prompt": "`class` 는 페이지에서 한 번만 쓰는 이름을 줄 때 쓰는 속성이다.",
+      "choices": [],
+      "answer_index": -1,
+      "answer_bool": false,
+      "answer_text": "",
+      "accepted": [],
+      "explanation": "노트에 `id` 는 페이지에서 한 번만 쓰는 이름을 줄 때 쓰고, `class` 는 여러 요소를 같은 이름으로 묶을 때 쓴다고 적혀 있다.",
+      "key_point_id": "k1",
+      "difficulty": "medium",
+      "pages": []
+    },
+    {
+      "type": "cloze",
+      "prompt": "`meta charset` 을 빠뜨리면 ____ 이 깨질 수 있다.",
+      "choices": [],
+      "answer_index": -1,
+      "answer_bool": false,
+      "answer_text": "한글",
+      "accepted": [
+        "한글 글자",
+        "한글 문자"
+      ],
+      "explanation": "노트 용어에 `meta charset` 은 문서의 문자 코드를 정하는 설정이고, 빠뜨리면 한글이 깨질 수 있다고 적혀 있다.",
+      "key_point_id": "k1",
+      "difficulty": "easy",
+      "pages": []
+    },
+    {
+      "type": "mcq",
+      "prompt": "같은 요소에 규칙이 겹치는데 명시도가 같다면, 어떤 규칙이 이기는가?",
+      "choices": [
+        "먼저 나온 규칙",
+        "나중에 나온 규칙",
+        "글자 수가 많은 규칙",
+        "무조건 내부 스타일"
+      ],
+      "answer_index": 1,
+      "answer_bool": false,
+      "answer_text": "",
+      "accepted": [],
+      "explanation": "노트에 명시도가 같으면 문서에서 나중에 나온 규칙이 이긴다고 적혀 있다. 명시도가 다르면 명시도가 높은 쪽이 먼저 이긴다.",
+      "key_point_id": "k2",
+      "difficulty": "medium",
+      "pages": []
+    },
+    {
+      "type": "mcq",
+      "prompt": "다음 규칙이 적용되는 요소는 무엇인가?\n\n```css\n.card > p {\n  color: #333;\n}\n```",
+      "choices": [
+        "`.card` 안의 모든 p",
+        "`.card` 의 바로 아래 자식인 p",
+        "`.card` 요소 자신",
+        "문서의 모든 p 태그"
+      ],
+      "answer_index": 1,
+      "answer_bool": false,
+      "answer_text": "",
+      "accepted": [],
+      "explanation": "노트에 `.card > p` 는 .card 의 바로 아래 자식인 p 만 고른다고 적혀 있다. 안쪽 모든 p 를 고르는 것은 `.card p` 다.",
+      "key_point_id": "k3",
+      "difficulty": "easy",
+      "pages": []
+    },
+    {
+      "type": "ox",
+      "prompt": "`.card p` 와 `.card > p` 는 같은 요소를 고른다.",
+      "choices": [],
+      "answer_index": -1,
+      "answer_bool": false,
+      "answer_text": "",
+      "accepted": [],
+      "explanation": "노트에 `.card > p` 는 바로 아래 자식만, `.card p` 는 안쪽의 모든 후손을 고른다고 적혀 있다. 그래서 고르는 범위가 다르다.",
+      "key_point_id": "k3",
+      "difficulty": "hard",
+      "pages": []
+    },
+    {
+      "type": "mcq",
+      "prompt": "`#intro` 는 어떤 요소를 고르는가?",
+      "choices": [
+        "class 가 intro 인 요소",
+        "id 가 intro 인 요소",
+        "태그 이름이 intro 인 요소",
+        "문서의 모든 intro 요소"
+      ],
+      "answer_index": 1,
+      "answer_bool": false,
+      "answer_text": "",
+      "accepted": [],
+      "explanation": "노트에 `#intro` 는 id 선택자이고 `.card` 는 class 선택자라고 적혀 있다. 샵(`#`)은 id, 점(`.`)은 class 를 뜻한다.",
+      "key_point_id": "k3",
+      "difficulty": "medium",
+      "pages": []
+    },
+    {
+      "type": "mcq",
+      "prompt": "`.card` 와 `.card > p` 중 명시도가 더 높은 것은 무엇인가?",
+      "choices": [
+        "`.card`",
+        "`.card > p`",
+        "두 값이 같다",
+        "비교할 수 없다"
+      ],
+      "answer_index": 1,
+      "answer_bool": false,
+      "answer_text": "",
+      "accepted": [],
+      "explanation": "노트에 `.card` 는 (0,1,0), `.card > p` 는 (0,1,1) 이라고 적혀 있다. 앞의 두 자리는 같고 세 번째 자리에서 1 이 0 보다 크므로 `.card > p` 가 더 높다.",
+      "key_point_id": "k4",
+      "difficulty": "medium",
+      "pages": []
+    },
+    {
+      "type": "short",
+      "prompt": "`div p` 의 명시도를 (id, class, 태그) 세 자리 숫자로 쓰면 무엇인가?",
+      "choices": [],
+      "answer_index": -1,
+      "answer_bool": false,
+      "answer_text": "(0,0,2)",
+      "accepted": [
+        "(0, 0, 2)",
+        "0,0,2"
+      ],
+      "explanation": "노트 예시에 `div p` 는 (0,0,2) 라고 적혀 있다. 태그가 두 개이므로 세 번째 자리만 2 가 된다.",
+      "key_point_id": "k4",
+      "difficulty": "hard",
+      "pages": []
+    },
+    {
+      "type": "mcq",
+      "prompt": "`width` 가 200px, `padding` 이 좌우 각 10px, `border` 가 좌우 각 2px 인 박스(`content-box`)가 화면에서 차지하는 폭은 얼마인가?",
+      "choices": [
+        "200px",
+        "204px",
+        "224px",
+        "220px"
+      ],
+      "answer_index": 2,
+      "answer_bool": false,
+      "answer_text": "",
+      "accepted": [],
+      "explanation": "노트 예제 계산에서 200 + 10 + 10 + 2 + 2 = 224 이므로 전체 폭은 224px 이다. 전체 폭은 content(width) + padding + border 로 구한다.",
+      "key_point_id": "k5",
+      "difficulty": "medium",
+      "pages": []
+    },
+    {
+      "type": "ox",
+      "prompt": "`box-sizing: border-box` 를 주면 `width` 가 padding 과 border 까지 포함한 값이 된다.",
+      "choices": [],
+      "answer_index": -1,
+      "answer_bool": true,
+      "answer_text": "",
+      "accepted": [],
+      "explanation": "노트 함정에 `box-sizing: border-box` 를 주면 width 가 padding 과 border 까지 포함한다고 적혀 있다. 기본값인 content-box 와 비교해서 기억하면 된다.",
+      "key_point_id": "k5",
+      "difficulty": "medium",
+      "pages": []
+    },
+    {
+      "type": "cloze",
+      "prompt": "`margin` 은 바깥쪽 ____ 이라서 전체 폭에 들어가지 않는다.",
+      "choices": [],
+      "answer_index": -1,
+      "answer_bool": false,
+      "answer_text": "간격",
+      "accepted": [
+        "여백",
+        "바깥 간격"
+      ],
+      "explanation": "노트 함정에 margin 은 바깥쪽 간격이라서 전체 폭에 들어가지 않는다고 적혀 있다. 박스의 폭은 content, padding, border 로 구한다.",
+      "key_point_id": "k5",
+      "difficulty": "easy",
+      "pages": []
+    },
+    {
+      "type": "mcq",
+      "prompt": "`@media (max-width: 600px) { ... }` 안의 규칙은 어떤 화면 폭에서 적용되는가?",
+      "choices": [
+        "600px 이상일 때",
+        "600px 이하일 때",
+        "정확히 600px 일 때만",
+        "화면 폭과 상관없이 항상"
+      ],
+      "answer_index": 1,
+      "answer_bool": false,
+      "answer_text": "",
+      "accepted": [],
+      "explanation": "노트에 `@media (max-width: 600px)` 안의 규칙은 화면 폭이 600px 이하일 때만 적용된다고 적혀 있다. 조건이 참일 때만 안쪽 규칙이 쓰인다.",
+      "key_point_id": "k6",
+      "difficulty": "medium",
+      "pages": []
+    }
+  ]
+}

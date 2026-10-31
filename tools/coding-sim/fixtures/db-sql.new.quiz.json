@@ -1,0 +1,233 @@
+{
+  "questions": [
+    {
+      "type": "mcq",
+      "prompt": "`LIKE` 에서 `_` 기호는 무엇을 뜻하는가?",
+      "choices": [
+        "글자 여러 개",
+        "글자 한 개",
+        "공백 한 칸",
+        "NULL 값"
+      ],
+      "answer_index": 1,
+      "answer_bool": false,
+      "answer_text": "",
+      "accepted": [],
+      "explanation": "노트는 `%` 는 글자 여러 개, `_` 는 글자 한 개를 뜻한다고 적는다. 두 기호를 헷갈리지 않도록 구분해서 기억해야 한다.",
+      "key_point_id": "k1",
+      "difficulty": "easy",
+      "pages": []
+    },
+    {
+      "type": "cloze",
+      "prompt": "`WHERE` 는 묶기 전의 행을, `HAVING` 은 묶은 뒤의 ____ 을 거른다.",
+      "choices": [],
+      "answer_index": -1,
+      "answer_bool": false,
+      "answer_text": "그룹",
+      "accepted": [
+        "그룹들"
+      ],
+      "explanation": "노트는 `WHERE` 가 묶기 전의 행을 거르고 `HAVING` 이 묶은 뒤의 그룹을 거른다고 적는다. 노트 예시의 `HAVING COUNT(*) > 1` 은 그룹의 개수를 보고 거르는 조건이다.",
+      "key_point_id": "k2",
+      "difficulty": "medium",
+      "pages": []
+    },
+    {
+      "type": "mcq",
+      "prompt": "아래 질의에서 `HAVING COUNT(*) > 1` 부분을 지우면 결과는 어떻게 달라지는가?\n```sql\nSELECT name, COUNT(*) FROM enroll WHERE dept = 'CS' GROUP BY name HAVING COUNT(*) > 1;\n```",
+      "choices": [
+        "CS 학과에서 같은 이름이 두 번 이상 나온 이름만 나온다",
+        "CS 학과에서 한 번만 나온 이름도 이름별로 묶여 함께 나온다",
+        "질의가 문법 오류가 나서 결과가 없다",
+        "CS 가 아닌 학과 학생도 함께 나온다"
+      ],
+      "answer_index": 1,
+      "answer_bool": false,
+      "answer_text": "",
+      "accepted": [],
+      "explanation": "`HAVING` 은 묶은 뒤의 그룹을 거르는 절이라서 지우면 그룹 개수 조건이 사라진다. `WHERE dept = 'CS'` 는 그대로 있어서 CS 학과 행만 이름별로 묶인다.",
+      "key_point_id": "k2",
+      "difficulty": "hard",
+      "pages": []
+    },
+    {
+      "type": "cloze",
+      "prompt": "두 테이블을 공통된 값으로 연결하는 질의다. 빈칸에 들어갈 것은 무엇인가?\n```sql\nSELECT e.name, c.title\nFROM enroll e\nJOIN course c ON e.cid = ____;\n```",
+      "choices": [],
+      "answer_index": -1,
+      "answer_bool": false,
+      "answer_text": "`c.id`",
+      "accepted": [],
+      "explanation": "노트는 `enroll` 의 `cid` 와 `course` 의 `id` 가 같은 행끼리 붙는다고 적는다. 별칭 `c` 가 `course` 를 가리키므로 연결 조건의 오른쪽은 `c.id` 가 된다.",
+      "key_point_id": "k3",
+      "difficulty": "medium",
+      "pages": []
+    },
+    {
+      "type": "mcq",
+      "prompt": "`JOIN` 으로 두 테이블을 붙일 때 기준이 되는 것은 무엇인가?",
+      "choices": [
+        "공통된 값이 같은 행끼리 붙인다",
+        "두 테이블의 이름 길이가 같은 것끼리 붙인다",
+        "`GROUP BY` 로 묶은 그룹끼리 붙인다",
+        "NULL 인 행만 붙인다"
+      ],
+      "answer_index": 0,
+      "answer_bool": false,
+      "answer_text": "",
+      "accepted": [],
+      "explanation": "노트는 `JOIN` 이 공통된 값으로 두 테이블을 연결하는 것이고, `enroll` 의 `cid` 와 `course` 의 `id` 가 같은 행끼리 붙는다고 적는다. 별칭은 이름을 짧게 쓰는 장치일 뿐 붙는 기준이 아니다.",
+      "key_point_id": "k3",
+      "difficulty": "easy",
+      "pages": []
+    },
+    {
+      "type": "ox",
+      "prompt": "별칭 `e`, `c` 를 붙이면 `JOIN` 의 결과 행 수가 달라진다.",
+      "choices": [],
+      "answer_index": -1,
+      "answer_bool": false,
+      "answer_text": "",
+      "accepted": [],
+      "explanation": "노트는 별칭을 붙이면 열 앞에 테이블 이름을 길게 쓰지 않아도 된다고 적는다. 별칭은 이름을 줄이는 장치이고, 어떤 행이 붙는지는 바꾸지 않는다.",
+      "key_point_id": "k3",
+      "difficulty": "medium",
+      "pages": []
+    },
+    {
+      "type": "mcq",
+      "prompt": "`grade` 값이 비어 있는(`NULL`) 행을 찾는 올바른 조건은 무엇인가?",
+      "choices": [
+        "`grade = NULL`",
+        "`grade IS NULL`",
+        "`grade = ''`",
+        "`grade == NULL`"
+      ],
+      "answer_index": 1,
+      "answer_bool": false,
+      "answer_text": "",
+      "accepted": [],
+      "explanation": "노트는 `grade = NULL` 로 비교하면 결과가 unknown 이 되어 한 줄도 안 나온다고 적는다. NULL 인지 확인할 때는 반드시 `grade IS NULL` 이나 `grade IS NOT NULL` 로 써야 한다고 적는다.",
+      "key_point_id": "k4",
+      "difficulty": "easy",
+      "pages": []
+    },
+    {
+      "type": "mcq",
+      "prompt": "`grade` 열의 값이 90, `NULL`, 80 인 세 행만 있을 때, `COUNT(grade)` 와 `COUNT(*)` 의 결과는 각각 얼마인가?",
+      "choices": [
+        "`COUNT(grade)` 는 2, `COUNT(*)` 는 3",
+        "`COUNT(grade)` 는 3, `COUNT(*)` 는 2",
+        "둘 다 3",
+        "둘 다 2"
+      ],
+      "answer_index": 0,
+      "answer_bool": false,
+      "answer_text": "",
+      "accepted": [],
+      "explanation": "노트는 `COUNT(grade)` 가 NULL 을 세지 않고 `COUNT(*)` 는 센다고 적는다. 그래서 값이 있는 90 과 80 만 세면 2 이고, 행 전체를 세면 3 이다.",
+      "key_point_id": "k4",
+      "difficulty": "hard",
+      "pages": []
+    },
+    {
+      "type": "cloze",
+      "prompt": "빈 값을 0 같은 다른 값으로 바꾸고 싶을 때 쓰는 함수 이름은 ____ 이다.",
+      "choices": [],
+      "answer_index": -1,
+      "answer_bool": false,
+      "answer_text": "`COALESCE`",
+      "accepted": [
+        "COALESCE",
+        "coalesce"
+      ],
+      "explanation": "노트는 빈 값을 다른 값으로 바꾸고 싶으면 `COALESCE(grade, 0)` 을 쓴다고 적는다. 그래서 빈칸에는 함수 이름인 `COALESCE` 가 들어간다.",
+      "key_point_id": "k4",
+      "difficulty": "medium",
+      "pages": []
+    },
+    {
+      "type": "short",
+      "prompt": "트랜잭션을 성공으로 확정할 때 쓰는 명령은 무엇인가?",
+      "choices": [],
+      "answer_index": -1,
+      "answer_bool": false,
+      "answer_text": "`COMMIT`",
+      "accepted": [
+        "commit"
+      ],
+      "explanation": "노트는 트랜잭션이 성공하면 `COMMIT`, 실패하면 `ROLLBACK` 을 쓴다고 적는다. 두 명령을 거꾸로 외우지 않도록 주의해야 한다.",
+      "key_point_id": "k5",
+      "difficulty": "medium",
+      "pages": []
+    },
+    {
+      "type": "mcq",
+      "prompt": "아래 트랜잭션을 실행하면 학번 2021001 의 `dept` 는 어떻게 되는가?\n```sql\nBEGIN; UPDATE enroll SET dept = 'AI' WHERE sid = 2021001; COMMIT;\n```",
+      "choices": [
+        "`dept` 가 AI 로 바뀌고 확정된다",
+        "`dept` 가 바뀌지 않는다",
+        "`dept` 는 바뀌지만 `ROLLBACK` 으로 취소된다",
+        "`dept` 가 NULL 이 된다"
+      ],
+      "answer_index": 0,
+      "answer_bool": false,
+      "answer_text": "",
+      "accepted": [],
+      "explanation": "`BEGIN` 으로 시작한 트랜잭션은 `UPDATE` 가 끝난 뒤 `COMMIT` 으로 성공 확정된다. 그래서 학번 2021001 의 `dept` 는 AI 가 된다.",
+      "key_point_id": "k5",
+      "difficulty": "medium",
+      "pages": []
+    },
+    {
+      "type": "mcq",
+      "prompt": "외래키(`FOREIGN KEY`)를 설명한 것으로 옳은 것은?",
+      "choices": [
+        "다른 테이블의 기본키를 참조하는 열이다",
+        "행을 유일하게 구분하는 열이다",
+        "열이 두 개 이상 묶인 복합키다",
+        "칸마다 하나의 값만 가지는 규칙이다"
+      ],
+      "answer_index": 0,
+      "answer_bool": false,
+      "answer_text": "",
+      "accepted": [],
+      "explanation": "노트는 외래키가 다른 테이블의 기본키를 참조하는 열이라고 적는다. 예로 `enroll` 의 `cid` 가 `course` 의 `id` 를 참조하므로 외래키다.",
+      "key_point_id": "k6",
+      "difficulty": "easy",
+      "pages": []
+    },
+    {
+      "type": "mcq",
+      "prompt": "기본키가 학번 하나인 학생 표에 학과와 학과장 열이 함께 있다. 학번 → 학과 → 학과장 구조라면 이 표는 어떤 정규형에 맞지 않는가?",
+      "choices": [
+        "1NF",
+        "2NF",
+        "3NF",
+        "정규화할 필요가 없다"
+      ],
+      "answer_index": 2,
+      "answer_bool": false,
+      "answer_text": "",
+      "accepted": [],
+      "explanation": "노트는 3NF 가 2NF 이고 기본키가 아닌 열끼리의 이행 종속을 없앤다고 적는다. 학과가 학과장을 정하는 구조이므로 학과 테이블을 분리해야 하고, 이 표는 3NF 에 맞지 않는다.",
+      "key_point_id": "k6",
+      "difficulty": "hard",
+      "pages": []
+    },
+    {
+      "type": "ox",
+      "prompt": "2NF 는 기본키가 아닌 열끼리의 이행 종속을 없애는 단계다.",
+      "choices": [],
+      "answer_index": -1,
+      "answer_bool": false,
+      "answer_text": "",
+      "accepted": [],
+      "explanation": "노트는 2NF 가 1NF 이고 복합키의 일부에만 종속된 열을 따로 뺀다고 적는다. 기본키가 아닌 열끼리의 이행 종속을 없애는 것은 3NF 이다.",
+      "key_point_id": "k6",
+      "difficulty": "medium",
+      "pages": []
+    }
+  ]
+}

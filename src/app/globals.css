@@ -424,6 +424,42 @@ body {
 .kok-red {
   color: var(--bad);
 }
+/* `코드`와 ``` 코드 블록: 고정폭 글꼴 + 회색 칸 (글자는 본문 색 그대로: 회색 칸에서도 본문 명암비) */
+.kok-code {
+  font-family: var(--font-mono);
+  font-size: 0.88em;
+  padding: 0.06em 0.32em;
+  border-radius: 0.35em;
+  background: var(--surface-2);
+  box-shadow: inset 0 0 0 1px var(--line);
+  overflow-wrap: anywhere;
+  -webkit-box-decoration-break: clone;
+  box-decoration-break: clone;
+}
+.kok-code-block {
+  display: block;
+  margin: 0.4em 0;
+  padding: 0.7em 0.85em;
+  border-radius: 12px;
+  background: var(--surface-2);
+  box-shadow: inset 0 0 0 1px var(--line);
+  font-family: var(--font-mono);
+  font-size: 0.86em;
+  line-height: 1.55;
+  white-space: pre;
+  overflow-x: auto;
+  tab-size: 4;
+  text-align: left;
+}
+.kok-code-block > code {
+  font: inherit;
+  background: none;
+  padding: 0;
+}
+.kok-code-block:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
 .kok-rich {
   display: block;
   white-space: pre-wrap;
@@ -519,6 +555,9 @@ body {
 }
 .kok-editor .ProseMirror p {
   margin: 0;
+}
+.kok-editor .ProseMirror pre.kok-code-block {
+  white-space: pre;
 }
 .kok-editor .ProseMirror ul,
 .kok-editor .ProseMirror ol {

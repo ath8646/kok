@@ -1,0 +1,270 @@
+{
+  "questions": [
+    {
+      "type": "ox",
+      "prompt": "빅오가 $O(n)$ 이면 그 실행 시간은 $\\Theta(n)$ 이라고 말할 수 있다.",
+      "choices": [],
+      "answer_index": -1,
+      "answer_bool": false,
+      "answer_text": "",
+      "accepted": [],
+      "explanation": "빅오는 상한이라서 $f(n) = 1$ 도 $O(n)$ 에 속한다. 그래서 $O(n)$ 이라고 해서 상한과 하한이 같은 $\\Theta(n)$ 이라고 할 수는 없다.",
+      "key_point_id": "k1",
+      "difficulty": "easy",
+      "pages": []
+    },
+    {
+      "type": "mcq",
+      "prompt": "$3n^2 + 5n + 7$ 의 빅오 표기로 가장 알맞은 것은?",
+      "choices": [
+        "$O(n)$",
+        "$O(n^2)$",
+        "$O(n^3)$",
+        "$O(4^n)$"
+      ],
+      "answer_index": 1,
+      "answer_bool": false,
+      "answer_text": "",
+      "accepted": [],
+      "explanation": "상수 배와 낮은 차수 항을 버리고 가장 큰 항 $n^2$ 만 남기면 $O(n^2)$ 이다. $O(n)$ 은 $n^2$ 항을 빼고 본 오답이다.",
+      "key_point_id": "k1",
+      "difficulty": "medium",
+      "pages": []
+    },
+    {
+      "type": "short",
+      "prompt": "상한과 하한이 같을 때 쓰는 표기 이름은 무엇인가? (영어 이름으로 답하기)",
+      "choices": [],
+      "answer_index": -1,
+      "answer_bool": false,
+      "answer_text": "Theta",
+      "accepted": [
+        "Θ",
+        "세타",
+        "theta"
+      ],
+      "explanation": "빅오는 상한, Omega 는 하한을 나타낸다. 상한과 하한이 같으면 Theta 로 쓴다.",
+      "key_point_id": "k1",
+      "difficulty": "easy",
+      "pages": []
+    },
+    {
+      "type": "cloze",
+      "prompt": "지수에 $n$ 이 들어가면 ____ 가 아니다. 그래서 $2^{2n} = 4^n$ 은 $O(2^n)$ 이 아니다.",
+      "choices": [],
+      "answer_index": -1,
+      "answer_bool": false,
+      "answer_text": "상수 배",
+      "accepted": [
+        "상수배",
+        "상수 곱",
+        "상수곱"
+      ],
+      "explanation": "노트의 함정 예시다. $2^{2n}$ 은 $4^n$ 과 같아서 $2^n$ 의 상수 배로 볼 수 없다.",
+      "key_point_id": "k2",
+      "difficulty": "medium",
+      "pages": []
+    },
+    {
+      "type": "mcq",
+      "prompt": "다음 중 증가율이 가장 큰 것은?",
+      "choices": [
+        "$O(n^2)$",
+        "$O(n \\log n)$",
+        "$O(2^n)$",
+        "$O(\\log n)$"
+      ],
+      "answer_index": 2,
+      "answer_bool": false,
+      "answer_text": "",
+      "accepted": [],
+      "explanation": "증가율 순서는 $O(\\log n) < O(n \\log n) < O(n^2) < O(2^n)$ 이다. 따라서 $O(2^n)$ 이 가장 빨리 커진다.",
+      "key_point_id": "k2",
+      "difficulty": "easy",
+      "pages": []
+    },
+    {
+      "type": "mcq",
+      "prompt": "$\\log_2 n$ 과 $\\log_{10} n$ 의 빅오 표기에 대한 설명으로 옳은 것은?",
+      "choices": [
+        "둘 다 $O(\\log n)$ 으로 같다",
+        "$O(\\log_2 n)$ 과 $O(\\log_{10} n)$ 은 서로 다른 증가율이다",
+        "$\\log_{10} n$ 은 $\\log_2 n$ 보다 항상 빠르게 늘어난다",
+        "밑이 10 이면 $O(n)$ 이 된다"
+      ],
+      "answer_index": 0,
+      "answer_bool": false,
+      "answer_text": "",
+      "accepted": [],
+      "explanation": "$\\log_a n = \\frac{\\log_b n}{\\log_b a}$ 에서 $\\log_b a$ 는 상수이므로 빅오에서는 밑을 무시한다. 그래서 둘 다 $O(\\log n)$ 이다.",
+      "key_point_id": "k3",
+      "difficulty": "medium",
+      "pages": []
+    },
+    {
+      "type": "short",
+      "prompt": "$1 + 2 + \\cdots + n$ 에서 $n = 10$ 일 때 합은 얼마인가? (숫자로 답하기)",
+      "choices": [],
+      "answer_index": -1,
+      "answer_bool": false,
+      "answer_text": "55",
+      "accepted": [
+        "오십오"
+      ],
+      "explanation": "합 공식 $\\frac{n(n+1)}{2}$ 에 $n = 10$ 을 넣으면 $\\frac{10 \\cdot 11}{2} = 55$ 이다.",
+      "key_point_id": "k3",
+      "difficulty": "easy",
+      "pages": []
+    },
+    {
+      "type": "mcq",
+      "prompt": "다음 코드에서 `count_pairs(4)` 가 반환하는 값은?\n```python\ndef count_pairs(n):\n    cnt = 0\n    for i in range(n):\n        for j in range(i):\n            cnt += 1\n    return cnt\n```",
+      "choices": [
+        "4",
+        "6",
+        "10",
+        "16"
+      ],
+      "answer_index": 1,
+      "answer_bool": false,
+      "answer_text": "",
+      "accepted": [],
+      "explanation": "안쪽 루프는 `i` 가 0, 1, 2, 3 일 때 각각 0, 1, 2, 3 번 돈다. 합은 $0 + 1 + 2 + 3 = 6$ 이다. 바깥과 안쪽을 그냥 곱한 $4 \\times 4 = 16$ 은 틀린 답이다.",
+      "key_point_id": "k4",
+      "difficulty": "medium",
+      "pages": []
+    },
+    {
+      "type": "mcq",
+      "prompt": "다음 C 코드에서 `sum++` 은 모두 몇 번 실행되는가?\n```c\nint sum = 0;\nfor (int i = 1; i <= n; i++)\n    for (int j = 1; j <= i; j++)\n        sum++;\n```",
+      "choices": [
+        "$n$ 번",
+        "$n^2$ 번",
+        "$\\frac{n(n+1)}{2}$ 번",
+        "$2n$ 번"
+      ],
+      "answer_index": 2,
+      "answer_bool": false,
+      "answer_text": "",
+      "accepted": [],
+      "explanation": "안쪽 루프는 $i$ 번 돌고 $i$ 가 1 부터 $n$ 까지 바뀌므로 $1 + 2 + \\cdots + n = \\frac{n(n+1)}{2}$ 번이다. $O(n^2)$ 이지만 정확한 횟수는 $\\frac{n(n+1)}{2}$ 이다.",
+      "key_point_id": "k4",
+      "difficulty": "hard",
+      "pages": []
+    },
+    {
+      "type": "cloze",
+      "prompt": "안쪽 반복 범위가 바깥 반복 변수에 묶여 있으면 바깥 횟수와 안쪽 횟수를 그냥 ____ 하면 틀리고, 합을 구해야 한다.",
+      "choices": [],
+      "answer_index": -1,
+      "answer_bool": false,
+      "answer_text": "곱",
+      "accepted": [
+        "곱하",
+        "곱셈"
+      ],
+      "explanation": "바깥 루프와 안쪽 루프의 횟수를 곱하면 $n \\times n$ 이 되어 실제 횟수와 다르다. 안쪽 횟수가 바깥 변수에 따라 변하므로 $1 + 2 + \\cdots + n$ 처럼 합을 구해야 한다.",
+      "key_point_id": "k4",
+      "difficulty": "medium",
+      "pages": []
+    },
+    {
+      "type": "ox",
+      "prompt": "이진 탐색은 정렬되지 않은 배열에서도 쓸 수 있다.",
+      "choices": [],
+      "answer_index": -1,
+      "answer_bool": false,
+      "answer_text": "",
+      "accepted": [],
+      "explanation": "이진 탐색은 가운데 값과 비교해서 찾는 구간을 절반씩 줄인다. 그래서 정렬된 배열에서만 쓸 수 있고, 정렬되지 않은 배열에서는 쓸 수 없다.",
+      "key_point_id": "k5",
+      "difficulty": "easy",
+      "pages": []
+    },
+    {
+      "type": "mcq",
+      "prompt": "다음 코드에서 $n = 16$ 이고 `i` 가 1 에서 시작하면 `i *= 2;` 는 몇 번 실행되는가?\n```c\nwhile (i < n) i *= 2;\n```",
+      "choices": [
+        "4번",
+        "8번",
+        "15번",
+        "16번"
+      ],
+      "answer_index": 0,
+      "answer_bool": false,
+      "answer_text": "",
+      "accepted": [],
+      "explanation": "`i` 는 1, 2, 4, 8 로 두 배씩 커지고 16 이 되면 멈춘다. 그래서 `i *= 2;` 는 4 번 실행되며, 이것은 $\\log_2 16 = 4$ 와 같다.",
+      "key_point_id": "k5",
+      "difficulty": "medium",
+      "pages": []
+    },
+    {
+      "type": "mcq",
+      "prompt": "아래 `binary_search` 에서 가운데 값 `a[mid]` 가 찾는 값 `target` 보다 작을 때 실행되는 줄은?\n```python\ndef binary_search(a, target):\n    lo, hi = 0, len(a) - 1\n    while lo <= hi:\n        mid = (lo + hi) // 2\n        if a[mid] == target:\n            return mid\n        elif a[mid] < target:\n            lo = mid + 1\n        else:\n            hi = mid - 1\n    return -1\n```",
+      "choices": [
+        "`lo = mid + 1`",
+        "`hi = mid - 1`",
+        "`return mid`",
+        "`return -1`"
+      ],
+      "answer_index": 0,
+      "answer_bool": false,
+      "answer_text": "",
+      "accepted": [],
+      "explanation": "가운데 값이 찾는 값보다 작으면 답은 오른쪽 절반에 있으므로 `lo` 를 `mid + 1` 로 올린다. `hi = mid - 1` 은 가운데 값이 찾는 값보다 클 때 실행된다.",
+      "key_point_id": "k5",
+      "difficulty": "medium",
+      "pages": []
+    },
+    {
+      "type": "mcq",
+      "prompt": "$T(n) = 2T(n/2) + n^2$ 의 점근적 표기로 가장 알맞은 것은?",
+      "choices": [
+        "$\\Theta(n)$",
+        "$\\Theta(n \\log n)$",
+        "$\\Theta(n^2)$",
+        "$\\Theta(n^{\\log_2 3})$"
+      ],
+      "answer_index": 2,
+      "answer_bool": false,
+      "answer_text": "",
+      "accepted": [],
+      "explanation": "$c = \\log_b a = \\log_2 2 = 1$ 이고 $f(n) = n^2$ 은 $n$ 보다 다항식으로 크다. 정규 조건도 $2(n/2)^2 = \\frac{1}{2}n^2$ 이라서 만족하므로 $\\Theta(n^2)$ 이다.",
+      "key_point_id": "k6",
+      "difficulty": "hard",
+      "pages": []
+    },
+    {
+      "type": "ox",
+      "prompt": "마스터 정리는 $T(n) = T(n-1) + 1$ 같은 꼴에도 바로 쓸 수 있다.",
+      "choices": [],
+      "answer_index": -1,
+      "answer_bool": false,
+      "answer_text": "",
+      "accepted": [],
+      "explanation": "마스터 정리는 $T(n) = aT(n/b) + f(n)$ 꼴에서만 쓴다. $n-1$ 처럼 $n/b$ 가 아닌 꼴은 전개로 풀어야 한다.",
+      "key_point_id": "k6",
+      "difficulty": "medium",
+      "pages": []
+    },
+    {
+      "type": "mcq",
+      "prompt": "$T(n) = 2T(n/2) + n$ 을 $n = 2^k$ 로 두고 전개한 결과로 알맞은 것은?",
+      "choices": [
+        "$T(n) = n\\,T(1) + n\\log_2 n$",
+        "$T(n) = n\\,T(1) + n^2$",
+        "$T(n) = 2^n\\,T(1) + n$",
+        "$T(n) = n\\,T(1) + \\log_2 n$"
+      ],
+      "answer_index": 0,
+      "answer_bool": false,
+      "answer_text": "",
+      "accepted": [],
+      "explanation": "전개하면 $T(n) = 2^k T(n/2^k) + k \\cdot n$ 이고, $n = 2^k$ 이면 $k = \\log_2 n$ 이다. 따라서 $T(n) = n\\,T(1) + n\\log_2 n$ 이 되고 빅오로는 $O(n\\log n)$ 이다.",
+      "key_point_id": "k6",
+      "difficulty": "hard",
+      "pages": []
+    }
+  ]
+}

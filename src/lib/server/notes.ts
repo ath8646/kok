@@ -90,8 +90,15 @@ export const NOTE_PROMPT_MAX_CHARS = 36_000;
 
 function clip(s: unknown, n: number): string {
   const t = typeof s === 'string' ? s : '';
-  return t.length > n ? `${t.slice(0, n)}…` : t;
+  if (t.length <= n) return t;
+  const out = `${t.slice(0, n)}…`;
+  // 코드 블록 가운데서 잘렸으면 블록을 닫는다 (AI 가 뒤의 글까지 코드로 읽지 않게)
+  const fences = out.match(/^[ \t]*`{3,}/gm) ?? [];
+  return fences.length % 2 ? `${out}\n${/`{3,}/.exec(fences[fences.length - 1])![0]}` : out;
 }
+
+/** 코드 블록이 든 예시는 더 길게 (15줄쯤 되는 코드가 반쯤에서 잘리지 않게) */
+const exampleMax = (text: string) => (/^[ \t]*`{3,}/m.test(text) ? 900 : 300);
 
 /** AI 에 보낼 글: 학생의 글자 꾸미기(**굵게** 등)는 빼고 (문제·그림에 기호가 옮겨 가지 않게), 길면 자른다 */
 function clipText(s: unknown, n: number): string {
@@ -115,7 +122,9 @@ function noteJson(note: Note, scale: number): string {
     terms: note.terms.slice(0, k(40)).map(({ term, meaning }) => ({ term: clipText(term, 80), meaning: clipText(meaning, n(300)) })),
     formulas: note.formulas.slice(0, k(20)).map(({ latex, label }) => ({ latex: clip(latex, 300), label: clipText(label, 100) })),
     pitfalls: note.pitfalls.slice(0, k(20)).map(({ text, key_point_id }) => ({ text: clipText(text, n(300)), key_point_id: clip(key_point_id, 20) })),
-    examples: note.examples.slice(0, k(20)).map(({ text, key_point_id }) => ({ text: clipText(text, n(300)), key_point_id: clip(key_point_id, 20) })),
+    examples: note.examples
+      .slice(0, k(20))
+      .map(({ text, key_point_id }) => ({ text: clipText(text, n(exampleMax(text))), key_point_id: clip(key_point_id, 20) })),
   });
 }
 

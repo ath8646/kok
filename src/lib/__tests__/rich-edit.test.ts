@@ -3,7 +3,8 @@ import { hasRichMarks, parseRich, plainMathText, previewText, splitMath, stripMa
 import { continueList, insertSnippet, toggleList, toggleWrap } from '@/lib/rich-edit';
 import { moveInGroup, starredFirst, withIds } from '@/lib/note-order';
 
-const flat = (ns: Inline[]): string => ns.map((n) => (n.t === 'text' ? n.v : n.t === 'math' ? `[${n.tex}]` : `<${n.t}>${flat(n.c)}</${n.t}>`)).join('');
+const flat = (ns: Inline[]): string =>
+  ns.map((n) => (n.t === 'text' ? n.v : n.t === 'code' ? `{${n.v}}` : n.t === 'math' ? `[${n.tex}]` : `<${n.t}>${flat(n.c)}</${n.t}>`)).join('');
 
 describe('쉬운 꾸미기 읽기', () => {
   it('굵게·형광펜·빨간 글씨와 수식', () => {
@@ -41,7 +42,7 @@ describe('쉬운 꾸미기 읽기', () => {
     // PDF 제목·용어: 꾸미기만 빼고 __init__ 같은 글은 그대로
     const bare = (t: string) =>
       splitMath(t)
-        .map((p) => (p.kind === 'text' ? p.text : `$${p.tex}$`))
+        .map((p) => (p.kind === 'text' ? p.text : p.kind === 'code' ? `\`${p.text}\`` : `$${p.tex}$`))
         .join('');
     // $ 없이 쓴 수식도 수식으로: 분명한 표시(^·아래 첨자·\명령·숫자가 든 등식)가 있는 덩어리만, 괄호 짝을 맞춰
     expect(bare('곡선 y=e^{2x}과 직선 y=-2x+a, x=1로 둘러싸인 영역 (단, 1<a<e^2)')).toBe(

@@ -56,6 +56,7 @@ import {
 import { growthOfParts, keepFromCurrent, mergeFits, noteForMerge, remergeState, MERGE_OUT_TOKENS, NOTE_TOO_LONG } from '@/lib/append-merge';
 import { modelForTier, type AiTask, type UserSettings } from '@/lib/settings';
 import { planChunks, slicePdf, splitPdfBySize, splitText, PdfError } from '@/lib/pdf';
+import { isOfficeText } from '@/lib/office/names';
 import { questionsForSolve, readSolution, stepsReachAnswer } from '@/lib/figure/solution';
 import { getAccount, getAppSettings, getFeatures, charge, refundSource, type Account, type AppSettings } from './account';
 import { AiCallError, callJson, imageBlock, pdfBlock, textBlock, usageOf, type ContentPart } from './claude';
@@ -662,7 +663,8 @@ async function stepOrganize(ctx: Ctx): Promise<Partial<SourceRow>> {
     size = { kind: 'image', images: paths.length };
   } else {
     const parts = splitText(src.text_content ?? '', TEXT_CHARS_PER_CHUNK);
-    meta.ownWriting = true;
+    // 학생이 적거나 붙여 넣은 글은 표현을 지키고, 한글·워드·PPT 에서 꺼낸 글(첫 줄 '(파일: …)')은 보통 자료처럼 정리한다
+    meta.ownWriting = !isOfficeText(src.text_content);
     const text = parts[Math.min(i, parts.length - 1)] ?? '';
     size = { kind: 'text', chars: text.length };
     content.push(textBlock(wrap('material', text)));

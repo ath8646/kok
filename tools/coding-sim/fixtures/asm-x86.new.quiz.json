@@ -1,0 +1,266 @@
+{
+  "questions": [
+    {
+      "type": "mcq",
+      "prompt": "`eax` 와 `rax` 의 관계로 옳은 것은?",
+      "choices": [
+        "`eax` 는 `rax` 의 상위 32비트다",
+        "`eax` 는 `rax` 의 하위 32비트다",
+        "`eax` 는 `rax` 의 하위 8비트다",
+        "`eax` 와 `rax` 는 서로 관계없는 레지스터다"
+      ],
+      "answer_index": 1,
+      "answer_bool": false,
+      "answer_text": "",
+      "accepted": [],
+      "explanation": "`eax` 는 `rax` 의 하위 32비트이고, `al` 은 `eax` 의 하위 8비트다. 그러니 `eax` 는 `rax` 의 일부를 이름으로 가리키는 것이다.",
+      "key_point_id": "k1",
+      "difficulty": "easy",
+      "pages": []
+    },
+    {
+      "type": "ox",
+      "prompt": "`rsp` 는 스택의 맨 위를, `rbp` 는 현재 함수의 스택 프레임 기준점을 가리킨다.",
+      "choices": [],
+      "answer_index": -1,
+      "answer_bool": true,
+      "answer_text": "",
+      "accepted": [],
+      "explanation": "`rsp` 는 스택의 맨 위(가장 낮은 주소)를 가리키는 스택 포인터이고, `rbp` 는 현재 함수의 스택 프레임 기준점인 베이스 포인터다. 두 레지스터의 역할을 서로 바꿔 외우면 틀린다.",
+      "key_point_id": "k1",
+      "difficulty": "medium",
+      "pages": []
+    },
+    {
+      "type": "short",
+      "prompt": "다음에 실행할 명령의 주소를 담는 레지스터는 무엇인가?",
+      "choices": [],
+      "answer_index": -1,
+      "answer_bool": false,
+      "answer_text": "`rip`",
+      "accepted": [
+        "rip",
+        "RIP"
+      ],
+      "explanation": "`rip` 는 다음에 실행할 명령의 주소를 담는 레지스터다. `rsp` 나 `rbp` 와 역할을 헷갈리지 않도록 구분해야 한다.",
+      "key_point_id": "k1",
+      "difficulty": "medium",
+      "pages": []
+    },
+    {
+      "type": "mcq",
+      "prompt": "AT&T 명령 `movl $1, %eax` 와 같은 뜻의 Intel 명령은 무엇인가?",
+      "choices": [
+        "`mov 1, eax`",
+        "`mov eax, 1`",
+        "`movl eax, 1`",
+        "`mov $1, %eax`"
+      ],
+      "answer_index": 1,
+      "answer_bool": false,
+      "answer_text": "",
+      "accepted": [],
+      "explanation": "AT&T 는 출처가 앞에 오고, Intel 은 목적지가 앞에 온다. 그래서 `eax` 에 1 을 넣는 명령은 Intel 로 `mov eax, 1` 이다.",
+      "key_point_id": "k2",
+      "difficulty": "medium",
+      "pages": []
+    },
+    {
+      "type": "mcq",
+      "prompt": "Intel 명령 `mov eax, ebx` 를 AT&T 로 바꾼 것은?",
+      "choices": [
+        "`movl %eax, %ebx`",
+        "`movl %ebx, %eax`",
+        "`movl ebx, eax`",
+        "`movl $ebx, $eax`"
+      ],
+      "answer_index": 1,
+      "answer_bool": false,
+      "answer_text": "",
+      "accepted": [],
+      "explanation": "AT&T 는 출처가 앞에 오므로 `ebx` 가 먼저 온다. 레지스터 이름 앞에는 `%` 를 붙이고, 32비트 크기는 접미사 `l` 로 나타낸다.",
+      "key_point_id": "k2",
+      "difficulty": "medium",
+      "pages": []
+    },
+    {
+      "type": "ox",
+      "prompt": "`movq %rsp, %rbp` 처럼 레지스터 앞에 `%` 가 붙은 줄은 Intel 문법이다.",
+      "choices": [],
+      "answer_index": -1,
+      "answer_bool": false,
+      "answer_text": "",
+      "accepted": [],
+      "explanation": "AT&T 문법에서는 레지스터 이름 앞에 `%` 를 붙인다. 그래서 이 줄은 AT&T 문법이고, 같은 뜻의 Intel 명령은 `mov rbp, rsp` 다.",
+      "key_point_id": "k2",
+      "difficulty": "easy",
+      "pages": []
+    },
+    {
+      "type": "mcq",
+      "prompt": "64비트에서 `push rbp` 를 실행하면 `rsp` 는 어떻게 바뀌는가?",
+      "choices": [
+        "8 만큼 늘어난다",
+        "8 만큼 줄어든다",
+        "4 만큼 줄어든다",
+        "바뀌지 않는다"
+      ],
+      "answer_index": 1,
+      "answer_bool": false,
+      "answer_text": "",
+      "accepted": [],
+      "explanation": "`push` 는 `rsp` 를 줄인 뒤 그 자리에 값을 쓴다. 64비트에서 `push rbp` 는 `rsp` 를 8 줄이고 `rbp` 값을 그 주소에 저장한다.",
+      "key_point_id": "k3",
+      "difficulty": "medium",
+      "pages": []
+    },
+    {
+      "type": "cloze",
+      "prompt": "`call add` 는 다음 명령의 주소, 즉 반환 주소를 스택에 ____ 한 뒤 `add` 로 점프한다.",
+      "choices": [],
+      "answer_index": -1,
+      "answer_bool": false,
+      "answer_text": "`push`",
+      "accepted": [
+        "push",
+        "PUSH"
+      ],
+      "explanation": "`call` 은 반환 주소를 스택에 push 한 뒤 함수로 점프한다. 반대로 `ret` 는 스택 맨 위의 반환 주소를 pop 해서 그 자리로 돌아간다.",
+      "key_point_id": "k3",
+      "difficulty": "easy",
+      "pages": []
+    },
+    {
+      "type": "ox",
+      "prompt": "함수 안에서 `push` 한 값을 `pop` 하지 않고 `ret` 하면 엉뚱한 주소로 돌아갈 수 있다.",
+      "choices": [],
+      "answer_index": -1,
+      "answer_bool": true,
+      "answer_text": "",
+      "accepted": [],
+      "explanation": "`ret` 는 스택 맨 위의 값을 반환 주소로 꺼내 쓴다. 중간에 `push` 한 값을 `pop` 하지 않으면 맨 위에 다른 값이 남아서 `ret` 가 엉뚱한 곳으로 간다.",
+      "key_point_id": "k3",
+      "difficulty": "hard",
+      "pages": []
+    },
+    {
+      "type": "cloze",
+      "prompt": "스택 프레임을 만드는 순서는 `push rbp` → `mov rbp, rsp` → 지역 변수 → `pop rbp` → ____ 이다.",
+      "choices": [],
+      "answer_index": -1,
+      "answer_bool": false,
+      "answer_text": "`ret`",
+      "accepted": [
+        "ret",
+        "RET"
+      ],
+      "explanation": "함수는 `push rbp` 로 시작해 `mov rbp, rsp` 로 기준점을 맞추고, 끝날 때 `pop rbp` 로 원래 `rbp` 를 되돌린 뒤 `ret` 로 돌아간다. 이 순서를 바꾸면 틀린다.",
+      "key_point_id": "k4",
+      "difficulty": "medium",
+      "pages": []
+    },
+    {
+      "type": "mcq",
+      "prompt": "아래 명령에서 `-4(%rbp)` 가 가리키는 곳은 어디인가?\n```asm\n    movl    -4(%rbp), %eax\n```",
+      "choices": [
+        "`rbp` 보다 4바이트 위 칸",
+        "`rbp` 보다 4바이트 아래 칸",
+        "`rsp` 가 가리키는 스택 맨 위 칸",
+        "`eax` 레지스터 그 자체"
+      ],
+      "answer_index": 1,
+      "answer_bool": false,
+      "answer_text": "",
+      "accepted": [],
+      "explanation": "지역 변수는 `rbp` 의 음수 방향에 두고, `[rbp-4]` 는 `rbp` 보다 4바이트 아래 칸이다. 그래서 `-4` 는 `rbp` 보다 아래를 뜻한다.",
+      "key_point_id": "k4",
+      "difficulty": "hard",
+      "pages": []
+    },
+    {
+      "type": "short",
+      "prompt": "리눅스 x86-64 에서 첫 번째 정수 인자를 받는 레지스터는 무엇인가?",
+      "choices": [],
+      "answer_index": -1,
+      "answer_bool": false,
+      "answer_text": "`rdi`",
+      "accepted": [
+        "rdi",
+        "RDI"
+      ],
+      "explanation": "정수 인자는 `rdi`, `rsi`, `rdx`, `rcx`, `r8`, `r9` 순서로 받으므로 첫 번째는 `rdi` 다. 반환값은 이와 다르게 `rax` 에 넣는다.",
+      "key_point_id": "k5",
+      "difficulty": "easy",
+      "pages": []
+    },
+    {
+      "type": "cloze",
+      "prompt": "아래 코드는 `add(2, 3)` 을 부르기 전에 인자를 넣는다. 빈칸에 들어갈 레지스터는 무엇인가?\n```asm\n    movl    $3, %esi\n    movl    $2, ____\n    call    add\n```",
+      "choices": [],
+      "answer_index": -1,
+      "answer_bool": false,
+      "answer_text": "`%edi`",
+      "accepted": [
+        "%edi",
+        "edi"
+      ],
+      "explanation": "`movl $2, %edi` 가 2 를 `edi` 에 넣는다. 3 은 `esi` 에 들어가며, 첫 번째 인자는 `rdi` 의 32비트 이름인 `edi` 로 받는다.",
+      "key_point_id": "k5",
+      "difficulty": "medium",
+      "pages": []
+    },
+    {
+      "type": "short",
+      "prompt": "`gcc -O0 -S` 로 C 코드를 컴파일하면 나오는 어셈블리는 어느 문법인가?",
+      "choices": [],
+      "answer_index": -1,
+      "answer_bool": false,
+      "answer_text": "AT&T 문법",
+      "accepted": [
+        "AT&T",
+        "AT&T 문법",
+        "att"
+      ],
+      "explanation": "`gcc -O0 -S` 로 컴파일하면 AT&T 문법의 어셈블리가 나온다. AT&T 에서는 레지스터 이름 앞에 `%` 를 붙이는 것이 특징이다.",
+      "key_point_id": "k6",
+      "difficulty": "easy",
+      "pages": []
+    },
+    {
+      "type": "mcq",
+      "prompt": "같은 C 코드를 `-O2` 로 컴파일하면 어떻게 되는가?",
+      "choices": [
+        "어셈블리 모양이 거의 같다",
+        "어셈블리 모양이 크게 달라진다",
+        "어셈블리가 아예 나오지 않는다",
+        "`-O2` 는 `-O0` 과 같은 뜻의 옵션이다"
+      ],
+      "answer_index": 1,
+      "answer_bool": false,
+      "answer_text": "",
+      "accepted": [],
+      "explanation": "같은 C 코드라도 `-O2` 로 컴파일하면 어셈블리 모양이 크게 달라진다. `-O0` 의 결과를 보고 `-O2` 도 같을 거라고 생각하면 틀린다.",
+      "key_point_id": "k6",
+      "difficulty": "medium",
+      "pages": []
+    },
+    {
+      "type": "mcq",
+      "prompt": "아래 코드의 둘째 줄 `movl %eax, -4(%rbp)` 가 하는 일은 무엇인가?\n```asm\n    addl    %edx, %eax\n    movl    %eax, -4(%rbp)\n    movl    -4(%rbp), %eax\n```",
+      "choices": [
+        "`eax` 의 값을 `-4(%rbp)` 칸에 저장한다",
+        "`-4(%rbp)` 칸의 값을 `eax` 로 옮긴다",
+        "`eax` 에 `-4` 를 더한다",
+        "`ret` 로 돌아갈 주소를 저장한다"
+      ],
+      "answer_index": 0,
+      "answer_bool": false,
+      "answer_text": "",
+      "accepted": [],
+      "explanation": "AT&T 는 출처가 앞에 오므로 `movl %eax, -4(%rbp)` 는 `eax` 의 값을 `-4(%rbp)` 칸에 쓴다. 반대 방향인 `movl -4(%rbp), %eax` 와 헷갈리면 안 된다.",
+      "key_point_id": "k6",
+      "difficulty": "hard",
+      "pages": []
+    }
+  ]
+}

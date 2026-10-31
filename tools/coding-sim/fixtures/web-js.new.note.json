@@ -1,0 +1,173 @@
+{
+  "title": "2주차: HTML·CSS·JavaScript 기초",
+  "unit": "웹 프로그래밍 2주차",
+  "summary": "웹 페이지는 HTML이 구조, CSS가 모양, JavaScript가 동작을 나눠 맡고, 이 자료는 선택자와 비교 연산자, 함수, DOM 조작의 기초를 다룬다.",
+  "key_points": [
+    {
+      "id": "k1",
+      "title": "웹 페이지를 만드는 세 가지 언어",
+      "explanation": "HTML은 태그로 제목과 문단, 버튼 같은 요소의 구조와 내용을 만든다. CSS는 색과 크기, 배치를 정하고 JavaScript는 클릭 같은 동작을 맡는다.",
+      "why": "세 언어가 맡는 역할을 구분해야 어떤 문제가 어느 언어의 일인지 골라낼 수 있다.",
+      "importance": "medium",
+      "pages": []
+    },
+    {
+      "id": "k2",
+      "title": "CSS 선택자: id 와 class",
+      "explanation": "`#`은 id, `.`은 class를 뜻한다. id는 페이지에 하나만 있어야 하고, class는 여러 요소에 붙여도 된다.",
+      "why": "선택자 기호를 헷갈리면 규칙이 엉뚱한 요소에 적용되므로 시험에서 자주 확인한다.",
+      "importance": "high",
+      "pages": []
+    },
+    {
+      "id": "k3",
+      "title": "비교 연산자와 참·거짓 값",
+      "explanation": "`==`는 타입을 자동으로 바꿔서 비교하고, `===`는 타입까지 같아야 참이다. `!!value`는 값을 진짜 true 나 false 로 바꾸고, `??`는 null 이나 undefined 일 때만 기본값을 준다.",
+      "why": "시험에 가장 자주 나오는 함정이고, 실무에서도 `===`를 쓰라고 강조하셨다.",
+      "importance": "high",
+      "pages": []
+    },
+    {
+      "id": "k4",
+      "title": "함수와 템플릿 리터럴",
+      "explanation": "화살표 함수는 `function` 키워드 없이 `const add = (a, b) => a + b;`처럼 짧게 쓴다. 백틱으로 감싼 템플릿 리터럴 안의 `${ }`는 변수 값으로 바뀐다.",
+      "why": "예제 코드를 읽을 때 기본 문법이므로 함수와 문자열 표기를 알아야 한다.",
+      "importance": "medium",
+      "pages": []
+    },
+    {
+      "id": "k5",
+      "title": "DOM 조작",
+      "explanation": "`document.querySelector`는 CSS 선택자 문법으로 요소를 찾아 준다. 찾은 요소의 `textContent`나 `classList`를 바꾸면 화면이 바로 바뀐다.",
+      "why": "HTML과 CSS를 JavaScript로 연결하는 방법이라서 실습 문제로 자주 나온다.",
+      "importance": "medium",
+      "pages": []
+    }
+  ],
+  "terms": [
+    {
+      "term": "HTML",
+      "meaning": "태그로 웹 페이지의 구조와 내용을 만드는 언어다."
+    },
+    {
+      "term": "CSS",
+      "meaning": "색, 크기, 배치처럼 화면의 모양을 정하는 언어다."
+    },
+    {
+      "term": "JavaScript",
+      "meaning": "클릭에 반응하는 등 페이지의 동작을 만드는 언어다."
+    },
+    {
+      "term": "`class`",
+      "meaning": "같은 스타일을 여러 요소에 줄 때 쓰는 속성이다."
+    },
+    {
+      "term": "`id`",
+      "meaning": "페이지 안에서 한 요소만 가리키는 이름을 주는 속성이다."
+    },
+    {
+      "term": "선택자",
+      "meaning": "CSS 규칙이 적용될 요소를 고르는 문법이다."
+    },
+    {
+      "term": "`let` / `const`",
+      "meaning": "변수를 선언하는 키워드다. 바꿀 일이 없으면 `const`를 쓴다."
+    },
+    {
+      "term": "타입 변환",
+      "meaning": "비교할 때 값의 자료형을 자동으로 바꾸는 것이다."
+    },
+    {
+      "term": "`!!`",
+      "meaning": "값을 진짜 true 나 false 로 바꾸는 표기다."
+    },
+    {
+      "term": "`??`",
+      "meaning": "null 이나 undefined 일 때만 기본값을 주는 연산자다."
+    },
+    {
+      "term": "`||`",
+      "meaning": "앞 값이 거짓이면 뒤 값을 고르는 연산자로, 0 이나 빈 문자열도 거짓으로 본다."
+    },
+    {
+      "term": "정규식",
+      "meaning": "문자열이 특정 모양인지 검사하는 패턴이다."
+    },
+    {
+      "term": "화살표 함수",
+      "meaning": "`=>`로 짧게 쓰는 함수 표기다."
+    },
+    {
+      "term": "템플릿 리터럴",
+      "meaning": "백틱으로 감싸고 `${ }` 안에 값을 넣는 문자열 표기다."
+    },
+    {
+      "term": "DOM",
+      "meaning": "브라우저가 HTML 을 읽어 만든 요소의 트리로, JavaScript 가 이것을 바꾼다."
+    },
+    {
+      "term": "`querySelector`",
+      "meaning": "CSS 선택자로 DOM 요소를 찾는 메서드다."
+    },
+    {
+      "term": "`textContent`",
+      "meaning": "요소 안의 글자를 읽거나 바꾸는 속성이다."
+    },
+    {
+      "term": "`classList`",
+      "meaning": "요소의 class 목록을 다루는 속성이다."
+    }
+  ],
+  "formulas": [],
+  "pitfalls": [
+    {
+      "text": "`==`와 `===`를 같은 것으로 생각하면 안 된다. `0 == \"\"`는 참이지만 `0 === \"\"`는 거짓이다.",
+      "key_point_id": "k3"
+    },
+    {
+      "text": "`||`는 0 이나 빈 문자열도 거짓으로 보기 때문에, null 이나 undefined 일 때만 기본값을 주려면 `??`를 써야 한다.",
+      "key_point_id": "k3"
+    },
+    {
+      "text": "정규식에서 `^`와 `$`를 빼면 문자열 중간에 맞는 부분만 있어도 통과한다.",
+      "key_point_id": "k3"
+    },
+    {
+      "text": "id 와 class 를 헷갈리면 안 된다. `#`은 id, `.`은 class 이고 id 는 페이지에 하나만 있어야 한다.",
+      "key_point_id": "k2"
+    }
+  ],
+  "examples": [
+    {
+      "text": "```html\n<div class=\"box\">\n  <p id=\"msg\">안녕하세요</p>\n</div>\n```",
+      "key_point_id": "k1"
+    },
+    {
+      "text": "```css\n#app { color: red; }\n```",
+      "key_point_id": "k2"
+    },
+    {
+      "text": "```js\nconsole.log(0 == \"\");                 // true\nconsole.log(0 === \"\");                // false\nconst value = \"\";\nconsole.log(!!value);                 // false\nconst phone = /^\\d{3}-\\d{4}$/;\nconsole.log(phone.test(\"010-1234\"));  // true\n```",
+      "key_point_id": "k3"
+    },
+    {
+      "text": "```js\nconst add = (a, b) => a + b;\nconst price = null;\nconst total = price ?? 0;\nconst name = '철수';\nconsole.log(`Hello ${name}`);\nconst app = document.querySelector('#app');\napp.textContent = `합계: ${add(total, 10)}`;\n```",
+      "key_point_id": "k4"
+    }
+  ],
+  "checks": [],
+  "changes": [
+    {
+      "text": "자료의 1~5장을 핵심 포인트 다섯 개로 묶었다. 시험 전 체크 줄은 함정과 핵심 포인트로 나눴다."
+    },
+    {
+      "text": "4칸 들여쓰기로 쓰인 코드를 언어 표시가 있는 코드 블록으로 바꿨다."
+    },
+    {
+      "text": "코드 조각과 연산자 기호를 백틱으로 감쌌다. 자료의 문장은 그대로 두었다."
+    },
+    {
+      "text": "글 자료라서 pages 는 비웠다."
+    }
+  ]
+}

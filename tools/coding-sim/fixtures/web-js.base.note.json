@@ -1,0 +1,239 @@
+{
+  "title": "웹 프로그래밍 2주차: HTML·CSS·JS 기초",
+  "unit": "2주차 HTML·CSS·JS",
+  "summary": "HTML 구조와 CSS 선택자, 비교와 논리 연산, 정규식, 화살표 함수, DOM 선택을 정리한 필기다.",
+  "key_points": [
+    {
+      "id": "k1",
+      "title": "HTML 구조와 CSS 선택자",
+      "explanation": "HTML 은 구조와 내용, CSS 는 모양, JavaScript 는 동작을 맡는다. HTML 요소는 태그로 감싸고 class 속성으로 여러 요소에 같은 이름을 붙이며, CSS 선택자에서 #은 id, .은 class 를 뜻한다.",
+      "why": "세 언어의 역할과 선택자 기호를 구분해야 화면 문제를 풀 수 있다.",
+      "importance": "medium",
+      "pages": []
+    },
+    {
+      "id": "k2",
+      "title": "비교 연산자와 기본값",
+      "explanation": "== 는 타입을 자동으로 바꿔서 비교하고, === 는 타입까지 같아야 참이다. !!value 는 값을 true 나 false 로 바꾸고, ?? 는 null 이나 undefined 일 때만 기본값을 준다.",
+      "why": "== 와 === 의 차이가 시험에 나온다.",
+      "importance": "high",
+      "pages": []
+    },
+    {
+      "id": "k3",
+      "title": "정규식으로 형식 검사",
+      "explanation": "정규식은 문자열이 정해진 형식에 맞는지 검사하는 패턴이다. 숫자 세 개, 하이픈, 숫자 네 개가 처음부터 끝까지 맞는지 보려면 시작과 끝을 가리키는 기호가 있어야 한다.",
+      "why": "형식 검사 문제에서 시작·끝 기호를 빼먹는 실수가 함정이 된다.",
+      "importance": "medium",
+      "pages": []
+    },
+    {
+      "id": "k4",
+      "title": "화살표 함수와 템플릿 리터럴",
+      "explanation": "화살표 함수는 function 키워드 없이 짧게 쓴다. 백틱으로 감싼 문자열 안에 변수를 넣으면 그 값이 들어가서 따옴표를 이어 붙이는 것보다 읽기 편하다.",
+      "why": "함수와 문자열 문법은 코드를 읽고 결과를 맞히는 문제의 기본이다.",
+      "importance": "medium",
+      "pages": []
+    },
+    {
+      "id": "k5",
+      "title": "DOM 선택과 화면 바꾸기",
+      "explanation": "document.querySelector 는 CSS 선택자 문법으로 요소를 찾아 준다. 찾은 요소의 textContent 나 classList 를 바꾸면 화면이 바로 바뀐다.",
+      "why": "JavaScript 로 화면을 바꾸는 기본 방법이다.",
+      "importance": "high",
+      "pages": []
+    }
+  ],
+  "terms": [
+    {
+      "term": "HTML",
+      "meaning": "웹 페이지의 구조와 내용을 태그로 감싸 쓰는 언어."
+    },
+    {
+      "term": "CSS",
+      "meaning": "웹 페이지의 모양(색, 크기, 배치)을 정하는 언어."
+    },
+    {
+      "term": "JavaScript",
+      "meaning": "웹 페이지의 동작을 만드는 언어. 클릭하면 화면을 바꾸는 일 등을 한다."
+    },
+    {
+      "term": "태그",
+      "meaning": "요소를 감싸는 시작 태그와 끝 태그."
+    },
+    {
+      "term": "요소(element)",
+      "meaning": "태그로 감싼 HTML 부분. 제목, 문단, 버튼 등."
+    },
+    {
+      "term": "class 속성",
+      "meaning": "여러 요소에 같은 이름을 붙여 같은 스타일을 줄 때 쓰는 속성."
+    },
+    {
+      "term": "id 속성",
+      "meaning": "페이지에 하나만 있어야 하는 요소 이름."
+    },
+    {
+      "term": "선택자",
+      "meaning": "CSS 규칙을 적용할 요소를 고르는 부분."
+    },
+    {
+      "term": "let",
+      "meaning": "값을 바꿀 수 있는 변수를 선언하는 키워드."
+    },
+    {
+      "term": "const",
+      "meaning": "바꿀 일이 없는 변수를 선언하는 키워드. 기본으로 쓴다."
+    },
+    {
+      "term": "==",
+      "meaning": "타입을 자동으로 바꿔서 비교하는 연산자."
+    },
+    {
+      "term": "===",
+      "meaning": "타입까지 같아야 참이 되는 비교 연산자."
+    },
+    {
+      "term": "!!value",
+      "meaning": "값을 true 나 false 로 바꾸는 표현. 빈 문자열, 0, null, undefined 는 false 가 된다."
+    },
+    {
+      "term": "??",
+      "meaning": "null 이나 undefined 일 때만 기본값을 주는 연산자."
+    },
+    {
+      "term": "||",
+      "meaning": "앞의 값이 거짓(0, 빈 문자열 등)이면 뒤의 값을 쓰는 연산자."
+    },
+    {
+      "term": "정규식",
+      "meaning": "문자열이 정해진 형식에 맞는지 검사하는 패턴."
+    },
+    {
+      "term": "시작·끝 기호",
+      "meaning": "정규식에서 문자열의 처음과 끝을 가리키는 기호."
+    },
+    {
+      "term": "화살표 함수",
+      "meaning": "function 키워드 없이 짧게 쓰는 함수 문법."
+    },
+    {
+      "term": "템플릿 리터럴",
+      "meaning": "백틱으로 감싸고 변수를 넣을 수 있는 문자열."
+    },
+    {
+      "term": "DOM",
+      "meaning": "자바스크립트가 HTML 요소를 고르고 바꿀 수 있게 만든 페이지 구조."
+    },
+    {
+      "term": "document.querySelector",
+      "meaning": "CSS 선택자 문법으로 요소를 찾는 방법."
+    },
+    {
+      "term": "textContent",
+      "meaning": "요소의 글 내용을 읽거나 바꾸는 속성."
+    },
+    {
+      "term": "classList",
+      "meaning": "요소의 class 목록을 다루는 속성."
+    }
+  ],
+  "formulas": [],
+  "pitfalls": [
+    {
+      "text": "id 는 페이지에 하나만 있어야 하고, class 는 여러 요소에 붙일 수 있다.",
+      "key_point_id": "k1"
+    },
+    {
+      "text": "CSS 선택자에서 #은 id, .은 class 를 뜻하니 서로 바꿔 쓰지 말 것.",
+      "key_point_id": "k1"
+    },
+    {
+      "text": "== 는 타입을 자동으로 바꾸므로 0 과 빈 문자열이 같다고 나온다. 실무에서는 === 를 쓴다.",
+      "key_point_id": "k2"
+    },
+    {
+      "text": "0 도 빈 문자열도 !!value 에서는 false 가 된다. 0 을 참으로 착각하지 말 것.",
+      "key_point_id": "k2"
+    },
+    {
+      "text": "|| 는 0 이나 빈 문자열도 거짓으로 보므로, null 이나 undefined 일 때만 기본값을 주려면 ?? 를 쓴다.",
+      "key_point_id": "k2"
+    },
+    {
+      "text": "시작·끝 기호를 빼면 문자열 중간에 맞는 부분만 있어도 통과한다. 예를 들어 010-12345 도 통과한다.",
+      "key_point_id": "k3"
+    },
+    {
+      "text": "변수를 넣으려면 따옴표가 아니라 백틱으로 감싼 문자열을 써야 한다.",
+      "key_point_id": "k4"
+    },
+    {
+      "text": "querySelector 의 선택자는 CSS 와 같은 문법이라 id 는 # 을 붙여 적는다.",
+      "key_point_id": "k5"
+    }
+  ],
+  "examples": [
+    {
+      "text": "<div class=\"box\"> 처럼 class 속성으로 여러 요소에 같은 이름을 붙인다.",
+      "key_point_id": "k1"
+    },
+    {
+      "text": "#app 선택자에 글자색 red 를 준 규칙은 id 가 app 인 요소의 글자를 빨갛게 바꾼다.",
+      "key_point_id": "k1"
+    },
+    {
+      "text": "0 == '' 는 true 이고, 0 === '' 는 false 이다.",
+      "key_point_id": "k2"
+    },
+    {
+      "text": "const price = null; const total = price ?? 0; 이면 total 은 0 이 된다.",
+      "key_point_id": "k2"
+    },
+    {
+      "text": "숫자 세 개, 하이픈, 숫자 네 개 형식을 검사하면 010-1234 는 맞고 010-12345 는 틀리다.",
+      "key_point_id": "k3"
+    },
+    {
+      "text": "const add = (a, b) => a + b; 는 두 수를 더하는 화살표 함수다.",
+      "key_point_id": "k4"
+    },
+    {
+      "text": "백틱으로 감싼 문자열 안에 달러 기호와 중괄호로 name 을 넣으면 name 값인 철수가 들어간다.",
+      "key_point_id": "k4"
+    },
+    {
+      "text": "document.querySelector('#app') 으로 id 가 app 인 요소를 찾는다.",
+      "key_point_id": "k5"
+    },
+    {
+      "text": "찾은 요소의 textContent 에 글을 넣으면 화면의 글이 바뀐다.",
+      "key_point_id": "k5"
+    }
+  ],
+  "checks": [
+    {
+      "text": "예제 HTML 에는 id 가 app 인 요소가 없는데, 뒤의 document.querySelector('#app') 은 그 요소를 찾는 코드다. 예제 HTML 과 코드가 맞는지 확인할 것."
+    }
+  ],
+  "changes": [
+    {
+      "text": "제목과 단원 이름을 정했다."
+    },
+    {
+      "text": "1절과 2절을 합쳐 핵심 내용 k1 로 했다."
+    },
+    {
+      "text": "3절의 정규식 설명을 따로 떼어 핵심 내용 k3 로 했다."
+    },
+    {
+      "text": "백틱, 코드 블록, 들여쓰기, 목록 기호를 빼고 글과 예시만 남겼다."
+    },
+    {
+      "text": "중괄호, 달러 기호, 백슬래시, 시작·끝 기호가 든 CSS 규칙, 정규식, 템플릿 리터럴 예시는 글로 풀어 썼다."
+    },
+    {
+      "text": "마지막 시험 전 체크 목록은 빼고 각 내용의 함정 칸에 나눠 담았다."
+    }
+  ]
+}

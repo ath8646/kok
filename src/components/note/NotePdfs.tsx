@@ -199,7 +199,6 @@ export function NotePdfs({ noteId, noteTitle, canCreate }: { noteId: string; not
                     setRenaming(row);
                   },
                 },
-                { label: '여러 개 고르기', icon: ICONS.select, onSelect: () => startSelect(row.id) },
                 { label: '지우기', icon: ICONS.trash, onSelect: () => setConfirm([row.id]), danger: true },
               ]}
             />
@@ -353,7 +352,8 @@ function PdfRow({
       className="kok-no-callout relative"
       {...press}
       onPointerDown={(e) => {
-        if ((e.target as Element).closest('button, [role="menu"]')) return;
+        // 줄 대부분은 '보기' 단추라 단추 위에서도 꾹 누르기를 받는다 (⋮ 와 펼친 메뉴만 빼고)
+        if ((e.target as Element).closest('[aria-haspopup="menu"], [role="menu"]')) return;
         press.onPointerDown(e);
       }}
       onClickCapture={(e) => {

@@ -1,0 +1,251 @@
+{
+  "title": "데이터베이스 3주차 필기",
+  "unit": "SQL 기초, JOIN, 트랜잭션",
+  "summary": "SELECT와 LIKE, 집계와 HAVING, JOIN, NULL 처리, 트랜잭션, 키와 정규화를 예제 질의와 함께 정리한 필기다.",
+  "key_points": [
+    {
+      "id": "k1",
+      "title": "관계형 데이터베이스와 SELECT, LIKE",
+      "explanation": "데이터는 표(테이블)에 저장하고, 표의 한 줄은 레코드(튜플), 한 열은 속성이다. `SELECT` 뒤에 열, `FROM` 뒤에 테이블, `WHERE` 뒤에 조건을 쓰고, 이름 일부는 `LIKE` 로 찾으며 `%` 는 글자 여러 개, `_` 는 글자 한 개를 뜻한다.",
+      "why": "시험에 나오는 모든 질의가 이 기본 구조 위에 있기 때문이다.",
+      "importance": "medium",
+      "pages": []
+    },
+    {
+      "id": "k2",
+      "title": "집계 함수와 GROUP BY, HAVING",
+      "explanation": "`COUNT`, `SUM`, `AVG`, `MAX`, `MIN` 같은 집계 함수는 여러 행을 한 값으로 줄인다. `GROUP BY` 로 묶은 뒤 그룹에 조건을 걸 때는 `HAVING` 을 쓴다.",
+      "why": "시험에 자주 나온다고 적혀 있고, WHERE 와 HAVING 을 구분해야 하기 때문이다.",
+      "importance": "high",
+      "pages": []
+    },
+    {
+      "id": "k3",
+      "title": "JOIN",
+      "explanation": "두 테이블을 공통된 값으로 연결하는 것이 `JOIN` 이다. `enroll` 의 `cid` 와 `course` 의 `id` 가 같은 행끼리 붙고, 별칭 `e`, `c` 를 붙이면 열 앞에 테이블 이름을 길게 쓰지 않아도 된다.",
+      "why": "여러 테이블에 걸친 질의를 쓰는 기본 방법이기 때문이다.",
+      "importance": "high",
+      "pages": []
+    },
+    {
+      "id": "k4",
+      "title": "NULL 처리",
+      "explanation": "NULL 은 0 도 아니고 빈 문자열도 아니며 '값이 아직 없음'을 뜻한다. 그래서 `grade = NULL` 로 비교하면 한 줄도 안 나오고, `grade IS NULL` 이나 `grade IS NOT NULL` 로 써야 한다.",
+      "why": "`=` 로 비교하면 오류 없이 결과만 틀려서 헷갈리기 쉽기 때문이다.",
+      "importance": "high",
+      "pages": []
+    },
+    {
+      "id": "k5",
+      "title": "트랜잭션",
+      "explanation": "여러 문장을 한 덩어리로 묶어서 중간에 하나라도 실패하면 전부 되돌리는 것이 트랜잭션이다. 성공하면 `COMMIT`, 실패하면 `ROLLBACK` 을 쓰고, 원자성, 일관성, 격리성, 지속성(ACID)이 여기서 나온다.",
+      "why": "계좌 이체처럼 두 문장이 함께 성공하거나 함께 실패해야 하는 상황을 설명할 수 있어야 하기 때문이다.",
+      "importance": "medium",
+      "pages": []
+    },
+    {
+      "id": "k6",
+      "title": "기본키, 외래키와 정규화",
+      "explanation": "기본키는 행을 유일하게 구분하는 열이고, 외래키는 다른 테이블의 기본키를 참조하는 열이다. 정규화는 중복과 삽입·삭제 이상을 줄이려고 1NF, 2NF, 3NF 순서로 테이블을 나누는 과정이다.",
+      "why": "시험 전에 예제 표 하나를 1NF, 2NF, 3NF 순서로 직접 나눠 보라고 적혀 있기 때문이다.",
+      "importance": "high",
+      "pages": []
+    }
+  ],
+  "terms": [
+    {
+      "term": "관계형 데이터베이스",
+      "meaning": "데이터를 표(테이블)에 저장하는 데이터베이스."
+    },
+    {
+      "term": "테이블",
+      "meaning": "행과 열로 데이터를 저장하는 표."
+    },
+    {
+      "term": "레코드(튜플)",
+      "meaning": "표의 한 줄."
+    },
+    {
+      "term": "속성(attribute)",
+      "meaning": "표의 한 열."
+    },
+    {
+      "term": "`SELECT`",
+      "meaning": "가져올 열을 적는 절."
+    },
+    {
+      "term": "`FROM`",
+      "meaning": "테이블을 적는 절."
+    },
+    {
+      "term": "`WHERE`",
+      "meaning": "묶기 전의 행에 거는 조건을 적는 절."
+    },
+    {
+      "term": "`LIKE`",
+      "meaning": "이름 일부로 찾을 때 쓰는 비교. `%` 는 글자 여러 개, `_` 는 글자 한 개를 뜻한다."
+    },
+    {
+      "term": "집계 함수",
+      "meaning": "여러 행을 한 값으로 줄이는 `COUNT`, `SUM`, `AVG`, `MAX`, `MIN` 같은 함수."
+    },
+    {
+      "term": "`GROUP BY`",
+      "meaning": "같은 값끼리 묶는 절."
+    },
+    {
+      "term": "`HAVING`",
+      "meaning": "묶은 뒤의 그룹에 조건을 거는 절."
+    },
+    {
+      "term": "`JOIN`",
+      "meaning": "공통된 값으로 두 테이블을 연결하는 것."
+    },
+    {
+      "term": "별칭",
+      "meaning": "테이블에 붙이는 짧은 이름. 예: `enroll e`."
+    },
+    {
+      "term": "`NULL`",
+      "meaning": "값이 아직 없음을 뜻한다. 0이나 빈 문자열이 아니다."
+    },
+    {
+      "term": "unknown",
+      "meaning": "NULL 과 비교했을 때 나오는 결과. 이 결과로는 행이 나오지 않는다."
+    },
+    {
+      "term": "`COALESCE`",
+      "meaning": "NULL 을 다른 값으로 바꾸는 함수. 예: `COALESCE(grade, 0)`."
+    },
+    {
+      "term": "`IS NULL`",
+      "meaning": "NULL 인지 확인하는 조건. 예: `grade IS NULL`."
+    },
+    {
+      "term": "트랜잭션",
+      "meaning": "여러 문장을 한 덩어리로 묶어 전부 성공하거나 전부 되돌리는 단위."
+    },
+    {
+      "term": "`COMMIT`",
+      "meaning": "트랜잭션을 성공으로 확정하는 명령."
+    },
+    {
+      "term": "`ROLLBACK`",
+      "meaning": "트랜잭션을 실패로 되돌리는 명령."
+    },
+    {
+      "term": "ACID",
+      "meaning": "원자성, 일관성, 격리성, 지속성. 트랜잭션이 지켜야 하는 네 가지 성질."
+    },
+    {
+      "term": "기본키(PRIMARY KEY)",
+      "meaning": "행을 유일하게 구분하는 열."
+    },
+    {
+      "term": "외래키(FOREIGN KEY)",
+      "meaning": "다른 테이블의 기본키를 참조하는 열."
+    },
+    {
+      "term": "복합키",
+      "meaning": "두 개 이상의 열을 묶어 만든 키. 예: `(sid, cid)`."
+    },
+    {
+      "term": "정규화",
+      "meaning": "중복과 삽입·삭제 이상을 줄이려고 테이블을 나누는 과정."
+    },
+    {
+      "term": "1NF",
+      "meaning": "모든 칸은 하나의 값만 가진다. 반복되는 그룹은 행으로 풀어 쓴다."
+    },
+    {
+      "term": "2NF",
+      "meaning": "1NF 이고, 복합키의 일부에만 종속된 열을 따로 뺀다."
+    },
+    {
+      "term": "3NF",
+      "meaning": "2NF 이고, 기본키가 아닌 열끼리의 이행 종속을 없앤다."
+    },
+    {
+      "term": "이행 종속",
+      "meaning": "학번 → 학과 → 학과장처럼 기본키가 아닌 열이 다른 열을 정하는 관계."
+    }
+  ],
+  "formulas": [],
+  "pitfalls": [
+    {
+      "text": "`LIKE` 의 대소문자 구분은 DBMS마다 달라서, 시험 때 조건을 꼭 확인해야 한다.",
+      "key_point_id": "k1"
+    },
+    {
+      "text": "`WHERE` 는 묶기 전의 행을, `HAVING` 은 묶은 뒤의 그룹을 거른다. 두 절을 헷갈리면 안 된다.",
+      "key_point_id": "k2"
+    },
+    {
+      "text": "`grade = NULL` 로 비교하면 결과가 unknown 이 되어 한 줄도 안 나온다.",
+      "key_point_id": "k4"
+    },
+    {
+      "text": "`COUNT(grade)` 는 NULL 을 세지 않고, `COUNT(*)` 는 NULL 이 있는 행도 센다.",
+      "key_point_id": "k4"
+    },
+    {
+      "text": "`COMMIT` 과 `ROLLBACK` 을 거꾸로 쓰면 안 된다. 성공은 `COMMIT`, 실패는 `ROLLBACK` 이다.",
+      "key_point_id": "k5"
+    },
+    {
+      "text": "기본키와 외래키를 헷갈리면 안 된다. 외래키는 다른 테이블의 기본키를 참조한다.",
+      "key_point_id": "k6"
+    },
+    {
+      "text": "2NF 와 3NF 를 헷갈리면 안 된다. 2NF 는 복합키의 일부에 종속된 열을, 3NF 는 기본키가 아닌 열끼리의 이행 종속을 뺀다.",
+      "key_point_id": "k6"
+    }
+  ],
+  "examples": [
+    {
+      "text": "이름에 kim 이 들어간 사람을 찾는 질의다.\n```sql\nSELECT name FROM enroll WHERE name LIKE '%kim%';\n```",
+      "key_point_id": "k1"
+    },
+    {
+      "text": "CS 학과에서 같은 이름이 두 번 이상 나오는 학생을 찾는 질의다.\n```sql\nSELECT name, COUNT(*) FROM enroll WHERE dept = 'CS' GROUP BY name HAVING COUNT(*) > 1;\n```",
+      "key_point_id": "k2"
+    },
+    {
+      "text": "두 테이블을 연결하는 질의다.\n```sql\nSELECT e.name, c.title\nFROM enroll e\nJOIN course c ON e.cid = c.id;\n```",
+      "key_point_id": "k3"
+    },
+    {
+      "text": "빈 값을 0으로 바꿔 보려면 `COALESCE(grade, 0)` 을 쓴다. `COUNT(grade)` 는 NULL 을 세지 않는다.",
+      "key_point_id": "k4"
+    },
+    {
+      "text": "두 문장을 한 트랜잭션에 묶은 예다.\n```sql\nBEGIN; UPDATE enroll SET dept = 'AI' WHERE sid = 2021001; COMMIT;\n```",
+      "key_point_id": "k5"
+    },
+    {
+      "text": "예제 표 `enroll` 에서 `cid` 가 `course` 의 `id` 를 참조하므로 외래키다. 학번 → 학과 → 학과장 구조라면 학과 테이블을 분리한다.",
+      "key_point_id": "k6"
+    }
+  ],
+  "checks": [],
+  "changes": [
+    {
+      "text": "1절(기초)과 2절(SELECT, LIKE)을 합쳐 핵심 1개(k1)로 만들었다. 그래서 7개 절을 핵심 6개로 나누었다."
+    },
+    {
+      "text": "3절은 k2, 4절은 k3, 5절은 k4, 6절은 k5, 7절은 k6(기본키·외래키·정규화)으로 나누었다."
+    },
+    {
+      "text": "3절의 '★ 시험 자주 나옴' 표시는 중요도 high 로 옮겼다."
+    },
+    {
+      "text": "SQL 질의 세 덩어리와 트랜잭션 예는 원문 그대로 예시(examples)로 옮기고, 본문에는 짧게 인용만 남겼다."
+    },
+    {
+      "text": "7절 끝의 시험 전 과제(예제 표를 1NF~3NF로 나누기)는 k6의 why 에 옮겼다."
+    },
+    {
+      "text": "설명은 원문 문장을 살려 두 문장 이내로 줄였다."
+    }
+  ]
+}

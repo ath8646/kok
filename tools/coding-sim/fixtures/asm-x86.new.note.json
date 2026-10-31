@@ -1,0 +1,261 @@
+{
+  "title": "컴퓨터구조 7주차 강의 정리",
+  "unit": "x86 레지스터와 함수 호출",
+  "summary": "x86 레지스터, AT&T 와 Intel 문법, 스택과 함수 호출, C 함수의 어셈블리를 정리했다.",
+  "key_points": [
+    {
+      "id": "k1",
+      "title": "레지스터의 이름과 역할",
+      "explanation": "레지스터는 CPU 안의 아주 빠른 기억 공간이다. `eax` 는 `rax` 의 하위 32비트이고, `rsp` 는 스택의 맨 위를, `rbp` 는 함수의 기준점을 가리킨다.",
+      "why": "`eax` 와 `rax` 의 관계, `rsp` 와 `rbp` 의 역할 차이가 시험에 자주 나오기 때문이다.",
+      "importance": "high",
+      "pages": []
+    },
+    {
+      "id": "k2",
+      "title": "Intel 문법과 AT&T 문법",
+      "explanation": "같은 기계어를 Intel 문법(목적지가 앞)과 AT&T 문법(출처가 앞)으로 적을 수 있다. AT&T 에서는 레지스터 앞에 `%`, 숫자 상수 앞에 `$` 를 붙이고, 접미사 `l` 은 32비트, `q` 는 64비트를 뜻한다.",
+      "why": "줄에 있는 `$` 와 `%` 표시, 목적지의 위치로 문법을 가려내는 문제가 나오기 때문이다.",
+      "importance": "high",
+      "pages": []
+    },
+    {
+      "id": "k3",
+      "title": "스택과 push, pop, call, ret",
+      "explanation": "`push` 는 `rsp` 를 줄이고 그 자리에 값을 쓰며, `pop` 은 값을 읽고 `rsp` 를 늘린다. `call` 은 반환 주소를 push 한 뒤 점프하고, `ret` 는 그 주소를 pop 해서 돌아간다.",
+      "why": "`call` 이 push 와 jump 를, `ret` 가 pop 과 jump 를 한다는 점이 시험에 자주 나오기 때문이다.",
+      "importance": "high",
+      "pages": []
+    },
+    {
+      "id": "k4",
+      "title": "스택 프레임 만들기와 정리하기",
+      "explanation": "함수가 시작할 때 `push rbp` 로 호출한 쪽의 `rbp` 를 저장하고, `mov rbp, rsp` 로 `rbp` 를 현재 `rsp` 에 맞춘다. 지역 변수는 `rbp` 의 음수 방향에 두고, 끝날 때는 `pop rbp` 로 원래 `rbp` 를 되돌린 뒤 `ret` 로 돌아간다.",
+      "why": "스택 프레임의 순서를 빈칸으로 묻는 문제가 자주 나오기 때문이다.",
+      "importance": "high",
+      "pages": []
+    },
+    {
+      "id": "k5",
+      "title": "인자와 반환값",
+      "explanation": "리눅스 x86-64 에서 정수 인자는 `rdi`, `rsi`, `rdx`, `rcx`, `r8`, `r9` 순서로 받고, 반환값은 `rax`(또는 `eax`)에 넣는다. `rbx` 처럼 callee-saved 인 레지스터는 쓰기 전에 `push` 로 저장하고, 끝나기 전에 `pop` 으로 되돌린다.",
+      "why": "첫 번째 인자 레지스터가 `rdi` 이고 반환값이 `rax` 라는 점이 시험에 자주 나오기 때문이다.",
+      "importance": "high",
+      "pages": []
+    },
+    {
+      "id": "k6",
+      "title": "C 함수를 어셈블리로 읽기",
+      "explanation": "`gcc -O0 -S` 로 컴파일하면 AT&T 문법의 어셈블리가 나온다. 예제의 `add` 는 `edi` 의 2 와 `esi` 의 3 을 더해 `eax` 에 두고 `ret` 로 돌아가며, `main` 은 그 값을 그대로 돌려줘서 종료 코드가 5 가 된다.",
+      "why": "C 함수 하나를 어셈블리로 읽는 문제와 `-O2` 로 컴파일했을 때의 차이가 시험에 나오기 때문이다.",
+      "importance": "high",
+      "pages": []
+    }
+  ],
+  "terms": [
+    {
+      "term": "레지스터",
+      "meaning": "CPU 안에 있는 아주 빠른 기억 공간."
+    },
+    {
+      "term": "`eax`",
+      "meaning": "32비트 x86 에서 자주 쓰는 범용 레지스터. 64비트에서는 `rax` 의 하위 32비트다."
+    },
+    {
+      "term": "`rax`",
+      "meaning": "64비트 범용 레지스터. 함수의 반환값을 넣는 곳이다."
+    },
+    {
+      "term": "`al`",
+      "meaning": "`eax` 의 하위 8비트."
+    },
+    {
+      "term": "`rsp`",
+      "meaning": "스택의 맨 위(가장 낮은 주소)를 가리키는 스택 포인터."
+    },
+    {
+      "term": "`rbp`",
+      "meaning": "현재 함수의 스택 프레임 기준점인 베이스 포인터."
+    },
+    {
+      "term": "`rip`",
+      "meaning": "다음에 실행할 명령의 주소를 담는 레지스터."
+    },
+    {
+      "term": "Intel 문법",
+      "meaning": "목적지가 앞에 오는 문법."
+    },
+    {
+      "term": "AT&T 문법",
+      "meaning": "출처가 앞에 오는 문법. 레지스터 앞에 `%`, 숫자 상수 앞에 `$` 를 붙인다."
+    },
+    {
+      "term": "접미사",
+      "meaning": "명령 뒤에 붙어 크기를 나타내는 글자. `l` 은 32비트, `q` 는 64비트다."
+    },
+    {
+      "term": "스택",
+      "meaning": "함수 호출과 지역 변수를 위해 쓰는 메모리 영역. 높은 주소에서 낮은 주소 쪽으로 자란다."
+    },
+    {
+      "term": "`push`",
+      "meaning": "`rsp` 를 줄인 뒤 그 자리에 값을 쓰는 명령."
+    },
+    {
+      "term": "`pop`",
+      "meaning": "값을 읽은 뒤 `rsp` 를 늘리는 명령."
+    },
+    {
+      "term": "`call`",
+      "meaning": "반환 주소를 스택에 push 한 뒤 함수로 점프하는 명령."
+    },
+    {
+      "term": "`ret`",
+      "meaning": "스택 맨 위의 반환 주소를 pop 해서 그 자리로 돌아가는 명령."
+    },
+    {
+      "term": "반환 주소",
+      "meaning": "`call` 이 스택에 쌓아 두는 다음 명령의 주소."
+    },
+    {
+      "term": "스택 프레임",
+      "meaning": "함수가 시작할 때 만드는 스택 영역. `rbp` 를 기준점으로 쓴다."
+    },
+    {
+      "term": "지역 변수",
+      "meaning": "함수 안에서 쓰는 변수. `rbp` 에서 음수 방향에 둔다."
+    },
+    {
+      "term": "인자",
+      "meaning": "함수를 부를 때 넘기는 값. 리눅스 x86-64 에서 정수 인자는 `rdi`, `rsi`, `rdx`, `rcx`, `r8`, `r9` 순서로 받는다."
+    },
+    {
+      "term": "반환값",
+      "meaning": "함수가 돌려주는 값. `rax`(또는 `eax`)에 넣는다."
+    },
+    {
+      "term": "callee-saved 레지스터",
+      "meaning": "함수가 쓰고 나서 원래 값으로 돌려놓아야 하는 레지스터. 예: `rbx`."
+    },
+    {
+      "term": "종료 코드",
+      "meaning": "프로그램이 끝날 때 남기는 값. 예제에서는 `main` 이 돌려준 값이 된다."
+    },
+    {
+      "term": "어셈블리",
+      "meaning": "기계어를 사람이 읽을 수 있게 적은 것."
+    },
+    {
+      "term": "`-O0`",
+      "meaning": "최적화를 하지 않는 gcc 옵션. `-O2` 는 최적화를 켠 옵션이다."
+    }
+  ],
+  "formulas": [],
+  "pitfalls": [
+    {
+      "text": "`eax` 에 쓰면 `rax` 의 상위 32비트는 0 이 된다. 64비트 레지스터로 생각하면 틀린다.",
+      "key_point_id": "k1"
+    },
+    {
+      "text": "`rsp` 와 `rbp` 를 같은 것으로 보면 안 된다. `rsp` 는 스택의 맨 위, `rbp` 는 함수의 기준점이다.",
+      "key_point_id": "k1"
+    },
+    {
+      "text": "AT&T 와 Intel 을 섞어 읽으면 목적지 위치가 반대라서 값이 거꾸로 옮겨졌다고 착각하기 쉽다.",
+      "key_point_id": "k2"
+    },
+    {
+      "text": "AT&T 에서는 출처인 `%ebx` 가 맨 앞에 와야 하는데, 이것을 뒤집어 쓰는 실수가 자주 나온다.",
+      "key_point_id": "k2"
+    },
+    {
+      "text": "함수 안에서 push 한 것을 pop 하지 않거나 `rsp` 를 임의로 바꾸면 스택이 깨져서 `ret` 가 엉뚱한 주소로 간다.",
+      "key_point_id": "k3"
+    },
+    {
+      "text": "지역 변수는 `rbp` 의 음수 방향에 있다. 양수 방향으로 생각하면 틀린다.",
+      "key_point_id": "k4"
+    },
+    {
+      "text": "스택 프레임의 순서(`push rbp` → `mov rbp, rsp` → 지역 변수 → `pop rbp` → `ret`)를 바꾸면 틀린다.",
+      "key_point_id": "k4"
+    },
+    {
+      "text": "첫 번째 인자는 `rdi` 이고 반환값은 `rax` 다. 둘을 바꿔 외우면 틀린다.",
+      "key_point_id": "k5"
+    },
+    {
+      "text": "`rbx` 를 쓰고 `pop rbx` 로 되돌리지 않으면 함수를 부른 쪽이 틀린 값을 받는다.",
+      "key_point_id": "k5"
+    },
+    {
+      "text": "같은 C 코드라도 `-O2` 로 컴파일하면 어셈블리 모양이 크게 달라진다. `-O0` 의 결과와 같다고 생각하면 틀린다.",
+      "key_point_id": "k6"
+    },
+    {
+      "text": "`movl %eax, -4(%rbp)` 와 `movl -4(%rbp), %eax` 는 방향이 반대다. 앞은 `eax` 의 값을 `c` 에 저장하고, 뒤는 `c` 의 값을 `eax` 로 옮긴다.",
+      "key_point_id": "k6"
+    }
+  ],
+  "examples": [
+    {
+      "text": "Intel 의 `mov eax, 1` 은 AT&T 의 `movl $1, %eax` 로, Intel 의 `mov eax, ebx` 는 AT&T 의 `movl %ebx, %eax` 로, Intel 의 `mov rbp, rsp` 는 AT&T 의 `movq %rsp, %rbp` 로 적는다.",
+      "key_point_id": "k2"
+    },
+    {
+      "text": "`push rbp` 는 64비트에서 `rsp` 를 8 줄이고 `rbp` 값을 그 주소에 저장한다.",
+      "key_point_id": "k3"
+    },
+    {
+      "text": "`call add` 는 다음 명령의 주소, 즉 반환 주소를 스택에 push 한 뒤 `add` 로 점프한다.",
+      "key_point_id": "k3"
+    },
+    {
+      "text": "`[rbp-4]` 는 `rbp` 보다 4바이트 아래 칸이다.",
+      "key_point_id": "k4"
+    },
+    {
+      "text": "`main` 에서 `add(2, 3)` 을 부를 때 2 는 `edi` 에, 3 은 `esi` 에 들어간다.",
+      "key_point_id": "k5"
+    },
+    {
+      "text": "C 함수 add 와 main 이다.\n```c\nint add(int a, int b) {\n    int c = a + b;\n    return c;\n}\n\nint main(void) {\n    return add(2, 3);\n}\n```",
+      "key_point_id": "k6"
+    },
+    {
+      "text": "add 의 어셈블리다. 주석과 지시어는 뺐다.\n```asm\nadd:\n    pushq   %rbp\n    movq    %rsp, %rbp\n    movl    %edi, -20(%rbp)\n    movl    %esi, -24(%rbp)\n    movl    -20(%rbp), %edx\n    movl    -24(%rbp), %eax\n    addl    %edx, %eax\n    movl    %eax, -4(%rbp)\n    movl    -4(%rbp), %eax\n    popq    %rbp\n    ret\n```",
+      "key_point_id": "k6"
+    },
+    {
+      "text": "main 의 어셈블리다.\n```asm\nmain:\n    pushq   %rbp\n    movq    %rsp, %rbp\n    movl    $3, %esi\n    movl    $2, %edi\n    call    add\n    popq    %rbp\n    ret\n```",
+      "key_point_id": "k6"
+    }
+  ],
+  "checks": [],
+  "changes": [
+    {
+      "text": "제목을 '[컴퓨터구조] 7주차 강의 정리 - x86 레지스터와 함수 호출'(35자)에서 '컴퓨터구조 7주차 강의 정리'(15자)로 줄였다."
+    },
+    {
+      "text": "1절부터 8절을 핵심 여섯 개로 묶었다. 1절은 k1, 2절은 k2, 3절과 4절은 k3, 5절은 k4, 6절은 k5, 7절은 k6이다."
+    },
+    {
+      "text": "8절 '자주 하는 실수'는 함정(pitfalls)으로 옮겼고, 시험 포인트 줄의 내용은 각 핵심의 이유(why)와 함정으로 나눴다."
+    },
+    {
+      "text": "2절의 들여쓴 Intel·AT&T 대응 세 줄은 문장 예시 한 개로 바꿨다."
+    },
+    {
+      "text": "7절의 어셈블리 한 덩어리를 add 와 main 두 블록으로 나눴다. 블록마다 15줄 이내다."
+    },
+    {
+      "text": "5절의 (1)~(4) 번호 단계는 설명 두 문장으로 줄이고, 단계 순서는 함정 항목에 남겼다."
+    },
+    {
+      "text": "문장 속 레지스터 이름, 명령, 주소 표기는 백틱으로 감쌌다."
+    },
+    {
+      "text": "각 설명은 두 문장 이내로 줄였다."
+    }
+  ]
+}

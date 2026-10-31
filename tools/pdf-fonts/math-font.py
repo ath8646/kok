@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
-"""PDF 요약 정리의 수식 글꼴 두 개를 DejaVu Sans 에서 뽑는다 (src/lib/server/note-pdf.ts 가 쓴다).
+"""PDF 요약 정리의 수식 글꼴 두 개와 코드 글꼴 하나를 DejaVu 에서 뽑는다 (src/lib/server/note-pdf.ts 가 쓴다).
 
 본문 글꼴(고운돋움)·제목 글꼴(주아)에 없는 글자를 이 글꼴들로 그린다:
 - DejaVuSans-Greek.sub.woff2: 그리스 문자 (ExtraLight: 고운돋움의 가는 획과 굵기가 비슷하다)
 - DejaVuSans-Math.sub.woff2: 나머지 수식 글자 (위아래 첨자·연산 기호·화살표, Book)
+- DejaVuSansMono-Code.sub.woff2: 코드(`코드`·``` 블록)의 고정폭 글꼴 (영문·숫자·기호·줄 긋기 글자, Book). 한글은 본문 글꼴로
 
 쓰는 법: python3 tools/pdf-fonts/math-font.py [/usr/share/fonts/truetype/dejavu]
   (DejaVu Sans 2.37, https://dejavu-fonts.github.io/ · 라이선스는 src/lib/server/pdf-fonts/LICENSE-DejaVu.txt)
@@ -20,6 +21,14 @@ from fontTools.ttLib.woff2 import WOFF2FlavorData
 OUT_DIR = 'src/lib/server/pdf-fonts'
 
 GREEK = [(0x0370, 0x03FF)]
+CODE = [
+    (0x0020, 0x007E),  # 영문·숫자·기호
+    (0x00A0, 0x00FF),  # 라틴-1 (é ü ×  …)
+    (0x2018, 0x201F),  # 따옴표
+    (0x2190, 0x2193),  # ← ↑ → ↓
+    (0x2500, 0x257F),  # 줄 긋기 (tree 출력: ├── └──)
+    (0x2580, 0x259F),  # 블록 (█ ░)
+]
 MATH = [
     (0x0300, 0x036F),  # 위에 붙는 표시 (x̄ 의 막대)
     (0x0370, 0x03FF),  # 그리스 문자 (Greek 글꼴에 없는 것: ϑ)
@@ -65,6 +74,7 @@ def main() -> None:
     src = sys.argv[1] if len(sys.argv) > 1 else '/usr/share/fonts/truetype/dejavu'
     build(os.path.join(src, 'DejaVuSans-ExtraLight.ttf'), GREEK, os.path.join(OUT_DIR, 'DejaVuSans-Greek.sub.woff2'))
     build(os.path.join(src, 'DejaVuSans.ttf'), MATH, os.path.join(OUT_DIR, 'DejaVuSans-Math.sub.woff2'))
+    build(os.path.join(src, 'DejaVuSansMono.ttf'), CODE, os.path.join(OUT_DIR, 'DejaVuSansMono-Code.sub.woff2'))
 
 
 if __name__ == '__main__':

@@ -1,0 +1,154 @@
+{
+  "questions": [
+    {
+      "type": "mcq",
+      "prompt": "다음 중 스택(Stack)에 대한 설명으로 옳은 것은?",
+      "choices": [
+        "먼저 들어간 자료가 먼저 나온다",
+        "나중에 들어간 자료가 먼저 나온다",
+        "가운데 자료부터 나온다",
+        "넣는 쪽과 빼는 쪽이 항상 반대쪽 끝이다"
+      ],
+      "answer_index": 1,
+      "answer_bool": false,
+      "answer_text": "",
+      "accepted": [],
+      "explanation": "스택은 한쪽 끝에서만 넣고 빼므로 나중에 들어간 자료가 먼저 나온다(LIFO). 먼저 들어간 것이 먼저 나오는 방식은 큐(FIFO)의 특징이라 헷갈리기 쉽다.",
+      "key_point_id": "k1",
+      "difficulty": "easy",
+      "pages": []
+    },
+    {
+      "type": "cloze",
+      "prompt": "나중에 들어간 것이 먼저 나오는 ____ 구조이고, 맨 위는 top 변수가 가리킨다.",
+      "choices": [],
+      "answer_index": -1,
+      "answer_bool": false,
+      "answer_text": "LIFO",
+      "accepted": ["후입선출", "Last In First Out"],
+      "explanation": "스택은 나중에 들어간 것이 먼저 나오므로 LIFO 구조다. 맨 위 자료는 top 변수가 가리키며, 큐의 FIFO 와는 나가는 순서가 반대다.",
+      "key_point_id": "k1",
+      "difficulty": "medium",
+      "pages": []
+    },
+    {
+      "type": "ox",
+      "prompt": "stack[++top] = x 는 값 x 를 먼저 넣은 뒤에 top 을 올린다.",
+      "choices": [],
+      "answer_index": -1,
+      "answer_bool": false,
+      "answer_text": "",
+      "accepted": [],
+      "explanation": "노트의 push 는 top 을 먼저 올린 뒤 stack[++top] = x 로 넣는다. 값을 먼저 넣고 나중에 올린다는 설명은 순서가 반대라서 틀리다.",
+      "key_point_id": "k2",
+      "difficulty": "medium",
+      "pages": []
+    },
+    {
+      "type": "short",
+      "prompt": "꽉 찬 스택에 push 를 하면 생기는 상태를 무엇이라 하는가?",
+      "choices": [],
+      "answer_index": -1,
+      "answer_bool": false,
+      "answer_text": "오버플로",
+      "accepted": ["overflow", "스택 오버플로"],
+      "explanation": "노트의 용어 풀이에서 꽉 찬 스택에 push 해서 넘치는 상태를 오버플로라고 한다. 빈 스택에서 pop 하는 상태는 언더플로이며, 하면 안 되는 연산이다.",
+      "key_point_id": "k2",
+      "difficulty": "easy",
+      "pages": []
+    },
+    {
+      "type": "mcq",
+      "prompt": "빈 스택에 push(3), push(5), pop(), push(7), pop() 을 차례로 실행했다. 두 번째 pop() 이 꺼내는 값은?",
+      "choices": [
+        "3",
+        "5",
+        "7",
+        "빈 스택이라 꺼낼 수 없다"
+      ],
+      "answer_index": 2,
+      "answer_bool": false,
+      "answer_text": "",
+      "accepted": [],
+      "explanation": "push(3), push(5) 뒤 pop() 으로 5 를 꺼내면 스택에는 3 이 남는다. 이어서 push(7) 을 하면 7 이 맨 위에 와서, 두 번째 pop() 은 7 을 꺼낸다.",
+      "key_point_id": "k2",
+      "difficulty": "hard",
+      "pages": []
+    },
+    {
+      "type": "mcq",
+      "prompt": "MAX 가 8 인 원형 큐에서 rear 가 7 일 때 $rear = (rear+1) \\% MAX$ 를 계산하면 rear 는 얼마인가?",
+      "choices": [
+        "7",
+        "8",
+        "0",
+        "1"
+      ],
+      "answer_index": 2,
+      "answer_bool": false,
+      "answer_text": "",
+      "accepted": [],
+      "explanation": "원형 큐에서 다음 자리는 $(rear+1) \\% MAX$ 로 구한다. 여기서 $(7+1) \\% 8 = 0$ 이므로 rear 는 맨 앞 칸인 0 이 된다.",
+      "key_point_id": "k3",
+      "difficulty": "medium",
+      "pages": []
+    },
+    {
+      "type": "ox",
+      "prompt": "원형 큐에서 $front == rear$ 이면 큐가 비어 있다.",
+      "choices": [],
+      "answer_index": -1,
+      "answer_bool": true,
+      "answer_text": "",
+      "accepted": [],
+      "explanation": "노트의 빈 조건은 $front == rear$ 이다. 가득 찬 조건은 $(rear+1) \\% MAX == front$ 로 따로 있으니 두 식을 구분해야 한다.",
+      "key_point_id": "k3",
+      "difficulty": "easy",
+      "pages": []
+    },
+    {
+      "type": "short",
+      "prompt": "배열의 끝과 처음을 이어서 빈칸을 다시 쓰는 큐를 무엇이라 하는가?",
+      "choices": [],
+      "answer_index": -1,
+      "answer_bool": false,
+      "answer_text": "원형 큐",
+      "accepted": ["원형큐", "환형 큐", "circular queue"],
+      "explanation": "노트에서 원형 큐는 배열의 끝을 처음과 이어 빈칸을 다시 쓰는 큐로 정의한다. rear 를 $(rear+1) \\% MAX$ 로 옮기는 것이 그 방법이다.",
+      "key_point_id": "k3",
+      "difficulty": "medium",
+      "pages": []
+    },
+    {
+      "type": "cloze",
+      "prompt": "연결 리스트는 자료를 연속된 칸에 두지 않고, 노드마다 다음 노드의 주소(____)를 가진다.",
+      "choices": [],
+      "answer_index": -1,
+      "answer_bool": false,
+      "answer_text": "next",
+      "accepted": ["next 포인터", "next 칸"],
+      "explanation": "노트에서 노드는 자료와 다음 노드의 주소를 담는다. 그 주소를 담는 칸의 이름이 next 이고, 파이썬에서는 마지막 노드의 next 에 None 을 넣는다.",
+      "key_point_id": "k4",
+      "difficulty": "medium",
+      "pages": []
+    },
+    {
+      "type": "mcq",
+      "prompt": "배열과 연결 리스트에서 중간에 원소를 넣는 시간을 비교한 설명으로 옳은 것은?",
+      "choices": [
+        "배열은 바로 넣어서 $O(1)$ 이고, 리스트는 원소를 밀어야 해서 $O(n)$ 이다",
+        "두 구조 모두 원소를 밀어야 해서 $O(n)$ 이다",
+        "배열은 원소를 밀어야 해서 $O(n)$ 이고, 리스트는 위치를 알면 $O(1)$ 이다",
+        "두 구조 모두 위치를 알면 $O(1)$ 이다"
+      ],
+      "answer_index": 2,
+      "answer_bool": false,
+      "answer_text": "",
+      "accepted": [],
+      "explanation": "배열은 중간에 넣으려면 원소를 한 칸씩 밀어야 해서 $O(n)$ 이다. 연결 리스트는 위치를 알면 새 노드와 앞 노드의 next 만 바꾸면 되어 $O(1)$ 이다.",
+      "key_point_id": "k5",
+      "difficulty": "hard",
+      "pages": []
+    }
+  ]
+}

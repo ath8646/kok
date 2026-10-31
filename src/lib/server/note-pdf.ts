@@ -54,6 +54,9 @@ type Palette = {
   line: RGB;
   lineAlpha: number;
   mark: RGB;
+  /** 코드 바탕 (글 속 코드·코드 블록) */
+  code: RGB;
+  codeAlpha: number;
   branches: RGB[];
 };
 
@@ -76,6 +79,8 @@ const PALETTES: Record<PdfTheme, Palette> = {
     line: hex('#ffffff'),
     lineAlpha: 0.7,
     mark: hex('#ffd60a'),
+    code: hex('#ffffff'),
+    codeAlpha: 0.09,
     branches: ['#8fc1ff', '#ffc27a', '#7fe0a4', '#b9abf7', '#ff8fb1', '#d7a2ff', '#7fdcea', '#d9c3a3'].map(hex),
   },
   light: {
@@ -94,13 +99,23 @@ const PALETTES: Record<PdfTheme, Palette> = {
     line: hex('#1c1c1e'),
     lineAlpha: 0.55,
     mark: hex('#ffe766'),
+    code: hex('#1c1c1e'),
+    codeAlpha: 0.06,
     branches: ['#0361cd', '#985700', '#03772b', '#5856d6', '#c50539', '#9536c2', '#067182', '#7f623d'].map(hex),
   },
 };
 
 // ------------------------------------------------------------- 글꼴
-/** 본문·제목 글꼴, 그다음 차례로 찾는 수식 글꼴들 */
-const FONT_FILES = ['GowunDodum-Regular.sub.woff2', 'Jua-Regular.sub.woff2', 'DejaVuSans-Greek.sub.woff2', 'DejaVuSans-Math.sub.woff2'];
+/** 본문·제목 글꼴, 그다음 차례로 찾는 수식 글꼴들, 마지막은 코드 글꼴(고정폭: 코드 조각을 그리고 다른 글꼴에 없는 줄 긋기 글자도) */
+const FONT_FILES = [
+  'GowunDodum-Regular.sub.woff2',
+  'Jua-Regular.sub.woff2',
+  'DejaVuSans-Greek.sub.woff2',
+  'DejaVuSans-Math.sub.woff2',
+  'DejaVuSansMono-Code.sub.woff2',
+];
+/** 코드 글자 크기 (본문 크기에 곱한다: 고정폭 글꼴은 한글 본문 옆에서 커 보여서) */
+const CODE_SCALE = 0.88;
 let fontCache: Promise<Uint8Array[]> | null = null;
 function loadFonts() {
   fontCache ??= (async () => {
@@ -112,19 +127,33 @@ function loadFonts() {
 /** 글자 모양 재기용 (위에 붙는 표시 자리): 필요할 때만 읽는다 */
 const kitCache: KitFont[] = [];
 
-type Run = { text: string; b?: boolean; mark?: boolean; red?: boolean };
+type Run = { text: string; b?: boolean; mark?: boolean; red?: boolean; code?: boolean; block?: boolean };
 
-/** 꾸민 글 → 줄마다 조각 (목록 표시는 글머리로, 수식은 읽을 수 있는 글자로) */
+/** 꾸민 글 → 줄마다 조각 (목록 표시는 글머리로, 수식은 읽을 수 있는 글자로, 코드는 고정폭 글꼴로) */
 function richLines(input: string): Run[][] {
   const walk = (ns: Inline[], style: Omit<Run, 'text'>, out: Run[]) => {
     for (const n of ns) {
       if (n.t === 'text') out.push({ ...style, text: n.v });
+      else if (n.t === 'code') out.push({ ...style, code: true, text: n.v });
       else if (n.t === 'math') out.push({ ...style, text: texToText(n.tex) });
       else walk(n.c, { ...style, [n.t === 'b' ? 'b' : n.t === 'mark' ? 'mark' : 'red']: true }, out);
     }
   };
   return parseRich(input ?? '').map((l) => {
     const out: Run[] = [];
+    if (l.code) {
+      // 코드 블록 줄: 들여쓰기 그대로 (탭은 빈칸 넷, 빈 줄도 한 줄)
+      out.push({
+        code: true,
+        block: true,
+        text:
+          l.c
+            .map((n) => (n.t === 'code' ? n.v : ''))
+            .join('')
+            .replace(/\t/g, '    ') || ' ',
+      });
+      return out;
+    }
     if (l.list === 'bullet') out.push({ text: '• ' });
     else if (l.list === 'number') out.push({ text: `${l.n}. ` });
     walk(l.c, {}, out);
@@ -140,7 +169,7 @@ class Sheet {
   page!: PDFPage;
   /** 위에서부터 잰 지금 자리 */
   y = MARGIN.top;
-  private chars: { body: Set<number>; head: Set<number> };
+  private chars: { body: Set<number>; head: Set<number>; mono: Set<number> };
   /** 본문 글꼴에 없는 글자를 차례로 찾는 글꼴 (그리스 문자 → 수식 기호) */
   private extra: Array<{ font: PDFFont; chars: Set<number> }>;
 
@@ -152,8 +181,10 @@ class Sheet {
     extra: PDFFont[],
     /** 글자 모양 (위에 붙는 표시를 앞 글자 위에 놓을 때) */
     private kit: (font: PDFFont) => KitFont | null,
+    /** 코드 글꼴 (extra 에도 들어 있다: 다른 글꼴에 없는 글자를 찾을 때) */
+    readonly mono: PDFFont,
   ) {
-    this.chars = { body: new Set(body.getCharacterSet()), head: new Set(head.getCharacterSet()) };
+    this.chars = { body: new Set(body.getCharacterSet()), head: new Set(head.getCharacterSet()), mono: new Set(mono.getCharacterSet()) };
     this.extra = extra.map((font) => ({ font, chars: new Set(font.getCharacterSet()) }));
     this.newPage();
   }
@@ -172,13 +203,13 @@ class Sheet {
     return out;
   }
 
-  /** 글을 글꼴이 같은 조각으로: 고른 글꼴 → 본문 글꼴 → 수식 글꼴들. 위에 붙는 표시(x̄ 의 막대)는 따로 */
+  /** 글을 글꼴이 같은 조각으로: 고른 글꼴 → 본문 글꼴 → 수식 글꼴들 → 코드 글꼴. 위에 붙는 표시(x̄ 의 막대)는 따로 */
   pieces(text: string, prefer: PDFFont = this.body): Array<{ text: string; font: PDFFont; mark: boolean }> {
     const out: Array<{ text: string; font: PDFFont; mark: boolean }> = [];
+    const own = prefer === this.head ? this.chars.head : prefer === this.mono ? this.chars.mono : null;
     for (const ch of text) {
       const cp = ch.codePointAt(0) ?? 0;
-      const head = prefer === this.head && this.chars.head.has(cp);
-      const font = head ? this.head : this.chars.body.has(cp) ? this.body : (this.extra.find((f) => f.chars.has(cp))?.font ?? this.body);
+      const font = own?.has(cp) ? prefer : this.chars.body.has(cp) ? this.body : (this.extra.find((f) => f.chars.has(cp))?.font ?? this.body);
       const mark = /\p{Mn}/u.test(ch);
       const last = out[out.length - 1];
       if (!mark && last && !last.mark && last.font === font) last.text += ch;
@@ -251,13 +282,30 @@ class Sheet {
    * 글을 너비에 맞게 줄로 나눈다: 빈칸에서 끊고, 한 낱말이 너무 길면 글자에서 끊는다. 줄마다 [시작, 끝) 글자 위치.
    * 줄을 끊은 빈칸은 어느 줄에도 들어가지 않는다
    */
-  wrapRanges(text: string, size: number, width: number, font: PDFFont = this.body): Array<[number, number]> {
+  wrapRanges(
+    text: string,
+    size: number,
+    width: number,
+    font: PDFFont = this.body,
+    /** 글자마다 글꼴·크기가 다르면 (코드 조각) */
+    perChar?: Array<{ font: PDFFont; size: number }>,
+  ): Array<[number, number]> {
     const chars = Array.from(text);
     const out: Array<[number, number]> = [];
     let start = 0;
     let lastSpace = -1;
     let i = 0;
-    const measure = (a: number, b: number) => this.width(chars.slice(a, b).join(''), size, font);
+    const measure = (a: number, b: number) => {
+      if (!perChar) return this.width(chars.slice(a, b).join(''), size, font);
+      let w = 0;
+      let from = a;
+      for (let k = a + 1; k <= b; k++) {
+        if (k < b && perChar[k].font === perChar[from].font && perChar[k].size === perChar[from].size) continue;
+        w += this.width(chars.slice(from, k).join(''), perChar[from].size, perChar[from].font);
+        from = k;
+      }
+      return w;
+    };
     while (i < chars.length) {
       const ch = chars[i];
       if (ch === '\n') {
@@ -311,12 +359,20 @@ class Sheet {
     const lh = o.line ?? LINE;
     const color = o.color ?? this.p.text;
     let drawn = 0;
+    const codeSize = size * CODE_SCALE;
     for (const runs of lines) {
       const cleaned = runs.map((r) => ({ ...r, chars: Array.from(this.clean(r.text)) }));
       const full = cleaned.map((r) => r.chars.join('')).join('');
-      const ranges = this.wrapRanges(full, size, width);
+      const hasCode = cleaned.some((r) => r.code);
+      const perChar = hasCode
+        ? cleaned.flatMap((r) => r.chars.map(() => (r.code ? { font: this.mono, size: codeSize } : { font: this.body, size })))
+        : undefined;
+      const block = runs.length === 1 && runs[0].block === true;
+      const ranges = this.wrapRanges(full, size, width, this.body, perChar);
       ranges.forEach(([start, end], li) => {
         this.need(lh);
+        // 코드 블록 줄은 너비 전체에 옅은 바탕 (이어진 줄은 한 덩어리로 보인다)
+        if (block) this.page.drawRectangle({ x: x - 5, y: this.py(this.y, lh), width: width + 10, height: lh, color: this.p.code, opacity: this.p.codeAlpha });
         let cx = x + (li > 0 ? (o.indent ?? 0) : 0);
         let at = 0;
         for (const r of cleaned) {
@@ -327,8 +383,13 @@ class Sheet {
           const b = Math.min(re, end);
           if (b <= a) continue;
           const piece = r.chars.slice(a - rs, b - rs).join('');
-          const w = this.width(piece, size);
+          const rsize = r.code ? codeSize : size;
+          const font = r.code ? this.mono : this.body;
+          const w = this.width(piece, rsize, font);
           const baseline = this.py(this.y + size * 0.86);
+          // 글 속 코드는 글자 뒤에 옅은 둥근 바탕
+          if (r.code && !block && piece.trim())
+            this.roundRect(cx - 1.5, this.y - 0.5, w + 3, size * 1.18, 2.5, { fill: this.p.code, opacity: Math.min(1, this.p.codeAlpha * 1.8) });
           if (r.mark)
             this.page.drawRectangle({
               x: cx - 1,
@@ -338,7 +399,7 @@ class Sheet {
               color: this.p.mark,
               opacity: this.p === PALETTES.dark ? 0.28 : 0.55,
             });
-          this.draw(piece, cx, baseline, size, r.red ? this.p.pink : color, { bold: r.b });
+          this.draw(piece, cx, baseline, rsize, r.red ? this.p.pink : color, { bold: r.b, font: r.code ? this.mono : undefined });
           cx += w;
         }
         this.y += lh;
@@ -646,12 +707,13 @@ export async function buildNotePdf(input: NotePdfInput): Promise<{ bytes: Uint8A
   }
   const embedded = await Promise.all(fonts.map((f) => doc.embedFont(f, { subset: true })));
   const [body, head, ...extra] = embedded;
+  const mono = embedded[FONT_FILES.length - 1];
   const kit = (font: PDFFont) => {
     const i = embedded.indexOf(font);
     return i < 0 ? null : (kitCache[i] ??= fontkit.create(fonts[i]));
   };
   const p = PALETTES[input.theme];
-  const s = new Sheet(doc, p, body, head, extra, kit);
+  const s = new Sheet(doc, p, body, head, extra, kit, mono);
   const note = input.note;
   const date = input.date.toLocaleDateString('ko-KR', { year: 'numeric', month: 'long', day: 'numeric', timeZone: 'Asia/Seoul' });
   // 단원은 학생이 고른 것만 (자료 행의 단원)

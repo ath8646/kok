@@ -1,0 +1,297 @@
+{
+  "title": "네트워크프로그래밍 4주차 강의 정리",
+  "unit": "소켓과 TCP 연결",
+  "summary": "소켓과 IP 주소, TCP 3-way handshake, C 소켓 API 서버와 파이썬 클라이언트, netstat 확인 방법을 정리했다.",
+  "key_points": [
+    {
+      "id": "k1",
+      "title": "소켓과 IP 주소·포트",
+      "explanation": "소켓은 프로그램이 네트워크로 데이터를 주고받는 끝점이고, 파일처럼 정수 번호로 다루며 IP 주소와 포트 번호의 짝으로 구분된다. 포트 번호는 16비트 값이라 0~65535 사이이고, 0~1023 은 잘 알려진 포트다.",
+      "why": "소켓을 IP 주소와 포트의 짝으로 보는 기본 개념이 여러 문제의 출발점이기 때문이다.",
+      "importance": "medium",
+      "pages": []
+    },
+    {
+      "id": "k2",
+      "title": "IP 주소와 서브넷",
+      "explanation": "`192.168.0.1/24` 에서 /24 는 앞의 24비트가 네트워크 부분이라는 뜻이다. 호스트 부분을 모두 0 으로 두면 네트워크 주소, 모두 1 로 두면 브로드캐스트 주소가 된다.",
+      "why": "시험에 자주 나온다고 적힌 네트워크 주소와 브로드캐스트 주소 계산의 기본이기 때문이다.",
+      "importance": "high",
+      "pages": []
+    },
+    {
+      "id": "k3",
+      "title": "TCP와 UDP",
+      "explanation": "TCP 는 연결형이라 데이터의 순서와 도착을 보장하고, UDP 는 비연결형이라 빠르지만 도착을 보장하지 않는다. 소켓 타입은 `SOCK_STREAM` 이 TCP, `SOCK_DGRAM` 이 UDP 다.",
+      "why": "시험에 자주 나온다고 적힌 TCP 의 바이트 스트림 성질을 단답으로 묻는 문제가 나오기 때문이다.",
+      "importance": "high",
+      "pages": []
+    },
+    {
+      "id": "k4",
+      "title": "TCP 3-way handshake",
+      "explanation": "TCP 연결은 SYN, SYN+ACK, ACK 세 메시지로 만든다. 서버의 확인 번호는 $x+1$, 클라이언트의 확인 번호는 $y+1$ 이다.",
+      "why": "연결이 어떻게 만들어지는지와 순서 번호 규칙을 묻는 문제의 핵심이기 때문이다.",
+      "importance": "high",
+      "pages": []
+    },
+    {
+      "id": "k5",
+      "title": "C 소켓 API 서버와 파이썬 클라이언트",
+      "explanation": "서버는 `socket`, `bind`, `listen`, `accept` 순서로 만들고, `accept` 가 돌려주는 새 소켓으로 대화한다. 파이썬에서 `connect` 를 부르면 3-way handshake 가 일어난다.",
+      "why": "시험 포인트에 서버를 만드는 순서와 listen 과 accept 의 차이가 적혀 있기 때문이다.",
+      "importance": "high",
+      "pages": []
+    },
+    {
+      "id": "k6",
+      "title": "netstat 로 상태 읽기와 자주 하는 실수",
+      "explanation": "`netstat -an | grep 8080` 으로 보면 LISTEN 은 accept 를 기다리는 소켓, ESTABLISHED 는 연결된 소켓이다. 자주 하는 실수는 `close` 를 빼먹어 자원이 새는 것이고, `bind` 가 실패하면 `SO_REUSEADDR` 를 켤 수 있다.",
+      "why": "시험 포인트에 netstat 상태 읽기가 있고, 실습에서 연결 상태를 확인하는 방법이기 때문이다.",
+      "importance": "medium",
+      "pages": []
+    }
+  ],
+  "terms": [
+    {
+      "term": "소켓(socket)",
+      "meaning": "네트워크로 데이터를 주고받는 끝점. 파일처럼 정수 번호로 다룬다."
+    },
+    {
+      "term": "파일 디스크립터",
+      "meaning": "프로세스가 연 파일이나 소켓을 가리키는 정수 번호."
+    },
+    {
+      "term": "IP 주소",
+      "meaning": "네트워크에서 호스트를 구분하는 주소. 네트워크 부분과 호스트 부분으로 나뉜다."
+    },
+    {
+      "term": "포트 번호",
+      "meaning": "같은 IP 안에서 프로그램을 구분하는 16비트 값. 0~65535 사이다."
+    },
+    {
+      "term": "잘 알려진 포트(well-known port)",
+      "meaning": "0~1023 번 포트. 웹은 HTTP 80, HTTPS 443 을 쓴다."
+    },
+    {
+      "term": "서브넷 마스크",
+      "meaning": "IP 주소에서 네트워크 부분을 가리는 값. 예: 255.255.255.0."
+    },
+    {
+      "term": "`/24`",
+      "meaning": "앞의 24비트가 네트워크 부분이라는 뜻."
+    },
+    {
+      "term": "네트워크 주소",
+      "meaning": "호스트 부분을 모두 0 으로 둔 주소. 예: 192.168.0.0."
+    },
+    {
+      "term": "브로드캐스트 주소",
+      "meaning": "호스트 부분을 모두 1 로 둔 주소. 예: 192.168.0.255."
+    },
+    {
+      "term": "TCP",
+      "meaning": "연결형 프로토콜. 순서와 도착을 보장하고 잃어버리면 다시 보낸다."
+    },
+    {
+      "term": "UDP",
+      "meaning": "비연결형 프로토콜. 빠르지만 도착을 보장하지 않는다."
+    },
+    {
+      "term": "연결형(connection-oriented)",
+      "meaning": "데이터를 보내기 전에 연결을 먼저 만드는 방식."
+    },
+    {
+      "term": "`SOCK_STREAM`",
+      "meaning": "TCP 를 뜻하는 소켓 타입."
+    },
+    {
+      "term": "`SOCK_DGRAM`",
+      "meaning": "UDP 를 뜻하는 소켓 타입."
+    },
+    {
+      "term": "바이트 스트림",
+      "meaning": "TCP 가 주는 연속된 바이트 흐름. 메시지 경계는 지키지 않는다."
+    },
+    {
+      "term": "세그먼트",
+      "meaning": "TCP 가 주고받는 데이터 단위. 플래그와 순서 번호를 싣는다."
+    },
+    {
+      "term": "플래그(SYN, ACK)",
+      "meaning": "세그먼트의 역할을 표시하는 값. SYN 은 연결 요청, ACK 는 확인이다."
+    },
+    {
+      "term": "초기 순서 번호",
+      "meaning": "연결을 만들 때 정하는 처음 순서 번호. 그림에서는 x, y 로 표시한다."
+    },
+    {
+      "term": "확인 번호",
+      "meaning": "상대에게 받았다고 알려 주는 번호. 순서 번호에 1을 더한 값이다."
+    },
+    {
+      "term": "3-way handshake",
+      "meaning": "SYN, SYN+ACK, ACK 세 번으로 TCP 연결을 만드는 과정."
+    },
+    {
+      "term": "SYN flood",
+      "meaning": "SYN 만 대량으로 보내 서버의 대기 공간을 채우는 공격."
+    },
+    {
+      "term": "`socket()`",
+      "meaning": "소켓을 만드는 함수. 예: `socket(AF_INET, SOCK_STREAM, 0)`."
+    },
+    {
+      "term": "`bind`",
+      "meaning": "IP 주소와 포트를 소켓에 묶는 함수."
+    },
+    {
+      "term": "`listen`",
+      "meaning": "연결 요청을 받을 준비를 하는 함수."
+    },
+    {
+      "term": "`accept`",
+      "meaning": "대기 중인 연결 하나를 꺼내 새 소켓 번호를 돌려주는 함수."
+    },
+    {
+      "term": "backlog",
+      "meaning": "연결 대기 큐의 길이. `listen` 의 두 번째 인자다."
+    },
+    {
+      "term": "`listen_fd`",
+      "meaning": "연결 요청을 기다리는 듣는 소켓의 번호."
+    },
+    {
+      "term": "`conn_fd`",
+      "meaning": "accept 가 돌려준 소켓 번호. 실제로 대화하는 소켓이다."
+    },
+    {
+      "term": "`htons`",
+      "meaning": "포트 번호를 네트워크 바이트 순서로 바꾸는 함수."
+    },
+    {
+      "term": "블로킹",
+      "meaning": "연결이 올 때까지 호출한 쪽이 멈춰 있는 것. 예: accept."
+    },
+    {
+      "term": "`recv`",
+      "meaning": "소켓에서 데이터를 읽는 함수. 인자는 한 번에 읽을 최대 바이트 수다."
+    },
+    {
+      "term": "`netstat`",
+      "meaning": "네트워크 연결과 소켓 상태를 보는 명령. `-a` 는 모든 소켓, `-n` 은 숫자로 보기."
+    },
+    {
+      "term": "LISTEN",
+      "meaning": "accept 를 기다리는 듣기 상태."
+    },
+    {
+      "term": "ESTABLISHED",
+      "meaning": "연결이 맺어진 상태."
+    },
+    {
+      "term": "`SO_REUSEADDR`",
+      "meaning": "`setsockopt` 로 켜는 옵션. 재시작을 쉽게 한다."
+    }
+  ],
+  "formulas": [
+    {
+      "latex": "x+1",
+      "label": "서버의 SYN+ACK 확인 번호"
+    },
+    {
+      "latex": "y+1",
+      "label": "클라이언트의 ACK 확인 번호"
+    }
+  ],
+  "pitfalls": [
+    {
+      "text": "소켓을 포트 번호만으로 구분한다고 생각하면 틀린다. 소켓은 IP 주소와 포트 번호의 짝으로 구분된다.",
+      "key_point_id": "k1"
+    },
+    {
+      "text": "네트워크 주소(호스트 부분 모두 0)와 브로드캐스트 주소(호스트 부분 모두 1)를 거꾸로 답하면 안 된다.",
+      "key_point_id": "k2"
+    },
+    {
+      "text": "TCP 가 메시지 경계를 지킨다고 생각하면 틀린다. TCP 는 바이트 스트림이다.",
+      "key_point_id": "k3"
+    },
+    {
+      "text": "SYN 은 데이터가 없으니 순서 번호를 차지하지 않는다고 생각하면 틀린다. 데이터가 없어도 하나를 차지한다.",
+      "key_point_id": "k4"
+    },
+    {
+      "text": "`listen` 이 연결을 받는다고 생각하면 틀린다. 연결을 꺼내는 것은 `accept` 다.",
+      "key_point_id": "k5"
+    },
+    {
+      "text": "`htons` 를 빼먹으면 엉뚱한 포트가 열린다.",
+      "key_point_id": "k5"
+    },
+    {
+      "text": "`recv` 가 요청한 만큼을 항상 다 돌려준다고 보장하지 않는다.",
+      "key_point_id": "k5"
+    },
+    {
+      "text": "LISTEN 과 ESTABLISHED 를 헷갈리면 안 된다. LISTEN 은 accept 를 기다리는 소켓이다.",
+      "key_point_id": "k6"
+    }
+  ],
+  "examples": [
+    {
+      "text": "주소 `192.168.0.1/24` 의 네트워크 주소는 192.168.0.0, 브로드캐스트 주소는 192.168.0.255 다.",
+      "key_point_id": "k2"
+    },
+    {
+      "text": "클라이언트가 x 로 SYN 을 보내면, 서버는 SYN+ACK 에 확인 번호 $x+1$ 을 실어 보낸다.",
+      "key_point_id": "k4"
+    },
+    {
+      "text": "서버를 만드는 C 코드다.\n```c\nint listen_fd = socket(AF_INET, SOCK_STREAM, 0);\nstruct sockaddr_in addr;\nmemset(&addr, 0, sizeof(addr));\naddr.sin_family = AF_INET;\naddr.sin_port = htons(8080);\naddr.sin_addr.s_addr = htonl(INADDR_ANY);\nbind(listen_fd, (struct sockaddr *)&addr, sizeof(addr));\nlisten(listen_fd, 5);\nint conn_fd = accept(listen_fd, NULL, NULL);\nwrite(conn_fd, \"hi\\n\", 3);\nclose(conn_fd);\n```",
+      "key_point_id": "k5"
+    },
+    {
+      "text": "클라이언트를 만드는 파이썬 코드다.\n```python\nimport socket\n\nwith socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:\n    s.connect((\"127.0.0.1\", 8080))\n    s.sendall(b\"hello server\\n\")\n    reply = s.recv(1024)\n    print(reply.decode())\n```",
+      "key_point_id": "k5"
+    },
+    {
+      "text": "포트의 연결 상태를 보는 명령과 출력이다.\n```bash\n$ netstat -an | grep 8080\ntcp  0  0  0.0.0.0:8080    0.0.0.0:*         LISTEN\ntcp  0  0  127.0.0.1:8080  127.0.0.1:52314  ESTABLISHED\n```",
+      "key_point_id": "k6"
+    }
+  ],
+  "checks": [
+    {
+      "text": "원문은 같은 IP 와 포트를 두 프로그램이 동시에 열 수 없다고 적는다. `SO_REUSEPORT` 같은 옵션이 있으면 예외가 있으니 조건을 붙여 확인할 것."
+    },
+    {
+      "text": "원문은 bind 실패(Address already in use)를 이전 서버가 포트를 붙잡고 있는 경우로 설명한다. `TIME_WAIT` 상태의 연결이 남아 있어도 같은 오류가 날 수 있으니 확인할 것."
+    }
+  ],
+  "changes": [
+    {
+      "text": "1절(소켓)과 3절(포트)을 합쳐 핵심 1개(k1)로 만들었다."
+    },
+    {
+      "text": "2절(서브넷)은 k2로, 4절(TCP와 UDP)은 k3로, 5절(3-way handshake)은 k4로 나누었다."
+    },
+    {
+      "text": "6절과 7절(서버와 파이썬 클라이언트)은 k5로, 8절과 9절(netstat, 자주 하는 실수)은 k6로 묶었다."
+    },
+    {
+      "text": "시험 포인트 문장은 각 핵심의 이유(why)와 함정(pitfalls)으로 나눠 옮겼다."
+    },
+    {
+      "text": "6절의 들여쓰기 네 칸으로 된 C 블록은 ```c 울타리 블록으로 바꿨다(코드 줄은 같다)."
+    },
+    {
+      "text": "코드 세 덩어리(C 서버, 파이썬 클라이언트, netstat 출력)는 원문 그대로 예시(examples)로 옮기고, 본문에는 짧게 인용만 남겼다."
+    },
+    {
+      "text": "3-way handshake 의 확인 번호는 수식(formulas)으로 옮겼다."
+    },
+    {
+      "text": "설명은 원문 문장을 살려 두 문장 이내로 줄였다."
+    }
+  ]
+}

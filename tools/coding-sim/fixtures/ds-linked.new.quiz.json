@@ -1,0 +1,218 @@
+{
+  "questions": [
+    {
+      "type": "mcq",
+      "prompt": "스택에 `push(3)`, `push(5)` 를 차례로 넣은 뒤 `pop()` 을 한 번 하면 무엇이 나오는가?",
+      "choices": [
+        "3",
+        "5",
+        "3 과 5 가 함께 나온다",
+        "에러가 난다"
+      ],
+      "answer_index": 1,
+      "answer_bool": false,
+      "answer_text": "",
+      "accepted": [],
+      "explanation": "스택은 나중에 들어간 것이 먼저 나오는 LIFO 구조라서 마지막에 넣은 5 가 나온다. 이후 스택에는 3 만 남는다.",
+      "key_point_id": "k1",
+      "difficulty": "easy",
+      "pages": []
+    },
+    {
+      "type": "ox",
+      "prompt": "빈 스택을 배열로 만들 때 맨 위를 가리키는 `top` 은 `top = 0` 으로 시작한다.",
+      "choices": [],
+      "answer_index": -1,
+      "answer_bool": false,
+      "answer_text": "",
+      "accepted": [],
+      "explanation": "빈 스택이면 `top = -1` 로 시작한다. 그래야 첫 번째 push 에서 `top` 을 올려 0 번 칸에 넣을 수 있다.",
+      "key_point_id": "k1",
+      "difficulty": "medium",
+      "pages": []
+    },
+    {
+      "type": "cloze",
+      "prompt": "스택은 나중에 들어간 것이 먼저 나오는 ____ 방식이다.",
+      "choices": [],
+      "answer_index": -1,
+      "answer_bool": false,
+      "answer_text": "LIFO",
+      "accepted": [
+        "lifo",
+        "Last In First Out"
+      ],
+      "explanation": "스택은 한쪽 끝에서만 넣고 빼므로 나중에 들어간 것이 먼저 나온다. 이를 LIFO 라고 한다.",
+      "key_point_id": "k1",
+      "difficulty": "easy",
+      "pages": []
+    },
+    {
+      "type": "mcq",
+      "prompt": "`stack[++top] = x;` 와 `return stack[top--];` 에 대한 설명으로 옳은 것은?",
+      "choices": [
+        "둘 다 값을 쓴 뒤에 `top` 을 바꾼다",
+        "`stack[++top]` 은 `top` 을 올린 뒤 넣고, `stack[top--]` 은 꺼낸 뒤에 `top` 을 내린다",
+        "`stack[++top]` 은 넣은 뒤에 올리고, `stack[top--]` 은 내린 뒤에 꺼낸다",
+        "둘 다 `top` 을 바꾸지 않는다"
+      ],
+      "answer_index": 1,
+      "answer_bool": false,
+      "answer_text": "",
+      "accepted": [],
+      "explanation": "`++` 가 앞에 붙은 식은 올린 뒤에 쓰고, `--` 가 뒤에 붙은 식은 쓴 뒤에 내린다. 두 식의 순서가 반대라서 하나로 뭉뚱그려 외우면 틀린다.",
+      "key_point_id": "k2",
+      "difficulty": "hard",
+      "pages": []
+    },
+    {
+      "type": "cloze",
+      "prompt": "`stack[++top] = x;` 에서 `top` 을 ____ 넣는다.",
+      "choices": [],
+      "answer_index": -1,
+      "answer_bool": false,
+      "answer_text": "먼저 올리고",
+      "accepted": [
+        "먼저 올린 뒤",
+        "올리고",
+        "올린 뒤"
+      ],
+      "explanation": "`++top` 은 top 을 먼저 올린 뒤 그 칸에 x 를 넣는다는 뜻이다. 이 순서가 `stack[top--]` 과 반대라는 점을 기억하자.",
+      "key_point_id": "k2",
+      "difficulty": "medium",
+      "pages": []
+    },
+    {
+      "type": "mcq",
+      "prompt": "빈 스택에서 `pop` 을 하면 어떤 상태가 되는가?",
+      "choices": [
+        "오버플로",
+        "언더플로",
+        "메모리 누수",
+        "시간 복잡도 증가"
+      ],
+      "answer_index": 1,
+      "answer_bool": false,
+      "answer_text": "",
+      "accepted": [],
+      "explanation": "빈 스택에서 꺼내려 하는 것이 언더플로다. 반대로 `top` 이 `MAX - 1` 인데 push 하면 오버플로가 난다.",
+      "key_point_id": "k2",
+      "difficulty": "medium",
+      "pages": []
+    },
+    {
+      "type": "ox",
+      "prompt": "큐는 나중에 들어온 것이 먼저 나오는 구조다.",
+      "choices": [],
+      "answer_index": -1,
+      "answer_bool": false,
+      "answer_text": "",
+      "accepted": [],
+      "explanation": "큐는 먼저 들어온 것이 먼저 나오는 FIFO 구조다. 나중에 들어온 것이 먼저 나오는 것은 스택(LIFO)이다.",
+      "key_point_id": "k3",
+      "difficulty": "easy",
+      "pages": []
+    },
+    {
+      "type": "mcq",
+      "prompt": "MAX 가 5 인 원형 큐에서 `rear` 가 4 일 때 `rear = (rear + 1) % MAX;` 를 실행하면 `rear` 는 얼마가 되는가?",
+      "choices": [
+        "5",
+        "4",
+        "0",
+        "1"
+      ],
+      "answer_index": 2,
+      "answer_bool": false,
+      "answer_text": "",
+      "accepted": [],
+      "explanation": "`(4 + 1) % 5` 는 0 이라서 `rear` 는 맨 앞 칸인 0 으로 돌아간다. 이것이 원형 큐가 앞쪽 빈칸을 다시 쓰는 방법이다.",
+      "key_point_id": "k3",
+      "difficulty": "hard",
+      "pages": []
+    },
+    {
+      "type": "mcq",
+      "prompt": "원형 큐가 가득 찼는지 판단하는 식으로 옳은 것은?",
+      "choices": [
+        "`front == rear`",
+        "`(rear + 1) % MAX == front`",
+        "`rear == MAX`",
+        "`top == -1`"
+      ],
+      "answer_index": 1,
+      "answer_bool": false,
+      "answer_text": "",
+      "accepted": [],
+      "explanation": "가득 찬 조건은 `(rear + 1) % MAX == front` 이고, `front == rear` 는 빈 조건이다. `top == -1` 은 스택에서 빈 상태를 나타내는 식이다.",
+      "key_point_id": "k3",
+      "difficulty": "hard",
+      "pages": []
+    },
+    {
+      "type": "mcq",
+      "prompt": "노드를 가운데에 넣을 때 옳은 순서는?",
+      "choices": [
+        "앞 노드의 `next` 를 먼저 바꾸고, 새 노드의 `next` 를 연결한다",
+        "새 노드의 `next` 를 먼저 연결하고, 앞 노드의 `next` 를 바꾼다",
+        "뒤쪽 노드를 먼저 `free` 한다",
+        "`malloc` 없이 `next` 만 바꾼다"
+      ],
+      "answer_index": 1,
+      "answer_bool": false,
+      "answer_text": "",
+      "accepted": [],
+      "explanation": "새 노드의 `next` 를 먼저 연결하고 앞 노드의 `next` 를 바꿔야 뒤쪽 노드를 잃지 않는다. 순서를 거꾸로 하면 뒤쪽 노드를 잃어버린다.",
+      "key_point_id": "k4",
+      "difficulty": "medium",
+      "pages": []
+    },
+    {
+      "type": "ox",
+      "prompt": "C 에서 노드 하나는 항상 8바이트다.",
+      "choices": [],
+      "answer_index": -1,
+      "answer_bool": false,
+      "answer_text": "",
+      "accepted": [],
+      "explanation": "노드 하나는 보통 16바이트다. 64비트 환경에서 `int` 뒤에 맞춤 정렬을 위한 패딩이 들어가기 때문이다.",
+      "key_point_id": "k4",
+      "difficulty": "easy",
+      "pages": []
+    },
+    {
+      "type": "mcq",
+      "prompt": "위치를 이미 알고 있을 때 중간 삽입의 비용을 배열과 연결 리스트로 비교하면?",
+      "choices": [
+        "배열 $O(1)$, 리스트 $O(n)$",
+        "배열 $O(n)$, 리스트 $O(1)$",
+        "둘 다 $O(n^2)$",
+        "둘 다 $O(1)$ 이고 메모리만 다르다"
+      ],
+      "answer_index": 1,
+      "answer_bool": false,
+      "answer_text": "",
+      "accepted": [],
+      "explanation": "배열은 원소를 밀어야 해서 $O(n)$ 이고, 리스트는 위치를 알면 `next` 만 바꾸면 되어 $O(1)$ 이다.",
+      "key_point_id": "k5",
+      "difficulty": "medium",
+      "pages": []
+    },
+    {
+      "type": "cloze",
+      "prompt": "배열의 임의 접근 비용은 ____ 이다.",
+      "choices": [],
+      "answer_index": -1,
+      "answer_bool": false,
+      "answer_text": "$O(1)$",
+      "accepted": [
+        "O(1)",
+        "상수 시간"
+      ],
+      "explanation": "배열은 번호로 바로 찾아갈 수 있어서 임의 접근이 $O(1)$ 이다. 연결 리스트는 처음부터 따라가야 해서 $O(n)$ 이다.",
+      "key_point_id": "k5",
+      "difficulty": "medium",
+      "pages": []
+    }
+  ]
+}

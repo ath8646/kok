@@ -1,8 +1,9 @@
 'use client';
 // 꾹 누르기 (손가락·펜·마우스 모두 0.45초). 누른 채 움직이면(스크롤·끌기) 취소한다.
 // 꾹 누른 다음에 오는 click 은 막는다 (링크로 넘어가지 않게). 손가락으로 꾹 누를 때 뜨는 기본 메뉴(링크 미리보기·복사)도 막는다.
-// 쓰는 곳: 자료함 카드 (꾹 누르면 여러 개 고르기)
-import { useCallback, useEffect, useRef, type MouseEvent, type PointerEvent } from 'react';
+// 키보드는 메뉴 키·Shift+F10 이 같은 일을 한다 (컴퓨터에서 오른쪽 단추 메뉴를 여는 키).
+// 쓰는 곳: 자료함·홈 최근 노트·오답노트·PDF 요약 목록 카드, 과목 서랍 (꾹 누르면 여러 개 고르기)
+import { useCallback, useEffect, useRef, type KeyboardEvent, type MouseEvent, type PointerEvent } from 'react';
 
 /** 꾹 눌렀다고 보는 시간 (삼성 노트처럼 0.5초쯤) */
 export const LONG_PRESS_MS = 450;
@@ -16,6 +17,8 @@ export function useLongPress(onLong: () => void, enabled = true) {
   const fired = useRef(false);
   /** 손가락·펜으로 누르는 중인지 (기본 메뉴는 이때만 막는다: 마우스 오른쪽 단추 메뉴는 그대로) */
   const touchy = useRef(false);
+  /** 방금 메뉴 키로 열었는지 (뒤따르는 브라우저 기본 메뉴를 막는다) */
+  const keyMenu = useRef(0);
   const latest = useRef(onLong);
   useEffect(() => {
     latest.current = onLong;
@@ -55,7 +58,14 @@ export function useLongPress(onLong: () => void, enabled = true) {
     onPointerCancel: cancel,
     onPointerLeave: cancel,
     onContextMenu: (e: MouseEvent) => {
-      if (enabled && (touchy.current || fired.current)) e.preventDefault();
+      if (enabled && (touchy.current || fired.current || Date.now() - keyMenu.current < 600)) e.preventDefault();
+    },
+    /** 키보드: 메뉴 키·Shift+F10 = 꾹 누르기 */
+    onKeyDown: (e: KeyboardEvent) => {
+      if (!enabled || !(e.key === 'ContextMenu' || (e.shiftKey && e.key === 'F10'))) return;
+      e.preventDefault();
+      keyMenu.current = Date.now();
+      latest.current();
     },
     /** 꾹 누른 뒤 손을 떼면 오는 click: 링크로 넘어가지 않게 막는다 */
     onClickCapture: (e: MouseEvent) => {

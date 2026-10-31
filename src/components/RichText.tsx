@@ -1,9 +1,9 @@
 'use client';
-// 글 + 수식(KaTeX) + 쉬운 꾸미기(**굵게**, ==형광펜==, !!빨간 글씨!!, '- ' 목록, '1. ' 번호) 보여 주기.
+// 글 + 수식(KaTeX) + 코드(`코드`, ``` 블록) + 쉬운 꾸미기(**굵게**, ==형광펜==, !!빨간 글씨!!, '- ' 목록, '1. ' 번호) 보여 주기.
 // 꾸미기는 parseRich 가 나눈 조각을 React 요소로만 그린다 (글을 HTML 로 바꾸지 않는다)
 import katex from 'katex';
 import { Fragment, memo, useMemo } from 'react';
-import { parseRich, type Inline } from '@/lib/richtext';
+import { parseRich, richBlocks, type Inline } from '@/lib/richtext';
 
 const KATEX_OPTS = {
   throwOnError: false,
@@ -48,6 +48,12 @@ function Nodes({ ns }: { ns: Inline[] }) {
     <>
       {ns.map((n, i) => {
         if (n.t === 'text') return <Fragment key={i}>{n.v}</Fragment>;
+        if (n.t === 'code')
+          return (
+            <code key={i} className="kok-code">
+              {n.v}
+            </code>
+          );
         if (n.t === 'math') return <Tex key={i} tex={n.tex} display={n.display} />;
         if (n.t === 'b')
           return (
@@ -73,8 +79,8 @@ function Nodes({ ns }: { ns: Inline[] }) {
 
 export const RichText = memo(function RichText({ text, className }: { text: string; className?: string }) {
   const lines = useMemo(() => parseRich(text), [text]);
-  // 목록이 없으면 글 흐름 그대로 (줄바꿈만 지킨다)
-  if (!lines.some((l) => l.list)) {
+  // 목록·코드 블록이 없으면 글 흐름 그대로 (줄바꿈만 지킨다)
+  if (!lines.some((l) => l.list || l.code)) {
     return (
       <span className={className} style={{ whiteSpace: 'pre-wrap' }}>
         {lines.map((l, i) => (
@@ -86,11 +92,18 @@ export const RichText = memo(function RichText({ text, className }: { text: stri
       </span>
     );
   }
-  // 목록이 있으면 줄마다 한 덩이 (span 이라 <p>·<li> 안에 넣어도 된다)
+  // 목록·코드 블록이 있으면 줄마다 한 덩이 (span 이라 <p>·<li> 안에 넣어도 된다). 코드 블록은 옆으로 넘기는 칸 하나
   return (
     <span className={className ? `kok-rich ${className}` : 'kok-rich'}>
-      {lines.map((l, i) =>
-        l.list ? (
+      {richBlocks(lines).map((b, i) => {
+        if (b.code)
+          return (
+            <span key={i} className="kok-code-block" data-lang={b.lang || undefined} tabIndex={0} role="group" aria-label={b.lang ? `${b.lang} 코드` : '코드'}>
+              <code>{b.lines.join('\n')}</code>
+            </span>
+          );
+        const l = b.line;
+        return l.list ? (
           <span key={i} className="kok-li" data-kind={l.list} data-mark={l.list === 'number' ? `${l.n}.` : undefined}>
             <Nodes ns={l.c} />
           </span>
@@ -98,8 +111,8 @@ export const RichText = memo(function RichText({ text, className }: { text: stri
           <span key={i} className="block">
             {l.c.length ? <Nodes ns={l.c} /> : <br />}
           </span>
-        ),
-      )}
+        );
+      })}
     </span>
   );
 });

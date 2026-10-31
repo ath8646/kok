@@ -54,6 +54,7 @@ import { QUICK_MAX, byPosition, quickSubjects } from '@/lib/subject-order';
 import { SubjectDrawer, type DrawerManage } from './SubjectDrawer';
 import { SubjectPickSheet } from './SubjectPick';
 import { MergeNotesSheet } from './MergeNotesSheet';
+import { NoteInfoSheet, type NoteInfo } from './NoteInfoSheet';
 import { CoverArt } from './CoverArt';
 import { CoverSheet } from './CoverSheet';
 import { useConfirm } from './Confirm';
@@ -157,7 +158,8 @@ export function LibraryView() {
   const [moving, setMoving] = useState<string[] | null>(null);
   const [mergingSubject, setMergingSubject] = useState<SubjectRow | null>(null);
   const [mergingNotes, setMergingNotes] = useState(false);
-  const [renaming, setRenaming] = useState<LibSource | null>(null);
+  /** 노트 정보(이름·과목·단원)를 고치는 자료 */
+  const [info, setInfo] = useState<LibSource | null>(null);
   // 표지 그림 창 (Pro): 연 자료의 번호 (목록이 바뀌어도 그 자료의 지금 표지를 보여 준다)
   const [coverId, setCoverId] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
@@ -499,6 +501,41 @@ export function LibraryView() {
     }).finally(() => {
       q.running = false;
     });
+  };
+
+  /**
+   * 노트 정보 저장: 이름·단원을 먼저 고치고, 과목을 바꿨으면 옮긴다 (노트·문제·복습 기록이 함께).
+   * 이름은 노트 화면의 제목에도 같이
+   */
+  const saveInfo = async (s: LibSource, next: NoteInfo, moveTo: SubjectRow | null): Promise<boolean> => {
+    try {
+      const patch: { title?: string; unit?: string } = {};
+      if (next.title !== (s.title ?? '')) patch.title = next.title;
+      if (next.unit !== (s.unit ?? '')) patch.unit = next.unit;
+      if (patch.title !== undefined || patch.unit !== undefined) {
+        const { error } = await sb().from('sources').update(patch).eq('id', s.id);
+        if (error) throw new Error('저장하지 못했어요. 다시 해 주세요.');
+        if (patch.title) await sb().from('notes').update({ title: patch.title }).eq('source_id', s.id);
+      }
+      if (moveTo) await api('/api/sources/move', { method: 'POST', body: JSON.stringify({ ids: [s.id], subject: moveTo.id }) });
+      setData((cur) =>
+        cur
+          ? {
+              subjects: moveTo && !cur.subjects.some((x) => x.id === moveTo.id) ? [...cur.subjects, moveTo] : cur.subjects,
+              sources: cur.sources.map((x) => (x.id === s.id ? { ...x, ...patch, ...(moveTo ? { subject_id: moveTo.id, position: null } : {}) } : x)),
+            }
+          : cur,
+      );
+      dropView(LIBRARY_VIEW);
+      toast(moveTo ? `'${moveTo.name}' 과목으로 옮겼어요.` : '저장했어요.', 'plain', DONE);
+      if (moveTo) window.dispatchEvent(new Event(SUBJECTS_CHANGED));
+      reload();
+      return true;
+    } catch (e) {
+      toast((e as Error).message, 'bad');
+      reload();
+      return false;
+    }
   };
 
   /** 자료(노트)를 다른 과목으로: 노트·문제·복습 기록이 함께 간다 */
@@ -1010,9 +1047,7 @@ export function LibraryView() {
                     onLongPress={() => (selecting ? togglePick(s.id) : startSelect(s.id))}
                     onStar={() => starOne(s)}
                     onReview={() => reviewOne(s)}
-                    onSelectMode={() => startSelect(s.id)}
-                    onRename={() => setRenaming(s)}
-                    onMove={mergeOn ? () => setMoving([s.id]) : undefined}
+                    onInfo={() => setInfo(s)}
                     onCover={coversOn && me?.canFigures ? () => setCoverId(s.id) : undefined}
                     tint={subjects.find((x) => x.id === s.subject_id)?.color ?? null}
                     onDelete={async () => {
@@ -1234,20 +1269,18 @@ export function LibraryView() {
         );
       })()}
 
-      {/* 자료 이름·단원 */}
-      <Sheet open={!!renaming} onClose={() => setRenaming(null)} title="자료 이름·단원">
-        {renaming ? (
-          <RenameForm
-            key={renaming.id}
-            s={renaming}
-            units={[...new Set((data?.sources ?? []).filter((x) => x.subject_id === renaming.subject_id && x.unit).map((x) => x.unit))]}
-            onDone={() => {
-              setRenaming(null);
-              reload();
-            }}
-          />
-        ) : null}
-      </Sheet>
+      {/* 노트 정보: 이름·과목·단원을 한 화면에서 (과목을 바꾸면 노트·문제·복습 기록이 같이 옮겨진다) */}
+      {info ? (
+        <NoteInfoSheet
+          key={info.id}
+          open
+          onClose={() => setInfo(null)}
+          value={{ title: info.title ?? '', subjectId: info.subject_id, unit: info.unit ?? '' }}
+          subjects={subjects}
+          canMove={mergeOn}
+          onSave={(next, moveTo) => saveInfo(info, next, moveTo)}
+        />
+      ) : null}
     </div>
   );
 }
@@ -1322,11 +1355,9 @@ function NoteCard({
   onLongPress,
   onStar,
   onReview,
-  onSelectMode,
-  onRename,
+  onInfo,
   onDelete,
   onRetry,
-  onMove,
   onCover,
   tint,
 }: {
@@ -1345,12 +1376,10 @@ function NoteCard({
   onLongPress: () => void;
   onStar: () => void;
   onReview: () => void;
-  onSelectMode: () => void;
-  onRename: () => void;
+  /** 노트 정보 (이름·과목·단원) */
+  onInfo: () => void;
   onDelete: () => void;
   onRetry: () => void;
-  /** 다른 과목으로 옮기기 (없으면 메뉴에 안 보인다) */
-  onMove?: () => void;
   /** 표지 그림 창 열기 (Pro, 없으면 메뉴에 안 보인다) */
   onCover?: () => void;
   /** 과목 색 (표지 그림 바탕을 옅게 물들인다) */
@@ -1364,19 +1393,17 @@ function NoteCard({
   const [startedBusy] = useState(processing);
   const fill = !isNew && mode === 'fill' ? 'kok-fill' : undefined;
   const press = useLongPress(onLongPress, true);
+  // 별표는 카드의 별 단추로, 여러 개 고르기는 꾹 누르기(키보드는 메뉴 키·Shift+F10)로 한다
   const items: MenuItem[] = [
     ...(failed ? [{ label: '다시 하기', icon: ICONS.retry, onSelect: onRetry }] : []),
     ...(organize
       ? [
-          { label: s.starred ? '별표 빼기' : '별표', icon: ICONS.star, onSelect: onStar },
           reviewOff
             ? { label: '복습에 다시 넣기', icon: ICONS.review, onSelect: onReview }
             : { label: '복습에서 빼기', icon: ICONS.reviewOff, onSelect: onReview },
         ]
       : []),
-    { label: '여러 개 고르기', icon: ICONS.select, onSelect: onSelectMode },
-    { label: '이름·단원 바꾸기', icon: ICONS.edit, onSelect: onRename },
-    ...(onMove ? [{ label: '다른 과목으로 옮기기', icon: ICONS.move, onSelect: onMove }] : []),
+    { label: '이름·과목·단원 바꾸기', icon: ICONS.edit, onSelect: onInfo },
     ...(onCover && s.status === 'ready' ? [{ label: '표지 그림', icon: ICONS.image, onSelect: onCover }] : []),
     { label: '지우기', icon: ICONS.trash, onSelect: onDelete, danger: true },
   ];
@@ -1655,72 +1682,9 @@ function DropHint({ onAdd, subjectName }: { onAdd: () => void; subjectName?: str
         <Icon d={ICONS.plus} size={30} strokeWidth={2.4} />
       </span>
       <span className="font-display text-xl">{subjectName ? `${subjectName}에 첫 자료를 넣어 보세요` : '첫 자료를 넣어 보세요'}</span>
-      <span className="max-w-sm text-sm text-muted">PDF·사진을 이 화면에 끌어다 놓거나, 여기를 눌러 공부한 내용을 적고 엔터를 누르면 AI가 정리해요.</span>
+      <span className="max-w-sm text-sm text-muted">
+        PDF·사진·한글·워드·PPT 파일을 이 화면에 끌어다 놓거나, 여기를 눌러 공부한 내용을 적고 엔터를 누르면 AI가 정리해요.
+      </span>
     </button>
-  );
-}
-
-function RenameForm({ s, units, onDone }: { s: LibSource; units: string[]; onDone: () => void }) {
-  const toast = useToast();
-  const [title, setTitle] = useState(s.title ?? '');
-  const [unit, setUnit] = useState(s.unit ?? '');
-  // 적는 글로 시작하는 단원 먼저, 많으면 12개까지
-  const typed = unit.trim();
-  const suggest = [
-    ...units.filter((u) => typed && u !== typed && u.startsWith(typed)),
-    ...units.filter((u) => !typed || u === typed || !u.startsWith(typed)),
-  ].slice(0, 12);
-  return (
-    <form
-      className="grid gap-3"
-      onSubmit={async (e) => {
-        e.preventDefault();
-        const t = title.trim().slice(0, 120);
-        const { error } = await sb()
-          .from('sources')
-          .update({ title: t, unit: unit.trim().slice(0, 40) })
-          .eq('id', s.id);
-        if (error) {
-          toast('저장하지 못했어요.', 'bad');
-          return;
-        }
-        // 노트 화면의 제목도 같이 (노트가 있으면). 이름이 바뀔 때만
-        if (t && t !== (s.title ?? '')) await sb().from('notes').update({ title: t }).eq('source_id', s.id);
-        onDone();
-      }}
-    >
-      <label className="grid gap-1.5 text-sm font-semibold">
-        자료 이름
-        <input className={inputClass} value={title} maxLength={120} onChange={(e) => setTitle(e.target.value)} />
-      </label>
-      <div className="grid gap-1.5">
-        <label className="grid gap-1.5 text-sm font-semibold">
-          단원 (같은 이름끼리 묶여요)
-          <input className={inputClass} value={unit} maxLength={40} onChange={(e) => setUnit(e.target.value)} />
-        </label>
-        {/* 이 과목에 있는 단원: 눌러서 고른다 (브라우저 기본 펼침 목록 대신) */}
-        {suggest.length ? (
-          <div className="flex flex-wrap gap-1.5" role="group" aria-label="있는 단원">
-            {suggest.map((u) => (
-              <button
-                key={u}
-                type="button"
-                aria-pressed={u === unit.trim()}
-                onClick={() => setUnit(u)}
-                className={cx(
-                  'press rounded-full px-3 py-1 text-sm font-semibold',
-                  u === unit.trim() ? 'kok-chip-on' : 'kok-chip-off bg-surface-2 text-ink hover:bg-surface-3',
-                )}
-              >
-                {u}
-              </button>
-            ))}
-          </div>
-        ) : null}
-      </div>
-      <Button type="submit" className="justify-self-start">
-        저장
-      </Button>
-    </form>
   );
 }

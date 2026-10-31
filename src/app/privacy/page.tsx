@@ -10,7 +10,7 @@ export const revalidate = 300;
 export default async function PrivacyPage() {
   const site = await getSiteInfo();
   return (
-    <LegalPage title="개인정보처리방침" updated="2026년 10월 30일">
+    <LegalPage title="개인정보처리방침" updated="2026년 10월 31일">
       <p>KOK(이하 &lsquo;서비스&rsquo;)은 공부에 꼭 필요한 정보만 모으고, 이용자가 언제든 내려받거나 지울 수 있게 해요.</p>
 
       <Sec title="1. 모으는 정보와 이유">
@@ -47,7 +47,9 @@ export default async function PrivacyPage() {
                 <td className="py-2 pr-3">화면에 이름 보여 주기 (실명이 아니어도 돼요)</td>
               </tr>
               <tr className="border-b border-line align-top">
-                <td className="py-2 pr-3">올린 공부 자료(PDF, 사진, 글)와 AI가 만든 노트·그림·문제</td>
+                <td className="py-2 pr-3">
+                  올린 공부 자료(PDF, 사진, 글)와 AI가 만든 노트·그림·문제. 한글·워드·PPT 파일은 기기에서 글만 꺼내 보내고 파일은 올리지 않아요
+                </td>
                 <td className="py-2 pr-3">정리·문제 만들기와 보여 주기</td>
               </tr>
               <tr className="border-b border-line align-top">

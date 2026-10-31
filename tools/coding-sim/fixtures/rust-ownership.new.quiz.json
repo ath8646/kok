@@ -1,0 +1,264 @@
+{
+  "questions": [
+    {
+      "type": "mcq",
+      "prompt": "러스트에서 값 하나의 주인에 대한 설명으로 옳은 것은?",
+      "choices": [
+        "주인 변수는 여러 개여도 된다",
+        "주인은 한 번에 하나뿐이다",
+        "주인이 범위를 벗어나도 값은 그대로 남는다",
+        "대입하면 원래 변수도 계속 주인이다"
+      ],
+      "answer_index": 1,
+      "answer_bool": false,
+      "answer_text": "",
+      "accepted": [],
+      "explanation": "값마다 주인 변수가 딱 하나 있고, 주인은 한 번에 하나뿐이다. 나머지 보기는 주인이 범위를 벗어나면 값이 drop 된다는 규칙이나 대입할 때 주인이 옮겨진다는 규칙과 맞지 않는다.",
+      "key_point_id": "k1",
+      "difficulty": "easy",
+      "pages": []
+    },
+    {
+      "type": "ox",
+      "prompt": "주인 변수가 범위를 벗어나면 그 값은 메모리에서 해제된다.",
+      "choices": [],
+      "answer_index": -1,
+      "answer_bool": true,
+      "answer_text": "",
+      "accepted": [],
+      "explanation": "소유권의 세 번째 규칙이다. 주인이 범위를 벗어나면 값이 사라지고 메모리가 해제되며, 이를 drop 이라고 한다.",
+      "key_point_id": "k1",
+      "difficulty": "easy",
+      "pages": []
+    },
+    {
+      "type": "cloze",
+      "prompt": "주인이 ____ 를 벗어나면 값이 사라지고 메모리가 해제된다.",
+      "choices": [],
+      "answer_index": -1,
+      "answer_bool": false,
+      "answer_text": "범위",
+      "accepted": [
+        "scope",
+        "스코프",
+        "범위(scope)"
+      ],
+      "explanation": "소유권의 세 번째 규칙이다. 주인 변수가 선언된 블록을 빠져나올 때 보통 닫는 중괄호를 만나는 순간 값이 drop 된다.",
+      "key_point_id": "k1",
+      "difficulty": "medium",
+      "pages": []
+    },
+    {
+      "type": "mcq",
+      "prompt": "다음 코드를 컴파일하면 어느 줄에서 에러가 나는가?\n```rust\nfn main() {\n    let s1 = String::from(\"hi\");\n    let s2 = s1;\n    println!(\"{}\", s1);\n}\n```",
+      "choices": [
+        "`let s1 = String::from(\"hi\");` 줄",
+        "`let s2 = s1;` 줄",
+        "`println!(\"{}\", s1);` 줄",
+        "에러 없이 `hi` 가 두 번 출력된다"
+      ],
+      "answer_index": 2,
+      "answer_bool": false,
+      "answer_text": "",
+      "accepted": [],
+      "explanation": "`let s2 = s1;` 에서 주인이 `s2` 로 옮겨져서 `s1` 은 더 이상 쓸 수 없다. 그래서 `println!` 에서 `s1` 을 쓰는 줄이 에러가 난다.",
+      "key_point_id": "k2",
+      "difficulty": "medium",
+      "pages": []
+    },
+    {
+      "type": "mcq",
+      "prompt": "`let s2 = s1;` 가 실행된 뒤의 상태로 옳은 것은?",
+      "choices": [
+        "`s1` 과 `s2` 가 모두 값의 주인이다",
+        "값의 주인은 `s2` 이고 `s1` 은 더 이상 쓸 수 없다",
+        "값이 복사되어 `s1` 과 `s2` 가 각각 주인이다",
+        "`s1` 이 빌림을 가지고 있어서 `s2` 는 읽기만 할 수 있다"
+      ],
+      "answer_index": 1,
+      "answer_bool": false,
+      "answer_text": "",
+      "accepted": [],
+      "explanation": "`let s2 = s1;` 은 값을 복사하지 않고 주인을 옮긴다. 옮긴 뒤의 `s1` 은 쓸 수 없고, 주인은 `s2` 하나뿐이다.",
+      "key_point_id": "k2",
+      "difficulty": "hard",
+      "pages": []
+    },
+    {
+      "type": "cloze",
+      "prompt": "대입할 때 값을 복사하지 않고 주인만 옮기는 것을 영어로 ____ 라고 한다.",
+      "choices": [],
+      "answer_index": -1,
+      "answer_bool": false,
+      "answer_text": "move",
+      "accepted": [
+        "Move",
+        "이동",
+        "이동 (move)"
+      ],
+      "explanation": "`let s2 = s1;` 처럼 대입하면 주인이 원래 변수에서 새 변수로 옮겨가는데, 이것을 이동이라고 한다.",
+      "key_point_id": "k2",
+      "difficulty": "easy",
+      "pages": []
+    },
+    {
+      "type": "ox",
+      "prompt": "`String` 도 정수처럼 대입하면 복사되므로, 대입한 뒤에도 원래 변수를 쓸 수 있다.",
+      "choices": [],
+      "answer_index": -1,
+      "answer_bool": false,
+      "answer_text": "",
+      "accepted": [],
+      "explanation": "`String` 은 `Copy` 트레이트를 구현하지 않아서 대입하면 옮겨진다. 그래서 대입한 뒤 원래 변수를 쓰면 에러가 난다.",
+      "key_point_id": "k3",
+      "difficulty": "medium",
+      "pages": []
+    },
+    {
+      "type": "mcq",
+      "prompt": "대입해도 옮겨지지 않고 복사되는 타입은 어느 것인가?",
+      "choices": [
+        "`String`",
+        "`Vec`",
+        "`i32`",
+        "힙을 쓰는 타입은 모두"
+      ],
+      "answer_index": 2,
+      "answer_bool": false,
+      "answer_text": "",
+      "accepted": [],
+      "explanation": "정수(`i32`)는 `Copy` 트레이트를 구현해서 대입하면 복사된다. `String` 과 `Vec` 은 힙을 쓰는 타입이라 대입하면 옮겨진다.",
+      "key_point_id": "k3",
+      "difficulty": "easy",
+      "pages": []
+    },
+    {
+      "type": "mcq",
+      "prompt": "다음 코드를 실행하면 화면에 무엇이 출력되는가?\n```rust\nfn add_world(s: &mut String) {\n    s.push_str(\", world\");\n}\n\nfn main() {\n    let mut s = String::from(\"hello\");\n    add_world(&mut s);\n    println!(\"{}\", s);\n}\n```",
+      "choices": [
+        "`hello`",
+        "`hello, world`",
+        "`world`",
+        "에러가 나서 아무것도 출력되지 않는다"
+      ],
+      "answer_index": 1,
+      "answer_bool": false,
+      "answer_text": "",
+      "accepted": [],
+      "explanation": "`add_world` 는 `&mut s` 로 같은 값을 빌려 뒤에 `, world` 를 붙인다. 원래 주인인 `main` 의 `s` 가 그대로 남아 있어서 `hello, world` 가 출력된다.",
+      "key_point_id": "k4",
+      "difficulty": "medium",
+      "pages": []
+    },
+    {
+      "type": "ox",
+      "prompt": "`&mut` 참조가 살아 있는 동안에도, 같은 값에 대한 `&` 참조는 만들 수 있다.",
+      "choices": [],
+      "answer_index": -1,
+      "answer_bool": false,
+      "answer_text": "",
+      "accepted": [],
+      "explanation": "가변 참조가 살아 있는 동안에는 불변 참조도 만들 수 없다. `&` 참조 여러 개만 있는 것은 괜찮다.",
+      "key_point_id": "k4",
+      "difficulty": "medium",
+      "pages": []
+    },
+    {
+      "type": "mcq",
+      "prompt": "같은 값 `s` 에 대해 아래 순서로 빌림을 만들면 어떻게 되는가?\n```rust\nlet mut s = String::from(\"hi\");\nlet r1 = &mut s;\nlet r2 = &s;\nprintln!(\"{} {}\", r1, r2);\n```",
+      "choices": [
+        "정상적으로 출력된다",
+        "`let r2 = &s;` 줄에서 에러가 난다",
+        "`let r1 = &mut s;` 줄에서 에러가 난다",
+        "`println!` 줄에서만 에러가 난다"
+      ],
+      "answer_index": 1,
+      "answer_bool": false,
+      "answer_text": "",
+      "accepted": [],
+      "explanation": "`r1` 은 `println!` 에서 아직 쓰이므로 가변 참조가 살아 있는 동안이다. 이때 불변 참조 `&s` 를 만들면 규칙에 어긋나서 `let r2 = &s;` 줄에서 에러가 난다.",
+      "key_point_id": "k4",
+      "difficulty": "hard",
+      "pages": []
+    },
+    {
+      "type": "mcq",
+      "prompt": "`fn longest<'a>(x: &'a str, y: &'a str) -> &'a str` 에서 `'a` 의 역할로 옳은 것은?",
+      "choices": [
+        "돌려주는 참조가 입력 참조 중 더 짧게 사는 쪽보다 오래 살 수 없다는 약속이다",
+        "값의 수명을 가장 길게 늘리는 장치다",
+        "문자열을 힙으로 옮기는 명령이다",
+        "변수 이름을 바꿔 주는 표시다"
+      ],
+      "answer_index": 0,
+      "answer_bool": false,
+      "answer_text": "",
+      "accepted": [],
+      "explanation": "`'a` 는 돌려주는 참조가 x 와 y 중 더 짧게 사는 쪽만큼만 살 수 있다는 약속이다. 수명을 늘리거나 줄이지 않고 참조 사이의 관계만 알려 준다.",
+      "key_point_id": "k5",
+      "difficulty": "medium",
+      "pages": []
+    },
+    {
+      "type": "ox",
+      "prompt": "수명 표시 `'a` 를 붙이면 값의 수명이 그만큼 길어진다.",
+      "choices": [],
+      "answer_index": -1,
+      "answer_bool": false,
+      "answer_text": "",
+      "accepted": [],
+      "explanation": "수명 표시는 값의 수명을 늘이거나 줄이지 않는다. 여러 참조 사이의 관계를 컴파일러에게 알려 줄 뿐이다.",
+      "key_point_id": "k5",
+      "difficulty": "easy",
+      "pages": []
+    },
+    {
+      "type": "cloze",
+      "prompt": "`'a` 를 빼고 `fn longest(x: &str, y: &str) -> &str` 로 쓰면 어느 쪽 수명인지 알 수 없어서 이 함수는 ____.",
+      "choices": [],
+      "answer_index": -1,
+      "answer_bool": false,
+      "answer_text": "컴파일되지 않는다",
+      "accepted": [
+        "컴파일되지 않음",
+        "컴파일 안 됨",
+        "컴파일이 안 된다"
+      ],
+      "explanation": "시험에 나오는 형태는 `fn longest<'a>(x: &'a str, y: &'a str) -> &'a str` 이다. 두 입력 참조 중 어느 쪽 수명을 따르는지 적지 않으면 컴파일되지 않는다.",
+      "key_point_id": "k5",
+      "difficulty": "hard",
+      "pages": []
+    },
+    {
+      "type": "mcq",
+      "prompt": "함수 안에서 만든 `String` 의 참조를 돌려주는 코드에 대한 설명으로 옳은 것은?",
+      "choices": [
+        "함수가 끝나면 값이 사라져 참조가 빈 곳을 가리키므로 댕글링 참조가 된다",
+        "참조는 항상 안전하므로 문제가 없다",
+        "값이 힙에 있으면 함수가 끝나도 참조는 유효하다",
+        "`&` 기호만 붙이면 값이 함수 밖에서도 살아남는다"
+      ],
+      "answer_index": 0,
+      "answer_bool": false,
+      "answer_text": "",
+      "accepted": [],
+      "explanation": "함수가 끝나는 순간 그 값이 사라지므로 돌려준 참조가 빈 곳을 가리키게 된다. 이것이 댕글링 참조이며, 러스트는 이런 코드를 컴파일하지 않는다.",
+      "key_point_id": "k6",
+      "difficulty": "medium",
+      "pages": []
+    },
+    {
+      "type": "ox",
+      "prompt": "러스트는 댕글링 참조가 되는 코드도 일단 컴파일한 뒤 실행할 때만 막는다.",
+      "choices": [],
+      "answer_index": -1,
+      "answer_bool": false,
+      "answer_text": "",
+      "accepted": [],
+      "explanation": "러스트는 댕글링 참조가 되는 코드를 컴파일하지 않는다. 실행할 때 막는 것이 아니라 컴파일 단계에서 막는다.",
+      "key_point_id": "k6",
+      "difficulty": "medium",
+      "pages": []
+    }
+  ]
+}

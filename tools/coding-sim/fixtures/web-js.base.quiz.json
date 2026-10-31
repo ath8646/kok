@@ -1,0 +1,196 @@
+{
+  "questions": [
+    {
+      "type": "mcq",
+      "prompt": "CSS 선택자에서 #과 .이 뜻하는 것으로 맞는 것은?",
+      "choices": [
+        "# 은 class, . 은 id 를 뜻한다",
+        "# 과 . 은 둘 다 id 를 뜻한다",
+        "# 은 id, . 은 class 를 뜻한다",
+        "# 과 . 은 둘 다 class 를 뜻한다"
+      ],
+      "answer_index": 2,
+      "answer_bool": false,
+      "answer_text": "",
+      "accepted": [],
+      "explanation": "CSS 선택자에서 # 은 id, . 은 class 를 뜻한다. id 는 페이지에 하나만 있어야 하고, class 는 여러 요소에 붙일 수 있다.",
+      "key_point_id": "k1",
+      "difficulty": "medium",
+      "pages": []
+    },
+    {
+      "type": "ox",
+      "prompt": "HTML 의 class 속성은 여러 요소에 같은 이름을 붙이는 데 쓴다.",
+      "choices": [],
+      "answer_index": -1,
+      "answer_bool": true,
+      "answer_text": "",
+      "accepted": [],
+      "explanation": "class 속성은 같은 스타일을 여러 요소에 줄 때 쓰는 이름이다. 필기의 예처럼 box 라는 class 를 여러 요소에 붙일 수 있다.",
+      "key_point_id": "k1",
+      "difficulty": "easy",
+      "pages": []
+    },
+    {
+      "type": "mcq",
+      "prompt": "0 == '' 와 0 === '' 의 결과를 맞게 짝지은 것은?",
+      "choices": [
+        "둘 다 true",
+        "== 는 true, === 는 false",
+        "== 는 false, === 는 true",
+        "둘 다 false"
+      ],
+      "answer_index": 1,
+      "answer_bool": false,
+      "answer_text": "",
+      "accepted": [],
+      "explanation": "== 는 타입을 자동으로 바꿔서 비교하므로 0 과 빈 문자열을 같다고 본다. === 는 타입까지 같아야 참이라서 false 가 된다.",
+      "key_point_id": "k2",
+      "difficulty": "medium",
+      "pages": []
+    },
+    {
+      "type": "ox",
+      "prompt": "!!value 에 0 을 넣으면 결과는 true 가 된다.",
+      "choices": [],
+      "answer_index": -1,
+      "answer_bool": false,
+      "answer_text": "",
+      "accepted": [],
+      "explanation": "빈 문자열, 0, null, undefined 는 !!value 에서 모두 false 가 된다. 그래서 0 을 넣으면 false 가 나온다.",
+      "key_point_id": "k2",
+      "difficulty": "medium",
+      "pages": []
+    },
+    {
+      "type": "short",
+      "prompt": "const price = 0; 이고 const total = price || 10; 이면 total 의 값은? 숫자로 답하세요.",
+      "choices": [],
+      "answer_index": -1,
+      "answer_bool": false,
+      "answer_text": "10",
+      "accepted": [
+        "10이다",
+        "10 이다",
+        "십"
+      ],
+      "explanation": "|| 는 앞의 값이 0 이나 빈 문자열 같은 거짓 값이면 뒤의 값을 쓴다. price 가 0 이라 거짓이므로 total 은 10 이 된다.",
+      "key_point_id": "k2",
+      "difficulty": "hard",
+      "pages": []
+    },
+    {
+      "type": "mcq",
+      "prompt": "시작·끝 기호를 뺀 정규식으로 010-12345 를 검사하면 결과는?",
+      "choices": [
+        "오류가 난다",
+        "숫자가 아니라서 검사하지 않는다",
+        "통과하지 못한다",
+        "통과한다"
+      ],
+      "answer_index": 3,
+      "answer_bool": false,
+      "answer_text": "",
+      "accepted": [],
+      "explanation": "시작·끝 기호가 없으면 문자열 중간에 맞는 010-1234 부분만 있어도 통과한다. 그래서 전체 문자열이 형식에 맞는지 보려면 시작과 끝 기호를 꼭 넣어야 한다.",
+      "key_point_id": "k3",
+      "difficulty": "hard",
+      "pages": []
+    },
+    {
+      "type": "ox",
+      "prompt": "정규식은 문자열이 정해진 형식에 맞는지 검사하는 패턴이다.",
+      "choices": [],
+      "answer_index": -1,
+      "answer_bool": true,
+      "answer_text": "",
+      "accepted": [],
+      "explanation": "정규식은 문자열의 형식을 검사하는 패턴이다. 숫자 세 개, 하이픈, 숫자 네 개 같은 형식을 이 패턴으로 확인할 수 있다.",
+      "key_point_id": "k3",
+      "difficulty": "easy",
+      "pages": []
+    },
+    {
+      "type": "mcq",
+      "prompt": "변수 값을 문자열 안에 넣어 쓰려면 어떤 기호로 감싸야 하는가?",
+      "choices": [
+        "큰따옴표",
+        "작은따옴표",
+        "백틱",
+        "대괄호"
+      ],
+      "answer_index": 2,
+      "answer_bool": false,
+      "answer_text": "",
+      "accepted": [],
+      "explanation": "백틱으로 감싼 템플릿 리터럴 안에 변수를 넣으면 그 값이 들어간다. 변수를 넣으려면 따옴표가 아니라 백틱으로 감싼 문자열을 써야 한다.",
+      "key_point_id": "k4",
+      "difficulty": "medium",
+      "pages": []
+    },
+    {
+      "type": "short",
+      "prompt": "화살표 함수를 짧게 쓸 때 생략하는 키워드는 무엇인가?",
+      "choices": [],
+      "answer_index": -1,
+      "answer_bool": false,
+      "answer_text": "function",
+      "accepted": [
+        "function 키워드",
+        "함수 키워드"
+      ],
+      "explanation": "화살표 함수는 function 키워드 없이 짧게 쓴다. 예를 들어 const add = (a, b) => a + b; 는 두 수를 더하는 화살표 함수다.",
+      "key_point_id": "k4",
+      "difficulty": "easy",
+      "pages": []
+    },
+    {
+      "type": "mcq",
+      "prompt": "document.querySelector('#app') 이 찾는 요소는 무엇인가?",
+      "choices": [
+        "태그 이름이 app 인 요소",
+        "class 가 app 인 요소",
+        "id 가 app 인 요소",
+        "app 이라는 글자를 가진 모든 요소"
+      ],
+      "answer_index": 2,
+      "answer_bool": false,
+      "answer_text": "",
+      "accepted": [],
+      "explanation": "querySelector 는 CSS 선택자 문법을 쓰므로 id 는 # 을 붙여 적는다. 그래서 '#app' 은 id 가 app 인 요소를 찾는다.",
+      "key_point_id": "k5",
+      "difficulty": "medium",
+      "pages": []
+    },
+    {
+      "type": "ox",
+      "prompt": "찾은 요소의 글 내용을 바꾸려면 classList 를 쓴다.",
+      "choices": [],
+      "answer_index": -1,
+      "answer_bool": false,
+      "answer_text": "",
+      "accepted": [],
+      "explanation": "글 내용은 textContent 로 읽고 바꾼다. classList 는 요소의 class 목록을 다루는 속성이다.",
+      "key_point_id": "k5",
+      "difficulty": "easy",
+      "pages": []
+    },
+    {
+      "type": "short",
+      "prompt": "찾은 요소의 class 목록을 다루는 속성 이름은 무엇인가?",
+      "choices": [],
+      "answer_index": -1,
+      "answer_bool": false,
+      "answer_text": "classList",
+      "accepted": [
+        "class list",
+        "클래스리스트",
+        "클래스 리스트"
+      ],
+      "explanation": "classList 는 요소의 class 목록을 다루는 속성이다. 글 내용을 다루는 textContent 와 헷갈리지 말고, class 를 바꿀 때는 classList 를 쓴다.",
+      "key_point_id": "k5",
+      "difficulty": "medium",
+      "pages": []
+    }
+  ]
+}

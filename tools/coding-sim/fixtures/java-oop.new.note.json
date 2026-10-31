@@ -1,0 +1,171 @@
+{
+  "title": "인터페이스, 제네릭, 람다",
+  "unit": "7주차: 인터페이스, 제네릭, 람다",
+  "summary": "자바의 인터페이스와 implements, main 메서드와 배열, 제네릭 컬렉션, 람다식, 그리고 `==` 과 equals 의 차이를 정리한 내용이다.",
+  "key_points": [
+    {
+      "id": "k1",
+      "title": "인터페이스와 implements",
+      "explanation": "인터페이스는 반드시 구현해야 할 메서드를 정한 약속이다. 클래스는 `implements` 로 인터페이스를 여러 개 따를 수 있지만, `extends` 로 부모 클래스는 하나만 가질 수 있다.",
+      "why": "시험 포인트로 꼽힌 implements 와 extends 의 차이를 구분해야 한다.",
+      "importance": "high",
+      "pages": []
+    },
+    {
+      "id": "k2",
+      "title": "main 메서드와 배열",
+      "explanation": "main 메서드의 모양은 항상 같다. 배열은 중괄호로 초기값을 줄 수 있고 `arr.length` 로 길이를 알 수 있지만, 크기가 고정이라 늘리려면 ArrayList 같은 컬렉션을 쓴다.",
+      "why": "배열의 크기가 고정이라는 점은 컬렉션을 고르는 기준이 된다.",
+      "importance": "medium",
+      "pages": []
+    },
+    {
+      "id": "k3",
+      "title": "제네릭 컬렉션과 오토박싱",
+      "explanation": "`List<Integer>` 는 Integer 만 담는 리스트다. 제네릭 자리에는 기본형 `int` 를 쓸 수 없어서 `Integer` 로 감싸 넣는데, 이것을 오토박싱이라고 한다.",
+      "why": "제네릭에 int 를 못 쓰는 이유는 시험 포인트로 꼽힌 내용이다.",
+      "importance": "high",
+      "pages": []
+    },
+    {
+      "id": "k4",
+      "title": "람다식",
+      "explanation": "`x -> x * 2` 는 매개변수 `x` 를 받아 `x * 2` 를 돌려주는 짧은 함수다. 컬렉션의 `stream().map(...)` 같은 곳에 넣어 쓴다.",
+      "why": "짧게 함수를 넘기는 코드를 읽을 수 있어야 컬렉션 코드의 뜻을 이해한다.",
+      "importance": "medium",
+      "pages": []
+    },
+    {
+      "id": "k5",
+      "title": "`==` 과 equals",
+      "explanation": "`==` 은 객체의 참조(주소)가 같은지만 보고, `.equals()` 는 내용이 같은지 본다. 문자열이나 객체를 비교할 때는 거의 항상 `.equals()` 를 쓴다.",
+      "why": "`==` 과 equals 의 차이는 시험 포인트로 꼽힌 내용이다.",
+      "importance": "high",
+      "pages": []
+    }
+  ],
+  "terms": [
+    {
+      "term": "인터페이스 (interface)",
+      "meaning": "이 메서드들은 반드시 구현해야 한다는 약속이다."
+    },
+    {
+      "term": "`implements`",
+      "meaning": "클래스가 인터페이스를 따르겠다고 선언하는 키워드다. 여러 개를 쓸 수 있다."
+    },
+    {
+      "term": "`extends`",
+      "meaning": "클래스가 부모 클래스를 물려받을 때 쓰는 키워드다. 부모는 하나만 가질 수 있다."
+    },
+    {
+      "term": "`@Override`",
+      "meaning": "구현한 메서드 위에 붙이는 표시다. 이름에 오타가 있으면 컴파일러가 잡아 준다."
+    },
+    {
+      "term": "배열 (array)",
+      "meaning": "크기가 고정된 자료 구조다. 길이는 `arr.length` 로 구한다."
+    },
+    {
+      "term": "ArrayList",
+      "meaning": "크기를 늘릴 수 있는 컬렉션이다."
+    },
+    {
+      "term": "컬렉션 (collection)",
+      "meaning": "여러 값을 모아 담는 자료 구조다. 예: `List`, `Map`."
+    },
+    {
+      "term": "제네릭 (generic)",
+      "meaning": "꺾쇠(`<>`) 안에 담을 타입을 적는 기능이다. 예: `List<Integer>`."
+    },
+    {
+      "term": "오토박싱 (autoboxing)",
+      "meaning": "기본형 `int` 를 `Integer` 로 감싸서 넣는 것이다."
+    },
+    {
+      "term": "`Map`",
+      "meaning": "키와 값을 짝지어 담는 컬렉션이다. 예: `Map<String, List<Integer>>` 는 문자열 키에 정수 리스트를 짝짓는다."
+    },
+    {
+      "term": "람다식 (lambda)",
+      "meaning": "`x -> x * 2` 처럼 매개변수를 받아 값을 돌려주는 짧은 함수 표현이다."
+    },
+    {
+      "term": "스트림 (stream)",
+      "meaning": "`stream().map(...)` 처럼 컬렉션의 원소를 차례로 넘기며 처리하는 흐름이다."
+    },
+    {
+      "term": "참조 (reference)",
+      "meaning": "객체가 있는 주소다. `==` 은 참조가 같은지 본다."
+    },
+    {
+      "term": "`equals()`",
+      "meaning": "객체의 내용이 같은지 비교하는 메서드다."
+    }
+  ],
+  "formulas": [],
+  "pitfalls": [
+    {
+      "text": "클래스는 `extends` 로 부모를 하나만 가질 수 있다. 인터페이스는 `implements` 로 여러 개를 따를 수 있다.",
+      "key_point_id": "k1"
+    },
+    {
+      "text": "`@Override` 를 붙이지 않으면 메서드 이름의 오타를 컴파일러가 잡아 주지 못한다.",
+      "key_point_id": "k1"
+    },
+    {
+      "text": "배열은 크기가 고정이라서 늘어나지 않는다. 늘리고 싶으면 ArrayList 같은 컬렉션을 쓴다.",
+      "key_point_id": "k2"
+    },
+    {
+      "text": "제네릭 자리에 `int` 를 쓰면 안 된다. `List<int>` 가 아니라 `List<Integer>` 로 쓴다.",
+      "key_point_id": "k3"
+    },
+    {
+      "text": "`==` 은 주소가 같은지만 본다. 같은 글자라도 `new` 로 새로 만든 문자열은 주소가 달라서 `==` 이 `false` 가 된다.",
+      "key_point_id": "k5"
+    }
+  ],
+  "examples": [
+    {
+      "text": "`Shape` 인터페이스를 `Circle` 클래스가 `implements` 하는 예\n```java\ninterface Shape {\n    double area();\n}\n\nclass Circle implements Shape {\n    private final double r;\n    Circle(double r) { this.r = r; }\n\n    @Override\n    public double area() {\n        return Math.PI * r * r;\n    }\n}\n```",
+      "key_point_id": "k1"
+    },
+    {
+      "text": "main 메서드와 배열 합계 예\n```java\npublic static void main(String[] args) {\n    int[] arr = {1, 2, 3};\n    int sum = 0;\n    for (int v : arr) sum += v;\n    System.out.println(\"합계: \" + sum);\n}\n```",
+      "key_point_id": "k2"
+    },
+    {
+      "text": "제네릭 컬렉션 선언 예\n```java\nList<Integer> nums = new ArrayList<>();\nMap<String, List<Integer>> groups = new HashMap<>();\n```",
+      "key_point_id": "k3"
+    },
+    {
+      "text": "람다식을 `map` 에 넣는 예\n```java\nnums.stream().map(x -> x * 2).forEach(System.out::println);\n```",
+      "key_point_id": "k4"
+    },
+    {
+      "text": "`==` 과 equals 비교 예\n```java\nString a = new String(\"hi\");\nString b = \"hi\";\nSystem.out.println(a == b);        // false: 같은 객체인지 비교\nSystem.out.println(a.equals(b));   // true: 내용이 같은지 비교\n```",
+      "key_point_id": "k5"
+    }
+  ],
+  "checks": [],
+  "changes": [
+    {
+      "text": "제목 머리말 '[자바프로그래밍] 7주차 정리 -' 를 떼고 짧은 제목으로 줄였다."
+    },
+    {
+      "text": "들여쓴 Java 코드 두 블록과 본문의 코드를 코드 블록으로 옮기고, 코드 안의 들여쓰기는 그대로 두었다."
+    },
+    {
+      "text": "문장 속 코드(`List<Integer>`, `x -> x * 2`, `arr.length`, `==` 등)는 백틱으로 감쌌다."
+    },
+    {
+      "text": "'※ 시험 포인트' 와 '교수님 말씀' 은 pitfalls 와 `key_points` 설명에 나눠 옮겼다."
+    },
+    {
+      "text": "네 절이던 구성에서 람다식과 `==` 과 equals 를 따로 떼어 `key_points` 다섯 개로 정리했다."
+    },
+    {
+      "text": "요약 문장은 새로 썼다. 본문 문장은 최대한 그대로 두었다."
+    }
+  ]
+}

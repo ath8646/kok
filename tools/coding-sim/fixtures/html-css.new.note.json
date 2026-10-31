@@ -1,0 +1,229 @@
+{
+  "title": "3주차 강의 정리 - HTML 구조와 CSS 선택자",
+  "unit": "웹 프로그래밍 3주차",
+  "summary": "HTML 태그로 문서의 구조를 만들고, CSS 선택자와 명시도, 박스 모델, `@media` 로 모양과 화면 폭별 규칙을 정하는 방법을 정리한다.",
+  "key_points": [
+    {
+      "id": "k1",
+      "title": "HTML 문서의 기본 구조",
+      "explanation": "HTML 은 `<p>` 같은 태그로 문서의 뼈대를 만들고, 대부분의 태그는 여는 태그와 닫는 태그로 감싼다. 화면에 보이는 내용은 `body` 안에, 탭 제목이나 문자 코드 같은 정보는 `head` 안에 넣는다.",
+      "why": "태그 짝 맞추기와 meta charset 을 빠뜨리는 실수는 시험에 자주 나온다고 적혀 있다.",
+      "importance": "high",
+      "pages": []
+    },
+    {
+      "id": "k2",
+      "title": "CSS 를 붙이는 방법과 우선순위",
+      "explanation": "CSS 는 `style` 속성을 쓰는 인라인, head 안의 style 태그를 쓰는 내부, `link` 로 불러오는 외부 세 가지 방법으로 붙인다. 같은 요소에 규칙이 겹치면 명시도가 높은 쪽이 이기고, 명시도가 같으면 나중에 나온 규칙이 이긴다.",
+      "why": "어떤 규칙이 적용되는지 정하는 기본 순서라서 명시도 문제의 바탕이 된다.",
+      "importance": "medium",
+      "pages": []
+    },
+    {
+      "id": "k3",
+      "title": "CSS 선택자",
+      "explanation": "태그, `.class`, `#id` 선택자로 요소를 고르고, `.card > p` 는 바로 아래 자식인 p 만, `.card p` 는 안쪽의 모든 p 를 고른다. `a:hover` 는 마우스를 올린 a 태그를 고른다.",
+      "why": "자식 선택자와 후손 선택자의 차이는 시험에 자주 나온다고 적혀 있다.",
+      "importance": "high",
+      "pages": []
+    },
+    {
+      "id": "k4",
+      "title": "명시도 계산",
+      "explanation": "명시도는 (id 개수, class·속성·가상 클래스 개수, 태그 개수) 순서로 세고 왼쪽 자리부터 비교한다. 예를 들어 `.card` 는 (0,1,0), `.card > p` 는 (0,1,1) 이고, (0,1,0) 은 (0,0,9) 보다 크다.",
+      "why": "여러 선택자의 명시도를 계산해 어떤 색이 적용되는지 고르는 문제는 시험에 자주 나온다고 적혀 있다.",
+      "importance": "high",
+      "pages": []
+    },
+    {
+      "id": "k5",
+      "title": "박스 모델과 전체 폭",
+      "explanation": "요소는 안쪽부터 content, padding, border, margin 으로 된 상자다. 기본값인 `box-sizing: content-box` 에서는 width 가 내용 영역만 뜻하므로, 실제 차지하는 폭은 $\\text{content}(\\text{width}) + \\text{padding} + \\text{border}$ 로 계산한다.",
+      "why": "width, padding, border 가 주어졌을 때 전체 폭을 계산하는 문제는 시험에 자주 나온다고 적혀 있다.",
+      "importance": "high",
+      "pages": []
+    },
+    {
+      "id": "k6",
+      "title": "@media 로 화면 폭별 규칙",
+      "explanation": "`@media (max-width: 600px) { … }` 안의 규칙은 화면 폭이 600px 이하일 때만 적용된다. 조건이 참일 때만 안쪽 규칙이 쓰이므로 조건이 가리키는 화면 폭 범위를 정확히 읽어야 한다.",
+      "why": "@media 조건이 참이 되는 화면 폭 범위를 읽는 문제가 시험에 자주 나온다고 적혀 있다.",
+      "importance": "medium",
+      "pages": []
+    }
+  ],
+  "terms": [
+    {
+      "term": "HTML",
+      "meaning": "태그로 웹 페이지의 구조와 내용을 만드는 언어다."
+    },
+    {
+      "term": "CSS",
+      "meaning": "태그에 모양(색, 크기, 배치)을 입히는 언어다."
+    },
+    {
+      "term": "태그",
+      "meaning": "`<p>` 처럼 꺾쇠로 감싸서 요소를 나타내는 표시다."
+    },
+    {
+      "term": "`<!DOCTYPE html>`",
+      "meaning": "HTML 문서가 시작된다는 것을 알리는 선언이다."
+    },
+    {
+      "term": "속성",
+      "meaning": "여는 태그 안에 `이름=\"값\"` 형식으로 쓰는 정보다."
+    },
+    {
+      "term": "`class`",
+      "meaning": "여러 요소를 같은 이름으로 묶을 때 쓰는 속성이다."
+    },
+    {
+      "term": "`id`",
+      "meaning": "페이지에서 한 번만 쓰는 이름을 줄 때 쓰는 속성이다."
+    },
+    {
+      "term": "`meta charset`",
+      "meaning": "문서의 문자 코드를 정하는 설정이다. 빠뜨리면 한글이 깨질 수 있다."
+    },
+    {
+      "term": "선택자",
+      "meaning": "CSS 규칙을 적용할 요소를 고르는 문법이다."
+    },
+    {
+      "term": "자식 선택자",
+      "meaning": "`.card > p` 처럼 `>` 로 쓰며, 바로 아래 자식만 고른다."
+    },
+    {
+      "term": "후손 선택자",
+      "meaning": "`.card p` 처럼 빈칸으로 쓰며, 안쪽에 있는 모든 요소를 고른다."
+    },
+    {
+      "term": "가상 클래스",
+      "meaning": "`a:hover` 처럼 콜론으로 붙이는 상태 선택자다."
+    },
+    {
+      "term": "명시도",
+      "meaning": "선택자가 얼마나 강한지 (id, class, 태그) 세 자리 숫자로 나타낸 값이다."
+    },
+    {
+      "term": "`!important`",
+      "meaning": "명시도 계산보다 앞서 규칙을 이기게 하는 표시다. 남발하지 않는 것이 원칙이다."
+    },
+    {
+      "term": "박스 모델",
+      "meaning": "요소를 content, padding, border, margin 으로 이루어진 상자로 보는 방식이다."
+    },
+    {
+      "term": "`box-sizing`",
+      "meaning": "width 가 무엇을 뜻하는지 정한다. 기본값은 `content-box`다."
+    },
+    {
+      "term": "`border-box`",
+      "meaning": "width 가 padding 과 border 까지 포함한 값이 되게 하는 값이다."
+    },
+    {
+      "term": "`@media`",
+      "meaning": "화면 폭 같은 조건에 따라 규칙을 적용하는 규칙이다."
+    },
+    {
+      "term": "반응형 디자인",
+      "meaning": "화면 폭에 따라 모양을 바꿔 여러 기기에 맞추는 방식이다."
+    }
+  ],
+  "formulas": [
+    {
+      "latex": "\\text{content}(\\text{width}) + \\text{padding} + \\text{border}",
+      "label": "박스가 차지하는 전체 폭 (content-box)"
+    },
+    {
+      "latex": "200 + 10 + 10 + 2 + 2 = 224",
+      "label": "예제 박스의 전체 폭(px)"
+    }
+  ],
+  "pitfalls": [
+    {
+      "text": "`<img>` 와 `<br>` 처럼 닫는 태그가 없는 태그도 있지만, 대부분의 태그는 여는 태그와 닫는 태그를 짝 맞춰 써야 한다.",
+      "key_point_id": "k1"
+    },
+    {
+      "text": "`<meta charset=\"UTF-8\">` 을 빠뜨리면 한글이 깨질 수 있다.",
+      "key_point_id": "k1"
+    },
+    {
+      "text": "인라인 스타일은 명시도 계산에서 가장 앞서서 보통 가장 먼저 적용된다. 명시도가 같을 때는 나중에 나온 규칙이 이긴다는 점을 잊으면 안 된다.",
+      "key_point_id": "k2"
+    },
+    {
+      "text": "`#intro` 는 id 선택자이고 `.card` 는 class 선택자다. 샵(#)과 점(.)을 바꾸면 엉뚱한 요소에 적용된다.",
+      "key_point_id": "k3"
+    },
+    {
+      "text": "`.card > p` 와 `.card p` 는 다르다. 전자는 바로 아래 자식만, 후자는 모든 후손을 고른다.",
+      "key_point_id": "k3"
+    },
+    {
+      "text": "태그를 여러 개 쓴 선택자가 class 하나보다 강하다고 생각하면 틀린다. 명시도는 왼쪽 자리부터 비교한다.",
+      "key_point_id": "k4"
+    },
+    {
+      "text": "`!important` 는 명시도 계산보다 앞서지만 남발하지 않는 것이 원칙이다.",
+      "key_point_id": "k4"
+    },
+    {
+      "text": "`box-sizing` 이 content-box 이면 width 는 padding 과 border 를 포함하지 않는다. `box-sizing: border-box` 를 주면 width 가 padding 과 border 까지 포함한다.",
+      "key_point_id": "k5"
+    },
+    {
+      "text": "margin 은 바깥쪽 간격이라서 전체 폭에 들어가지 않는다.",
+      "key_point_id": "k5"
+    },
+    {
+      "text": "`max-width: 600px` 조건은 화면 폭이 600px 이하일 때 참이고, 600px 보다 넓으면 안쪽 규칙이 적용되지 않는다.",
+      "key_point_id": "k6"
+    }
+  ],
+  "examples": [
+    {
+      "text": "```html\n<!DOCTYPE html>\n<html lang=\"ko\">\n<head>\n  <meta charset=\"UTF-8\">\n  <title>첫 페이지</title>\n  <link rel=\"stylesheet\" href=\"style.css\">\n</head>\n<body>\n  <div class=\"card\" id=\"intro\">\n    <h1>KOK 소개</h1>\n    <p>공부 자료를 넣으면 정리해 줍니다.</p>\n  </div>\n  <a href=\"#top\">맨 위로</a>\n</body>\n</html>\n```",
+      "key_point_id": "k1"
+    },
+    {
+      "text": "```css\n.card > p {\n  color: #333;\n}\n\na:hover {\n  text-decoration: underline;\n}\n\n#intro {\n  background: #f5f5f5;\n}\n```",
+      "key_point_id": "k3"
+    },
+    {
+      "text": "`.card` 는 (0,1,0), `.card > p` 는 (0,1,1), `a:hover` 는 (0,1,1), `div p` 는 (0,0,2) 이다.",
+      "key_point_id": "k4"
+    },
+    {
+      "text": "```css\n.box {\n    width: 200px;\n    padding: 10px;\n    border: 2px solid #000;\n}\n/* 화면 폭: 200 + 10 + 10 + 2 + 2 = 224px */\n```",
+      "key_point_id": "k5"
+    },
+    {
+      "text": "```css\n.card {\n  width: 600px;\n}\n\n@media (max-width: 600px) {\n  .card {\n    width: 100%;\n  }\n}\n```",
+      "key_point_id": "k6"
+    }
+  ],
+  "checks": [
+    {
+      "text": "모바일 화면에서는 보통 max-width 조건을 쓴다는 문장은 모바일 우선(min-width) 방식과 어긋날 수 있다. 강의에서 어느 방식을 기준으로 했는지 확인할 것."
+    }
+  ],
+  "changes": [
+    {
+      "text": "자료의 1~6장을 핵심 포인트 여섯 개로 나눴다."
+    },
+    {
+      "text": "기본 들여쓰기 4칸만 쓰인 CSS 예제는 css 코드 블록으로 바꿨다. 들여쓰기 안쪽 칸은 그대로 두었다."
+    },
+    {
+      "text": "박스 모델 계산식은 $...$ 수식으로 바꿨다. 선택자와 태그 이름은 백틱으로 감쌌다."
+    },
+    {
+      "text": "마지막 '※ 시험 포인트' 줄은 핵심 포인트의 why 와 함정 목록으로 나눴다."
+    },
+    {
+      "text": "글 자료라서 pages 는 비웠다."
+    }
+  ]
+}

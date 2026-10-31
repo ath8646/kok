@@ -1,0 +1,156 @@
+{
+  "questions": [
+    {
+      "type": "short",
+      "prompt": "다음 코드에서 `maxOf(3, 7)` 을 호출하면 `T` 는 어떤 자료형으로 찍히는가? 자료형 이름을 쓰시오.\n\n```cpp\ntemplate <typename T>\nT maxOf(T a, T b) {\n    return (a > b) ? a : b;\n}\n```",
+      "choices": [],
+      "answer_index": -1,
+      "answer_bool": false,
+      "answer_text": "`int`",
+      "accepted": [],
+      "explanation": "`3` 과 `7` 은 모두 `int` 이므로 `T` 가 `int` 로 찍힌다. 함수 템플릿은 인자를 보고 `T` 를 스스로 알아낸다.",
+      "key_point_id": "k1",
+      "difficulty": "easy",
+      "pages": []
+    },
+    {
+      "type": "mcq",
+      "prompt": "다음 함수 템플릿을 보고 물음에 답하시오. 컴파일 오류가 나는 호출은?\n\n```cpp\ntemplate <typename T>\nT maxOf(T a, T b) {\n    return (a > b) ? a : b;\n}\n```",
+      "choices": [
+        "`maxOf(3, 7)`",
+        "`maxOf(2.5, 1.0)`",
+        "`maxOf(1, 2.5)`",
+        "`maxOf<double>(1, 2.5)`"
+      ],
+      "answer_index": 2,
+      "answer_bool": false,
+      "answer_text": "",
+      "accepted": [],
+      "explanation": "`maxOf(1, 2.5)` 은 `int` 와 `double` 이 섞여서 `T` 를 하나로 정하지 못해 오류가 난다. `maxOf<double>(1, 2.5)` 처럼 꺾쇠에 자료형을 직접 적으면 `T` 가 정해져서 오류가 없다.",
+      "key_point_id": "k1",
+      "difficulty": "hard",
+      "pages": []
+    },
+    {
+      "type": "ox",
+      "prompt": "C++17 부터는 `Box b;` 처럼 꺾쇠를 빼도 항상 자료형이 추론되어 오류가 나지 않는다.",
+      "choices": [],
+      "answer_index": -1,
+      "answer_bool": false,
+      "answer_text": "",
+      "accepted": [],
+      "explanation": "`Box b;` 처럼 꺾쇠 없이 쓰면 오류가 나는 것이 기본이고, C++17 부터는 일부 경우에만 추론된다. 그래서 항상 오류가 나지 않는다는 말은 거짓이다.",
+      "key_point_id": "k2",
+      "difficulty": "medium",
+      "pages": []
+    },
+    {
+      "type": "mcq",
+      "prompt": "다음 코드에서 `a + b` 는 무엇으로 풀리는가?\n\n```cpp\nstruct Point {\n    int x, y;\n    Point operator+(const Point &other) const {\n        return Point{x + other.x, y + other.y};\n    }\n};\n```",
+      "choices": [
+        "`a.operator+(b)`",
+        "`b.operator+(a)`",
+        "`a.operator+()` 만 호출되고 `b` 는 무시된다",
+        "`operator+(a, b)` 전역 호출"
+      ],
+      "answer_index": 0,
+      "answer_bool": false,
+      "answer_text": "",
+      "accepted": [],
+      "explanation": "멤버 함수로 만들면 왼쪽 피연산자 `a` 가 `this` 가 되어 `a.operator+(b)` 로 풀린다. 함수 이름 뒤의 `const` 는 왼쪽 객체를 바꾸지 않는다는 약속이다.",
+      "key_point_id": "k3",
+      "difficulty": "medium",
+      "pages": []
+    },
+    {
+      "type": "ox",
+      "prompt": "`<<` 는 멤버 함수로 만들어야 `std::cout << p` 를 쓸 수 있다.",
+      "choices": [],
+      "answer_index": -1,
+      "answer_bool": false,
+      "answer_text": "",
+      "accepted": [],
+      "explanation": "`std::cout` 이 왼쪽에 와야 하므로 `<<` 를 멤버 함수로 만들면 `std::cout << p` 를 쓸 수 없다. 그래서 `<<` 는 전역 함수나 `friend` 로 만든다.",
+      "key_point_id": "k4",
+      "difficulty": "easy",
+      "pages": []
+    },
+    {
+      "type": "mcq",
+      "prompt": "왼쪽 피연산자가 `int` 인 `2 * p` 같은 식을 만들 때 `operator*` 는 어떻게 만들어야 하는가?",
+      "choices": [
+        "멤버 함수로 만든다",
+        "전역 함수로 만든다",
+        "`int` 클래스 안에 정의한다",
+        "`main` 함수 안에 정의한다"
+      ],
+      "answer_index": 1,
+      "answer_bool": false,
+      "answer_text": "",
+      "accepted": [],
+      "explanation": "왼쪽 피연산자가 `int` 인 식은 멤버 함수로 만들 수 없어서, 이때는 전역 함수로 만든다. `<<` 를 전역 함수로 만드는 이유와 같다.",
+      "key_point_id": "k4",
+      "difficulty": "medium",
+      "pages": []
+    },
+    {
+      "type": "mcq",
+      "prompt": "다음 코드를 컴파일하면 어떻게 되는가?\n\n```cpp\ntemplate <typename T>\nT twice(T x) {\n    return x * 2;\n}\n\nint main() {\n    std::cout << twice(\"hi\") << '\\n';\n    return 0;\n}\n```",
+      "choices": [
+        "`2` 가 출력된다",
+        "`hihi` 가 출력된다",
+        "컴파일 오류가 난다",
+        "`0` 이 출력된다"
+      ],
+      "answer_index": 2,
+      "answer_bool": false,
+      "answer_text": "",
+      "accepted": [],
+      "explanation": "`twice(\"hi\")` 에서 `T` 는 `const char *` 가 된다. 이 자료형과 `int` 사이에는 `*` 를 쓸 수 없어서, 정의가 아니라 호출한 곳에서 컴파일 오류가 난다.",
+      "key_point_id": "k5",
+      "difficulty": "hard",
+      "pages": []
+    },
+    {
+      "type": "ox",
+      "prompt": "템플릿 정의는 보통 헤더 파일에 두며, 정의가 보이지 않는 곳에서 템플릿을 부르면 링크 오류가 난다.",
+      "choices": [],
+      "answer_index": -1,
+      "answer_bool": true,
+      "answer_text": "",
+      "accepted": [],
+      "explanation": "템플릿 정의는 보통 헤더 파일에 두고, 인스턴스화는 호출 시점에 일어난다. 그래서 정의가 보이지 않는 곳에서 부르면 링크 오류가 난다.",
+      "key_point_id": "k5",
+      "difficulty": "easy",
+      "pages": []
+    },
+    {
+      "type": "cloze",
+      "prompt": "템플릿 정의는 보통 ____ 파일에 둔다.",
+      "choices": [],
+      "answer_index": -1,
+      "answer_bool": false,
+      "answer_text": "헤더",
+      "accepted": [
+        "헤더 파일"
+      ],
+      "explanation": "템플릿 정의는 보통 헤더 파일에 둔다. 인스턴스화는 호출 시점에 일어나므로, 정의가 보이지 않으면 링크 오류가 난다.",
+      "key_point_id": "k5",
+      "difficulty": "medium",
+      "pages": []
+    },
+    {
+      "type": "cloze",
+      "prompt": "`Box<int>` 와 `Box<double>` 은 서로 다른 자료형이라 서로 ____ 할 수 없다.",
+      "choices": [],
+      "answer_index": -1,
+      "answer_bool": false,
+      "answer_text": "대입",
+      "accepted": [],
+      "explanation": "`Box<int>` 와 `Box<double>` 은 꺾쇠 안의 자료형이 달라서 서로 다른 자료형이다. 그래서 한 쪽을 다른 쪽에 대입할 수 없다.",
+      "key_point_id": "k2",
+      "difficulty": "medium",
+      "pages": []
+    }
+  ]
+}

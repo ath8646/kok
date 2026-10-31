@@ -1,0 +1,265 @@
+{
+  "questions": [
+    {
+      "type": "mcq",
+      "prompt": "소켓을 구분하는 기준으로 옳은 것은?",
+      "choices": [
+        "포트 번호만으로 구분한다",
+        "IP 주소와 포트 번호의 짝으로 구분한다",
+        "프로그램 이름만으로 구분한다",
+        "`SOCK_STREAM` 같은 소켓 타입만으로 구분한다"
+      ],
+      "answer_index": 1,
+      "answer_bool": false,
+      "answer_text": "",
+      "accepted": [],
+      "explanation": "소켓은 IP 주소와 포트 번호의 짝으로 구분된다. 포트 번호만으로 구분한다고 생각하면 틀리는데, 포트는 같은 IP 안에서 프로그램을 구분하는 값이기 때문이다.",
+      "key_point_id": "k1",
+      "difficulty": "medium",
+      "pages": []
+    },
+    {
+      "type": "cloze",
+      "prompt": "포트 번호는 16비트 값이라 0부터 ____ 사이의 값을 가진다.",
+      "choices": [],
+      "answer_index": -1,
+      "answer_bool": false,
+      "answer_text": "65535",
+      "accepted": [
+        "65,535"
+      ],
+      "explanation": "포트 번호는 16비트 값이라 0부터 65535 까지 쓸 수 있다. 그중 0~1023 번은 잘 알려진 포트(well-known port)라고 부른다.",
+      "key_point_id": "k1",
+      "difficulty": "easy",
+      "pages": []
+    },
+    {
+      "type": "mcq",
+      "prompt": "`192.168.0.1/24` 에서 `/24` 가 뜻하는 것은?",
+      "choices": [
+        "호스트 부분이 24비트라는 뜻이다",
+        "앞의 24비트가 네트워크 부분이라는 뜻이다",
+        "포트 번호가 24번이라는 뜻이다",
+        "24개의 포트를 한 묶음으로 쓴다는 뜻이다"
+      ],
+      "answer_index": 1,
+      "answer_bool": false,
+      "answer_text": "",
+      "accepted": [],
+      "explanation": "`/24` 는 앞의 24비트가 네트워크 부분이라는 뜻이다. 나머지 자리는 호스트 부분이라서 포트 번호와는 상관없는 표시다.",
+      "key_point_id": "k2",
+      "difficulty": "easy",
+      "pages": []
+    },
+    {
+      "type": "mcq",
+      "prompt": "`192.168.0.1/24` 와 같은 네트워크에 속하는 호스트 주소는?",
+      "choices": [
+        "`192.168.1.7`",
+        "`192.168.0.7`",
+        "`10.0.0.7`",
+        "`192.167.0.7`"
+      ],
+      "answer_index": 1,
+      "answer_bool": false,
+      "answer_text": "",
+      "accepted": [],
+      "explanation": "`/24` 는 앞의 24비트, 즉 `192.168.0` 이 네트워크 부분이라는 뜻이다. 그래서 네 번째 자리만 다른 `192.168.0.7` 이 같은 네트워크에 속하고, 세 번째 자리가 다른 `192.168.1.7` 은 다른 네트워크다.",
+      "key_point_id": "k2",
+      "difficulty": "hard",
+      "pages": []
+    },
+    {
+      "type": "ox",
+      "prompt": "호스트 부분을 모두 0 으로 둔 주소가 브로드캐스트 주소다.",
+      "choices": [],
+      "answer_index": -1,
+      "answer_bool": false,
+      "answer_text": "",
+      "accepted": [],
+      "explanation": "호스트 부분을 모두 0 으로 둔 주소는 네트워크 주소이고, 모두 1 로 둔 주소가 브로드캐스트 주소다. 두 주소를 거꾸로 답하면 틀린다.",
+      "key_point_id": "k2",
+      "difficulty": "medium",
+      "pages": []
+    },
+    {
+      "type": "mcq",
+      "prompt": "TCP 와 UDP 를 설명한 것으로 옳은 것은?",
+      "choices": [
+        "TCP 는 비연결형이라 빠르고, UDP 는 연결형이라 도착을 보장한다",
+        "TCP 는 연결형이라 순서와 도착을 보장하고, UDP 는 비연결형이라 빠르지만 도착을 보장하지 않는다",
+        "TCP 와 UDP 는 모두 도착을 보장한다",
+        "TCP 와 UDP 는 소켓 타입이 같아서 구분할 수 없다"
+      ],
+      "answer_index": 1,
+      "answer_bool": false,
+      "answer_text": "",
+      "accepted": [],
+      "explanation": "TCP 는 연결형이라 데이터의 순서와 도착을 보장하고, UDP 는 비연결형이라 빠르지만 도착을 보장하지 않는다. 소켓 타입으로는 `SOCK_STREAM` 이 TCP, `SOCK_DGRAM` 이 UDP 다.",
+      "key_point_id": "k3",
+      "difficulty": "easy",
+      "pages": []
+    },
+    {
+      "type": "short",
+      "prompt": "TCP 가 주는 연속된 바이트 흐름을 뜻하는 말은 무엇인가?",
+      "choices": [],
+      "answer_index": -1,
+      "answer_bool": false,
+      "answer_text": "바이트 스트림",
+      "accepted": [
+        "byte stream",
+        "바이트스트림"
+      ],
+      "explanation": "TCP 는 바이트 스트림이라 데이터를 연속된 바이트 흐름으로 준다. 그래서 메시지 경계를 지킨다고 생각하면 틀린다.",
+      "key_point_id": "k3",
+      "difficulty": "medium",
+      "pages": []
+    },
+    {
+      "type": "cloze",
+      "prompt": "소켓 타입 `SOCK_DGRAM` 은 ____ 를 뜻한다.",
+      "choices": [],
+      "answer_index": -1,
+      "answer_bool": false,
+      "answer_text": "UDP",
+      "accepted": [
+        "udp",
+        "UDP 프로토콜"
+      ],
+      "explanation": "`SOCK_STREAM` 은 TCP, `SOCK_DGRAM` 은 UDP 를 뜻하는 소켓 타입이다. 두 타입을 바꿔 외우지 않도록 주의해야 한다.",
+      "key_point_id": "k3",
+      "difficulty": "easy",
+      "pages": []
+    },
+    {
+      "type": "mcq",
+      "prompt": "TCP 연결을 만드는 3-way handshake 의 순서로 옳은 것은?",
+      "choices": [
+        "SYN → SYN+ACK → ACK",
+        "SYN → ACK → SYN+ACK",
+        "ACK → SYN → SYN+ACK",
+        "SYN+ACK → SYN → FIN"
+      ],
+      "answer_index": 0,
+      "answer_bool": false,
+      "answer_text": "",
+      "accepted": [],
+      "explanation": "TCP 연결은 SYN, SYN+ACK, ACK 세 메시지로 만든다. 클라이언트가 SYN 을 보내면 서버가 SYN+ACK 로 답하고, 마지막으로 클라이언트가 ACK 를 보낸다.",
+      "key_point_id": "k4",
+      "difficulty": "medium",
+      "pages": []
+    },
+    {
+      "type": "cloze",
+      "prompt": "클라이언트가 $x$ 로 SYN 을 보내면, 서버는 SYN+ACK 에 확인 번호 ____ 을 실어 보낸다.",
+      "choices": [],
+      "answer_index": -1,
+      "answer_bool": false,
+      "answer_text": "$x+1$",
+      "accepted": [
+        "x+1",
+        "x + 1",
+        "$x + 1$"
+      ],
+      "explanation": "SYN 도 데이터는 없지만 순서 번호를 하나 차지한다. 그래서 서버의 확인 번호는 $x$ 에 1 을 더한 $x+1$ 이고, 클라이언트의 확인 번호는 $y+1$ 이다.",
+      "key_point_id": "k4",
+      "difficulty": "hard",
+      "pages": []
+    },
+    {
+      "type": "ox",
+      "prompt": "SYN 은 데이터가 없으므로 순서 번호를 차지하지 않는다.",
+      "choices": [],
+      "answer_index": -1,
+      "answer_bool": false,
+      "answer_text": "",
+      "accepted": [],
+      "explanation": "SYN 은 데이터가 없어도 순서 번호를 하나 차지한다. 그래서 확인 번호는 순서 번호에 1 을 더한 값이 된다.",
+      "key_point_id": "k4",
+      "difficulty": "medium",
+      "pages": []
+    },
+    {
+      "type": "cloze",
+      "prompt": "아래 코드는 서버의 포트를 정하는 부분이다. 빈칸에 들어갈 함수 이름은 무엇인가?\n```c\naddr.sin_family = AF_INET;\naddr.sin_port = ____(8080);\naddr.sin_addr.s_addr = htonl(INADDR_ANY);\n```",
+      "choices": [],
+      "answer_index": -1,
+      "answer_bool": false,
+      "answer_text": "`htons`",
+      "accepted": [
+        "htons",
+        "htons()"
+      ],
+      "explanation": "`htons` 는 포트 번호를 네트워크 바이트 순서로 바꾸는 함수다. 이것을 빼먹으면 엉뚱한 포트가 열린다.",
+      "key_point_id": "k5",
+      "difficulty": "medium",
+      "pages": []
+    },
+    {
+      "type": "mcq",
+      "prompt": "아래 코드에서 `listen(listen_fd, 5);` 의 `5` 는 무엇인가?\n```c\nbind(listen_fd, (struct sockaddr *)&addr, sizeof(addr));\nlisten(listen_fd, 5);\n```",
+      "choices": [
+        "`recv` 에서 한 번에 읽을 최대 바이트 수",
+        "연결 대기 큐의 길이(backlog)",
+        "`bind` 에 묶은 포트 번호",
+        "`accept` 가 기다리는 시간(초)"
+      ],
+      "answer_index": 1,
+      "answer_bool": false,
+      "answer_text": "",
+      "accepted": [],
+      "explanation": "`listen` 의 두 번째 인자는 backlog 라고 하며, 연결 대기 큐의 길이다. `recv` 의 인자는 한 번에 읽을 최대 바이트 수이므로 두 인자를 구분해야 한다.",
+      "key_point_id": "k5",
+      "difficulty": "hard",
+      "pages": []
+    },
+    {
+      "type": "short",
+      "prompt": "대기 중인 연결 하나를 꺼내 대화에 쓸 새 소켓 번호를 돌려주는 함수는 무엇인가?",
+      "choices": [],
+      "answer_index": -1,
+      "answer_bool": false,
+      "answer_text": "`accept`",
+      "accepted": [
+        "accept",
+        "accept()"
+      ],
+      "explanation": "`accept` 는 대기 중인 연결 하나를 꺼내 새 소켓 번호를 돌려주는 함수다. `listen` 은 연결을 받을 준비만 하므로 연결을 꺼내는 것은 `accept` 다.",
+      "key_point_id": "k5",
+      "difficulty": "medium",
+      "pages": []
+    },
+    {
+      "type": "mcq",
+      "prompt": "아래 `netstat` 출력에서 `accept` 를 기다리는 소켓은 어느 줄인가?\n```bash\n$ netstat -an | grep 8080\ntcp  0  0  0.0.0.0:8080    0.0.0.0:*         LISTEN\ntcp  0  0  127.0.0.1:8080  127.0.0.1:52314  ESTABLISHED\n```",
+      "choices": [
+        "첫째 줄, LISTEN 상태",
+        "둘째 줄, ESTABLISHED 상태",
+        "두 줄 모두",
+        "두 줄 모두 아니다, 기다리는 소켓은 이 출력에 없다"
+      ],
+      "answer_index": 0,
+      "answer_bool": false,
+      "answer_text": "",
+      "accepted": [],
+      "explanation": "LISTEN 은 `accept` 를 기다리는 소켓이고, ESTABLISHED 는 이미 연결이 맺어진 소켓이다. 두 상태를 헷갈리면 안 된다.",
+      "key_point_id": "k6",
+      "difficulty": "medium",
+      "pages": []
+    },
+    {
+      "type": "ox",
+      "prompt": "소켓을 다 쓴 뒤 `close` 를 빼먹으면 자원이 샐 수 있다.",
+      "choices": [],
+      "answer_index": -1,
+      "answer_bool": true,
+      "answer_text": "",
+      "accepted": [],
+      "explanation": "`close` 를 빼먹어 자원이 새는 것은 자주 하는 실수로 꼽힌다. 다 쓴 소켓은 `close` 로 닫아야 한다.",
+      "key_point_id": "k6",
+      "difficulty": "easy",
+      "pages": []
+    }
+  ]
+}

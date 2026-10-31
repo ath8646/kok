@@ -24,6 +24,33 @@ describe('grading', () => {
     expect(miss.needsAi).toBe(true);
     expect(autoGrade({ type: 'short', answer: '엽록체' }, '  ').needsAi).toBe(false);
   });
+  it('뜻을 바꾸는 기호가 다르면 틀린 답 (코드·수식 답)', () => {
+    const ok = (answer: string, given: string) => autoGrade({ type: 'short', answer }, given).correct;
+    // 기호만으로 된 답
+    expect(ok('->', '->')).toBe(true);
+    expect(ok('->', '=>')).toBe(false);
+    expect(ok('//', '// ')).toBe(true);
+    expect(ok('<<', '>>')).toBe(false);
+    // 음수·소수점·부등호·!=·증감
+    expect(ok('-1', '-1')).toBe(true);
+    expect(ok('-1', '1')).toBe(false);
+    expect(ok('0.5', '05')).toBe(false);
+    expect(ok('3.14', '3.14')).toBe(true);
+    expect(ok('a < b', 'a<b')).toBe(true);
+    expect(ok('a < b', 'a > b')).toBe(false);
+    expect(ok('a != b', 'a = b')).toBe(false);
+    expect(ok('x--', 'x')).toBe(false);
+    // 띄어쓰기·대소문자·괄호·밑줄은 예전처럼 너그럽게
+    expect(ok('print(x)', 'print (x)')).toBe(true);
+    expect(ok('__init__', 'init')).toBe(true);
+    expect(ok('O(n log n)', 'o(nlogn)')).toBe(true);
+    expect(ok('Photo-Synthesis', 'photosynthesis')).toBe(true);
+    expect(ok('2-3', '23')).toBe(true);
+    // 답의 수식·코드 표시는 읽을 수 있는 글자로
+    expect(ok('$x^2$', 'x^2')).toBe(true);
+    expect(ok('`len(xs)`', 'len(xs)')).toBe(true);
+    expect(ok('$-3$', '3')).toBe(false);
+  });
   it('rates by correctness and time', () => {
     expect(autoRating('mcq', false, 1000)).toBe(1);
     expect(autoRating('mcq', true, 3000)).toBe(4);

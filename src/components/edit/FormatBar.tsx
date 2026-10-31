@@ -1,5 +1,5 @@
 'use client';
-// 켜진 글 칸의 꾸미기 줄: 화면 아래(폰은 키보드 바로 위). 굵게·형광펜·빨간 글씨·목록·번호·수식·되돌리기.
+// 켜진 글 칸의 꾸미기 줄: 화면 아래(폰은 키보드 바로 위). 굵게·형광펜·빨간 글씨·코드·목록·번호·코드 블록·수식·되돌리기.
 // 버튼을 눌러도 글 칸의 초점과 고른 글이 그대로 있다. Alt+F10 으로 글 칸에서 이 줄로, Esc 로 글 칸으로 돌아간다.
 import { useEditorState } from '@tiptap/react';
 import type { Editor } from '@tiptap/core';
@@ -50,6 +50,11 @@ function NumbersIcon() {
   );
 }
 
+/** 글 속 코드: < > */
+const CODE_ICON = 'M8.5 7 3.5 12l5 5M15.5 7l5 5-5 5';
+/** 코드 블록: 네모 안의 < > */
+const CODE_BLOCK_ICON = 'M3.5 4.5h17v15h-17zM9.5 9.5 7 12l2.5 2.5M14.5 9.5 17 12l-2.5 2.5';
+
 const KEYBOARD_DOWN = 'M3 4.5h18v10H3zM6.5 7.5h.01M9.5 7.5h.01M12.5 7.5h.01M15.5 7.5h.01M8 11.5h8M9 18.5l3 2.5 3-2.5';
 
 type Tool = { key: string; label: string; icon: ReactNode; on?: boolean; disabled?: boolean; run: () => void; gap?: boolean };
@@ -72,9 +77,12 @@ export default function FormatBar({
         bold: e.isActive('bold'),
         highlight: e.isActive('highlight'),
         red: e.isActive('red'),
+        code: e.isActive('code'),
         bullet: e.isActive('bulletList'),
         ordered: e.isActive('orderedList'),
+        codeBlock: e.isActive('codeBlock'),
         lists: !!e.schema.nodes.bulletList,
+        blocks: !!e.schema.nodes.codeBlock,
         undo: e.can().undo(),
         redo: e.can().redo(),
         mathAt: sel instanceof NodeSelection && sel.node.type.name === 'math' ? sel.from : null,
@@ -98,12 +106,22 @@ export default function FormatBar({
     }
     onMath(null);
   };
+  // 코드 블록 안은 글자 그대로라 꾸미기·수식을 쓸 수 없다
+  const inCode = st.codeBlock;
   const tools: Tool[] = [
-    { key: 'b', label: '굵게', on: st.bold, icon: <span className="text-[16px] font-black leading-none">B</span>, run: () => chain().toggleMark('bold').run() },
+    {
+      key: 'b',
+      label: '굵게',
+      on: st.bold,
+      disabled: inCode,
+      icon: <span className="text-[16px] font-black leading-none">B</span>,
+      run: () => chain().toggleMark('bold').run(),
+    },
     {
       key: 'mark',
       label: '형광펜',
       on: st.highlight,
+      disabled: inCode,
       icon: <span className="kok-mark text-[13px] font-extrabold leading-none text-ink">가</span>,
       run: () => chain().toggleMark('highlight').run(),
     },
@@ -111,16 +129,29 @@ export default function FormatBar({
       key: 'red',
       label: '빨간 글씨',
       on: st.red,
+      disabled: inCode,
       icon: <span className="kok-red text-[15px] font-extrabold leading-none">가</span>,
       run: () => chain().toggleMark('red').run(),
     },
+    { key: 'code', label: '코드', on: st.code, disabled: inCode, icon: <Icon d={CODE_ICON} size={19} />, run: () => chain().toggleMark('code').run() },
     ...(st.lists
       ? [
           { key: 'ul', label: '목록', on: st.bullet, icon: <BulletsIcon />, run: () => chain().toggleBulletList().run(), gap: true },
           { key: 'ol', label: '번호 목록', on: st.ordered, icon: <NumbersIcon />, run: () => chain().toggleOrderedList().run() },
         ]
       : []),
-    { key: 'math', label: '수식', icon: <span className="font-serif text-[16px] italic leading-none">x²</span>, run: math, gap: true },
+    ...(st.blocks
+      ? [
+          {
+            key: 'pre',
+            label: '코드 블록',
+            on: st.codeBlock,
+            icon: <Icon d={CODE_BLOCK_ICON} size={19} />,
+            run: () => chain().toggleNode('codeBlock', 'paragraph').run(),
+          },
+        ]
+      : []),
+    { key: 'math', label: '수식', disabled: inCode, icon: <span className="font-serif text-[16px] italic leading-none">x²</span>, run: math, gap: true },
     { key: 'undo', label: '되돌리기', disabled: !st.undo, icon: <Icon d={ICONS.undo} size={19} />, run: () => chain().undo().run(), gap: true },
     { key: 'redo', label: '다시 하기', disabled: !st.redo, icon: <Icon d={ICONS.redo} size={19} />, run: () => chain().redo().run() },
     { key: 'done', label: '글 칸 닫기', icon: <Icon d={KEYBOARD_DOWN} size={20} />, run: () => editor.commands.blur(), gap: true },

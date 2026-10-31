@@ -338,7 +338,9 @@ export default function HomePage() {
             <Icon d={ICONS.plus} size={30} strokeWidth={2.4} />
           </span>
           <span className="font-display text-xl">공부한 내용을 넣어 보세요</span>
-          <span className="max-w-sm text-sm text-muted">여기를 눌러 적고 엔터를 누르거나, PDF·사진을 화면에 끌어다 놓으면 AI가 정리하고 문제를 만들어요.</span>
+          <span className="max-w-sm text-sm text-muted">
+            여기를 눌러 적고 엔터를 누르거나, PDF·사진·한글·워드·PPT 파일을 화면에 끌어다 놓으면 AI가 정리하고 문제를 만들어요.
+          </span>
         </button>
       )}
 
@@ -466,7 +468,7 @@ export default function HomePage() {
           </span>
           <span>
             <span className="block font-bold">자료 넣기</span>
-            <span className="text-sm text-muted">글 · PDF · 사진</span>
+            <span className="text-sm text-muted">글 · PDF · 사진 · 한글 · PPT</span>
           </span>
         </button>
         <Link href="/wrong" className="kok-card kok-card-hover press grid gap-2 p-4">

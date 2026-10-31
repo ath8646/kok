@@ -5,7 +5,7 @@ import { parseRich } from '../richtext';
 const round = (s: string, single = false) => docToRich(richToDoc(s, { single }), { single });
 
 type Inl = ReturnType<typeof parseRich>[number]['c'];
-const flat = (ns: Inl): string => ns.map((n) => (n.t === 'text' ? n.v : n.t === 'math' ? n.tex : flat(n.c))).join('');
+const flat = (ns: Inl): string => ns.map((n) => (n.t === 'text' || n.t === 'code' ? n.v : n.t === 'math' ? n.tex : flat(n.c))).join('');
 
 const para = (...content: DocNode[]): DocNode => ({ type: 'doc', content: [{ type: 'paragraph', content }] });
 const t = (text: string, ...marks: string[]): DocNode =>

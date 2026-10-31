@@ -1,0 +1,209 @@
+{
+  "questions": [
+    {
+      "type": "mcq",
+      "prompt": "실행 권한이 없는 `run.sh` 를 실행하는 방법으로 옳은 것은?",
+      "choices": [
+        "`./run.sh`",
+        "`bash run.sh`",
+        "`chmod run.sh`",
+        "`echo run.sh`"
+      ],
+      "answer_index": 1,
+      "answer_bool": false,
+      "answer_text": "",
+      "accepted": [],
+      "explanation": "노트에 권한이 없어도 `bash run.sh` 라고 쓰면 실행된다고 적혀 있다. `./run.sh` 는 실행 권한이 있어야 실행된다.",
+      "key_point_id": "k1",
+      "difficulty": "medium",
+      "pages": []
+    },
+    {
+      "type": "mcq",
+      "prompt": "`x = 10` 처럼 등호 양옆에 공백을 두고 쓰면 어떤 일이 생기는가?",
+      "choices": [
+        "`x` 변수에 10 이 들어간다.",
+        "`x` 라는 명령을 찾으려다 오류가 난다.",
+        "`x` 는 자동으로 0 이 된다.",
+        "`x` 라는 파일이 만들어진다."
+      ],
+      "answer_index": 1,
+      "answer_bool": false,
+      "answer_text": "",
+      "accepted": [],
+      "explanation": "노트에 `x=10` 은 맞지만 `x = 10` 은 명령 `x` 를 찾으라는 뜻이 되어 오류가 난다고 적혀 있다. 그래서 대입할 때는 등호 양옆에 공백 없이 쓴다.",
+      "key_point_id": "k2",
+      "difficulty": "easy",
+      "pages": []
+    },
+    {
+      "type": "cloze",
+      "prompt": "작은따옴표 'a' 안에서는 `$` 가 펼쳐지지 않고 ____ 나온다.",
+      "choices": [],
+      "answer_index": -1,
+      "answer_bool": false,
+      "answer_text": "글자 그대로",
+      "accepted": [
+        "그대로",
+        "글자 그대로 나온다"
+      ],
+      "explanation": "노트에 큰따옴표 안에서는 `$` 가 값으로 바뀌지만 작은따옴표 안에서는 글자 그대로 나온다고 적혀 있다.",
+      "key_point_id": "k2",
+      "difficulty": "medium",
+      "pages": []
+    },
+    {
+      "type": "mcq",
+      "prompt": "다음 명령이 출력하는 것은 무엇인가?\n\n```bash\necho '$HOME'\n```",
+      "choices": [
+        "집 경로",
+        "`$HOME`",
+        "빈 줄",
+        "오류 메시지"
+      ],
+      "answer_index": 1,
+      "answer_bool": false,
+      "answer_text": "",
+      "accepted": [],
+      "explanation": "노트 예시에서 `echo \"$HOME\"` 은 집 경로를 출력하고, `echo '$HOME'` 은 `$HOME` 이라는 글자를 그대로 출력한다고 적혀 있다.",
+      "key_point_id": "k2",
+      "difficulty": "medium",
+      "pages": []
+    },
+    {
+      "type": "mcq",
+      "prompt": "`$#` 는 무엇을 나타내는가?",
+      "choices": [
+        "스크립트 이름",
+        "인자 개수",
+        "직전 명령의 종료 상태",
+        "첫 번째 인자"
+      ],
+      "answer_index": 1,
+      "answer_bool": false,
+      "answer_text": "",
+      "accepted": [],
+      "explanation": "노트에 `$#` 는 인자 개수를 알려 주고, `$0` 은 스크립트 이름이라고 적혀 있다.",
+      "key_point_id": "k3",
+      "difficulty": "easy",
+      "pages": []
+    },
+    {
+      "type": "ox",
+      "prompt": "큰따옴표로 감싼 `\"$*\"` 는 인자 하나하나를 따로 유지한다.",
+      "choices": [],
+      "answer_index": -1,
+      "answer_bool": false,
+      "answer_text": "",
+      "accepted": [],
+      "explanation": "노트에 `\"$@\"` 는 인자 하나하나를 따로 유지하고, `\"$*\"` 는 모든 인자를 하나의 문자열로 합친다고 적혀 있다.",
+      "key_point_id": "k3",
+      "difficulty": "hard",
+      "pages": []
+    },
+    {
+      "type": "cloze",
+      "prompt": "`$?` 는 직전 명령이 성공하면 ____ 을 담는다.",
+      "choices": [],
+      "answer_index": -1,
+      "answer_bool": false,
+      "answer_text": "0",
+      "accepted": [
+        "0 을",
+        "영",
+        "zero"
+      ],
+      "explanation": "노트에 `$?` 는 직전 명령의 종료 상태이고, 성공하면 0 이라고 적혀 있다.",
+      "key_point_id": "k3",
+      "difficulty": "medium",
+      "pages": []
+    },
+    {
+      "type": "mcq",
+      "prompt": "다음 조건문에서 `x` 가 10보다 큰지 비교하는 연산자는 무엇인가?\n\n```bash\nif [ \"$x\" -gt 10 ]; then\n```",
+      "choices": [
+        "`-lt`",
+        "`-gt`",
+        "`-eq`",
+        "`-ne`"
+      ],
+      "answer_index": 1,
+      "answer_bool": false,
+      "answer_text": "",
+      "accepted": [],
+      "explanation": "노트에 `-gt` 는 크다, `-lt` 는 작다, `-eq` 는 같다는 뜻이라고 적혀 있다.",
+      "key_point_id": "k4",
+      "difficulty": "easy",
+      "pages": []
+    },
+    {
+      "type": "short",
+      "prompt": "변수를 큰따옴표 없이 `[ $x -gt 10 ]` 로 쓰면, x 가 빈 값일 때 나는 오류 문구에 들어가는 영어 표현은 무엇인가?",
+      "choices": [],
+      "answer_index": -1,
+      "answer_bool": false,
+      "answer_text": "unary operator expected",
+      "accepted": [
+        "unary operator",
+        "unary operator expected 오류"
+      ],
+      "explanation": "노트에 변수를 큰따옴표로 감싸지 않으면 x 가 빈 값일 때 `unary operator expected` 오류가 난다고 적혀 있다.",
+      "key_point_id": "k4",
+      "difficulty": "hard",
+      "pages": []
+    },
+    {
+      "type": "mcq",
+      "prompt": "다음 반복문에서 `*.txt` 는 무엇에 의해 실제 파일 이름 목록으로 펼쳐지는가?\n\n```bash\nfor f in *.txt; do\n```",
+      "choices": [
+        "`grep`",
+        "쉘의 파일 이름 확장",
+        "`echo`",
+        "`export`"
+      ],
+      "answer_index": 1,
+      "answer_bool": false,
+      "answer_text": "",
+      "accepted": [],
+      "explanation": "노트에 `*.txt` 는 쉘이 실제 파일 이름 목록으로 펼치는데, 이를 파일 이름 확장이라고 한다고 적혀 있다.",
+      "key_point_id": "k5",
+      "difficulty": "medium",
+      "pages": []
+    },
+    {
+      "type": "cloze",
+      "prompt": "`while` 문은 조건이 ____ 동안 반복한다.",
+      "choices": [],
+      "answer_index": -1,
+      "answer_bool": false,
+      "answer_text": "참인",
+      "accepted": [
+        "참",
+        "맞는",
+        "true 인"
+      ],
+      "explanation": "노트에 `while` 은 조건이 참인 동안 반복하며, 카운터는 `i=$((i + 1))` 로 올린다고 적혀 있다.",
+      "key_point_id": "k5",
+      "difficulty": "easy",
+      "pages": []
+    },
+    {
+      "type": "mcq",
+      "prompt": "`명령1 || 명령2` 에서 `명령2` 가 실행되는 경우는 언제인가?",
+      "choices": [
+        "`명령1` 이 성공했을 때",
+        "`명령1` 이 실패했을 때",
+        "항상 실행된다",
+        "두 명령 모두 실패했을 때"
+      ],
+      "answer_index": 1,
+      "answer_bool": false,
+      "answer_text": "",
+      "accepted": [],
+      "explanation": "노트에 `명령1 || 명령2` 는 명령1 이 실패했을 때만 명령2 를 실행한다고 적혀 있다. 성공하면 뒤 명령은 실행되지 않는다.",
+      "key_point_id": "k6",
+      "difficulty": "medium",
+      "pages": []
+    }
+  ]
+}

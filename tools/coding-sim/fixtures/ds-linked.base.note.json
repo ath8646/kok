@@ -1,0 +1,103 @@
+{
+  "title": "자료구조 3주차 정리: 선형 자료구조",
+  "unit": "선형 자료구조",
+  "summary": "스택(LIFO)과 큐(FIFO), 원형 큐, 연결 리스트의 구조와 연산 시간을 정리한 노트다.",
+  "key_points": [
+    {
+      "id": "k1",
+      "title": "스택(Stack)과 LIFO",
+      "explanation": "스택은 한쪽 끝에서만 넣고 뺀다. 나중에 들어간 것이 먼저 나오는 LIFO 구조이고, 맨 위는 top 변수가 가리킨다.",
+      "why": "스택과 큐의 나가는 순서를 구분해야 두 구조의 문제를 풀 수 있다.",
+      "importance": "high",
+      "pages": []
+    },
+    {
+      "id": "k2",
+      "title": "스택의 push와 pop",
+      "explanation": "push 는 top 을 먼저 올린 뒤 stack[++top] = x 로 넣고, pop 은 stack[top--] 로 꺼낸 뒤 top 을 내린다. 두 연산 모두 $O(1)$ 이다.",
+      "why": "top 을 올리고 내리는 순서는 코드 문제에서 틀리기 쉬운 부분이다.",
+      "importance": "high",
+      "pages": []
+    },
+    {
+      "id": "k3",
+      "title": "큐(Queue)와 원형 큐",
+      "explanation": "큐는 rear 에서 넣고 front 에서 빼며, 먼저 들어온 것이 먼저 나오는 FIFO 구조다. 빈칸을 다시 쓰려고 rear 를 $(rear+1) \\% MAX$ 로 옮기는 원형 큐를 쓴다.",
+      "why": "가득 찬 조건과 빈 조건을 정확히 알아야 원형 큐 문제를 풀 수 있다.",
+      "importance": "high",
+      "pages": []
+    },
+    {
+      "id": "k4",
+      "title": "연결 리스트와 노드",
+      "explanation": "연결 리스트는 자료를 연속된 칸에 두지 않고, 노드마다 다음 노드의 주소(next)를 가진다. 파이썬에서는 마지막 노드의 next 에 None 을 넣는다.",
+      "why": "노드의 삽입과 삭제 순서를 이해하는 데 기초가 된다.",
+      "importance": "medium",
+      "pages": []
+    },
+    {
+      "id": "k5",
+      "title": "배열과 연결 리스트 비교",
+      "explanation": "임의 접근은 배열이 $O(1)$, 리스트가 $O(n)$ 이다. 중간 삽입은 배열이 원소를 밀어야 해서 $O(n)$, 리스트는 위치를 알면 $O(1)$ 이다.",
+      "why": "두 구조의 시간 복잡도를 비교하는 문제에 바로 쓰인다.",
+      "importance": "medium",
+      "pages": []
+    }
+  ],
+  "terms": [
+    { "term": "스택 (Stack)", "meaning": "한쪽 끝에서만 넣고 빼는 자료구조." },
+    { "term": "LIFO", "meaning": "나중에 들어간 것이 먼저 나오는 순서." },
+    { "term": "top", "meaning": "스택의 맨 위를 가리키는 변수. 빈 스택이면 -1 로 시작한다." },
+    { "term": "push", "meaning": "스택에 자료를 넣는 연산(삽입)." },
+    { "term": "pop", "meaning": "스택에서 자료를 꺼내는 연산(삭제)." },
+    { "term": "peek", "meaning": "꺼내지 않고 맨 위 자료만 확인하는 연산." },
+    { "term": "오버플로", "meaning": "꽉 찬 스택에 push 해서 넘치는 상태." },
+    { "term": "언더플로", "meaning": "빈 스택에서 pop 하는 상태. 하면 안 된다." },
+    { "term": "콜 스택", "meaning": "함수 호출 기록을 쌓아 두는 스택." },
+    { "term": "큐 (Queue)", "meaning": "한쪽 끝에서 넣고 반대쪽 끝에서 빼는 자료구조." },
+    { "term": "FIFO", "meaning": "먼저 들어온 것이 먼저 나오는 순서." },
+    { "term": "rear", "meaning": "큐에서 자료를 넣는 쪽 끝을 가리키는 변수." },
+    { "term": "front", "meaning": "큐에서 자료를 빼는 쪽 끝을 가리키는 변수." },
+    { "term": "원형 큐", "meaning": "배열의 끝을 처음과 이어서 빈칸을 다시 쓰는 큐." },
+    { "term": "연결 리스트 (Linked List)", "meaning": "자료를 연속된 칸에 두지 않고 노드끼리 주소로 잇는 구조." },
+    { "term": "노드", "meaning": "자료와 다음 노드의 주소를 담는 단위." },
+    { "term": "next", "meaning": "다음 노드의 주소를 담는 칸." },
+    { "term": "malloc", "meaning": "C 에서 노드를 힙 메모리에 만들 때 쓰는 함수." },
+    { "term": "free", "meaning": "C 에서 다 쓴 메모리를 돌려줄 때 쓰는 함수." },
+    { "term": "임의 접근", "meaning": "인덱스로 원하는 칸을 바로 찾아가는 것." },
+    { "term": "$O(1)$", "meaning": "원소 수와 상관없이 한 번에 끝나는 연산의 시간." },
+    { "term": "$O(n)$", "meaning": "원소를 처음부터 하나씩 따라가야 하는 연산의 시간." }
+  ],
+  "formulas": [
+    { "latex": "rear = (rear + 1) \\% MAX", "label": "원형 큐에서 rear 를 다음 칸으로 옮기는 식" },
+    { "latex": "(rear + 1) \\% MAX == front", "label": "원형 큐가 가득 찬 조건" },
+    { "latex": "front == rear", "label": "원형 큐가 빈 조건" }
+  ],
+  "pitfalls": [
+    { "text": "스택(LIFO)과 큐(FIFO)는 나가는 순서가 반대라서 바꿔 외우기 쉽다.", "key_point_id": "k1" },
+    { "text": "stack[++top] 은 top 을 올린 뒤에 쓰고, stack[top--] 은 쓴 뒤에 top 을 내린다. 두 순서를 섞지 않는다.", "key_point_id": "k2" },
+    { "text": "꽉 찬 스택에 push 하면 오버플로, 빈 스택에서 pop 하면 언더플로가 된다.", "key_point_id": "k2" },
+    { "text": "원형 큐의 가득 찬 조건 $(rear+1) \\% MAX == front$ 와 빈 조건 $front == rear$ 를 뒤바꿔 외우기 쉽다.", "key_point_id": "k3" },
+    { "text": "중간에 넣을 때 앞 노드의 next 를 먼저 바꾸면 뒤쪽 노드를 잃어버린다. 새 노드의 next 를 먼저 연결한다.", "key_point_id": "k4" },
+    { "text": "배열은 임의 접근이 $O(1)$ 이고 연결 리스트는 $O(n)$ 이다. 맨 앞 삽입과 삭제만 리스트도 $O(1)$ 이다.", "key_point_id": "k5" }
+  ],
+  "examples": [
+    { "text": "push(3), push(5), pop() 을 하면 5 가 나오고 스택에는 3 만 남는다.", "key_point_id": "k2" },
+    { "text": "괄호 검사: ( 를 만나면 push 하고, ) 를 만나면 pop 해서 짝이 맞는지 본다.", "key_point_id": "k1" },
+    { "text": "스택의 쓰임: 함수 호출 기록(콜 스택), 실행 취소(undo).", "key_point_id": "k1" },
+    { "text": "MAX 가 5 일 때 rear 가 4 에서 다음 칸으로 가면 $(4+1) \\% 5 = 0$ 이 되어 맨 앞으로 돌아간다.", "key_point_id": "k3" },
+    { "text": "큐의 쓰임: 프로세스 스케줄링, 너비 우선 탐색(BFS).", "key_point_id": "k3" },
+    { "text": "C 의 struct Node 노드 하나는 보통 16바이트다. 64비트 환경에서 int 뒤에 맞춤 정렬 패딩이 들어가기 때문이다.", "key_point_id": "k4" },
+    { "text": "파이썬에서 node = Node(10) 으로 노드를 만들고 node.next = None 으로 마지막 노드를 표시한다.", "key_point_id": "k4" }
+  ],
+  "checks": [],
+  "changes": [
+    { "text": "1~4 번 절을 핵심 개념 다섯 개(k1~k5)로 나누고 제목을 붙였다." },
+    { "text": "코드 블록(스택 배열 구현, 원형 큐 삽입, C 구조체, 파이썬 노드)은 싣지 않고, 그 안의 식과 동작은 설명 글과 예시로 옮겼다." },
+    { "text": "원형 큐의 식과 가득 찬·빈 조건, Big-O 표기를 수식(LaTeX)으로 바꿨다." },
+    { "text": "※ 시험 포인트 두 줄은 함정(pitfalls) 항목으로 옮겼다." },
+    { "text": "본문의 백틱 표기는 뺐고, 코드 이름은 그대로 적었다." },
+    { "text": "예) 와 쓰임 줄은 예시(examples)로 옮겼다." },
+    { "text": "자료에 없는 사실은 넣지 않았고, 요약·단원·용어 풀이·시험 이유는 새로 적었다." }
+  ]
+}

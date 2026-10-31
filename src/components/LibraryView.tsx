@@ -957,7 +957,14 @@ export function LibraryView() {
         {/* 과목을 읽는 동안: 과목 칩 자리 */}
         {!data ? [0, 1].map((i) => <span key={i} className="kok-skel kok-bone h-10 w-20 shrink-0" aria-hidden="true" />) : null}
         {/* 과목 칩: 꾹 눌러 옆으로 끌면 차례가 바뀐다 (키보드는 Alt + ←/→) */}
-        <ChipSort items={chipSubjects} enabled={!!data && !selecting && chipSubjects.length > 1} onReorder={reorderChips} onMoved={setChipNote}>
+        <ChipSort
+          items={chipSubjects}
+          enabled={!!data && !selecting && chipSubjects.length > 1}
+          rowRef={chipsRef}
+          onReorder={reorderChips}
+          onMoved={setChipNote}
+          lifted={(s) => <ChipFace on={selected === s.id} label={s.name} count={counts.get(s.id) ?? 0} color={subjectVar(s.color)} />}
+        >
           {(s, sort) => (
             <FolderChip
               key={s.id}
@@ -1378,11 +1385,12 @@ function FolderChip({
         onClick();
       }}
       className={cx(
-        'press inline-flex h-10 shrink-0 items-center gap-2 rounded-full px-4 text-sm font-semibold transition-colors duration-200',
-        // 고른 칩은 테마의 두 색 (화면 꾸미기 C, globals.css .kok-chip-on)
-        on ? 'kok-chip-on' : 'kok-chip-off bg-surface text-ink shadow-[0_1px_2px_var(--shadow)] hover:bg-surface-2',
+        'press transition-colors duration-200',
+        chipFaceClass(on),
+        !on && 'hover:bg-surface-2',
         mode === 'fill' && 'kok-fill',
         sort && 'kok-chip-sort',
+        // 들려 있는 칩의 원래 자리 (흐린 자리 표시: 들린 칩은 줄 위 맨 위 층에 따로)
         sort?.dragging && 'is-dragging',
       )}
     >
@@ -1396,6 +1404,26 @@ function FolderChip({
         <span className="inline-block h-2 w-3 rounded-full bg-current opacity-20" aria-hidden="true" />
       ) : null}
     </button>
+  );
+}
+
+/** 과목 칩의 모양 (줄의 칩과 들린 칩이 같게) */
+function chipFaceClass(on: boolean): string {
+  return cx(
+    'inline-flex h-10 shrink-0 items-center gap-2 rounded-full px-4 text-sm font-semibold',
+    // 고른 칩은 테마의 두 색 (화면 꾸미기 C, globals.css .kok-chip-on)
+    on ? 'kok-chip-on' : 'kok-chip-off bg-surface text-ink shadow-[0_1px_2px_var(--shadow)]',
+  );
+}
+
+/** 꾹 눌러 든 과목 칩의 복사본 (손가락을 따라가는 모습: 누를 수 없다) */
+function ChipFace({ on, label, count, color }: { on: boolean; label: string; count: number; color: string }) {
+  return (
+    <span className={chipFaceClass(on)}>
+      <span className="h-2.5 w-2.5 rounded-full" style={{ background: color }} />
+      <span className="max-w-[9rem] truncate">{label}</span>
+      <span className={cx('tabular-nums', !on && 'text-muted')}>{count}</span>
+    </span>
   );
 }
 

@@ -5539,6 +5539,40 @@ async def main():
         assert await chip_ids(phone) == want, await chip_ids(phone)
         assert phone.url.endswith("/library"), phone.url
         await shot(phone, "97-subject-chip-reorder", full=False)
+        # 줄 끝까지 끌고 잠깐 머물기: 줄은 칩이 끝나는 곳까지만 넘어가고(예전에는 끌린 칩이 줄을 늘려 끝없이 넘어갔다),
+        # 들린 칩(줄 밖 맨 위 층의 복사본)은 화면 안에 있고, 놓으면 맨 끝 자리로
+        box = phone.get_by_role("tablist", name="과목")
+        natural = await box.evaluate("el => el.scrollWidth - el.clientWidth")
+        assert natural > 0, "the chip row should overflow on a phone"
+        await phone.evaluate("""(() => { const box = document.querySelector('[role=tablist][aria-label="과목"]'); window.__edge = { sl: 0, left: 1e9, right: -1e9, seen: 0 };
+          const f = () => { const l = document.querySelector('.kok-chip-lifted'); if (l) { const r = l.getBoundingClientRect(); window.__edge.left = Math.min(window.__edge.left, r.left); window.__edge.right = Math.max(window.__edge.right, r.right); window.__edge.seen++; }
+            window.__edge.sl = Math.max(window.__edge.sl, box.scrollLeft); if (!window.__edge.stop) requestAnimationFrame(f); }; requestAnimationFrame(f); })()""")
+        cdp = await phone.context.new_cdp_session(phone)
+        first = want[0]
+        a = await chip(phone, first).bounding_box()
+        x0, y0 = a["x"] + a["width"] / 2, a["y"] + a["height"] / 2
+        vw = await phone.evaluate("innerWidth")
+        await cdp.send("Input.dispatchTouchEvent", {"type": "touchStart", "touchPoints": [{"x": x0, "y": y0}]})
+        await phone.wait_for_timeout(420)
+        for i in range(1, 21):
+            await cdp.send("Input.dispatchTouchEvent", {"type": "touchMove", "touchPoints": [{"x": x0 + (vw - 3 - x0) * i / 20, "y": y0}]})
+            await phone.wait_for_timeout(16)
+        for _ in range(60):
+            await cdp.send("Input.dispatchTouchEvent", {"type": "touchMove", "touchPoints": [{"x": vw - 3, "y": y0 + 0.5}]})
+            await phone.wait_for_timeout(25)
+        await expect(phone.locator(".kok-chip-sort.is-dragging")).to_have_count(1)
+        await shot(phone, "97-subject-chip-edge", full=False)
+        await cdp.send("Input.dispatchTouchEvent", {"type": "touchEnd", "touchPoints": []})
+        await cdp.detach()
+        edge = await phone.evaluate("(() => { window.__edge.stop = true; return window.__edge; })()")
+        assert edge["seen"] > 10, edge
+        assert edge["sl"] <= natural + 1, f"the chip row scrolled past its end while dragging: {edge['sl']} > {natural}"
+        assert edge["left"] >= 0 and edge["right"] <= vw, f"the lifted chip left the screen: {edge}"
+        want = [*[x for x in want if x != first], first]
+        await poll_db(order_sql(row), ",".join(want))
+        assert await chip_ids(phone) == want, await chip_ids(phone)
+        await expect(phone.locator(".kok-chip-lifted")).to_have_count(0)
+        assert phone.url.endswith("/library"), phone.url
         # 키보드: Alt + → 로 한 칸 뒤로 (알림으로 읽어 준다)
         await chip(phone, want[0]).focus()
         await phone.keyboard.press("Alt+ArrowRight")

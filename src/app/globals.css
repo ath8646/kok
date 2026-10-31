@@ -1768,11 +1768,26 @@ body.kok-editing .kok-fab {
   user-select: none;
   -webkit-touch-callout: none;
 }
+/* 들린 칩의 원래 자리: 흐린 자리 표시 (옆 칩들이 비켜 주는 동안 새 자리로 미끄러진다) */
 .kok-chip-sort.is-dragging {
+  opacity: 0.35;
+}
+/* 들린 칩 (줄 밖 맨 위 층의 복사본, ChipSort): 살짝 커지고 그림자가 깊어진다.
+   그림자는 drop-shadow 라 시그니처 테마의 네모 칩에도 칩 모양 그대로 진다. 움직이는 동안은 위치만 바뀐다 (그리기는 한 번) */
+.kok-chip-lifted {
+  display: inline-flex;
   cursor: grabbing;
-  box-shadow:
-    0 10px 24px var(--shadow-strong),
-    0 2px 6px var(--shadow-strong) !important;
+  transform: scale(1.06);
+  filter: drop-shadow(0 10px 14px var(--shadow-strong)) drop-shadow(0 2px 3px var(--shadow-strong));
+  will-change: transform;
+}
+@keyframes kok-chip-lift {
+  from {
+    transform: scale(1);
+  }
+}
+.kok-chip-lifted.is-animated {
+  animation: kok-chip-lift 140ms var(--ease-out) backwards;
 }
 /* 순서 바꾸기 화면으로 들어올 때 줄이 차례로 (늦게 나오는 줄도 300ms 안에 끝나게) */
 .kok-sort-in {

@@ -352,7 +352,12 @@ async def edit_text(page, name, text, scope=None):
     await root.get_by_role("textbox", name=name, exact=True).click()
     pm = root.locator(f".ProseMirror[aria-label='{name}']")
     await expect(pm).to_be_focused()
+    # 막 켜진 편집기가 누른 자리의 커서를 잡은 뒤에 바꾼다 (그 전에 바꾸면 전체 고르기가 풀려 누른 자리에 끼워 넣어진다)
+    await page.wait_for_timeout(150)
     await pm.fill(text)
+    if (await pm.inner_text()).strip() != text.strip():
+        await pm.press("ControlOrMeta+a")
+        await pm.fill(text)
     return pm
 
 

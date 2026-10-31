@@ -62,8 +62,8 @@ export async function POST(req: NextRequest) {
     for (const f of b.files) {
       const kind = shareKindOf(f.name)!;
       const id = crypto.randomUUID();
-      const path = `${postFolder(acc.userId, b.postId)}/${id}.${shareExt(kind, f.name)}`;
-      const previewPath = f.preview ? `${postFolder(acc.userId, b.postId)}/${id}.preview.jpg` : null;
+      const path = `${postFolder(b.postId)}/${id}.${shareExt(kind, f.name)}`;
+      const previewPath = f.preview ? `${postFolder(b.postId)}/${id}.preview.jpg` : null;
       const { data, error } = await bucket.createSignedUploadUrl(path);
       if (error || !data?.token) throw new UserFacingError('upload_sign', '파일을 올릴 준비를 하지 못했어요. 다시 해 주세요.', 502);
       let previewToken: string | null = null;

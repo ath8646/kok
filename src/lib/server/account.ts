@@ -236,7 +236,7 @@ let featuresCache: { at: number; value: Features } | null = null;
  */
 export async function getFeatures(admin: SupabaseClient): Promise<Features> {
   if (featuresCache && Date.now() - featuresCache.at < 60_000) return featuresCache.value;
-  const [v, p, r, c, f, t, ti, ac, qf, pf, cf, og, sf, sd, vk, rs, nc, np, se, cv, mx, cm] = await Promise.all([
+  const [v, p, r, c, f, t, ti, ac, qf, pf, cf, og, sf, sd, vk, rs, nc, np, se, cv, mx, cm, cs] = await Promise.all([
     admin.from('note_versions').select('id').limit(1),
     admin.from('sources').select('parent_id').limit(1),
     admin.from('questions').select('rested_hidden').limit(1),
@@ -260,6 +260,8 @@ export async function getFeatures(admin: SupabaseClient): Promise<Features> {
     admin.from('sources').select('cover').limit(1),
     admin.from('custom_plans').select('extra').limit(1),
     admin.from('community_posts').select('id').limit(1),
+    // 공유받아 넣은 노트 표시 (다시 나누기·두 번 넣기를 막는다)
+    admin.from('sources').select('shared_from').limit(1),
   ]);
   const value: Features = {
     versions: !v.error && !p.error,
@@ -278,7 +280,7 @@ export async function getFeatures(admin: SupabaseClient): Promise<Features> {
     sessions: !se.error,
     covers: !cv.error,
     maxPlan: !mx.error,
-    community: !cm.error,
+    community: !cm.error && !cs.error,
   };
   featuresCache = { at: Date.now(), value };
   return value;

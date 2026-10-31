@@ -8,6 +8,7 @@ import {
   galleryNameProblem,
   galleryQuery,
   isOfficialGallery,
+  nicknameProblem,
   organizable,
   readSharedMark,
   searchWords,
@@ -152,8 +153,22 @@ describe('익명 이름', () => {
         { author: 'u4', anonymous: true },
       ],
       'u1',
+      true,
     );
     expect(names).toEqual(['익명1', '익명(글쓴이)', '', '익명1', '익명2']);
+  });
+
+  it('닉네임으로 쓴 글의 글쓴이가 익명으로 단 댓글에는 글쓴이 표시가 없다 (붙이면 익명이 풀린다)', () => {
+    const names = anonymousNames(
+      [
+        { author: 'u1', anonymous: true },
+        { author: 'u2', anonymous: true },
+        { author: 'u1', anonymous: true },
+      ],
+      'u1',
+      false,
+    );
+    expect(names).toEqual(['익명1', '익명2', '익명1']);
   });
 });
 
@@ -204,5 +219,13 @@ describe('공유받은 노트 표시', () => {
     expect(readSharedMark({})).toBeNull();
     expect(readSharedMark(null)).toBeNull();
     expect(readSharedMark({ shared: { post, title: 3 } })).toEqual({ post, title: '', by: '', at: '' });
+  });
+});
+
+describe('닉네임', () => {
+  it('운영자처럼 보이거나 익명으로 시작하는 닉네임만 막는다', () => {
+    for (const bad of ['익명', '익명1', '익명 (글쓴이)', 'KOK 운영자', '관리자님', '운영진', 'kok', 'KOK팀', 'kok 공식'])
+      expect(nicknameProblem(bad), bad).not.toBeNull();
+    for (const ok of ['수학공식왕', 'kokoa', '민지', 'KOK좋아', '무명', '나는익명이아님']) expect(nicknameProblem(ok), ok).toBeNull();
   });
 });

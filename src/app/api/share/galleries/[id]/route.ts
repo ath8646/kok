@@ -6,6 +6,9 @@ import { UserFacingError, errorResponse } from '@/lib/server/errors';
 import { GALLERY_COLS, assertCanWrite, galleryView, loadGallery, managesGallery, removePostFiles, requireCommunity, type GalleryRow } from '@/lib/server/share';
 import { GALLERY_CATEGORIES, SHARE_TEXT, galleryKey, galleryNameProblem } from '@/lib/share';
 
+// 파일 확인·노트 그림 복사·글 지우기(파일 폴더)가 오래 걸릴 수 있다
+export const maxDuration = 60;
+
 export async function GET(_req: NextRequest, ctx: RouteContext<'/api/share/galleries/[id]'>) {
   try {
     const { id } = await ctx.params;

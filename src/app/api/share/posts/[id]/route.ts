@@ -12,18 +12,23 @@ import {
   assertCanWrite,
   assertVisible,
   blockedIds,
+  profilesOf,
   buildNoteSnapshot,
   checkUploads,
+  clearTickets,
   cleanBody,
   cleanTitle,
   commentViews,
   galleryView,
+  importedFrom,
   loadGallery,
   loadPost,
   managesGallery,
   notePreview,
   noteFolder,
+  noteSaveError,
   postSummary,
+  removePaths,
   removePostFiles,
   requireCommunity,
   signUrls,
@@ -31,7 +36,11 @@ import {
   type FileRow,
 } from '@/lib/server/share';
 import { removeFolder } from '@/lib/server/files';
+import { SOURCES_BUCKET } from '@/lib/supabase/admin';
 import { SHARE_TEXT, type PostDetail } from '@/lib/share';
+
+// 파일 확인·노트 그림 복사·글 지우기(파일 폴더)가 오래 걸릴 수 있다
+export const maxDuration = 60;
 
 export async function GET(req: NextRequest, ctx: RouteContext<'/api/share/posts/[id]'>) {
   try {
@@ -43,7 +52,8 @@ export async function GET(req: NextRequest, ctx: RouteContext<'/api/share/posts/
     assertVisible(post, acc);
     const mine = post.author_id === acc.userId;
     const blocked = await blockedIds(admin, acc.userId);
-    if (!mine && blocked.includes(post.author_id)) {
+    // 차단은 닉네임으로 쓴 글에만 (익명 글까지 막으면 막힌 것으로 익명 글쓴이를 알아낼 수 있다)
+    if (!mine && !post.anonymous && blocked.includes(post.author_id)) {
       throw new UserFacingError('blocked', "차단한 사람의 글이에요. '내 활동'의 차단 목록에서 풀 수 있어요.", 403);
     }
     const gallery = await loadGallery(admin, post.gallery_id);
@@ -65,32 +75,39 @@ export async function GET(req: NextRequest, ctx: RouteContext<'/api/share/posts/
     for (const r of [files, note, comments, likedPost, unlockedRow, fav, used]) if (r.error) throw r.error;
     const fileRows = (files.data ?? []) as FileRow[];
     const commentRows = (comments.data ?? []) as CommentRow[];
-    const { data: likedComments } = commentRows.length
-      ? await admin
-          .from('community_likes')
-          .select('target_id')
-          .eq('user_id', acc.userId)
-          .eq('target_type', 'comment')
-          .in(
-            'target_id',
-            commentRows.map((c) => c.id),
-          )
-      : { data: [] };
+    // 내가 좋아요한 댓글 (주소가 너무 길어지지 않게 100개씩)
+    const likedComments = new Set<string>();
+    for (let i = 0; i < commentRows.length; i += 100) {
+      const { data, error } = await admin
+        .from('community_likes')
+        .select('target_id')
+        .eq('user_id', acc.userId)
+        .eq('target_type', 'comment')
+        .in(
+          'target_id',
+          commentRows.slice(i, i + 100).map((c) => c.id),
+        );
+      if (error) throw error;
+      for (const l of data ?? []) likedComments.add(String(l.target_id));
+    }
     const previews = await signUrls(
       admin,
       COMMUNITY_BUCKET,
       fileRows.map((f) => f.preview_path).filter((p): p is string => !!p),
     );
     const manager = managesGallery(acc, gallery);
+    const imported = post.has_note && !mine ? await importedFrom(admin, acc.userId, id) : null;
     const limit = acc.lim.downloadsDaily;
     const unlocked = mine || acc.isAdmin || !!unlockedRow.data || (!post.has_files && !post.has_note);
     // 쓴 사람이 아니면 연 수를 센다 (?seen=1: 같은 화면에서 다시 읽을 때(댓글을 단 뒤 등)는 세지 않는다)
     const counted = !mine && req.nextUrl.searchParams.get('seen') !== '1';
     if (counted) await admin.rpc('kok_share_view', { p_post: id });
+    // 운영자에게만: 글과 익명 댓글의 실제 글쓴이
     let realAuthor: PostDetail['realAuthor'] = undefined;
+    let authors: Awaited<ReturnType<typeof profilesOf>> | undefined;
     if (acc.isAdmin) {
-      const { data: prof } = await admin.from('profiles').select('nickname, email').eq('id', post.author_id).maybeSingle();
-      realAuthor = prof ? { nickname: (prof.nickname as string | null) ?? null, email: (prof.email as string | null) ?? null } : null;
+      authors = await profilesOf(admin, [post.author_id, ...commentRows.filter((c) => c.anonymous).map((c) => c.author_id)]);
+      realAuthor = authors.get(post.author_id) ?? null;
     }
     const detail: PostDetail = {
       ...postSummary(
@@ -113,15 +130,12 @@ export async function GET(req: NextRequest, ctx: RouteContext<'/api/share/posts/
         previewUrl: f.preview_path ? (previews.get(f.preview_path) ?? null) : null,
       })),
       note: note.data ? notePreview(note.data as Parameters<typeof notePreview>[0]) : null,
-      thread: commentViews(commentRows, post, acc, {
-        blocked: new Set(blocked),
-        liked: new Set((likedComments ?? []).map((l) => String(l.target_id))),
-        manager,
-      }),
+      thread: commentViews(commentRows, post, acc, { blocked: new Set(blocked), liked: likedComments, manager, authors }),
       gallery: galleryView(gallery, acc, new Set(fav.data ? [gallery.id] : [])),
       canEdit: mine || acc.isAdmin,
       canDelete: mine || manager,
       realAuthor,
+      imported,
       downloadsLeft: limit === null ? null : Math.max(0, limit - (used.count ?? 0)),
       downloadsDaily: limit,
     };
@@ -187,29 +201,38 @@ export async function PATCH(req: NextRequest, ctx: RouteContext<'/api/share/post
       files.reduce((m, f) => Math.max(m, f.position + 1), 0),
     );
 
-    // 노트: 바꾸면 예전 모습을 지우고 새로 담는다
+    // 노트: 새 모습을 다 만든 뒤에 바꾸고, 그 다음에 예전 모습의 그림을 지운다 (새 모습을 못 만들면 예전 노트가 그대로 남는다.
+    // 그림은 붙일 때마다 새 폴더라 바꾸는 동안에도 받는 사람이 예전 그림을 복사할 수 있다)
     if (b.note !== undefined) {
-      await admin.from('community_notes').delete().eq('post_id', id);
-      await removeFolder(admin, noteFolder(post.author_id, id)).catch(() => 0);
-      patch.has_note = false;
+      const { data: old, error: oErr } = await admin.from('community_notes').select('figure_paths').eq('post_id', id).maybeSingle();
+      if (oErr) throw oErr;
+      const oldPaths = ((old?.figure_paths as string[] | null) ?? []).filter((x) => x.startsWith(`${noteFolder(post.author_id, id)}/`));
       if (b.note) {
         const shared = await buildNoteSnapshot(admin, acc, b.note, id);
-        const { error } = await admin.from('community_notes').insert({
-          post_id: id,
-          owner_id: acc.userId,
-          title: shared.title,
-          subject_name: shared.subject,
-          key_points: shared.keyPoints,
-          questions: shared.questions,
-          snapshot: shared.snapshot,
-          figure_paths: shared.figurePaths,
-        });
+        const { error } = await admin.from('community_notes').upsert(
+          {
+            post_id: id,
+            owner_id: acc.userId,
+            title: shared.title,
+            subject_name: shared.subject,
+            key_points: shared.keyPoints,
+            questions: shared.questions,
+            snapshot: shared.snapshot,
+            figure_paths: shared.figurePaths,
+          },
+          { onConflict: 'post_id' },
+        );
         if (error) {
-          await removeFolder(admin, noteFolder(post.author_id, id)).catch(() => 0);
-          throw error;
+          await removeFolder(admin, shared.folder).catch(() => 0);
+          throw noteSaveError(error);
         }
         patch.has_note = true;
+      } else {
+        const { error } = await admin.from('community_notes').delete().eq('post_id', id);
+        if (error) throw error;
+        patch.has_note = false;
       }
+      await removePaths(admin, SOURCES_BUCKET, oldPaths).catch(() => 0);
     }
     if (removing.length) {
       const { error } = await admin
@@ -226,7 +249,7 @@ export async function PATCH(req: NextRequest, ctx: RouteContext<'/api/share/post
     if (added.length) {
       const { error } = await admin.from('community_files').insert(added);
       if (error) throw error;
-      await admin.from('community_uploads').delete().eq('user_id', acc.userId).eq('post_id', id);
+      await clearTickets(admin, acc.userId, id, added);
     }
     if (removing.length || added.length) patch.has_files = keep + added.length > 0;
     if (Object.keys(patch).length) {

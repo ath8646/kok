@@ -15,13 +15,13 @@ import { Comments } from '@/components/share/Comments';
 import { DownloadLimitSheet, ImportSheet, ShareReportSheet } from '@/components/share/ShareSheets';
 import { EmptyHint, KindTag, LikeButton, NotReady, kindIcon } from '@/components/share/ShareUi';
 import { fileAsFile, fileUrl } from '@/components/share/upload';
-import { ApiError, Button, ICONS, Icon, LargeHeader, Menu, Sheet, Spinner, api, cx, useToast, DONE, type MenuItem } from '@/components/ui';
+import { ApiError, Button, ICONS, Icon, LargeHeader, LinkButton, Menu, Sheet, Spinner, api, cx, useToast, DONE, type MenuItem } from '@/components/ui';
 import { fetchSubjects } from '@/lib/data';
 import { handOffFiles } from '@/lib/events';
 import { josa } from '@/lib/josa';
 import { previewText } from '@/lib/richtext';
 import { pickerOrder } from '@/lib/subject-order';
-import { readView, viewStamp, writeView } from '@/lib/view-cache';
+import { dropView, readView, viewStamp, writeView } from '@/lib/view-cache';
 import { countText, fileSizeText, organizable, timeAgo, type FileView, type PostDetail } from '@/lib/share';
 import type { SubjectRow } from '@/lib/types';
 
@@ -73,10 +73,19 @@ export default function PostPage() {
     viewed.add(id);
     return api<{ post: PostDetail }>(`/api/share/posts/${id}${again ? '?seen=1' : ''}`).then((r) => r.post);
   }, [id]);
-  const failed = useCallback((e: unknown) => {
-    if (e instanceof ApiError && e.code === 'not_ready') setNotReady(true);
-    else setError({ code: e instanceof ApiError ? e.code : 'unknown', message: (e as Error).message });
-  }, []);
+  const failed = useCallback(
+    (e: unknown) => {
+      if (e instanceof ApiError && e.code === 'not_ready') return setNotReady(true);
+      const code = e instanceof ApiError ? e.code : 'unknown';
+      setError({ code, message: (e as Error).message });
+      // 지워졌거나 가려졌거나 차단한 글은 기억해 둔 모습도 버린다 (옛 글이 그대로 보이지 않게)
+      if (code === 'not_found' || code === 'hidden' || code === 'blocked') {
+        setPost(null);
+        dropView(key);
+      }
+    },
+    [key],
+  );
 
   useEffect(() => {
     if (!owner) return;
@@ -284,8 +293,8 @@ export default function PostPage() {
   const block = async () => {
     const ok = await ask({
       title: '글쓴이 차단',
-      body: p.anonymous ? '이 글을 쓴 사람을 차단할까요?' : `${p.authorName}님을 차단할까요?`,
-      note: '이 사람이 쓴 글과 댓글이 내 화면에서 보이지 않아요. 내 활동의 차단 목록에서 언제든 풀 수 있어요.',
+      body: `${p.authorName}님을 차단할까요?`,
+      note: '이 사람이 닉네임으로 쓴 글과 댓글이 내 화면에서 보이지 않아요. 내 활동의 차단 목록에서 언제든 풀 수 있어요.',
       ok: '차단',
       danger: true,
     });
@@ -314,7 +323,8 @@ export default function PostPage() {
     ...(p.canEdit ? [{ label: '고치기', icon: ICONS.pen, onSelect: () => router.push(`/share/write?edit=${id}`) }] : []),
     ...(me.isAdmin ? [{ label: p.hidden ? '다시 보이기' : '가리기 (운영자)', icon: ICONS.eye, onSelect: () => setHidden(!p.hidden) }] : []),
     ...(!p.mine ? [{ label: '신고', icon: ICONS.flag, onSelect: () => setReporting(true) }] : []),
-    ...(!p.mine ? [{ label: '글쓴이 차단', icon: ICONS.block, onSelect: block, danger: true }] : []),
+    // 익명 글은 차단할 수 없다 (차단으로 빠지는 것을 보고 익명 글쓴이를 알아낼 수 있어서: 문제가 있으면 신고)
+    ...(!p.mine && !p.anonymous ? [{ label: '글쓴이 차단', icon: ICONS.block, onSelect: block, danger: true }] : []),
     ...(p.canDelete ? [{ label: '지우기', icon: ICONS.trash, onSelect: remove, danger: true }] : []),
   ];
 
@@ -499,6 +509,14 @@ export default function PostPage() {
                 <p className="rounded-xl bg-surface-2 px-3 py-2.5 text-center text-xs text-muted">
                   내 노트를 담았어요. 받은 사람은 정리·마인드맵·문제를 에너지 없이 자기 자료함에 넣을 수 있어요.
                 </p>
+              ) : p.imported ? (
+                // 이미 넣은 노트는 다시 넣지 않고 연다
+                <>
+                  <LinkButton href={`/notes/${p.imported}`} variant="secondary">
+                    <Icon d={ICONS.folder} size={17} />내 자료함의 노트 열기
+                  </LinkButton>
+                  <p className="text-center text-xs text-muted">이 노트는 이미 내 자료함에 넣었어요.</p>
+                </>
               ) : (
                 <>
                   <Button
@@ -527,7 +545,7 @@ export default function PostPage() {
         </section>
       ) : null}
 
-      <Comments postId={id} thread={p.thread} canWrite onChanged={reload} />
+      <Comments postId={id} thread={p.thread} canWrite defaultAnonymous={p.mine && p.anonymous} onChanged={reload} />
 
       <DownloadLimitSheet open={limitOpen} onClose={() => setLimitOpen(false)} daily={p.downloadsDaily} />
       <ShareReportSheet what={reporting ? { kind: 'post', id } : null} onClose={() => setReporting(false)} />

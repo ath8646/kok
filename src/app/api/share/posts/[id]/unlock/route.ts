@@ -15,7 +15,8 @@ export async function POST(req: NextRequest, ctx: RouteContext<'/api/share/posts
     const post = await loadPost(admin, id);
     assertVisible(post, acc);
     if (post.author_id === acc.userId || acc.isAdmin) return Response.json({ ok: true, left: null, daily: acc.lim.downloadsDaily });
-    if ((await blockedIds(admin, acc.userId)).includes(post.author_id)) throw new UserFacingError('blocked', '차단한 사람의 글이에요.', 403);
+    // 차단은 닉네임으로 쓴 글에만 (익명 글까지 막으면 막힌 것으로 익명 글쓴이를 알아낼 수 있다)
+    if (!post.anonymous && (await blockedIds(admin, acc.userId)).includes(post.author_id)) throw new UserFacingError('blocked', '차단한 사람의 글이에요.', 403);
     const limit = acc.lim.downloadsDaily;
     const { data, error } = await admin.rpc('kok_share_unlock', {
       p_user: acc.userId,

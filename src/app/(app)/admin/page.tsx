@@ -135,6 +135,8 @@ export default function AdminPage() {
     /** 테마 그림 신고: 그림 번호 → 잠깐 볼 수 있는 주소 */
     pictures?: Record<string, string>;
     users: Record<string, { email: string; nickname: string }>;
+    /** 자료 공유 신고: 신고한 것 번호 → 실제 글쓴이·댓글이 있는 글·가렸는지 (익명 글도 운영자는 안다) */
+    share?: Record<string, { author: string | null; anonymous: boolean; postId: string | null; hidden: boolean; gone: boolean }>;
   } | null>(null);
 
   const applyOverview = useCallback((o: Overview) => {
@@ -576,6 +578,19 @@ export default function AdminPage() {
         {reports?.reports.map((r) => {
           const q = r.target_id ? reports.questions[r.target_id] : undefined;
           const who = reports.users[r.reporter_id];
+          const shared = r.target_id && r.target_type.startsWith('share_') ? reports.share?.[r.target_id] : undefined;
+          const commentPost = shared?.postId ?? (r.snapshot ? (/글 번호: ([0-9a-f-]{36})/.exec(r.snapshot)?.[1] ?? null) : null);
+          /** 신고된 글·댓글 가리기·다시 보이기 (그 신고들도 해결·기각으로 닫힌다) */
+          const hideShared = async (hidden: boolean) => {
+            try {
+              const kind = r.target_type === 'share_post' ? 'posts' : 'comments';
+              await api(`/api/share/${kind}/${r.target_id}/hide`, { method: 'POST', body: JSON.stringify({ hidden }) });
+              toast(hidden ? '가렸어요. 신고도 해결로 닫았어요.' : '다시 보이게 했어요. 신고는 기각으로 닫았어요.', 'ok', DONE);
+              loadReports();
+            } catch (e) {
+              toast((e as Error).message, 'bad');
+            }
+          };
           return (
             <div key={r.id} className="grid gap-2 rounded-xl border border-line p-3">
               <div className="flex flex-wrap items-center gap-2 text-sm">
@@ -585,6 +600,14 @@ export default function AdminPage() {
                 </span>
               </div>
               <p className="whitespace-pre-wrap font-semibold">“{r.reason}”</p>
+              {shared ? (
+                <p className="text-sm">
+                  <span className="text-muted">{r.target_type === 'share_gallery' ? '만든 사람' : '실제 글쓴이'} </span>
+                  {shared.gone ? '지워졌어요' : (shared.author ?? '탈퇴한 사용자')}
+                  {shared.anonymous ? <span className="text-muted"> · 익명으로 씀</span> : null}
+                  {shared.hidden ? <span className="text-muted"> · 가려 둠</span> : null}
+                </p>
+              ) : null}
               {r.target_type === 'theme' && r.target_id && reports.pictures?.[r.target_id] ? (
                 // 신고한 AI 그림 (서명 주소, 1시간)
                 // eslint-disable-next-line @next/next/no-img-element
@@ -610,10 +633,15 @@ export default function AdminPage() {
                     {r.target_type === 'share_post' ? '글 보기' : '갤러리 보기'}
                   </LinkButton>
                 ) : null}
-                {r.target_type === 'share_comment' && r.snapshot && /글 번호: ([0-9a-f-]{36})/.test(r.snapshot) ? (
-                  <LinkButton size="sm" href={`/share/p/${/글 번호: ([0-9a-f-]{36})/.exec(r.snapshot)![1]}`}>
+                {r.target_type === 'share_comment' && commentPost ? (
+                  <LinkButton size="sm" href={`/share/p/${commentPost}`}>
                     댓글이 있는 글 보기
                   </LinkButton>
+                ) : null}
+                {shared && !shared.gone && (r.target_type === 'share_post' || r.target_type === 'share_comment') ? (
+                  <Button size="sm" variant="secondary" onClick={() => hideShared(!shared.hidden)}>
+                    {shared.hidden ? '다시 보이기' : '가리기'}
+                  </Button>
                 ) : null}
                 {q ? (
                   <Button

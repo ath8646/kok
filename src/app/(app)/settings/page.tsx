@@ -29,6 +29,7 @@ import { supabaseBrowser } from '@/lib/supabase/client';
 import type { SubjectRow } from '@/lib/types';
 import { THEME_FONTS, type ModelTier, type UserSettings } from '@/lib/settings';
 import { energyPeriodLabel, perkNeed, perkTierName, planLabel, type Perk } from '@/lib/plans';
+import { nicknameProblem } from '@/lib/share';
 import { accountLabel } from '@/lib/login';
 import { applyTheme, clearTheme, loadThemeFont } from '@/lib/theme';
 import { ThemeSettings } from '@/components/ThemeSettings';
@@ -166,6 +167,8 @@ export default function SettingsPage() {
   const set = <K extends keyof UserSettings>(k: K, v: Partial<UserSettings[K]>) => setDraft({ ...draft, [k]: { ...draft[k], ...v } });
   const e = me.energy;
   const canTheme = me.canTheme;
+  /** 자료 공유에 보이는 이름이라 운영자처럼 보이거나 '익명'으로 시작하는 닉네임은 막는다 */
+  const nickProblem = me.isAdmin || !nickname.trim() || nickname.trim() === me.nickname ? null : nicknameProblem(nickname.trim());
   /** 혜택이 생기는 요금제 이름 ('Max', 없으면 '') */
   const tierOf = (perk: Perk) => perkTierName(me.perkTiers, perk);
   /** 칸 이름 뒤에 붙일 요금제 ' (Max)' */
@@ -209,10 +212,17 @@ export default function SettingsPage() {
       <Card className="grid gap-3">
         <Field label="닉네임" htmlFor="set-nick">
           <div className="flex gap-2">
-            <input id="set-nick" className={inputClass} value={nickname} maxLength={20} onChange={(ev) => setNickname(ev.target.value)} />
+            <input
+              id="set-nick"
+              className={inputClass}
+              value={nickname}
+              maxLength={20}
+              aria-describedby={nickProblem ? 'set-nick-problem' : undefined}
+              onChange={(ev) => setNickname(ev.target.value)}
+            />
             <Button
               variant="secondary"
-              disabled={!nickname.trim() || nickname.trim() === me.nickname}
+              disabled={!nickname.trim() || nickname.trim() === me.nickname || !!nickProblem}
               onClick={async () => {
                 const { error } = await sb().from('profiles').update({ nickname: nickname.trim() }).eq('id', me.userId);
                 if (error) toast('저장하지 못했어요.', 'bad');
@@ -225,6 +235,11 @@ export default function SettingsPage() {
               저장
             </Button>
           </div>
+          {nickProblem ? (
+            <p id="set-nick-problem" className="mt-1.5 text-sm text-bad">
+              {nickProblem}
+            </p>
+          ) : null}
         </Field>
         <p className="text-sm text-muted">로그인 계정: {accountLabel(me.email, me.provider)}</p>
         <div className="flex flex-wrap items-center gap-2">

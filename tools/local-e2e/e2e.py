@@ -1581,6 +1581,9 @@ async def share_steps(browser):
     assert db(f"select kind || ':' || coalesce(pages, 0) || ':' || (preview_path is not null)::text from public.community_files where post_id = '{pa}'") == "pdf:2:true"
     assert int(db(f"select questions from public.community_notes where post_id = '{pa}'")) > 0
     assert db(f"select count(*) from public.community_uploads where post_id = '{pa}'") == "0", "upload tickets are cleared once the post is made"
+    # 파일 경로(미리보기·받기 주소에 그대로 들어간다)에는 계정 번호가 없다: 익명 글과 견줘 글쓴이를 알아내지 못하게
+    assert db(f"select string_agg(path || ' ' || coalesce(preview_path, ''), ' ') from public.community_files where post_id = '{pa}'").startswith(f"p/{pa}/")
+    assert db(f"select count(*) from public.community_files where path like '%{student}%' or preview_path like '%{student}%'") == "0"
     await shot(page, "142-share-post-mine")
 
     step("share: the note menu's '자료 공유에 올리기' opens the writer with that note attached")
@@ -1675,6 +1678,18 @@ async def share_steps(browser):
     await opage.get_by_role("button", name="노트 메뉴").click()
     await expect(opage.get_by_role("menuitem", name="자료 공유에 올리기")).to_have_count(0)
     await opage.keyboard.press("Escape")
+    assert db(f"select shared_from from public.sources where id = '{new_sid}'") == pa
+    # 같은 글의 노트는 두 번 넣지 않는다: 글 화면은 '내 자료함의 노트 열기', 서버도 넣은 노트를 돌려준다
+    await opage.goto(BASE + f"/share/p/{pa}")
+    await expect(opage.get_by_text("이 노트는 이미 내 자료함에 넣었어요.")).to_be_visible()
+    await expect(opage.get_by_role("button", name="내 자료함에 넣기")).to_have_count(0)
+    o_subject_id = db(f"select subject_id from public.sources where id = '{new_sid}'")
+    r = await opage.request.post(BASE + f"/api/share/posts/{pa}/import", headers={"origin": BASE}, data={"subjectId": o_subject_id})
+    got = await r.json()
+    assert r.ok and got.get("existing") is True and got["sourceId"] == new_sid, got
+    assert db(f"select count(*) from public.sources where user_id = '{other}' and shared_from = '{pa}'") == "1"
+    await opage.get_by_role("link", name="내 자료함의 노트 열기").click()
+    await opage.wait_for_url(re.compile(rf"/notes/{new_sid}"))
 
     step("share: 'KOK으로 정리' hands the PDF to 자료 넣기 in the subject I pick")
     await opage.goto(BASE + f"/share/p/{pa}")
@@ -1764,7 +1779,9 @@ async def share_steps(browser):
     await rsheet.get_by_role("button", name="신고 보내기").click()
     await expect(opage.get_by_text("신고했어요. 운영자가 확인할게요.")).to_be_visible()
     await poll_db(f"select hidden::text from public.community_posts where id = '{pc}'", "true")
-    assert "글쓴이:" in db(f"select snapshot from public.reports where reporter_id = '{other}' and target_id = '{pc}'")
+    # 신고한 사람도 자기 신고(snapshot)를 읽을 수 있어서 계정 번호는 남기지 않는다 (실제 글쓴이는 운영자 신고함이 그때 읽는다)
+    snap = db(f"select snapshot from public.reports where reporter_id = '{other}' and target_id = '{pc}'")
+    assert f"글쓴이: {s_nick}" in snap and student not in snap, snap
     n0 = len(ERRORS)
     await opage.reload()
     await expect(opage.get_by_text("가려진 글이에요", exact=True)).to_be_visible()
@@ -1772,20 +1789,53 @@ async def share_steps(browser):
     await page.goto(BASE + f"/share/p/{pc}")
     await expect(page.get_by_text("신고가 쌓여 가려진 글이에요. 운영자가 확인할 때까지 나와 운영자만 볼 수 있어요.")).to_be_visible()
 
-    step("share: blocking the writer hides their posts for me (anonymous ones too); unblock from 내 활동")
+    step("share: blocking hides the writer's named posts only (blocking anonymous ones would unmask them); unblock from 내 활동")
+    # 익명 글에는 차단이 없고 서버도 거절한다 (문제가 있으면 신고)
+    await opage.goto(BASE + f"/share/p/{pd}")
+    await opage.get_by_role("button", name="글 메뉴", exact=True).click()
+    await expect(opage.get_by_role("menuitem", name="신고")).to_be_visible()
+    await expect(opage.get_by_role("menuitem", name="글쓴이 차단")).to_have_count(0)
+    await opage.keyboard.press("Escape")
+    n0 = len(ERRORS)
+    r = await opage.request.post(BASE + "/api/share/blocks", headers={"origin": BASE}, data={"post": pd})
+    assert r.status == 400 and (await r.json())["error"] == "anonymous", (r.status, await r.text())
+    del ERRORS[n0:]
+    # 익명 글의 글쓴이가 다는 댓글은 처음부터 익명이고 '익명(글쓴이)'
+    await page.goto(BASE + f"/share/p/{pd}")
+    await expect(page.get_by_label("익명으로", exact=True)).to_be_checked()
+    await page.get_by_role("textbox", name="댓글", exact=True).fill("교과서 3단원까지예요")
+    await page.get_by_role("button", name="댓글 달기").click()
+    await expect(page.get_by_text("익명(글쓴이)", exact=True)).to_be_visible()
+    # 닉네임 글의 글쓴이를 차단하면 그 사람의 닉네임 글만 빠지고 익명 글과 그 댓글은 그대로
     await opage.goto(BASE + f"/share/p/{pa}")
     await opage.get_by_role("button", name="글 메뉴", exact=True).click()
     await opage.get_by_role("menuitem", name="글쓴이 차단").click()
     await app_confirm(opage)
     await opage.wait_for_url(re.compile(rf"/share/g/{gid}$"))
-    await expect(opage.get_by_text("아직 글이 없어요")).to_be_visible()
+    await expect(opage.get_by_role("link", name=re.compile("시험 범위 아는 사람"))).to_be_visible()
+    await expect(opage.get_by_role("link", name=re.compile("광합성 정리 PDF와 노트"))).to_have_count(0)
+    await expect(opage.get_by_role("link", name=re.compile("세포 분열 요약"))).to_have_count(0)
+    await opage.goto(BASE + f"/share/p/{pd}")
+    await expect(opage.get_by_text("교과서 3단원까지예요")).to_be_visible()
+    await expect(opage.get_by_text("익명(글쓴이)", exact=True)).to_be_visible()
     await opage.goto(BASE + "/share/me?tab=blocks")
     await expect(opage.get_by_text(s_nick, exact=True)).to_be_visible()
     await opage.get_by_role("button", name="풀기").click()
     await app_confirm(opage)
     await expect(opage.get_by_text("차단한 사람이 없어요")).to_be_visible()
     await opage.goto(BASE + f"/share/g/{gid}")
-    await expect(opage.get_by_role("link", name=re.compile("시험 범위 아는 사람"))).to_be_visible()
+    await expect(opage.get_by_role("link", name=re.compile("광합성 정리 PDF와 노트"))).to_be_visible()
+    # 익명 댓글 신고 (운영자 신고함에서 실제 글쓴이를 본다: 아래)
+    await opage.goto(BASE + f"/share/p/{pd}")
+    await opage.get_by_role("region", name="댓글").get_by_role("button", name="댓글 메뉴").first.click()
+    await expect(opage.get_by_role("menuitem", name="차단")).to_have_count(0)
+    await opage.get_by_role("menuitem", name="신고").click()
+    rsheet = opage.get_by_role("dialog", name="신고하기")
+    await rsheet.get_by_role("button", name="광고·도배예요").click()
+    await rsheet.get_by_role("button", name="신고 보내기").click()
+    await expect(opage.get_by_text("신고했어요. 운영자가 확인할게요.")).to_be_visible()
+    snap = db(f"select snapshot from public.reports where reporter_id = '{other}' and target_type = 'share_comment' order by id desc limit 1")
+    assert "댓글쓴이: 익명" in snap and student not in snap, snap
 
     step("share: search finds posts by every word and galleries by name")
     await page.goto(BASE + "/share")
@@ -1814,6 +1864,22 @@ async def share_steps(browser):
     await expect(page.get_by_role("heading", name="세포 분열 요약 (고침)")).to_be_visible()
     await expect(page.get_by_text("· 고침")).to_be_visible()
     assert db(f"select count(*) from public.community_files where post_id = '{pb}'") == "1"
+    # 붙인 노트 바꾸기: 붙일 수 없는 노트로 바꾸면 예전 노트가 그대로 남는다 (새 모습을 다 만든 뒤에만 바꾼다)
+    note_before = db(f"select title || '|' || array_to_string(figure_paths, ',') from public.community_notes where post_id = '{pa}'")
+    n0 = len(ERRORS)
+    r = await page.request.patch(BASE + f"/api/share/posts/{pa}", headers={"origin": BASE}, data={"note": "00000000-0000-4000-8000-000000000000"})
+    assert r.status == 404, (r.status, await r.text())
+    del ERRORS[n0:]
+    assert db(f"select title || '|' || array_to_string(figure_paths, ',') from public.community_notes where post_id = '{pa}'") == note_before
+    assert db(f"select has_note::text from public.community_posts where id = '{pa}'") == "true"
+    # 같은 노트를 다시 붙이면 새 폴더에 새 모습을 담고 예전 그림을 지운다
+    old_figs = [x for x in note_before.split("|", 1)[1].split(",") if x]
+    r = await page.request.patch(BASE + f"/api/share/posts/{pa}", headers={"origin": BASE}, data={"note": sid0})
+    assert r.ok, (r.status, await r.text())
+    new_figs = [x for x in db(f"select array_to_string(figure_paths, ',') from public.community_notes where post_id = '{pa}'").split(",") if x]
+    assert all(re.fullmatch(rf"{student}/share/{pa}/[0-9a-f]{{8}}/f\d+\.jpg", x) for x in new_figs), new_figs
+    assert all((files_root / "sources" / x).exists() for x in new_figs), new_figs
+    assert not any((files_root / "sources" / x).exists() for x in old_figs if x not in new_figs), old_figs
 
     step("share: the gallery maker deletes another student's post in their gallery")
     await opage.goto(BASE + f"/share/write?g={gid}")
@@ -1831,23 +1897,32 @@ async def share_steps(browser):
     assert db(f"select count(*) from public.community_posts where id = '{pe}'") == "0"
     await octx.close()
 
-    step("share: the admin sees who wrote an anonymous post, shows a hidden post again, and can delete any post")
+    step("share: the admin sees who wrote anonymous posts and comments, shows a hidden post again (its reports close), and can delete any post")
     actx, apage = await new_ctx(browser, "admin", width=1280)
     await apage.goto(BASE + f"/share/p/{pd}")
     await expect(apage.get_by_text(re.compile(rf"실제 글쓴이: {re.escape(s_nick)} \(student@example.com\)"))).to_be_visible()
-    await apage.goto(BASE + f"/share/p/{pc}")
-    await apage.get_by_role("button", name="다시 보이기").click()
+    await expect(apage.get_by_role("region", name="댓글").get_by_text(f"실제: {s_nick}", exact=True)).to_be_visible()
+    # 신고함: 신고한 사람이 읽는 내용에는 없던 실제 글쓴이를 운영자에게만
+    await apage.goto(BASE + "/admin")
+    await expect(apage.get_by_text(re.compile(rf"{re.escape(s_nick)} \(student@example.com\) · 익명으로 씀")).first).to_be_visible()
+    await expect(apage.get_by_role("link", name="댓글이 있는 글 보기").first).to_be_visible()
+    # 가려진 글(신고 다섯 개)은 '가려 둠': 신고함에서 다시 보이게 하면 그 글의 열린 신고는 기각으로 닫힌다
+    await expect(apage.get_by_text("· 가려 둠").first).to_be_visible()
+    await apage.get_by_role("button", name="다시 보이기").first.click()
+    await expect(apage.get_by_text("다시 보이게 했어요. 신고는 기각으로 닫았어요.")).to_be_visible()
     await poll_db(f"select hidden::text from public.community_posts where id = '{pc}'", "false")
+    assert db(f"select count(*) from public.reports where target_id = '{pc}' and status = 'open'") == "0"
+    assert int(db(f"select count(*) from public.reports where target_id = '{pc}' and status = 'dismissed'")) == 5
+    await apage.goto(BASE + f"/share/p/{pc}")
+    await expect(apage.get_by_role("heading", name="화학 반응 문제지")).to_be_visible()
     await apage.get_by_role("button", name="글 메뉴", exact=True).click()
     await apage.get_by_role("menuitem", name="지우기").click()
     msg = await app_confirm(apage)
     assert "운영자로 지워요" in msg, msg
     await apage.wait_for_url(re.compile(rf"/share/g/{gid}$"))
     assert db(f"select count(*) from public.community_posts where id = '{pc}'") == "0"
-    assert not (files_root / "community" / student / pc).exists() or not any((files_root / "community" / student / pc).iterdir()), "deleted post's files are removed"
-    # 신고함에 자료 공유 신고가 보인다
-    await apage.goto(BASE + "/admin")
-    await expect(apage.get_by_role("link", name="글 보기").first).to_be_visible()
+    pc_dir = files_root / "community" / "p" / pc
+    assert not pc_dir.exists() or not any(pc_dir.iterdir()), "deleted post's files are removed"
     await actx.close()
 
     step("share: the maker deletes the gallery (only their posts left): posts, files and the note's pictures go")
@@ -1858,7 +1933,7 @@ async def share_steps(browser):
     await page.wait_for_url(re.compile(r"/share$"))
     assert db(f"select count(*) from public.community_galleries where id = '{gid}'") == "0"
     assert db(f"select count(*) from public.community_posts where gallery_id = '{gid}'") == "0"
-    left = [p for p in (files_root / "community" / student).rglob("*") if p.is_file()] if (files_root / "community" / student).exists() else []
+    left = [f for post in (pa, pb, pd) if (files_root / "community" / "p" / post).exists() for f in (files_root / "community" / "p" / post).rglob("*") if f.is_file()]
     assert not left, left
     shared_figs = files_root / "sources" / student / "share"
     assert not shared_figs.exists() or not [p for p in shared_figs.rglob("*") if p.is_file()], "the shared note's pictures go with the posts"
@@ -4393,6 +4468,8 @@ async def main():
         await shot(page, "50-theme-ai-dark", full=False)
         await brightness.get_by_role("radio", name="기기 설정").click()
         await wait_js(page, "!document.documentElement.hasAttribute('data-mode')")
+        # 설정은 0.6초 뒤에 저장한다: 화면을 새로 열기 전에 저장을 기다린다 (새로 열면 기다리던 저장이 사라진다)
+        await wait_saved({"mode": "system"})
         await page.goto(BASE + "/home")
         await page.wait_for_timeout(1200)
         await shot(page, "50-home-ai-picture", full=False)
@@ -4648,7 +4725,9 @@ async def main():
         await expect(page.get_by_role("link", name="터미널 열기")).to_be_hidden()
         await page.goto(BASE + "/review")
         await page.wait_for_timeout(800)
-        # 카드는 굵은 테두리(안쪽 그림자) + 번지지 않는 딱딱한 그림자 (큰 카드는 7px, 다른 카드는 4px)
+        # 카드는 굵은 테두리(안쪽 그림자) + 번지지 않는 딱딱한 그림자 (큰 카드는 7px, 다른 카드는 4px). 마우스가 카드 위에 있으면 떠오른 모양이라 비켜 둔다
+        await page.mouse.move(1, 1)
+        await page.wait_for_timeout(250)
         card = await page.evaluate("getComputedStyle(document.querySelector('.kok-card')).boxShadow")
         assert "inset" in card and re.search(r"\b[47]px [47]px 0px", card), card
         await shot(page, "53-skin-brutal-review", full=False)

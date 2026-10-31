@@ -2,7 +2,7 @@
 // 자료 공유의 창: 갤러리 만들기·고치기, 신고, 노트 고르기, 노트를 넣을 과목 고르기, 받기 한도 안내
 import { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { Button, Field, ICONS, Icon, Sheet, api, cx, inputClass, useToast, DONE } from '@/components/ui';
+import { Button, Field, ICONS, Icon, Sheet, api, cx, inputClass, radioKeys, useToast, DONE } from '@/components/ui';
 import { useMe } from '@/components/AppShell';
 import { fetchSubjects, sb, topLevelSources } from '@/lib/data';
 import { SOURCES_CHANGED, SUBJECTS_CHANGED } from '@/lib/events';
@@ -21,6 +21,7 @@ import {
   type ShareReportKind,
 } from '@/lib/share';
 import { REPORT_REASON_MAX, reportReason } from '@/lib/report';
+import { josa } from '@/lib/josa';
 import type { SubjectRow } from '@/lib/types';
 
 const chip = (on: boolean) =>
@@ -127,8 +128,17 @@ export function GallerySheet({
             분류
           </p>
           <div className="flex flex-wrap gap-1.5" role="radiogroup" aria-labelledby="gallery-cat">
-            {GALLERY_CATEGORIES.map((c) => (
-              <button key={c} type="button" role="radio" aria-checked={cat === c} className={chip(cat === c)} onClick={() => setCat(c)}>
+            {GALLERY_CATEGORIES.map((c, i) => (
+              <button
+                key={c}
+                type="button"
+                role="radio"
+                aria-checked={cat === c}
+                tabIndex={cat === c ? 0 : -1}
+                className={chip(cat === c)}
+                onClick={() => setCat(c)}
+                onKeyDown={(e) => radioKeys(e, i, GALLERY_CATEGORIES.length, (n) => setCat(GALLERY_CATEGORIES[n]))}
+              >
                 {CATEGORY_LABEL[c]}
               </button>
             ))}
@@ -329,6 +339,8 @@ export function NotePickerSheet({ open, onClose, onPick }: { open: boolean; onCl
   const [rows, setRows] = useState<Array<{ id: string; title: string; subject_id: string; created_at: string }> | null>(null);
   const [subjects, setSubjects] = useState<SubjectRow[]>([]);
   const [q, setQ] = useState('');
+  const [failed, setFailed] = useState(false);
+  const [attempt, setAttempt] = useState(0);
   useEffect(() => {
     if (!open) return;
     let alive = true;
@@ -347,12 +359,12 @@ export function NotePickerSheet({ open, onClose, onPick }: { open: boolean; onCl
         setRows(list.data ?? []);
       })
       .catch(() => {
-        if (alive) toast('노트 목록을 불러오지 못했어요.', 'bad');
+        if (alive) setFailed(true);
       });
     return () => {
       alive = false;
     };
-  }, [open, toast]);
+  }, [open, attempt]);
   const subjectOf = useMemo(() => new Map(subjects.map((s) => [s.id, s])), [subjects]);
   const shown = (rows ?? []).filter((r) => !q.trim() || r.title.toLowerCase().includes(q.trim().toLowerCase()));
   return (
@@ -363,7 +375,17 @@ export function NotePickerSheet({ open, onClose, onPick }: { open: boolean; onCl
         </p>
         <input aria-label="노트 찾기" className={inputClass} value={q} placeholder="노트 이름으로 찾기" onChange={(e) => setQ(e.target.value)} />
         {rows === null ? (
-          <p className="text-sm text-muted">불러오는 중…</p>
+          failed ? (
+            <LoadFailed
+              what="노트 목록"
+              onRetry={() => {
+                setFailed(false);
+                setAttempt((n) => n + 1);
+              }}
+            />
+          ) : (
+            <p className="text-sm text-muted">불러오는 중…</p>
+          )
         ) : !shown.length ? (
           <p className="text-sm text-muted">{rows.length ? '찾는 노트가 없어요.' : '아직 정리가 끝난 노트가 없어요.'}</p>
         ) : (
@@ -403,6 +425,18 @@ export function NotePickerSheet({ open, onClose, onPick }: { open: boolean; onCl
   );
 }
 
+/** 시트 안에서 읽지 못했을 때: 까닭 한 줄 + 다시 불러오기 */
+function LoadFailed({ what, onRetry }: { what: string; onRetry: () => void }) {
+  return (
+    <div className="flex flex-wrap items-center gap-3 rounded-2xl bg-surface-2 px-3.5 py-3">
+      <p className="min-w-0 flex-1 text-sm">{josa(what, '을')} 불러오지 못했어요. 인터넷 연결을 확인해 주세요.</p>
+      <Button size="sm" variant="secondary" onClick={onRetry}>
+        다시 불러오기
+      </Button>
+    </div>
+  );
+}
+
 // ------------------------------------------------------------- 공유받은 노트를 넣을 과목
 export function ImportSheet({
   open,
@@ -424,6 +458,8 @@ export function ImportSheet({
   const [pick, setPick] = useState<string | null>(null);
   const [newName, setNewName] = useState('');
   const [busy, setBusy] = useState(false);
+  const [failed, setFailed] = useState(false);
+  const [attempt, setAttempt] = useState(0);
   useEffect(() => {
     if (!open) return;
     let alive = true;
@@ -436,11 +472,11 @@ export function ImportSheet({
         setPick(same?.id ?? list[0]?.id ?? 'new');
         setNewName(same ? '' : defaultSubject);
       })
-      .catch(() => alive && toast('과목을 불러오지 못했어요.', 'bad'));
+      .catch(() => alive && setFailed(true));
     return () => {
       alive = false;
     };
-  }, [open, defaultSubject, toast]);
+  }, [open, defaultSubject, attempt]);
   const save = async () => {
     setBusy(true);
     try {
@@ -457,8 +493,12 @@ export function ImportSheet({
         subjectId = made.id;
       }
       if (!subjectId) return;
-      const r = await api<{ sourceId: string }>(`/api/share/posts/${postId}/import`, { method: 'POST', body: JSON.stringify({ subjectId }) });
-      toast('내 자료함에 넣었어요. 문제는 오늘 복습에도 나와요.', 'ok', DONE);
+      const r = await api<{ sourceId: string; existing?: boolean }>(`/api/share/posts/${postId}/import`, {
+        method: 'POST',
+        body: JSON.stringify({ subjectId }),
+      });
+      if (r.existing) toast('이미 넣은 노트예요. 그 노트를 열게요.');
+      else toast('내 자료함에 넣었어요. 문제는 오늘 복습에도 나와요.', 'ok', DONE);
       window.dispatchEvent(new Event(SOURCES_CHANGED));
       onClose();
       router.push(`/notes/${r.sourceId}`);
@@ -482,16 +522,43 @@ export function ImportSheet({
       <div className="grid gap-3">
         <p className="text-sm text-muted">&lsquo;{title}&rsquo; 노트를 고른 과목에 넣어요. 정리·마인드맵·문제가 그대로 들어오고 AI를 쓰지 않아요.</p>
         {subjects === null ? (
-          <p className="text-sm text-muted">불러오는 중…</p>
+          failed ? (
+            <LoadFailed
+              what="과목"
+              onRetry={() => {
+                setFailed(false);
+                setAttempt((n) => n + 1);
+              }}
+            />
+          ) : (
+            <p className="text-sm text-muted">불러오는 중…</p>
+          )
         ) : (
           <div className="flex flex-wrap gap-1.5" role="radiogroup" aria-label="넣을 과목">
-            {subjects.map((s) => (
-              <button key={s.id} type="button" role="radio" aria-checked={pick === s.id} className={chip(pick === s.id)} onClick={() => setPick(s.id)}>
+            {subjects.map((s, i) => (
+              <button
+                key={s.id}
+                type="button"
+                role="radio"
+                aria-checked={pick === s.id}
+                tabIndex={pick === s.id ? 0 : -1}
+                className={chip(pick === s.id)}
+                onClick={() => setPick(s.id)}
+                onKeyDown={(e) => radioKeys(e, i, subjects.length + 1, (n) => setPick(subjects[n]?.id ?? 'new'))}
+              >
                 <span className="mr-1.5 h-2.5 w-2.5 rounded-full" style={{ background: subjectVar(s.color) }} aria-hidden="true" />
                 {s.name}
               </button>
             ))}
-            <button type="button" role="radio" aria-checked={pick === 'new'} className={chip(pick === 'new')} onClick={() => setPick('new')}>
+            <button
+              type="button"
+              role="radio"
+              aria-checked={pick === 'new'}
+              tabIndex={pick === 'new' ? 0 : -1}
+              className={chip(pick === 'new')}
+              onClick={() => setPick('new')}
+              onKeyDown={(e) => radioKeys(e, subjects.length, subjects.length + 1, (n) => setPick(subjects[n]?.id ?? 'new'))}
+            >
               <Icon d={ICONS.plus} size={14} className="mr-1" />새 과목
             </button>
           </div>

@@ -36,6 +36,18 @@ export function galleryKey(name: string): string {
 /** 운영자로 보일 수 있는 이름 (관리자만 쓴다) */
 const RESERVED = /(운영자|관리자|운영진|공식|kok)/i;
 
+/**
+ * 닉네임 검사 (자료 공유의 글·댓글에 보이는 이름): 운영자처럼 보이는 이름과 '익명'으로 시작하는 이름(익명 표시 '익명1'·'익명(글쓴이)'과 헷갈린다)만 막는다.
+ * 문제가 있으면 한국어 이유, 없으면 null. 관리자는 검사하지 않는다
+ */
+export function nicknameProblem(name: string): string | null {
+  const key = galleryKey(name);
+  if (/^익명/.test(key)) return "'익명'으로 시작하는 닉네임은 쓸 수 없어요. 익명으로 쓰려면 '익명으로'를 켜 주세요.";
+  if (/(운영자|관리자|운영진)/.test(key) || /^kok(팀|운영|공식|관리)?$/i.test(key))
+    return "'운영자'·'관리자'처럼 운영하는 사람으로 보이는 닉네임은 쓸 수 없어요.";
+  return null;
+}
+
 /** 갤러리 이름 검사: 문제가 있으면 한국어 이유, 없으면 null */
 export function galleryNameProblem(name: string, isAdmin: boolean): string | null {
   const n = name.replace(/\s+/g, ' ').trim();
@@ -197,14 +209,15 @@ export function galleryQuery(q: string): string {
 
 // ------------------------------------------------------------- 이름·시간
 /**
- * 익명 댓글의 이름 (서버가 쓴 사람 번호로 셈: 화면에는 번호를 보내지 않는다). 글쓴이면 '익명(글쓴이)',
- * 아니면 그 글에서 처음 나온 차례로 '익명1'·'익명2' (같은 사람은 같은 이름). 익명이 아니면 ''
+ * 익명 댓글의 이름 (서버가 쓴 사람 번호로 셈: 화면에는 번호를 보내지 않는다). 익명 글의 글쓴이면 '익명(글쓴이)',
+ * 아니면 그 글에서 처음 나온 차례로 '익명1'·'익명2' (같은 사람은 같은 이름). 익명이 아니면 ''.
+ * 닉네임으로 쓴 글의 글쓴이가 익명으로 단 댓글에는 '글쓴이'를 붙이지 않는다 (붙이면 익명이 풀린다)
  */
-export function anonymousNames(comments: Array<{ author: string; anonymous: boolean }>, postAuthor: string): string[] {
+export function anonymousNames(comments: Array<{ author: string; anonymous: boolean }>, postAuthor: string, postAnonymous: boolean): string[] {
   const seen = new Map<string, number>();
   return comments.map((c) => {
     if (!c.anonymous) return '';
-    if (c.author === postAuthor) return '익명(글쓴이)';
+    if (postAnonymous && c.author === postAuthor) return '익명(글쓴이)';
     if (!seen.has(c.author)) seen.set(c.author, seen.size + 1);
     return `익명${seen.get(c.author)}`;
   });
@@ -332,7 +345,9 @@ export type CommentView = {
   id: string;
   parentId: string | null;
   authorName: string;
-  /** 글쓴이가 쓴 댓글 */
+  /** 익명으로 쓴 댓글 (차단할 수 없다) */
+  anonymous: boolean;
+  /** 글쓴이가 쓴 댓글 (글과 댓글이 같이 익명이거나 같이 닉네임일 때만) */
   byPostAuthor: boolean;
   mine: boolean;
   body: string;
@@ -345,6 +360,8 @@ export type CommentView = {
   edited: boolean;
   createdAt: string;
   canDelete: boolean;
+  /** 운영자에게만: 익명 댓글의 실제 글쓴이 */
+  realAuthor?: { nickname: string | null; email: string | null } | null;
 };
 
 export type PostDetail = PostSummary & {
@@ -362,6 +379,8 @@ export type PostDetail = PostSummary & {
   canDelete: boolean;
   /** 관리자에게만: 익명 글의 실제 글쓴이 */
   realAuthor?: { nickname: string | null; email: string | null } | null;
+  /** 이 글의 노트를 이미 내 자료함에 넣었으면 열 노트 (자료 번호) */
+  imported: string | null;
   /** 오늘 받기 (null = 제한 없음) */
   downloadsLeft: number | null;
   downloadsDaily: number | null;

@@ -8,7 +8,7 @@ import { UserFacingError, errorResponse } from '@/lib/server/errors';
 import { removeFolder } from '@/lib/server/files';
 import { accountKeys, recordDeletion } from '@/lib/server/tombstone';
 import { THEME_IMAGES_BUCKET } from '@/lib/server/themes';
-import { COMMUNITY_BUCKET } from '@/lib/server/share';
+import { COMMUNITY_BUCKET, removeUserShareFiles } from '@/lib/server/share';
 
 export const maxDuration = 120;
 
@@ -26,7 +26,9 @@ export async function DELETE(req: NextRequest) {
     await removeFolder(admin, acc.userId);
     // 테마 배경 그림 (버킷이 아직 없으면 지울 것도 없다)
     await removeFolder(admin, acc.userId, THEME_IMAGES_BUCKET);
-    // 자료 공유에 올린 파일 (글·댓글 행은 계정을 지우면 같이 지워진다. 공유한 노트의 그림은 위 내 폴더에 있다)
+    // 자료 공유에 올린 파일: 글 폴더(p/글id)에는 계정 번호가 없어서 내 글을 읽어 지운다 (글·댓글 행은 계정을 지우면 같이 지워진다.
+    // 공유한 노트의 그림은 위 내 폴더에 있다). 계정 번호 폴더는 처음 만든 때의 경로라 남아 있으면 같이
+    await removeUserShareFiles(admin, acc.userId);
     await removeFolder(admin, acc.userId, COMMUNITY_BUCKET);
     const { error } = await admin.auth.admin.deleteUser(acc.userId);
     if (error) throw error;

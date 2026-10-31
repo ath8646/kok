@@ -230,9 +230,15 @@ begin
     raise exception 'post list function should be denied';
   exception when insufficient_privilege then null;
   end;
+  -- 공유받은 노트가 온 글(shared_from)은 서버만 본다
+  begin
+    perform shared_from from public.sources limit 1;
+    raise exception 'sources.shared_from should be hidden';
+  exception when insufficient_privilege then null;
+  end;
   -- 공유 파일은 저장소에서도 직접 올리거나 볼 수 없다
   begin
-    insert into storage.objects (bucket_id, name) values ('community', auth.uid()::text || '/p/a.pdf');
+    insert into storage.objects (bucket_id, name) values ('community', 'p/' || gen_random_uuid()::text || '/a.pdf');
     raise exception 'direct community upload should be denied';
   exception when insufficient_privilege then null;
   end;
@@ -425,6 +431,13 @@ begin
   if (select like_count from public.community_posts where id = p1) <> 1 then raise exception 'like twice counts once'; end if;
   perform public.kok_share_like(b, 'post', p1, false);
   if (select like_count from public.community_posts where id = p1) <> 0 then raise exception 'unlike'; end if;
+  -- 좋아요 행이 지워지면 (탈퇴 등) 수도 준다
+  perform public.kok_share_like(b, 'post', p1, true);
+  perform public.kok_share_like(a, 'post', p1, true);
+  if (select like_count from public.community_posts where id = p1) <> 2 then raise exception 'two likes'; end if;
+  delete from public.community_likes where user_id = b;
+  if (select like_count from public.community_posts where id = p1) <> 1 then raise exception 'like count follows deleted likes'; end if;
+  perform public.kok_share_like(a, 'post', p1, false);
   -- 받기: 하루 2개, 같은 글은 다시 세지 않는다
   r := public.kok_share_unlock(b, p1, now() - interval '1 hour', 2);
   if r->>'result' <> 'ok' then raise exception 'unlock 1: %', r; end if;
@@ -444,8 +457,9 @@ begin
   if n <> 0 then raise exception 'all words must match: %', n; end if;
   select count(*) into n from public.kok_share_posts(g, null, 'text', 'new', null, null, false, 20, 0);
   if n <> 1 then raise exception 'text-only filter: %', n; end if;
+  -- 차단은 닉네임으로 쓴 글만 뺀다 (익명 글까지 빼면 빠진 것으로 익명 글쓴이를 알아낼 수 있다)
   select count(*) into n from public.kok_share_posts(g, null, null, 'new', null, array[a], false, 20, 0);
-  if n <> 0 then raise exception 'blocked author excluded: %', n; end if;
+  if n <> 1 then raise exception 'blocked author: named posts out, the anonymous one stays: %', n; end if;
   update public.community_posts set hidden = true where id = p3;
   select count(*) into n from public.kok_share_posts(g, null, null, 'new', null, null, false, 20, 0);
   if n <> 2 then raise exception 'hidden post excluded: %', n; end if;
@@ -454,6 +468,24 @@ begin
   if (select post_count from public.community_galleries where id = g) <> 2 then raise exception 'post count after delete'; end if;
   delete from public.community_galleries where id = g;
   if exists (select 1 from public.community_posts where id = p1) then raise exception 'posts go with the gallery'; end if;
+end $$;
+
+-- 공유받아 넣은 노트: 같은 글은 한 사람에게 한 번 (sources_shared_from_uniq)
+do $$
+declare
+  a uuid := '11111111-1111-1111-1111-111111111111';
+  sub uuid;
+  post uuid := gen_random_uuid();
+begin
+  select id into sub from public.subjects where user_id = a limit 1;
+  if sub is null then insert into public.subjects (user_id, name) values (a, '공유 시험') returning id into sub; end if;
+  insert into public.sources (user_id, subject_id, kind, text_content, shared_from) values (a, sub, 'text', 'x', post);
+  begin
+    insert into public.sources (user_id, subject_id, kind, text_content, shared_from) values (a, sub, 'text', 'y', post);
+    raise exception 'the same shared post twice should be refused';
+  exception when unique_violation then null;
+  end;
+  delete from public.sources where user_id = a and shared_from = post;
 end $$;
 
 insert into public.sources (user_id, subject_id, kind, text_content)

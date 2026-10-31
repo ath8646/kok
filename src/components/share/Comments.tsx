@@ -1,6 +1,6 @@
 'use client';
-// 글의 댓글: 댓글과 답글(한 단계), 좋아요, 고치기·지우기(쓴 사람, 갤러리 만든 사람·운영자는 지우기), 신고·차단, 익명으로 쓰기.
-// 글쓴이가 쓴 댓글은 '글쓴이' 표시, 익명 댓글은 서버가 정한 이름('익명1'·'익명(글쓴이)')
+// 글의 댓글: 댓글과 답글(한 단계), 좋아요, 고치기·지우기(쓴 사람, 갤러리 만든 사람·운영자는 지우기), 신고·차단(닉네임 댓글만), 익명으로 쓰기.
+// 글쓴이가 쓴 댓글은 '글쓴이' 표시, 익명 댓글은 서버가 정한 이름('익명1'·'익명(글쓴이)'). 운영자는 가리기·다시 보이기와 익명 댓글의 실제 글쓴이
 import { useRef, useState } from 'react';
 import { useMe } from '@/components/AppShell';
 import { confirmOpen, useAskText, useConfirm } from '@/components/Confirm';
@@ -13,12 +13,15 @@ export function Comments({
   postId,
   thread,
   canWrite,
+  defaultAnonymous = false,
   onChanged,
 }: {
   postId: string;
   thread: CommentView[];
   /** 댓글을 쓸 수 있는지 (가린 글·정지된 계정은 아니다) */
   canWrite: boolean;
+  /** 처음부터 '익명으로'를 켜 둔다 (내가 익명으로 쓴 글: 내 닉네임으로 답하다 익명이 풀리지 않게) */
+  defaultAnonymous?: boolean;
   /** 댓글이 바뀌면 글을 다시 읽는다 */
   onChanged: () => Promise<void>;
 }) {
@@ -92,11 +95,22 @@ export function Comments({
     }
   };
 
+  /** 운영자: 가리기·다시 보이기 (그 댓글의 열린 신고도 해결·기각으로 닫힌다) */
+  const hide = async (c: CommentView, hidden: boolean) => {
+    try {
+      await api(`/api/share/comments/${c.id}/hide`, { method: 'POST', body: JSON.stringify({ hidden }) });
+      toast(hidden ? '댓글을 가렸어요.' : '댓글을 다시 보이게 했어요.', 'ok', DONE);
+      await onChanged();
+    } catch (e) {
+      toast((e as Error).message, 'bad');
+    }
+  };
+
   const block = async (c: CommentView) => {
     const ok = await ask({
       title: '차단하기',
       body: `${c.authorName}님을 차단할까요?`,
-      note: '이 사람이 쓴 글과 댓글이 내 화면에서 보이지 않아요. 내 활동에서 언제든 풀 수 있어요.',
+      note: '이 사람이 닉네임으로 쓴 글과 댓글이 내 화면에서 보이지 않아요. 내 활동에서 언제든 풀 수 있어요.',
       ok: '차단',
       danger: true,
     });
@@ -117,8 +131,10 @@ export function Comments({
       : [
           ...(c.mine || me.isAdmin ? [{ label: '고치기', icon: ICONS.pen, onSelect: () => setEditing(c.id) }] : []),
           ...(c.canDelete ? [{ label: '지우기', icon: ICONS.trash, onSelect: () => remove(c), danger: true }] : []),
+          ...(me.isAdmin ? [{ label: c.hidden ? '다시 보이기' : '가리기 (운영자)', icon: ICONS.eye, onSelect: () => hide(c, !c.hidden) }] : []),
           ...(!c.mine ? [{ label: '신고', icon: ICONS.flag, onSelect: () => setReporting(c.id) }] : []),
-          ...(!c.mine ? [{ label: '차단', icon: ICONS.block, onSelect: () => block(c), danger: true }] : []),
+          // 익명 댓글은 차단할 수 없다 (차단으로 빠지는 것을 보고 익명 글쓴이를 알아낼 수 있어서: 문제가 있으면 신고)
+          ...(!c.mine && !c.anonymous ? [{ label: '차단', icon: ICONS.block, onSelect: () => block(c), danger: true }] : []),
         ];
     return (
       <li key={c.id} className={cx('grid gap-1.5', reply ? 'rounded-2xl bg-surface-2 px-3.5 py-3' : 'py-3')}>
@@ -136,6 +152,11 @@ export function Comments({
                 {c.edited ? ' · 고침' : ''}
               </span>
               {c.hidden && c.body ? <span className="rounded-full bg-warn-soft px-2 py-0.5 text-[11px] font-bold text-warn">가려짐</span> : null}
+              {c.realAuthor ? (
+                <span className="min-w-0 truncate text-xs text-muted" title="운영자에게만 보여요">
+                  실제: {c.realAuthor.nickname ?? c.realAuthor.email ?? '이름 없음'}
+                </span>
+              ) : null}
               {items.length ? (
                 <span className="ml-auto">
                   <Menu label="댓글 메뉴" items={items} small />
@@ -203,6 +224,7 @@ export function Comments({
             await onChanged();
           }}
           ensureName={() => ensureNickname(me, askText, refresh, toast)}
+          defaultAnonymous={defaultAnonymous}
         />
       ) : null}
       <ShareReportSheet what={reporting ? { kind: 'comment', id: reporting } : null} onClose={() => setReporting(null)} />
@@ -217,6 +239,7 @@ function CommentBox({
   boxRef,
   onSent,
   ensureName,
+  defaultAnonymous,
 }: {
   postId: string;
   replyTo: CommentView | null;
@@ -224,10 +247,11 @@ function CommentBox({
   boxRef: React.RefObject<HTMLTextAreaElement | null>;
   onSent: () => Promise<void>;
   ensureName: () => Promise<boolean>;
+  defaultAnonymous: boolean;
 }) {
   const toast = useToast();
   const [text, setText] = useState('');
-  const [anonymous, setAnonymous] = useState(false);
+  const [anonymous, setAnonymous] = useState(defaultAnonymous);
   const [busy, setBusy] = useState(false);
   const send = async () => {
     const body = text.trim();

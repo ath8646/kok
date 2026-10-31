@@ -3,7 +3,7 @@
 import Link from 'next/link';
 import type { FormEvent, ReactNode } from 'react';
 import type { useAskText } from '@/components/Confirm';
-import { ICONS, Icon, cx, useToast } from '@/components/ui';
+import { ICONS, Icon, cx, radioKeys, useToast } from '@/components/ui';
 import { sb } from '@/lib/data';
 import {
   CATEGORY_LABEL,
@@ -11,6 +11,7 @@ import {
   SHARE_KIND_LABEL,
   SHARE_TEXT,
   countText,
+  nicknameProblem,
   timeAgo,
   type GalleryCategory,
   type GalleryView,
@@ -140,7 +141,7 @@ export function CategoryChips({ value, onChange }: { value: GalleryCategory | 'a
   const items: Array<GalleryCategory | 'all'> = ['all', ...GALLERY_CATEGORIES];
   return (
     <div className="no-scrollbar -mx-4 flex gap-2 overflow-x-auto px-4 pb-1 md:mx-0 md:flex-wrap md:px-0" role="radiogroup" aria-label="갤러리 분류">
-      {items.map((c) => {
+      {items.map((c, i) => {
         const on = c === value;
         return (
           <button
@@ -148,7 +149,10 @@ export function CategoryChips({ value, onChange }: { value: GalleryCategory | 'a
             type="button"
             role="radio"
             aria-checked={on}
+            // 고른 칩만 Tab 으로 들어가고 화살표로 옮긴다 (라디오 묶음)
+            tabIndex={on ? 0 : -1}
             onClick={() => onChange(c)}
+            onKeyDown={(e) => radioKeys(e, i, items.length, (n) => onChange(items[n]))}
             className={cx(
               'kok-chip press inline-flex h-9 shrink-0 items-center rounded-full px-4 text-sm font-semibold transition-colors duration-200',
               on ? 'kok-chip-on' : 'kok-chip-off bg-surface text-ink shadow-[0_1px_2px_var(--shadow)] hover:bg-surface-2',
@@ -288,7 +292,14 @@ export async function ensureNickname(
   refresh: () => Promise<void>,
   toast: ReturnType<typeof useToast>,
 ): Promise<boolean> {
-  if ((me.nickname ?? '').trim()) return true;
+  const current = (me.nickname ?? '').trim();
+  if (current) {
+    // 운영자처럼 보이거나 '익명'으로 시작하는 닉네임은 글·댓글에 쓰지 않는다 (서버도 막는다)
+    const problem = me.isAdmin ? null : nicknameProblem(current);
+    if (!problem) return true;
+    toast(`${problem} 설정에서 닉네임을 바꿔 주세요.`, 'bad');
+    return false;
+  }
   const name = await askText({
     title: '닉네임 정하기',
     body: '자료 공유의 글과 댓글에 이 이름이 보여요. 설정에서 언제든 바꿀 수 있어요. 진짜 이름이나 학교는 적지 않는 게 좋아요.',
@@ -299,7 +310,7 @@ export async function ensureNickname(
       const t = v.trim();
       if (t.length < 2) return '2자 이상 적어 주세요.';
       if (t.length > SHARE_TEXT.nickname) return `${SHARE_TEXT.nickname}자까지 적을 수 있어요.`;
-      return null;
+      return me.isAdmin ? null : nicknameProblem(t);
     },
   });
   if (name === null) return false;

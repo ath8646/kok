@@ -2444,7 +2444,8 @@ drop trigger if exists community_posts_touch on public.community_posts;
 create trigger community_posts_touch before update on public.community_posts
   for each row execute function public.kok_touch_updated_at();
 
--- 글에 붙인 파일 ('community' 버킷: 쓴 사람id/글id/파일id.확장자, 미리보기는 .preview.jpg)
+-- 글에 붙인 파일 ('community' 버킷: p/글id/파일id.확장자, 미리보기는 .preview.jpg. 경로는 받기 주소에 그대로 들어가서 계정 번호를 넣지 않는다:
+-- 익명 글과 견줘 글쓴이를 알아내지 못하게. 처음 만든 때의 글은 쓴 사람id/글id/)
 create table if not exists public.community_files (
   id uuid primary key default gen_random_uuid(),
   post_id uuid not null references public.community_posts(id) on delete cascade,
@@ -2460,7 +2461,8 @@ create table if not exists public.community_files (
 );
 create index if not exists community_files_post_idx on public.community_files (post_id, position);
 
--- 글에 붙인 KOK 노트 (붙일 때의 모습 그대로: 정리·그림 설계도·문제). 그림 파일은 'sources' 버킷의 쓴 사람id/share/글id/
+-- 글에 붙인 KOK 노트 (붙일 때의 모습 그대로: 정리·그림 설계도·문제). 그림 파일은 'sources' 버킷의 쓴 사람id/share/글id/붙일 때마다 새 폴더/
+-- (노트를 바꾸는 동안 받는 사람이 예전 그림을 그대로 복사할 수 있게: 새 모습을 넣은 뒤에 예전 그림을 지운다). 화면에는 경로를 보내지 않는다
 create table if not exists public.community_notes (
   post_id uuid primary key references public.community_posts(id) on delete cascade,
   owner_id uuid not null references auth.users(id) on delete cascade,
@@ -2510,7 +2512,8 @@ create table if not exists public.community_downloads (
 );
 create index if not exists community_downloads_user_idx on public.community_downloads (user_id, created_at desc);
 
--- 차단: 그 사람의 글·댓글이 내 화면에서 빠진다 (익명으로 쓴 것도). label: 차단할 때 보인 이름
+-- 차단: 그 사람이 닉네임으로 쓴 글·댓글이 내 화면에서 빠진다. 익명으로 쓴 것은 차단할 수 없고 빠지지도 않는다
+-- (빠지는 익명 글을 보고 글쓴이를 알아낼 수 있어서). label: 차단할 때 보인 이름
 create table if not exists public.community_blocks (
   -- 풀 때 쓰는 번호 (차단한 사람의 계정 번호는 화면에 보내지 않는다: 익명 글쓴이를 알아내지 못하게)
   id uuid not null default gen_random_uuid() unique,
@@ -2539,6 +2542,11 @@ create table if not exists public.community_uploads (
 );
 create index if not exists community_uploads_user_idx on public.community_uploads (user_id, created_at desc);
 create index if not exists community_uploads_time_idx on public.community_uploads (created_at);
+
+-- 공유받아 넣은 노트가 온 글 (서버만 쓴다: 학생 칸 GRANT 없음). 같은 글의 노트를 두 번 넣지 않고(합친 노트에 들어가 있어도),
+-- 공유받은 노트(가 합쳐진 노트)를 내 것처럼 다시 나누지 못하게 한다. 글이 지워져도 노트는 남아서 외래 키는 두지 않는다
+alter table public.sources add column if not exists shared_from uuid;
+create unique index if not exists sources_shared_from_uniq on public.sources (user_id, shared_from) where shared_from is not null;
 
 -- 운영자가 처음에 만들어 두는 갤러리 (만든 사람 없음 = 운영자가 관리). 이미 있으면 그대로 둔다
 insert into public.community_galleries (id, name, name_key, description, category) values
@@ -2588,7 +2596,35 @@ drop trigger if exists community_comments_count on public.community_comments;
 create trigger community_comments_count after insert or delete or update of deleted on public.community_comments
   for each row execute function public.kok_share_count();
 
--- 좋아요 켜기·끄기와 수 고치기를 한 번에. 돌려주는 값: 지금 좋아요 수 (없는 글·댓글이면 null)
+-- 좋아요 수: 좋아요 행이 생기고 지워질 때마다 고친다 (탈퇴로 지워진 좋아요도 빠진다. 지운 글·댓글의 좋아요는 kok_share_count 가 지운다)
+create or replace function public.kok_share_like_count()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  if tg_op = 'INSERT' then
+    if new.target_type = 'post' then
+      update public.community_posts set like_count = like_count + 1 where id = new.target_id;
+    else
+      update public.community_comments set like_count = like_count + 1 where id = new.target_id;
+    end if;
+  elsif tg_op = 'DELETE' then
+    if old.target_type = 'post' then
+      update public.community_posts set like_count = greatest(0, like_count - 1) where id = old.target_id;
+    else
+      update public.community_comments set like_count = greatest(0, like_count - 1) where id = old.target_id;
+    end if;
+  end if;
+  return null;
+end;
+$$;
+drop trigger if exists community_likes_count on public.community_likes;
+create trigger community_likes_count after insert or delete on public.community_likes
+  for each row execute function public.kok_share_like_count();
+
+-- 좋아요 켜기·끄기 (수는 위 트리거가 고친다). 돌려주는 값: 지금 좋아요 수 (없는 글·댓글이면 null)
 create or replace function public.kok_share_like(p_user uuid, p_type text, p_id uuid, p_on boolean)
 returns int
 language plpgsql
@@ -2596,7 +2632,6 @@ security definer
 set search_path = public
 as $$
 declare
-  changed int := 0;
   cnt int;
 begin
   if p_type = 'post' then
@@ -2614,17 +2649,10 @@ begin
   else
     delete from public.community_likes where user_id = p_user and target_type = p_type and target_id = p_id;
   end if;
-  get diagnostics changed = row_count;
   if p_type = 'post' then
-    update public.community_posts
-       set like_count = greatest(0, like_count + case when changed > 0 then (case when p_on then 1 else -1 end) else 0 end)
-     where id = p_id
-    returning like_count into cnt;
+    select like_count into cnt from public.community_posts where id = p_id;
   else
-    update public.community_comments
-       set like_count = greatest(0, like_count + case when changed > 0 then (case when p_on then 1 else -1 end) else 0 end)
-     where id = p_id
-    returning like_count into cnt;
+    select like_count into cnt from public.community_comments where id = p_id;
   end if;
   return cnt;
 end;
@@ -2687,7 +2715,8 @@ as $$
      and (p_kind is null
           or (p_kind = 'material' and (p.has_files or p.has_note))
           or (p_kind = 'text' and not p.has_files and not p.has_note))
-     and (p_exclude is null or not (p.author_id = any(p_exclude)))
+     -- 차단은 닉네임으로 쓴 글에만 (익명 글까지 빼면 빠진 것으로 익명 글쓴이를 알아낼 수 있다)
+     and (p_exclude is null or p.anonymous or not (p.author_id = any(p_exclude)))
      and not exists (
        select 1 from unnest(coalesce(p_words, '{}'::text[])) w
         where not (p.title ilike '%' || w || '%' escape '\' or p.body ilike '%' || w || '%' escape '\')
@@ -2716,6 +2745,7 @@ grant all on
   public.community_likes, public.community_downloads, public.community_blocks, public.community_favs, public.community_uploads
 to service_role;
 revoke execute on function public.kok_share_count() from public, anon, authenticated;
+revoke execute on function public.kok_share_like_count() from public, anon, authenticated;
 revoke execute on function public.kok_share_like(uuid, text, uuid, boolean) from public, anon, authenticated;
 revoke execute on function public.kok_share_unlock(uuid, uuid, timestamptz, int) from public, anon, authenticated;
 revoke execute on function public.kok_share_posts(uuid, text[], text, text, uuid, uuid[], boolean, int, int) from public, anon, authenticated;

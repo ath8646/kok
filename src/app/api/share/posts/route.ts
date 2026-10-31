@@ -14,7 +14,8 @@ import {
   cleanTitle,
   hitShare,
   loadGallery,
-  noteFolder,
+  clearTickets,
+  noteSaveError,
   requireCommunity,
   summaries,
   writerName,
@@ -24,6 +25,9 @@ import { removeFolder } from '@/lib/server/files';
 import { SHARE_TEXT, searchWords } from '@/lib/share';
 
 const PAGE = 20;
+
+// 파일 확인·노트 그림 복사·글 지우기(파일 폴더)가 오래 걸릴 수 있다
+export const maxDuration = 60;
 
 export async function GET(req: NextRequest) {
   try {
@@ -104,7 +108,7 @@ export async function POST(req: NextRequest) {
       has_note: !!shared,
     });
     if (pErr) {
-      if (shared) await removeFolder(admin, noteFolder(acc.userId, b.id)).catch(() => 0);
+      if (shared) await removeFolder(admin, shared.folder).catch(() => 0);
       throw pErr;
     }
     try {
@@ -123,15 +127,16 @@ export async function POST(req: NextRequest) {
           snapshot: shared.snapshot,
           figure_paths: shared.figurePaths,
         });
-        if (error) throw error;
+        if (error) throw noteSaveError(error);
       }
     } catch (e) {
       // 반만 만든 글은 남기지 않는다 (파일은 하루 뒤 청소가 지운다)
       await admin.from('community_posts').delete().eq('id', b.id);
-      if (shared) await removeFolder(admin, noteFolder(acc.userId, b.id)).catch(() => 0);
+      if (shared) await removeFolder(admin, shared.folder).catch(() => 0);
       throw e;
     }
-    await admin.from('community_uploads').delete().eq('user_id', acc.userId).eq('post_id', b.id);
+    // 글에 붙인 파일의 올리기 자리만 지운다 (같은 글에 아직 붙이지 않은 다른 올리기는 그대로)
+    await clearTickets(admin, acc.userId, b.id, files);
     return Response.json({ ok: true, id: b.id });
   } catch (e) {
     return errorResponse(e);

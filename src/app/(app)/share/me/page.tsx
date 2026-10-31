@@ -45,6 +45,10 @@ function ShareMe() {
   const [loadingMore, setLoadingMore] = useState(false);
   const [blocks, setBlocks] = useState<Block[] | null>(null);
   const [notReady, setNotReady] = useState(false);
+  /** 읽지 못한 것 (다시 불러오기 단추로 다시 읽는다) */
+  const [failed, setFailed] = useState(false);
+  const [blocksFailed, setBlocksFailed] = useState(false);
+  const [attempt, setAttempt] = useState(0);
   const [making, setMaking] = useState(false);
 
   useEffect(() => {
@@ -55,6 +59,7 @@ function ShareMe() {
     const fail = (e: unknown) => {
       if (!alive) return;
       if (e instanceof ApiError && e.code === 'not_ready') setNotReady(true);
+      else setFailed(true);
     };
     api<Activity>('/api/share/me')
       .then((a) => {
@@ -74,7 +79,7 @@ function ShareMe() {
     return () => {
       alive = false;
     };
-  }, [owner]);
+  }, [owner, attempt]);
 
   // 차단 목록은 그 탭을 열 때
   useEffect(() => {
@@ -82,11 +87,29 @@ function ShareMe() {
     let alive = true;
     api<{ blocks: Block[] }>('/api/share/blocks')
       .then((r) => alive && setBlocks(r.blocks))
-      .catch(() => alive && setBlocks([]));
+      .catch(() => alive && setBlocksFailed(true));
     return () => {
       alive = false;
     };
-  }, [owner, tab]);
+  }, [owner, tab, attempt]);
+
+  const retry = () => {
+    setFailed(false);
+    setBlocksFailed(false);
+    setAttempt((n) => n + 1);
+  };
+  const loadFailed = (
+    <EmptyHint
+      title="불러오지 못했어요"
+      body="인터넷 연결을 확인하고 다시 불러와 주세요."
+      action={
+        <Button size="sm" variant="secondary" onClick={retry}>
+          <Icon d={ICONS.retry} size={16} />
+          다시 불러오기
+        </Button>
+      }
+    />
+  );
 
   if (!me) return null;
   if (notReady) return <NotReady />;
@@ -108,7 +131,7 @@ function ShareMe() {
   };
 
   const unblock = async (b: Block) => {
-    const ok = await ask({ title: '차단 풀기', body: `${b.label}의 차단을 풀까요?`, note: '이 사람의 글과 댓글이 다시 보여요.', ok: '풀기' });
+    const ok = await ask({ title: '차단 풀기', body: `${b.label}의 차단을 풀까요?`, note: '이 사람이 닉네임으로 쓴 글과 댓글이 다시 보여요.', ok: '풀기' });
     if (!ok) return;
     try {
       await api('/api/share/blocks', { method: 'DELETE', body: JSON.stringify({ id: b.id }) });
@@ -144,7 +167,11 @@ function ShareMe() {
 
       {tab === 'posts' ? (
         posts === null ? (
-          <PostSkeleton />
+          failed ? (
+            loadFailed
+          ) : (
+            <PostSkeleton />
+          )
         ) : (
           <>
             <PostList
@@ -174,7 +201,11 @@ function ShareMe() {
 
       {tab === 'received' ? (
         activity === null ? (
-          <PostSkeleton />
+          failed ? (
+            loadFailed
+          ) : (
+            <PostSkeleton />
+          )
         ) : (
           <>
             <PostList
@@ -189,7 +220,11 @@ function ShareMe() {
 
       {tab === 'galleries' ? (
         activity === null ? (
-          <PostSkeleton rows={2} />
+          failed ? (
+            loadFailed
+          ) : (
+            <PostSkeleton rows={2} />
+          )
         ) : (
           <div className="grid gap-2.5">
             <div className="flex items-center justify-between gap-2 px-1">
@@ -219,7 +254,11 @@ function ShareMe() {
 
       {tab === 'blocks' ? (
         blocks === null ? (
-          <PostSkeleton rows={2} />
+          blocksFailed ? (
+            loadFailed
+          ) : (
+            <PostSkeleton rows={2} />
+          )
         ) : blocks.length ? (
           <ul className="grid gap-2" aria-label="차단한 사람">
             {blocks.map((b) => (
@@ -236,7 +275,7 @@ function ShareMe() {
             ))}
           </ul>
         ) : (
-          <EmptyHint title="차단한 사람이 없어요" body="글이나 댓글의 메뉴에서 차단하면 그 사람의 글과 댓글이 내 화면에서 보이지 않아요." />
+          <EmptyHint title="차단한 사람이 없어요" body="닉네임으로 쓴 글이나 댓글의 메뉴에서 차단하면 그 사람의 글과 댓글이 내 화면에서 보이지 않아요." />
         )
       ) : null}
 

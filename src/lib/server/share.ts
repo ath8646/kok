@@ -12,6 +12,7 @@ import {
   anonymousNames,
   cleanFileName,
   isOfficialGallery,
+  nicknameProblem,
   readSharedMark,
   shareKindOf,
   sniffJpeg,
@@ -42,11 +43,13 @@ export function assertCanWrite(acc: Account): void {
   if (acc.banned) throw new UserFacingError('banned', '이 계정은 자료 공유에 글을 쓸 수 없어요. 운영자에게 문의해 주세요.', 403);
 }
 
-/** 글·댓글에 적을 이름: 익명이면 '익명', 아니면 닉네임 (없으면 먼저 정하게 한다) */
+/** 글·댓글에 적을 이름: 익명이면 '익명', 아니면 닉네임 (없으면 먼저 정하게 한다. 운영자처럼 보이는 닉네임은 바꾸게 한다) */
 export function writerName(acc: Account, anonymous: boolean): string {
   if (anonymous) return '익명';
   const nick = (acc.nickname ?? '').replace(/\s+/g, ' ').trim().slice(0, 20);
   if (!nick) throw new UserFacingError('need_nickname', '자료 공유에 쓸 닉네임을 먼저 정해 주세요.', 400);
+  const problem = acc.isAdmin ? null : nicknameProblem(nick);
+  if (problem) throw new UserFacingError('bad_nickname', `${problem} 설정에서 닉네임을 바꿔 주세요.`, 400);
   return nick;
 }
 
@@ -151,6 +154,20 @@ export function assertVisible(post: PostRow, acc: Account): void {
   }
 }
 
+/**
+ * 운영자가 가리거나 다시 보이게 하면 그것의 열린 신고를 닫는다: 가리면 해결, 다시 보이게 하면 기각
+ * (기각해 두어야 다음 새 신고부터 다시 센다: /api/share/report)
+ */
+export async function settleShareReports(admin: SupabaseClient, kind: 'post' | 'comment', id: string, hidden: boolean): Promise<void> {
+  const { error } = await admin
+    .from('reports')
+    .update({ status: hidden ? 'resolved' : 'dismissed', resolved_at: new Date().toISOString() })
+    .eq('target_type', `share_${kind}`)
+    .eq('target_id', id)
+    .eq('status', 'open');
+  if (error) throw error;
+}
+
 // ------------------------------------------------------------- 화면에 보낼 모양
 export function galleryView(g: GalleryRow, acc: Account, favs: Set<string>): GalleryView {
   return {
@@ -219,21 +236,27 @@ export function managesGallery(acc: Account, g: Pick<GalleryRow, 'owner_id'>): b
   return acc.isAdmin || (!!g.owner_id && g.owner_id === acc.userId);
 }
 
-/** 댓글 목록 (익명 이름은 서버가 정하고 쓴 사람 번호는 보내지 않는다. 차단한 사람의 댓글은 뺀다, 답글이 있는 댓글은 '차단한 사람의 댓글'로) */
+/**
+ * 댓글 목록. 익명 이름은 서버가 정하고 쓴 사람 번호는 보내지 않는다.
+ * - 차단은 닉네임으로 쓴 댓글에만 (익명 댓글까지 가리면 가려진 것으로 익명 글쓴이를 알아낼 수 있다). 답글이 있는 댓글은 자리만 남긴다
+ * - '글쓴이' 표시는 글과 댓글이 같이 익명이거나 같이 닉네임일 때만 (익명 글의 글쓴이가 닉네임으로 단 댓글에 '글쓴이'를 붙이면 익명이 풀린다)
+ * - 운영자에게만 익명 댓글의 실제 글쓴이(authors)
+ */
 export function commentViews(
   rows: CommentRow[],
   post: PostRow,
   acc: Account,
-  opts: { blocked: Set<string>; liked: Set<string>; manager: boolean },
+  opts: { blocked: Set<string>; liked: Set<string>; manager: boolean; authors?: Map<string, { nickname: string | null; email: string | null }> },
 ): CommentView[] {
   const anon = anonymousNames(
     rows.map((c) => ({ author: c.author_id, anonymous: c.anonymous })),
     post.author_id,
+    post.anonymous,
   );
   const hasReplies = new Set(rows.filter((c) => c.parent_id).map((c) => c.parent_id as string));
   const out: CommentView[] = [];
   rows.forEach((c, i) => {
-    const blocked = opts.blocked.has(c.author_id);
+    const blocked = !c.anonymous && opts.blocked.has(c.author_id);
     if (blocked && !hasReplies.has(c.id)) return;
     const mine = c.author_id === acc.userId;
     const hiddenForMe = c.hidden && !mine && !acc.isAdmin;
@@ -242,7 +265,8 @@ export function commentViews(
       id: c.id,
       parentId: c.parent_id,
       authorName: gone ? '' : c.anonymous ? anon[i] : c.author_name,
-      byPostAuthor: !gone && c.author_id === post.author_id,
+      anonymous: c.anonymous,
+      byPostAuthor: !gone && c.author_id === post.author_id && c.anonymous === post.anonymous,
       mine: mine && !c.deleted,
       body: c.deleted ? '' : blocked ? '' : hiddenForMe ? '' : c.body,
       likes: c.like_count,
@@ -253,8 +277,23 @@ export function commentViews(
       edited: !!c.edited_at,
       createdAt: c.created_at,
       canDelete: !c.deleted && (mine || opts.manager),
+      ...(acc.isAdmin && c.anonymous && !gone ? { realAuthor: opts.authors?.get(c.author_id) ?? null } : {}),
     });
   });
+  return out;
+}
+
+/** 운영자 화면에 보일 실제 글쓴이 (닉네임·이메일) */
+export async function profilesOf(admin: SupabaseClient, ids: string[]): Promise<Map<string, { nickname: string | null; email: string | null }>> {
+  const out = new Map<string, { nickname: string | null; email: string | null }>();
+  const uniq = [...new Set(ids)];
+  for (let i = 0; i < uniq.length; i += 100) {
+    const { data } = await admin
+      .from('profiles')
+      .select('id, nickname, email')
+      .in('id', uniq.slice(i, i + 100));
+    for (const p of data ?? []) out.set(String(p.id), { nickname: (p.nickname as string | null) ?? null, email: (p.email as string | null) ?? null });
+  }
   return out;
 }
 
@@ -309,22 +348,50 @@ export async function readHead(admin: SupabaseClient, bucket: string, path: stri
   return out;
 }
 
-/** 글의 파일 폴더 ('community' 버킷 쓴사람id/글id) */
-export function postFolder(authorId: string, postId: string): string {
-  return `${authorId}/${postId}`;
+/**
+ * 글의 파일 폴더 ('community' 버킷 p/글id). 경로에 쓴 사람 번호를 넣지 않는다: 미리보기·받기 주소에 경로가 그대로 들어가서,
+ * 넣으면 익명 글과 닉네임 글의 주소를 견줘 익명 글쓴이를 알아낼 수 있다. 누가 올렸는지는 올리기 자리(community_uploads)가 지킨다
+ */
+export function postFolder(postId: string): string {
+  return `p/${postId}`;
 }
 
-/** 글에 붙인 노트의 그림 폴더 ('sources' 버킷 쓴사람id/share/글id) */
+/**
+ * 글에 붙인 노트의 그림 폴더 ('sources' 버킷 쓴사람id/share/글id). 그림은 붙일 때마다 그 안의 새 폴더(8자)에 둔다:
+ * 노트를 바꾸는 동안에도 받는 사람이 예전 모습의 그림을 복사할 수 있게 (새 모습을 넣은 뒤에 예전 그림을 지운다). 경로는 화면에 보내지 않는다
+ */
 export function noteFolder(authorId: string, postId: string): string {
   return `${authorId}/share/${postId}`;
 }
 
-/** 글을 지울 때 파일·노트 그림도 지운다 (행은 cascade 로 지워진다) */
+/** 노트 그림 경로 안의 이름 (그림 폴더 바로 아래 fN.jpg 또는 붙일 때마다의 폴더/fN.jpg) */
+const SHARED_FIGURE = /^(?:[0-9a-f]{8}\/)?(f\d{1,4}\.jpg)$/;
+
+/** 글을 지울 때 파일·노트 그림도 지운다 (행은 cascade 로 지워진다). 처음 만든 때의 경로(쓴사람id/글id)에 올린 파일도 */
 export async function removePostFiles(admin: SupabaseClient, posts: Array<Pick<PostRow, 'id' | 'author_id'>>): Promise<void> {
   for (const p of posts) {
-    await removeFolder(admin, postFolder(p.author_id, p.id), COMMUNITY_BUCKET).catch(() => 0);
+    await removeFolder(admin, postFolder(p.id), COMMUNITY_BUCKET).catch(() => 0);
+    await removeFolder(admin, `${p.author_id}/${p.id}`, COMMUNITY_BUCKET).catch(() => 0);
     await removeFolder(admin, noteFolder(p.author_id, p.id)).catch(() => 0);
   }
+}
+
+/** 탈퇴: 내 글의 파일 폴더와 글이 되지 않은 올리기 자리의 파일 (글 폴더에는 계정 번호가 없어서 내 글을 읽어 지운다. 글 행은 계정을 지우면 같이 지워진다) */
+export async function removeUserShareFiles(admin: SupabaseClient, userId: string): Promise<void> {
+  if (!(await getFeatures(admin)).community) return;
+  const { data: posts } = await admin.from('community_posts').select('id, author_id').eq('author_id', userId).limit(10_000);
+  await removePostFiles(admin, (posts ?? []) as Array<Pick<PostRow, 'id' | 'author_id'>>);
+  const { data: pending } = await admin.from('community_uploads').select('path').eq('user_id', userId).limit(10_000);
+  await removePaths(
+    admin,
+    COMMUNITY_BUCKET,
+    (pending ?? []).map((r) => String(r.path)),
+  );
+}
+
+/** 저장소 파일 여러 개 지우기 (100개씩, 실패는 넘어간다: 하루 청소가 다시 본다) */
+export async function removePaths(admin: SupabaseClient, bucket: string, paths: string[]): Promise<void> {
+  for (let i = 0; i < paths.length; i += 100) await admin.storage.from(bucket).remove(paths.slice(i, i + 100));
 }
 
 // ------------------------------------------------------------- 글쓰기
@@ -367,7 +434,7 @@ export async function checkUploads(
   }>
 > {
   if (!files.length) return [];
-  const folder = postFolder(acc.userId, postId);
+  const folder = postFolder(postId);
   const paths = files.flatMap((f) => [f.path, ...(f.previewPath ? [f.previewPath] : [])]);
   if (paths.some((p) => !p.startsWith(`${folder}/`) || p.includes('..')))
     throw new UserFacingError('bad_path', '올린 파일이 이 글의 것이 아니에요. 다시 올려 주세요.', 400);
@@ -399,6 +466,24 @@ export async function checkUploads(
   return out;
 }
 
+/** 글에 붙인 파일의 올리기 자리를 지운다 (붙인 것만: 같은 글에 올리는 중인 다른 파일의 자리는 그대로 두고, 남은 자리는 하루 뒤 청소가 본다) */
+export async function clearTickets(
+  admin: SupabaseClient,
+  userId: string,
+  postId: string,
+  files: Array<{ path: string; preview_path: string | null }>,
+): Promise<void> {
+  const paths = files.flatMap((f) => [f.path, ...(f.preview_path ? [f.preview_path] : [])]);
+  for (let i = 0; i < paths.length; i += 100) {
+    await admin
+      .from('community_uploads')
+      .delete()
+      .eq('user_id', userId)
+      .eq('post_id', postId)
+      .in('path', paths.slice(i, i + 100));
+  }
+}
+
 // ------------------------------------------------------------- 노트 공유
 type Snapshot = {
   v: 1;
@@ -408,7 +493,15 @@ type Snapshot = {
   questions: Array<Record<string, unknown>>;
 };
 
-const SNAPSHOT_MAX_CHARS = 1_400_000;
+/** 노트 모습의 크기 (JSON 바이트). DB 는 jsonb 1.5MB 까지 받는다 (community_notes.snapshot) */
+const SNAPSHOT_MAX_BYTES = 1_300_000;
+const NOTE_TOO_BIG = '노트가 너무 커서 공유할 수 없어요. 노트를 나누거나 PDF 요약으로 올려 주세요.';
+
+/** 노트 모습을 넣다가 DB 의 크기 검사(23514)에 걸리면 같은 안내로 */
+export function noteSaveError(e: { code?: string } | null): unknown {
+  if (e?.code === '23514') return new UserFacingError('note_too_big', NOTE_TOO_BIG, 400);
+  return e;
+}
 const QUESTION_KEYS = [
   'key_point_id',
   'type',
@@ -456,16 +549,21 @@ export async function buildNoteSnapshot(
   acc: Account,
   sourceId: string,
   postId: string,
-): Promise<{ title: string; subject: string; keyPoints: number; questions: number; snapshot: Snapshot; figurePaths: string[] }> {
-  const { data: src, error: sErr } = await admin.from('sources').select('id, user_id, subject_id, status, title').eq('id', sourceId).maybeSingle();
+): Promise<{ title: string; subject: string; keyPoints: number; questions: number; snapshot: Snapshot; figurePaths: string[]; folder: string }> {
+  const { data: src, error: sErr } = await admin.from('sources').select('id, user_id, subject_id, status, title, shared_from').eq('id', sourceId).maybeSingle();
   if (sErr) throw sErr;
   if (!src || src.user_id !== acc.userId) throw new UserFacingError('not_found', '붙일 노트를 찾을 수 없어요.', 404);
   if (src.status !== 'ready') throw new UserFacingError('not_ready', '정리가 끝난 노트만 공유할 수 있어요.', 409);
+  // 공유받은 노트(가 합쳐 들어온 노트)는 다시 나누지 않는다 (다른 사람이 만든 것을 내 이름으로 퍼뜨리지 않게: 이용약관 6)
+  if (src.shared_from) throw new UserFacingError('shared_note', '공유받은 노트는 다시 공유할 수 없어요. 내가 만든 노트를 붙여 주세요.', 400);
+  const { data: kids, error: kErr } = await admin.from('sources').select('id').eq('parent_id', sourceId).not('shared_from', 'is', null).limit(1);
+  if (kErr) throw kErr;
+  if (kids?.length) throw new UserFacingError('shared_note', '공유받은 노트가 합쳐진 노트는 공유할 수 없어요. 내가 만든 노트를 붙여 주세요.', 400);
   const { data: noteRow, error: nErr } = await admin.from('notes').select('id, title, body').eq('source_id', sourceId).maybeSingle();
   if (nErr) throw nErr;
   if (!noteRow) throw new UserFacingError('not_found', '붙일 노트를 찾을 수 없어요.', 404);
   const raw = (noteRow.body ?? {}) as Record<string, unknown>;
-  // 공유받아 넣은 노트는 다시 나누지 않는다 (다른 사람이 만든 것을 내 이름으로 퍼뜨리지 않게: 이용약관 6)
+  // 표시가 남은 예전 노트 (shared_from 칸이 생기기 전에 넣은 것)
   if (readSharedMark(raw)) throw new UserFacingError('shared_note', '공유받은 노트는 다시 공유할 수 없어요. 내가 만든 노트를 붙여 주세요.', 400);
   const n = zNote.parse(raw);
   if (!n.key_points.length && !n.summary.trim() && !n.terms.length && !n.formulas.length) {
@@ -489,10 +587,11 @@ export async function buildNoteSnapshot(
   }
   const moved = new Map<string, string>();
   const bucket = admin.storage.from(SOURCES_BUCKET);
+  const folder = `${noteFolder(acc.userId, postId)}/${crypto.randomUUID().replace(/-/g, '').slice(0, 8)}`;
   let k = 0;
   for (const from of crops) {
     if (!from.startsWith(`${acc.userId}/figs/`)) continue;
-    const to = `${noteFolder(acc.userId, postId)}/f${++k}.jpg`;
+    const to = `${folder}/f${++k}.jpg`;
     const { error } = await bucket.copy(from, to);
     if (!error) moved.set(from, to);
   }
@@ -516,9 +615,9 @@ export async function buildNoteSnapshot(
     visuals: ((vis ?? []) as Array<{ type: string; spec: unknown }>).map((v) => ({ type: v.type, spec: v.spec })),
     questions: usable,
   };
-  if (JSON.stringify(snapshot).length > SNAPSHOT_MAX_CHARS) {
-    await removeFolder(admin, noteFolder(acc.userId, postId)).catch(() => 0);
-    throw new UserFacingError('note_too_big', '노트가 너무 커서 공유할 수 없어요. 노트를 나누거나 PDF 요약으로 올려 주세요.', 400);
+  if (Buffer.byteLength(JSON.stringify(snapshot)) > SNAPSHOT_MAX_BYTES) {
+    await removeFolder(admin, folder).catch(() => 0);
+    throw new UserFacingError('note_too_big', NOTE_TOO_BIG, 400);
   }
   return {
     title: String(noteRow.title || src.title || n.title || '노트').slice(0, 120),
@@ -527,6 +626,7 @@ export async function buildNoteSnapshot(
     questions: usable.length,
     snapshot,
     figurePaths: [...moved.values()],
+    folder,
   };
 }
 
@@ -549,11 +649,24 @@ export function notePreview(row: { title: string; subject_name: string; question
   };
 }
 
+/** 이 글의 노트를 이미 넣었으면 열 노트 (합친 노트에 들어갔으면 그 노트) */
+export async function importedFrom(admin: SupabaseClient, userId: string, postId: string): Promise<string | null> {
+  const { data, error } = await admin.from('sources').select('id, parent_id').eq('user_id', userId).eq('shared_from', postId).limit(1);
+  if (error) throw error;
+  const row = data?.[0];
+  return row ? String(row.parent_id ?? row.id) : null;
+}
+
 /**
  * 공유받은 노트를 내 자료함에 (AI·에너지 없이): 새 자료 행 + 노트·그림·문제(복습 카드)를 한 번에 만든다.
- * 그림 파일은 내 그림 폴더로 복사하고 경로를 바꾼다. 실패하면 만든 것을 지운다
+ * 그림 파일은 내 그림 폴더로 복사하고 경로를 바꾼다. 실패하면 만든 것을 지운다. 이미 넣은 글이면 그 노트 (existing)
  */
-export async function importSharedNote(admin: SupabaseClient, acc: Account, post: PostRow, subjectId: string): Promise<{ sourceId: string; noteId: string }> {
+export async function importSharedNote(
+  admin: SupabaseClient,
+  acc: Account,
+  post: PostRow,
+  subjectId: string,
+): Promise<{ sourceId: string; noteId: string | null; existing?: boolean }> {
   const { data: shared, error } = await admin.from('community_notes').select('title, snapshot').eq('post_id', post.id).maybeSingle();
   if (error) throw error;
   if (!shared) throw new UserFacingError('not_found', '이 글에는 노트가 없어요.', 404);
@@ -574,8 +687,8 @@ export async function importSharedNote(admin: SupabaseClient, acc: Account, post
   }
   for (const from of paths) {
     if (!from.startsWith(prefix)) continue;
-    const name = from.slice(prefix.length);
-    if (!/^f\d{1,4}\.jpg$/.test(name)) continue;
+    const name = SHARED_FIGURE.exec(from.slice(prefix.length))?.[1];
+    if (!name) continue;
     const to = `${acc.userId}/figs/${sourceId}/${name}`;
     const { error: cErr } = await bucket.copy(from, to);
     if (!cErr) moved.set(from, to);
@@ -605,9 +718,15 @@ export async function importSharedNote(admin: SupabaseClient, acc: Account, post
     status: 'ready',
     step: 'done',
     progress: 100,
+    shared_from: post.id,
   });
   if (sErr) {
     await removeFolder(admin, `${acc.userId}/figs/${sourceId}`).catch(() => 0);
+    // 같은 글을 거의 같은 때 두 번 넣으면 (sources_shared_from_uniq) 먼저 넣은 노트로
+    if (sErr.code === '23505') {
+      const prev = await importedFrom(admin, acc.userId, post.id);
+      if (prev) return { sourceId: prev, noteId: null, existing: true };
+    }
     throw sErr;
   }
   const { data: noteId, error: fErr } = await admin.rpc('kok_finalize_source', {

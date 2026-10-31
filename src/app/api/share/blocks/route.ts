@@ -1,5 +1,6 @@
-// 차단: 글이나 댓글을 쓴 사람을 막으면 그 사람의 글·댓글이 내 화면에서 빠진다 (익명으로 쓴 것도).
-// 계정 번호는 화면에 보내지 않는다 (익명 글쓴이를 알아내지 못하게): 차단 목록은 차단할 때 보인 이름과 풀기 번호만
+// 차단: 닉네임으로 쓴 글이나 댓글의 글쓴이를 막으면 그 사람이 닉네임으로 쓴 글·댓글이 내 화면에서 빠진다.
+// 익명으로 쓴 것은 차단할 수 없고 차단해도 빠지지 않는다: 차단으로 빠지는 익명 글을 보면 익명 글쓴이를 알아낼 수 있어서 (문제가 있으면 신고).
+// 계정 번호는 화면에 보내지 않는다: 차단 목록은 차단할 때 보인 이름과 풀기 번호만
 import type { NextRequest } from 'next/server';
 import { z } from 'zod';
 import { assertSameOrigin, readJson, requireAccount } from '@/lib/server/auth';
@@ -39,21 +40,25 @@ export async function POST(req: NextRequest) {
     if (!parsed.success) throw new UserFacingError('bad_body', '보낸 내용이 올바르지 않아요.', 400);
     let who: string;
     let label: string;
+    let anonymous: boolean;
     if ('post' in parsed.data) {
       const p = await loadPost(admin, parsed.data.post);
       who = p.author_id;
-      label = p.anonymous ? `익명 (글: ${p.title.slice(0, 20)})` : p.author_name;
+      label = p.author_name;
+      anonymous = p.anonymous;
     } else {
       const { data: c, error } = await admin
         .from('community_comments')
-        .select('author_id, author_name, anonymous, body')
+        .select('author_id, author_name, anonymous, deleted')
         .eq('id', parsed.data.comment)
         .maybeSingle();
       if (error) throw error;
-      if (!c) throw new UserFacingError('not_found', '댓글을 찾을 수 없어요.', 404);
+      if (!c || c.deleted) throw new UserFacingError('not_found', '댓글을 찾을 수 없어요.', 404);
       who = String(c.author_id);
-      label = c.anonymous ? `익명 (댓글: ${String(c.body).slice(0, 16)})` : String(c.author_name);
+      label = String(c.author_name);
+      anonymous = !!c.anonymous;
     }
+    if (anonymous) throw new UserFacingError('anonymous', '익명으로 쓴 글과 댓글은 차단할 수 없어요. 문제가 있으면 신고해 주세요.', 400);
     if (who === acc.userId) throw new UserFacingError('self', '나를 차단할 수는 없어요.', 400);
     const { count } = await admin.from('community_blocks').select('id', { count: 'exact', head: true }).eq('user_id', acc.userId);
     if ((count ?? 0) >= BLOCKS_MAX) throw new UserFacingError('block_limit', `차단은 ${BLOCKS_MAX}명까지예요.`, 400);

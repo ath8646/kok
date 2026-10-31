@@ -94,25 +94,34 @@ export async function GET(req: NextRequest) {
     let shareOrphans = 0;
     if ((await getFeatures(admin)).community) {
       try {
-        const { data: old } = await admin.from('community_uploads').select('id, path').lt('created_at', dayAgo).limit(1000);
+        const { data: old, error: oErr } = await admin.from('community_uploads').select('id, path').lt('created_at', dayAgo).limit(1000);
+        if (oErr) throw oErr;
         const rows = (old ?? []) as Array<{ id: number; path: string }>;
         if (rows.length) {
-          // 그사이 글이 되어 파일 행이 생긴 것은 지우지 않는다 (자리만 지운다)
+          // 그사이 글이 되어 파일 행이 생긴 것은 지우지 않는다 (자리만 지운다). 주소가 너무 길어지지 않게 100개씩 보고,
+          // 하나라도 읽지 못하면 이번에는 아무것도 지우지 않는다 (글에 붙은 파일을 지우지 않게: 내일 다시 본다)
           const paths = rows.map((r) => r.path);
-          const [{ data: used }, { data: previews }] = await Promise.all([
-            admin.from('community_files').select('path').in('path', paths),
-            admin.from('community_files').select('preview_path').in('preview_path', paths),
-          ]);
-          const keep = new Set([...(used ?? []).map((u) => String(u.path)), ...(previews ?? []).map((u) => String(u.preview_path))]);
+          const keep = new Set<string>();
+          for (let i = 0; i < paths.length; i += 100) {
+            const part = paths.slice(i, i + 100);
+            const [used, previews] = await Promise.all([
+              admin.from('community_files').select('path').in('path', part),
+              admin.from('community_files').select('preview_path').in('preview_path', part),
+            ]);
+            if (used.error) throw used.error;
+            if (previews.error) throw previews.error;
+            for (const u of used.data ?? []) keep.add(String(u.path));
+            for (const u of previews.data ?? []) keep.add(String(u.preview_path));
+          }
           const drop = paths.filter((p) => !keep.has(p));
           for (let i = 0; i < drop.length; i += 100) await admin.storage.from(COMMUNITY_BUCKET).remove(drop.slice(i, i + 100));
-          await admin
-            .from('community_uploads')
-            .delete()
-            .in(
-              'id',
-              rows.map((r) => r.id),
-            );
+          const ids = rows.map((r) => r.id);
+          for (let i = 0; i < ids.length; i += 100) {
+            await admin
+              .from('community_uploads')
+              .delete()
+              .in('id', ids.slice(i, i + 100));
+          }
           shareOrphans = drop.length;
         }
       } catch (e) {

@@ -26,7 +26,7 @@ export async function POST(req: NextRequest, ctx: RouteContext<'/api/share/posts
     if (text.length > SHARE_TEXT.comment) throw new UserFacingError('long', `댓글은 ${SHARE_TEXT.comment.toLocaleString('ko-KR')}자까지예요.`, 400);
     const post = await loadPost(admin, id);
     assertVisible(post, acc);
-    if (post.author_id !== acc.userId && (await blockedIds(admin, acc.userId)).includes(post.author_id)) {
+    if (post.author_id !== acc.userId && !post.anonymous && (await blockedIds(admin, acc.userId)).includes(post.author_id)) {
       throw new UserFacingError('blocked', '차단한 사람의 글에는 댓글을 쓸 수 없어요.', 403);
     }
     let parent: string | null = null;

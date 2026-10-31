@@ -52,9 +52,23 @@ export function appendKeyPointMax(current: number, parts: Range[]): number {
   return clamp(current + grow, Math.max(9, current), Math.max(current, KEY_POINTS_MAX));
 }
 
-/** 정리·합치기 답의 길이(토큰): 개념 하나에 약 400토큰(설명·용어·함정·예시 몫), 바탕 3000 */
+/** 정리 답 길이의 끝 (토큰): 이보다 길면 한 번에 끝나지 않을 수 있어 개념을 줄여 다시 정리한다 (pipeline stepOrganize) */
+export const NOTE_OUT_MAX = 20_000;
+
+/**
+ * 정리 답의 길이(토큰): 개념 하나에 약 520토큰(설명·왜 중요한지·용어·함정·예시 몫, 한국어 JSON 은 생각보다 길다), 바탕 3500, 그림마다 400.
+ * 답은 쓴 만큼만 낸다 (한도일 뿐이라 요금은 그대로)
+ */
 export function noteOutTokens(maxKeyPoints: number, figures = 0): number {
-  return Math.min(16_000, 3000 + maxKeyPoints * 400 + figures * 400);
+  return Math.min(NOTE_OUT_MAX, 3500 + maxKeyPoints * 520 + figures * 400);
+}
+
+/**
+ * AI 한 번을 기다리는 시간 (ms): 답이 길수록 길게 (느린 모델은 초당 약 70~80토큰 + 자료를 읽는 시간), 60초 ~ 240초.
+ * 부르는 쪽은 남은 시간(서버 함수 300초)보다 짧게 자른다
+ */
+export function aiWaitMs(maxTokens: number): number {
+  return Math.round(Math.min(240_000, Math.max(60_000, 30_000 + maxTokens * 13)));
 }
 
 /**

@@ -787,6 +787,59 @@ export default function NotePage() {
         }
       : undefined;
 
+  // 여러 개 지우기: 문제마다 같은 규칙 (다른 버전에도 있는 문제는 이 버전에서만 뺀다). 지난 버전 목록은 한 번에 고친다
+  const removeMany =
+    versionsOn && versions.length
+      ? (qs: QuestionRow[]): QuestionRemoval => {
+          const plans = qs.map((q) => ({ q, plan: removalPlan(q.id, versions, cur, old ? old.number : cur, q.status !== 'hidden') }));
+          const del = plans.filter((p) => p.plan === 'delete').map((p) => p.q);
+          const hide = plans.filter((p) => p.plan === 'hide').map((p) => p.q);
+          const unlist = plans.filter((p) => p.plan === 'unlist').map((p) => p.q);
+          const all = del.length === qs.length;
+          return {
+            label: del.length ? '지우기' : '이 버전에서 빼기',
+            confirm: `고른 문제 ${qs.length}개를 ${all ? '지울까요?' : del.length ? '지우거나 이 버전에서 뺄까요?' : '이 버전에서 뺄까요?'}`,
+            note: all
+              ? '푼 기록도 같이 지워지고 되돌릴 수 없어요.'
+              : del.length
+                ? `다른 버전에도 있는 ${qs.length - del.length}개는 이 버전에서만 빼고, 나머지 ${del.length}개는 푼 기록과 같이 지워져요.`
+                : '다른 버전에는 그대로 남아요.',
+            danger: del.length > 0,
+            run: async () => {
+              let ok = true;
+              const ids = (list: QuestionRow[]) => list.map((q) => q.id);
+              for (let i = 0; i < del.length; i += 100) {
+                if (
+                  (
+                    await sb()
+                      .from('questions')
+                      .delete()
+                      .in('id', ids(del.slice(i, i + 100)))
+                  ).error
+                )
+                  ok = false;
+              }
+              // 쉬는 중이던 문제는 그것도 기억해 둔다 (그 버전으로 돌아오면 다시 쉬는 중)
+              for (const rested of [true, false]) {
+                const group = hide.filter((q) => (q.status === 'suspended') === rested);
+                for (let i = 0; i < group.length; i += 100) {
+                  const { error } = await sb()
+                    .from('questions')
+                    .update({ status: 'hidden', ...(restedOn ? { rested_hidden: rested } : {}) })
+                    .in('id', ids(group.slice(i, i + 100)));
+                  if (error) ok = false;
+                }
+              }
+              if (old && (del.length || unlist.length)) {
+                const gone = new Set([...ids(del), ...ids(unlist)]);
+                if (!(await setOldQuestionIds(old.questionIds.filter((x) => !gone.has(x))))) ok = false;
+              }
+              return ok;
+            },
+          };
+        }
+      : undefined;
+
   const openVersion = (n: number) => {
     const v = n === cur ? null : n;
     setViewing(v);
@@ -1397,6 +1450,7 @@ export default function NotePage() {
               practice={canPractice ? { href: practiceHref(sourceId), onOpen: openPractice } : undefined}
               onChanged={reload}
               removal={removal}
+              removeMany={removeMany}
               oldVersion={
                 old
                   ? {

@@ -7,6 +7,8 @@ import {
   keyPointRange,
   mergedKeyPointRange,
   noteOutTokens,
+  aiWaitMs,
+  NOTE_OUT_MAX,
   quizOutTokens,
 } from '@/lib/ai/scale';
 import { maxNodesFor, visualOutTokens } from '@/lib/mindmap-clean';
@@ -46,7 +48,13 @@ describe('자료 양에 따라 만드는 양이 늘어난다', () => {
 
   it('답 길이·마인드맵·문제·레슨 수가 개념 수를 따라간다', () => {
     expect(noteOutTokens(7)).toBeLessThan(noteOutTokens(16));
-    expect(noteOutTokens(24, 6)).toBeLessThanOrEqual(16_000);
+    expect(noteOutTokens(24, 6)).toBeLessThanOrEqual(NOTE_OUT_MAX);
+    // 개념 하나에 500토큰 넘게 (예전 400: 개념 24개 합치기가 12600토큰에서 잘렸다)
+    expect(noteOutTokens(16) - noteOutTokens(15)).toBeGreaterThanOrEqual(500);
+    // 기다리는 시간은 답 길이를 따라 60초 ~ 240초
+    expect(aiWaitMs(2000)).toBe(60_000);
+    expect(aiWaitMs(NOTE_OUT_MAX)).toBe(240_000);
+    expect(aiWaitMs(9000)).toBeGreaterThan(aiWaitMs(4000));
     expect(quizOutTokens(5)).toBeLessThan(quizOutTokens(24));
     expect(maxNodesFor(3)).toBe(42);
     expect(maxNodesFor(3, 7)).toBe(42);

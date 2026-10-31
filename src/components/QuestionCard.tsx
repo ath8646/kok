@@ -9,6 +9,7 @@ import { useMe } from './AppShell';
 import { QuestionFigure, StepsDisclosure, useSolution } from './figure/SolutionView';
 import { SourceFigureView } from './figure/SourceFigureView';
 import { RichText } from './RichText';
+import { PromptText } from './PromptText';
 import { Button, Chip, ICONS, Icon, cx, inputClass, Spinner } from './ui';
 import { pageName } from '@/lib/page-labels';
 
@@ -93,7 +94,7 @@ function ResultMark({ state, className, size = 'sm' }: { state: Exclude<MarkStat
 }
 
 function Prompt({ q }: { q: ReviewQuestion }) {
-  if (q.type !== 'cloze') return <RichText text={q.prompt} />;
+  if (q.type !== 'cloze') return <PromptText text={q.prompt} />;
   const parts = q.prompt.split(/(_{2,}|\(\s*\)|\[\s*\])/);
   return (
     <>

@@ -17,8 +17,6 @@ import { assertOwnPath, downloadOwn, extOk, removePaths, sniff } from '@/lib/ser
 import { chunkCount } from '@/lib/server/pipeline';
 import { driveSource } from '@/lib/server/drive';
 import { coverWanted, estimateCover, estimateEnergy, estimateFigures, estimateRedraws, estimateSmallTask, figuresWanted, redrawsWanted } from '@/lib/ai/models';
-import { zNote } from '@/lib/ai/schemas';
-import { estimateTokens, mergeFits, noteForMerge, MERGE_GROWTH_MAX, NOTE_TOO_LONG } from '@/lib/append-merge';
 import { modelForTier } from '@/lib/settings';
 import { pdfPageCount } from '@/lib/pdf';
 import { keepPictureMarks } from '@/lib/doc-pictures';
@@ -50,6 +48,7 @@ const Body = z.object({
 });
 
 export async function POST(req: NextRequest) {
+  const startedAt = Date.now();
   let uploaded: string[] = [];
   let cleanup = false;
   let ownerId = '';
@@ -76,13 +75,9 @@ export async function POST(req: NextRequest) {
       const { data: parent } = await admin.from('sources').select('id, user_id, subject_id, status, parent_id').eq('id', parentId).maybeSingle();
       if (!parent || parent.user_id !== acc.userId || parent.parent_id) throw new UserFacingError('not_found', '노트를 찾을 수 없어요.', 404);
       if (parent.status !== 'ready') throw new UserFacingError('parent_not_ready', '노트 정리가 끝난 뒤에 자료를 더할 수 있어요.', 409);
-      const { data: pnote } = await admin.from('notes').select('id, body').eq('source_id', parentId).maybeSingle();
+      // 노트가 커도 더할 수 있다: 합칠 때 AI 는 합치는 계획만 쓰고 앱이 옮긴다 (lib/merge-plan.ts)
+      const { data: pnote } = await admin.from('notes').select('id').eq('source_id', parentId).maybeSingle();
       if (!pnote) throw new UserFacingError('not_found', '노트를 찾을 수 없어요.', 404);
-      // 합친 노트가 AI 답 길이에 들어가지 않을 만큼 긴 노트는 정리하기 전에 알려 준다
-      // (파일은 정리해 봐야 길이를 알아서 가장 크게 늘어난다고 본다: 다 정리한 뒤에 막히지 않게)
-      const full = noteForMerge(zNote.parse(pnote.body ?? {}));
-      const growth = b.kind === 'text' ? estimateTokens(b.text ?? '') : MERGE_GROWTH_MAX;
-      if (!full || !mergeFits(full, growth)) throw new UserFacingError('note_too_long', NOTE_TOO_LONG, 400);
       b.subjectId = parent.subject_id as string;
     }
 
@@ -225,7 +220,7 @@ export async function POST(req: NextRequest) {
     }
 
     const origin = req.nextUrl.origin;
-    after(() => driveSource(b.id, origin));
+    after(() => driveSource(b.id, origin, startedAt));
     return Response.json({ ok: true, id: b.id, estimate });
   } catch (e) {
     // 잠깐 기다리면 되는 거절(요청이 너무 빠름, 정리 중인 자료가 꽉 참)은 파일을 남겨 둔다:

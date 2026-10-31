@@ -26,6 +26,7 @@ export function QuestionsPanel({
   practice,
   onChanged,
   removal,
+  removeMany,
   oldVersion,
   figures = [],
 }: {
@@ -40,11 +41,17 @@ export function QuestionsPanel({
   onChanged: () => void;
   /** 지우기 대신 (노트 버전이 있으면 다른 버전의 문제는 남긴다) */
   removal?: (q: QuestionRow) => QuestionRemoval;
+  /** 여러 개 지우기 대신 (같은 규칙) */
+  removeMany?: (qs: QuestionRow[]) => QuestionRemoval;
   /**
    * 지난 버전을 보고 있을 때: 만든 문제를 그 버전 목록에 넣는다. setConcept 가 있으면 문제의 개념을 바꿀 때
    * 문제 행 대신 그 버전의 개념 기록(qkeys)을 고친다 (지금 버전의 개념은 그대로)
    */
-  oldVersion?: { number: number; addQuestion: (id: string) => Promise<boolean>; setConcept?: (questionId: string, keyPointId: string | null) => Promise<boolean> };
+  oldVersion?: {
+    number: number;
+    addQuestion: (id: string) => Promise<boolean>;
+    setConcept?: (questionId: string, keyPointId: string | null) => Promise<boolean>;
+  };
   /** 노트의 자료 그림 (다시 만들기 미리보기의 그림 문제에 붙여 보여 준다) */
   figures?: SourceFigure[];
 }) {
@@ -104,6 +111,7 @@ export function QuestionsPanel({
         keyPoints={keyPoints}
         onChanged={onChanged}
         removal={removal}
+        removeMany={removeMany}
         conceptEdit={oldVersion?.setConcept}
         emptyText={oldVersion ? '이 버전에는 문제가 없어요.' : '이 노트에는 아직 문제가 없어요.'}
       />

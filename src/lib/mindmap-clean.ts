@@ -11,9 +11,9 @@ export function maxNodesFor(depth: number, keyPoints = 7): number {
 /** 노트 하나의 마인드맵 노드 수 끝 (노트 합치기의 capNodes 와 같게) */
 export const MINDMAP_NODES_MAX = 150;
 
-/** 마인드맵 답의 길이(토큰): 노드 하나에 약 40토큰 + 표·연표 몫 */
+/** 마인드맵 답의 길이(토큰): 노드 하나에 약 55토큰(1단계 가지는 외우기 한 줄까지) + 표·연표 몫 */
 export function visualOutTokens(maxNodes: number): number {
-  return Math.min(10_000, 2000 + maxNodes * 40);
+  return Math.min(14_000, 2500 + maxNodes * 55);
 }
 
 /** 마인드맵 정리: id 겹침 제거, 개수 제한, 잠긴(편집된) 노드 유지 */

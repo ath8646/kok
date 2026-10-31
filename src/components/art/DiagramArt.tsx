@@ -2,6 +2,7 @@
 // 도식 다시 그리기: 칸에 놓인 상자(네모·둥근 네모·타원·원·글만)와 잇는 선(화살표·양쪽 화살표·선·점선), 묶음 영역
 import { memo, type ReactNode } from 'react';
 import { DG, layoutDiagram, linkRoute, type NodeBox } from '@/lib/art/layout';
+import { textWidth } from '@/lib/mindmap-layout';
 import type { DiagramArt } from '@/lib/art/spec';
 import { FONT, TONE_VAR, arrowHead, haloText, svgStyle } from './shared';
 
@@ -31,6 +32,11 @@ export const DiagramArtView = memo(function DiagramArtView({ art, label }: { art
   const links: ReactNode[] = [];
   const nodes: ReactNode[] = [];
   const linkLabels: ReactNode[] = [];
+  // 선 이름이 상자나 다른 선 이름에 겹치지 않게: 놓을 수 있는 자리를 차례로 보고 처음 빈 곳에 (상자 글 위에 얹히던 것)
+  type Rect = { x: number; y: number; w: number; h: number };
+  const hit = (a: Rect, b: Rect) => Math.abs(a.x - b.x) * 2 < a.w + b.w && Math.abs(a.y - b.y) * 2 < a.h + b.h;
+  const solid: Rect[] = [...L.boxes.values()].map((b) => ({ x: b.cx, y: b.cy, w: b.w + 4, h: b.h + 4 }));
+  const taken: Rect[] = [];
 
   art.groups.forEach((g, i) => {
     const r = L.groups[i];
@@ -83,16 +89,28 @@ export const DiagramArtView = memo(function DiagramArtView({ art, label }: { art
     if (head) links.push(<path key={`h${i}`} d={arrowHead(route[route.length - 2], route[route.length - 1], 8)} style={{ fill: 'var(--muted)' }} />);
     if (tail) links.push(<path key={`t${i}`} d={arrowHead(route[1], route[0], 8)} style={{ fill: 'var(--muted)' }} />);
     if (l.label) {
-      // 가장 긴 토막의 가운데에
-      let best = 0;
-      let at = { x: (route[0].x + route[1].x) / 2, y: (route[0].y + route[1].y) / 2 };
-      for (let k = 1; k < route.length; k++) {
-        const len = Math.hypot(route[k].x - route[k - 1].x, route[k].y - route[k - 1].y);
-        if (len > best) {
-          best = len;
-          at = { x: (route[k].x + route[k - 1].x) / 2, y: (route[k].y + route[k - 1].y) / 2 };
-        }
+      // 긴 토막의 가운데부터: 상자·다른 선 이름과 겹치지 않는 첫 자리 (없으면 가장 긴 토막 옆으로 비켜서)
+      const w = textWidth(l.label, 11) + 8;
+      const h = 15;
+      const segs = route
+        .slice(1)
+        .map((p, k) => ({ a: route[k], b: p, len: Math.hypot(p.x - route[k].x, p.y - route[k].y) }))
+        .sort((s1, s2) => s2.len - s1.len);
+      const spots = segs.flatMap(({ a, b }) => [0.5, 0.3, 0.7].map((t) => ({ x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t })));
+      const clear = (p: { x: number; y: number }) => {
+        const r = { x: p.x, y: p.y, w, h };
+        return !solid.some((b) => hit(r, b)) && !taken.some((t) => hit(r, t));
+      };
+      let at = spots.find(clear);
+      if (!at) {
+        // 가장 긴 토막의 가운데에서 선에 수직으로 비켜 본다
+        const { a, b, len } = segs[0];
+        const mid = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
+        const nx = len ? -(b.y - a.y) / len : 0;
+        const ny = len ? (b.x - a.x) / len : 1;
+        at = [12, -12, 22, -22].map((d) => ({ x: mid.x + nx * d, y: mid.y + ny * d })).find(clear) ?? mid;
       }
+      taken.push({ x: at.x, y: at.y, w, h });
       linkLabels.push(
         <text
           key={`ll${i}`}

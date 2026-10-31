@@ -693,6 +693,21 @@ const MARK = /표시:([^\s".,<]+)/g;
 function fakeNote(text) {
   const title = /광합성/.test(text) ? '광합성' : '시험 자료';
   const marks = [...new Set([...text.matchAll(MARK)].map((m) => m[1]))];
+  // 자료의 새 개념 (노트에 더한 자료): 합치기는 계획만 받으니 새 개념은 조각의 개념이어야 한다
+  const material = (text.match(/<material>\n([\s\S]*?)\n<\/material>/) || [])[1] || '';
+  const extra = [
+    ...(/호흡을 비교/.test(material)
+      ? [{ id: 'k5', title: '광합성과 호흡', explanation: '호흡은 포도당을 분해해 에너지를 얻는 과정으로, 밤낮없이 일어난다.', why: '광합성과 비교하는 문제가 나온다.', importance: 'high', pages: [] }]
+      : []),
+    ...[...new Set([...material.matchAll(MARK)].map((m) => m[1]))].map((m, i) => ({
+      id: `k${6 + i}`,
+      title: `표시 ${m}`,
+      explanation: `${m} 자료에서 더한 내용이에요.`,
+      why: '',
+      importance: 'medium',
+      pages: [],
+    })),
+  ];
   return {
     title,
     unit: '2. 식물과 에너지',
@@ -702,6 +717,7 @@ function fakeNote(text) {
       { id: 'k2', title: '광합성 장소: 엽록체', explanation: '광합성은 잎의 엽록체에서 일어난다. 엽록체에는 엽록소가 있다.', why: '세포 소기관 이름을 헷갈리기 쉽다.', importance: 'high', pages: [2] },
       { id: 'k3', title: '광합성의 결과물', explanation: '광합성으로 포도당과 산소가 만들어진다. 포도당은 녹말로 바뀌어 저장된다.', why: '결과물을 고르는 문제가 나온다.', importance: 'medium', pages: [2, 3] },
       { id: 'k4', title: '빛의 세기와 광합성', explanation: '빛이 셀수록 광합성량이 늘다가 어느 정도 이상에서는 일정해진다.', why: '그래프 해석 문제로 나온다.', importance: 'low', pages: [4] },
+      ...extra,
     ],
     terms: [
       { term: '엽록체', meaning: '광합성이 일어나는 세포 소기관' },
@@ -846,10 +862,10 @@ function fakeVisual(prompt) {
 }
 
 /**
- * 노트에 자료를 더할 때: 받은 지금 노트(<note>)에 새 자료의 개념을 붙인다.
- * 새 자료(<new_parts>)에 '표시:이름' 이 있으면 '표시 이름' 개념을, 없으면 '광합성과 호흡' 개념을 붙인다
+ * 합치는 계획 (lib/merge-plan.ts): 지금 노트(<note>)의 개념은 하나씩 그대로, 조각(<parts>·<new_parts>)의 개념은 이름이 같은 개념에 묶고
+ * (실제 AI 처럼 지금 글을 그대로 쓴다) 다른 것은 새 개념으로. 용어·예문은 보내지 않는다 (stats.mergeTerms 가 0 인지 e2e 가 본다)
  */
-function fakeMerged(textOf) {
+function fakeMergePlan(textOf) {
   const section = (tag) => (textOf.match(new RegExp(`<${tag}>\\n([\\s\\S]*?)\\n</${tag}>`)) || [])[1] || '';
   let base = null;
   try {
@@ -857,28 +873,37 @@ function fakeMerged(textOf) {
   } catch {
     base = null;
   }
-  const n = base && Array.isArray(base.key_points) ? { ...fakeNote(textOf), ...base } : fakeNote(textOf);
-  // 단어장의 낱말을 합치기에 보냈는지 (앱이 옮기면 0: e2e 가 본다)
-  let partTerms = 0;
+  let parts = [];
   try {
-    partTerms = JSON.parse(section('new_parts')).reduce((a, p) => a + (Array.isArray(p.terms) ? p.terms.length : 0), 0);
+    parts = JSON.parse(section(base ? 'new_parts' : 'parts'));
   } catch {
-    partTerms = 0;
+    parts = [];
   }
-  stats.mergeTerms = [...(stats.mergeTerms || []), (Array.isArray(base?.terms) ? base.terms.length : 0) + partTerms].slice(-20);
-  const kps = [...n.key_points];
-  const nextId = () => `k${Math.max(0, ...kps.map((k) => Number(String(k.id).replace(/\D/g, '')) || 0)) + 1}`;
-  const marks = [...new Set([...section('new_parts').matchAll(MARK)].map((m) => m[1]))];
-  if (!marks.length) {
-    if (!kps.some((k) => k.title === '광합성과 호흡')) {
-      kps.push({ id: nextId(), title: '광합성과 호흡', explanation: '호흡은 포도당을 분해해 에너지를 얻는 과정으로, 밤낮없이 일어난다.', why: '광합성과 비교하는 문제가 나온다.', importance: 'high', pages: [] });
+  const terms = (Array.isArray(base?.terms) ? base.terms.length : 0) + parts.reduce((a, p) => a + (Array.isArray(p.terms) ? p.terms.length : 0), 0);
+  stats.mergeTerms = [...(stats.mergeTerms || []), terms].slice(-20);
+  stats.mergePlans = (stats.mergePlans || 0) + 1;
+  const items = [];
+  const byTitle = new Map();
+  const add = (k) => {
+    const same = byTitle.get(k.title);
+    if (same) {
+      same.item.from.push(k.id);
+      Object.assign(same.item, { title: same.kp.title, explanation: same.kp.explanation, why: same.kp.why });
+      return;
     }
-    return { ...n, summary: '식물은 광합성으로 양분을 만들고, 호흡으로 그 양분에서 에너지를 꺼내 쓴다.', key_points: kps };
-  }
-  for (const m of marks) {
-    if (!kps.some((k) => k.title === `표시 ${m}`)) kps.push({ id: nextId(), title: `표시 ${m}`, explanation: `${m} 자료에서 더한 내용이에요.`, why: '', importance: 'medium', pages: [] });
-  }
-  return { ...n, key_points: kps };
+    const item = { from: [k.id], title: '', explanation: '', why: '' };
+    items.push(item);
+    byTitle.set(k.title, { item, kp: k });
+  };
+  for (const k of base?.key_points ?? []) add(k);
+  for (const p of parts) for (const k of p.key_points ?? []) add(k);
+  const added = parts.flatMap((p) => p.key_points ?? []).some((k) => k.title === '광합성과 호흡');
+  return {
+    title: base?.title ?? parts[0]?.title ?? '시험 자료',
+    unit: base?.unit ?? parts[0]?.unit ?? '',
+    summary: added ? '식물은 광합성으로 양분을 만들고, 호흡으로 그 양분에서 에너지를 꺼내 쓴다.' : (base?.summary ?? parts.map((p) => p.summary).join(' ')),
+    key_points: items,
+  };
 }
 
 /**
@@ -1086,6 +1111,37 @@ function fakeCourse(textOf) {
       { title: '기본 개념', summary: '뜻과 까닭을 배웠어요', lessons: lessons.slice(0, half) },
       { title: '적용하기', summary: '예시와 비교로 다졌어요', lessons: lessons.slice(half) },
     ].filter((u) => u.lessons.length),
+  };
+}
+
+/** 큰 노트의 학습 길 1: 뼈대 (개념마다 레슨 하나, 레슨 셋마다 단계) */
+function fakeCourseOutline(textOf) {
+  const noteJson = (textOf.match(/<note>\n([\s\S]*?)\n<\/note>/) || [])[1] || '{}';
+  let ids = [];
+  try {
+    ids = (JSON.parse(noteJson).key_points || []).map((k) => k.id).filter(Boolean);
+  } catch {
+    ids = [];
+  }
+  stats.courseOutlines = (stats.courseOutlines || 0) + 1;
+  const lessons = ids.map((id, i) => ({ title: `레슨 ${i + 1}`, goal: `${id} 개념을 설명할 수 있어요`, key_point_ids: [id] }));
+  const units = [];
+  for (let i = 0; i < lessons.length; i += 3) units.push({ title: `${units.length + 1}단계`, summary: '이 단계에서 배운 것', lessons: lessons.slice(i, i + 3) });
+  return { title: '큰 노트 학습 길', intro: '나눠 만든 학습 길이에요.', units };
+}
+
+/** 큰 노트의 학습 길 2: 한 단계의 레슨 ('exactly N items' 만큼). 실패를 흉내 내면 그 단계는 앱이 노트로 채운다 */
+function fakeCourseUnit(textOf) {
+  const n = Number((textOf.match(/exactly (\d+) items? in "lessons"/) || [])[1] || 1);
+  stats.courseUnits = (stats.courseUnits || 0) + 1;
+  return {
+    lessons: Array.from({ length: n }, (_, i) => ({
+      cards: [
+        { kind: 'concept', heading: '뜻', text: `단계 레슨 ${i + 1}의 뜻을 쉽게 풀어 써요.`, tip: '' },
+        { kind: 'example', heading: '예시', text: '생활 속 예시 하나.', tip: '' },
+      ],
+      checks: [{ type: 'ox', prompt: `단계 레슨 ${i + 1}: 맞는 말인가요?`, choices: [], answer: 'O', accepted: [], explanation: '맞아요.' }],
+    })),
   };
 }
 
@@ -1344,6 +1400,12 @@ async function handleClaude(req, res) {
   } else if (props.reply) {
     task = props.outside_note ? 'chat' : 'ask';
     out = fakeChat(textOf, props, images);
+  } else if (props.units && !props.units.items?.properties?.lessons?.items?.properties?.cards) {
+    task = 'course_outline';
+    out = fakeCourseOutline(textOf);
+  } else if (props.lessons && !props.units) {
+    task = 'course_unit';
+    out = fakeCourseUnit(textOf);
   } else if (props.units) {
     task = 'course';
     out = fakeCourse(textOf);
@@ -1353,9 +1415,9 @@ async function handleClaude(req, res) {
   } else if (props.id_map) {
     task = 'reorganize';
     out = fakeReorganized(textOf);
-  } else if (props.key_points && /Merge the new material into the current note/.test(textOf)) {
+  } else if (props.key_points?.items?.properties?.from) {
     task = 'merge';
-    out = fakeMerged(textOf);
+    out = fakeMergePlan(textOf);
   } else if (props.figures?.items?.properties?.image) {
     task = 'locate';
     out = fakeLocate(textOf, props);

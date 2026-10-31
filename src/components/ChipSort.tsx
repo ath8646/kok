@@ -2,7 +2,17 @@
 // 자료함 과목 칩 줄의 차례 바꾸기: 칩을 꾹 누르면(손가락·마우스 모두 0.35초) 들려서 옆으로 끌어 놓는다.
 // 키보드는 칩에서 Alt + ←/→ 로 한 칸씩 (칩은 탭 목록의 탭이라 스페이스·엔터는 그대로 과목 고르기).
 // 끌고 나서 손을 떼면 브라우저가 누르기(click)도 보내서, 끈 뒤 잠깐은 그 칩의 누르기를 무시한다(blockClick).
-import { DndContext, MouseSensor, TouchSensor, closestCenter, useSensor, useSensors, type Announcements, type DragEndEvent, type Modifier } from '@dnd-kit/core';
+import {
+  DndContext,
+  MouseSensor,
+  TouchSensor,
+  closestCenter,
+  useSensor,
+  useSensors,
+  type Announcements,
+  type DragEndEvent,
+  type Modifier,
+} from '@dnd-kit/core';
 import { SortableContext, arrayMove, horizontalListSortingStrategy, useSortable } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
 import { useRef, type CSSProperties, type ReactNode } from 'react';
@@ -65,7 +75,8 @@ export function ChipSort<T extends { id: string; name: string }>({
   const announcements: Announcements = {
     onDragStart: ({ active }) => `${nameOf(active.id)} 과목을 들었어요. 지금 ${at(active.id) + 1}번째예요.`,
     onDragOver: ({ active, over }) => (over ? `${nameOf(active.id)}: ${at(over.id) + 1}번째 자리예요.` : `${nameOf(active.id)}: 줄 밖이에요.`),
-    onDragEnd: ({ active, over }) => (over ? `${nameOf(active.id)} 과목을 ${at(over.id) + 1}번째에 놓았어요.` : `${nameOf(active.id)} 과목을 제자리에 놓았어요.`),
+    onDragEnd: ({ active, over }) =>
+      over ? `${nameOf(active.id)} 과목을 ${at(over.id) + 1}번째에 놓았어요.` : `${nameOf(active.id)} 과목을 제자리에 놓았어요.`,
     onDragCancel: ({ active }) => `${nameOf(active.id)} 옮기기를 그만뒀어요.`,
   };
   const onDragEnd = ({ active, over }: DragEndEvent) => {
@@ -89,6 +100,8 @@ export function ChipSort<T extends { id: string; name: string }>({
       sensors={sensors}
       collisionDetection={closestCenter}
       modifiers={[sideways]}
+      // 끝에 아주 가까울 때만 줄을 넘긴다 (기본 20% 는 폰에서 셋째 칩이 벌써 그 안이라, 놓는 동안 줄이 밀려 엉뚱한 자리에 놓였다)
+      autoScroll={{ threshold: { x: 0.08, y: 0 }, acceleration: 6 }}
       onDragStart={() => buzz(12)}
       onDragEnd={onDragEnd}
       onDragCancel={settle}

@@ -58,7 +58,7 @@ export function BranchCards({
                   style={{ background: `color-mix(in srgb, ${color} 15%, var(--surface))`, color }}
                   aria-hidden="true"
                 >
-                  {icons && b.icon ? b.icon : i + 1}
+                  {icons && b.icon ? b.icon : b.index + 1}
                 </span>
                 <span className="min-w-0 flex-1">
                   <span className="block font-display text-[17px] leading-snug text-ink">{b.label}</span>

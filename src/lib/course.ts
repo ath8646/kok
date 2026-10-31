@@ -2,7 +2,7 @@
 // 서버가 만들어 note_courses.plan 에 저장하고, 화면은 길(path)을 그려 레슨을 하나씩 열어 준다. 진도는 note_courses.progress (학생이 고친다)
 import { z } from 'zod';
 import { coursePlanRange } from '@/lib/ai/scale';
-import { readChatQuestion, toQuestionRow, type CourseAi } from './ai/schemas';
+import { readChatQuestion, toQuestionRow, type CourseAi, type CourseOutline, type CourseUnitAi, type Note } from './ai/schemas';
 import type { QuestionType } from './grading';
 
 // ------------------------------------------------------------- 수준
@@ -35,11 +35,45 @@ export type CoursePlan = { title: string; intro: string; units: CourseUnit[] };
 
 /** 만들 때 함께 보낼 원본 자료의 끝: 글은 글자 수, PDF 는 앞쪽 몇 쪽(크기도), 사진은 몇 장 */
 export const COURSE_MATERIAL = { textChars: 20_000, pdfPages: 8, pdfBytes: 6 * 1024 * 1024, images: 4 } as const;
-/** 답 길이와 에너지 검사·화면 예상에 쓰는 답 길이: 개념 수에 따라 (레슨 하나에 카드·문제 약 650토큰) */
+/** 레슨 하나의 카드·확인 문제 답 길이 (토큰) */
+const LESSON_TOKENS = 650;
+/** 답 길이와 에너지 검사·화면 예상에 쓰는 답 길이 (한 번에 만들 때): 개념 수에 따라 */
 export function courseOut(keyPoints: number): { max: number; estimate: number } {
   const { lessons } = coursePlanRange(keyPoints);
-  const max = Math.min(24_000, 4000 + lessons.max * 650);
+  const max = Math.min(24_000, 4000 + lessons.max * LESSON_TOKENS);
   return { max, estimate: Math.round(max * 0.6) };
+}
+
+/**
+ * 레슨이 이보다 많을 수 있는 노트(개념 9개부터)는 두 번에 나눠 만든다: 길의 뼈대 한 번 → 단계마다 레슨(동시에).
+ * 한 번에 받으면 답이 2만 토큰 가까이 되어 시간 안에 끝나지 않거나 잘렸다 (큰 노트의 레슨이 안 만들어지던 까닭)
+ */
+export const COURSE_STAGED_FROM = 9;
+export const courseStaged = (keyPoints: number) => coursePlanRange(keyPoints).lessons.max >= COURSE_STAGED_FROM;
+
+/** 뼈대의 답 길이: 레슨마다 이름·목표·개념 번호 */
+export function courseOutlineOut(keyPoints: number): number {
+  return Math.min(8000, 1500 + coursePlanRange(keyPoints).lessons.max * 150);
+}
+/** 한 단계의 답 길이: 그 단계의 레슨 수만큼 */
+export function courseUnitOut(lessons: number): number {
+  return Math.min(10_000, 1500 + Math.max(1, lessons) * LESSON_TOKENS * 1.3);
+}
+
+/**
+ * 만들기 예상 (에너지 검사·화면 예상이 같은 계산): 보낼 노트 길이(글자)와 개념 수로 입력·답 토큰.
+ * 나눠 만들 때는 뼈대(노트 전체) + 단계마다(그 단계의 개념, 노트를 단계 수로 나눈 만큼 + 길 전체)
+ */
+export function courseCost(keyPoints: number, noteChars: number): { inputTokens: number; outTokens: number } {
+  const note = Math.min(26_000, 3000 + noteChars * 0.9);
+  if (!courseStaged(keyPoints)) return { inputTokens: note, outTokens: courseOut(keyPoints).estimate };
+  const { units, lessons } = coursePlanRange(keyPoints);
+  const stages = Math.round((units.min + units.max) / 2);
+  const outline = courseOutlineOut(keyPoints);
+  return {
+    inputTokens: Math.round(note + stages * (3000 + (note - 3000) / stages + outline * 0.6)),
+    outTokens: Math.round(outline * 0.6 + lessons.max * LESSON_TOKENS * 0.7),
+  };
 }
 
 /** 한 학습 길의 크기 끝 (답이 길어지거나 저장 칸(256KB)을 넘지 않게) */
@@ -144,6 +178,148 @@ export function settleCourse(ai: CourseAi, keyPointIds: readonly string[]): Cour
   return { title: clip(ai.title, 60), intro: clip(ai.intro, 240), units };
 }
 
+// ------------------------------------------------------------- 큰 노트: 나눠 만들기
+/** 뼈대를 받은 대로 쓸 수 있게: 빈 단계·레슨은 빼고 수를 줄인다 (settleCourse 와 같은 끝). 레슨이 없으면 null */
+export function settleOutline(o: CourseOutline, keyPointIds: readonly string[]): CourseOutline | null {
+  const known = new Set(keyPointIds);
+  const units = o.units
+    .map((u) => ({
+      ...u,
+      lessons: u.lessons
+        .filter((l) => l.title.trim() || l.goal.trim() || l.key_point_ids.length)
+        .slice(0, COURSE_LIMITS.lessons)
+        .map((l) => ({ ...l, key_point_ids: [...new Set(l.key_point_ids.filter((k) => known.has(k)))] })),
+    }))
+    .filter((u) => u.lessons.length)
+    .slice(0, COURSE_LIMITS.units);
+  return units.length ? { ...o, units } : null;
+}
+
+/** AI 가 뼈대를 못 만들었을 때: 개념을 차례대로 한두 개씩 레슨으로, 레슨 세 개쯤마다 단계 (AI 없이) */
+export function fallbackOutline(note: Note, keyPoints = note.key_points.length): CourseOutline {
+  const { units } = coursePlanRange(keyPoints);
+  const kps = note.key_points.filter((k) => k.id);
+  const per = kps.length > COURSE_LIMITS.units * COURSE_LIMITS.lessons ? 2 : kps.length > 12 ? 2 : 1;
+  const lessons: CourseOutline['units'][number]['lessons'] = [];
+  for (let i = 0; i < kps.length; i += per) {
+    const group = kps.slice(i, i + per);
+    lessons.push({
+      title: clip(group[0].title, 20),
+      goal: `${clip(group.map((k) => k.title).join('·'), 60)}을 설명할 수 있어요`,
+      key_point_ids: group.map((k) => k.id),
+    });
+  }
+  const n = Math.min(COURSE_LIMITS.units, Math.max(units.min, Math.ceil(lessons.length / COURSE_LIMITS.lessons)), Math.max(1, lessons.length));
+  const size = Math.ceil(lessons.length / n);
+  const out: CourseOutline['units'] = [];
+  for (let u = 0; u < n; u++) {
+    const ls = lessons.slice(u * size, (u + 1) * size);
+    if (ls.length) out.push({ title: `${u + 1}단계`, summary: '', lessons: ls });
+  }
+  return { title: clip(note.title, 24), intro: '', units: out };
+}
+
+/** 노트의 문제 (레슨을 AI 없이 만들 때 확인 문제로) */
+export type NoteQuestionLite = {
+  type: string;
+  prompt: string;
+  choices: unknown;
+  answer: unknown;
+  accepted?: unknown;
+  explanation?: unknown;
+  key_point_id?: unknown;
+};
+
+/** 노트의 문제 → 확인 문제 모양 (채팅 문제 모양: settleCourse 가 읽는다). 읽을 수 없으면 null */
+function questionAsCheck(q: NoteQuestionLite): Record<string, unknown> | null {
+  const choices = Array.isArray(q.choices) ? q.choices.map(String) : [];
+  const answer =
+    q.type === 'mcq'
+      ? typeof q.answer === 'number'
+        ? (choices[q.answer] ?? '')
+        : ''
+      : q.type === 'ox'
+        ? q.answer === true
+          ? 'O'
+          : q.answer === false
+            ? 'X'
+            : ''
+        : typeof q.answer === 'string'
+          ? q.answer
+          : '';
+  if (!answer || !['mcq', 'ox', 'cloze', 'short'].includes(q.type)) return null;
+  return {
+    type: q.type,
+    prompt: String(q.prompt ?? ''),
+    choices,
+    answer,
+    accepted: Array.isArray(q.accepted) ? q.accepted.map(String) : [],
+    explanation: typeof q.explanation === 'string' ? q.explanation : '',
+  };
+}
+
+/**
+ * 한 단계의 레슨을 AI 가 끝내 못 만들었을 때: 노트의 개념 설명·예시·함정으로 카드를, 노트의 문제로 확인 문제를 만든다 (AI 없이).
+ * 다른 단계는 AI 레슨 그대로라 길 전체가 실패하지 않는다
+ */
+export function fallbackLessons(lessons: CourseOutline['units'][number]['lessons'], note: Note, questions: NoteQuestionLite[]): CourseUnitAi['lessons'] {
+  const byId = new Map(note.key_points.map((k) => [k.id, k]));
+  return lessons.map((l) => {
+    const kps = l.key_point_ids.map((id) => byId.get(id)).filter((k): k is Note['key_points'][number] => !!k);
+    const ids = new Set(kps.map((k) => k.id));
+    const cards: CourseUnitAi['lessons'][number]['cards'] = kps.map((k) => ({
+      kind: 'concept',
+      heading: clip(k.title, 20),
+      text: k.explanation,
+      tip: clip(k.why, 60),
+    }));
+    for (const ex of note.examples.filter((e) => ids.has(e.key_point_id)).slice(0, 2)) cards.push({ kind: 'example', heading: '예시', text: ex.text, tip: '' });
+    for (const p of note.pitfalls.filter((e) => ids.has(e.key_point_id)).slice(0, 2))
+      cards.push({ kind: 'tip', heading: '헷갈리기 쉬워요', text: p.text, tip: '' });
+    if (!cards.length && l.goal.trim()) cards.push({ kind: 'concept', heading: clip(l.title, 20), text: l.goal, tip: '' });
+    const checks = questions
+      .filter((q) => typeof q.key_point_id === 'string' && ids.has(q.key_point_id))
+      .map(questionAsCheck)
+      .filter((c): c is Record<string, unknown> => !!c)
+      .slice(0, 3);
+    return { cards, checks };
+  });
+}
+
+/** 뼈대 + 단계마다 받은 레슨 → 한 번에 만든 것과 같은 모양 (settleCourse 가 다듬는다). 레슨 수가 다르면 앞에서부터 맞춘다 */
+export function assembleCourse(outline: CourseOutline, units: CourseUnitAi['lessons'][]): CourseAi {
+  return {
+    title: outline.title,
+    intro: outline.intro,
+    units: outline.units.map((u, ui) => ({
+      title: u.title,
+      summary: u.summary,
+      lessons: u.lessons.map((l, li) => ({
+        title: l.title,
+        goal: l.goal,
+        key_point_ids: l.key_point_ids,
+        cards: units[ui]?.[li]?.cards ?? [],
+        checks: units[ui]?.[li]?.checks ?? [],
+      })),
+    })),
+  };
+}
+
+/** 한 단계에 보낼 노트: 그 단계의 개념과 그 개념의 함정·예시, 용어·공식은 모두 (개념이 없으면 노트 그대로) */
+export function noteForStage(note: Note, keyPointIds: readonly string[]): Note {
+  const ids = new Set(keyPointIds);
+  const key_points = note.key_points.filter((k) => ids.has(k.id));
+  if (!key_points.length) return note;
+  return {
+    ...note,
+    key_points,
+    pitfalls: note.pitfalls.filter((p) => ids.has(p.key_point_id)),
+    examples: note.examples.filter((p) => ids.has(p.key_point_id)),
+    checks: [],
+    changes: [],
+  };
+}
+
 // ------------------------------------------------------------- 진도 (progress)
 export type Stars = 0 | 1 | 2 | 3;
 export type CourseProgress = {
@@ -211,6 +387,66 @@ export function courseNodes(plan: CoursePlan, progress: CourseProgress): CourseN
     out.push({ kind: 'final', id: 'final', title: '총정리', state: state(!!f), stars: f?.stars ?? 0 });
   }
   return out;
+}
+
+/** 단계가 이만큼부터면 길을 섹션으로 나눠 보인다 (길이 너무 길어 끝까지 내리기 힘들어서) */
+export const SECTION_FROM_UNITS = 4;
+/** 섹션 하나에 단계 몇 개쯤 (고르게 나눈다: 4단계 → 2·2, 5단계 → 3·2, 7단계 → 3·2·2) */
+export const UNITS_PER_SECTION = 3;
+/** 섹션 하나에 칸(레슨·단계 복습) 몇 개쯤까지: 단계마다 레슨이 많으면 섹션을 더 잘게 */
+const SECTION_NODES = 13;
+
+export type CourseSection = {
+  /** 0부터 */
+  index: number;
+  /** 이 섹션의 단계 번호 (0부터, 차례대로) */
+  units: number[];
+  /** 이 섹션의 칸 (마지막 섹션에는 총정리도) */
+  nodes: CourseNode[];
+  done: number;
+  total: number;
+  /** done: 모두 끝냄, current: 지금 할 칸이 이 섹션에, later: 아직 (건너뛰어 끝낸 칸이 있을 수 있다) */
+  state: 'done' | 'current' | 'later';
+};
+
+/**
+ * 긴 길은 섹션으로 나눈다: 섹션 1(1~3단계) → 섹션 2(4~6단계) … 단계 번호는 길 전체로 이어진다.
+ * 단계가 SECTION_FROM_UNITS 보다 적고 칸도 많지 않으면 null (나누지 않고 예전처럼 한 줄로).
+ * 섹션 수 = 단계 3개쯤마다, 칸이 많으면 더 (단계보다 많지는 않게), 단계는 앞 섹션부터 하나씩 더 받아 고르게
+ */
+export function courseSections(plan: CoursePlan, nodes: CourseNode[]): CourseSection[] | null {
+  const n = plan.units.length;
+  const byUnits = n >= SECTION_FROM_UNITS ? Math.ceil(n / UNITS_PER_SECTION) : 1;
+  const count = Math.min(n, Math.max(byUnits, Math.ceil(nodes.length / SECTION_NODES)));
+  if (count < 2) return null;
+  const base = Math.floor(n / count);
+  let extra = n % count;
+  const out: CourseSection[] = [];
+  let next = 0;
+  for (let i = 0; i < count; i++) {
+    const size = base + (extra > 0 ? 1 : 0);
+    if (extra > 0) extra--;
+    const units = Array.from({ length: size }, (_, k) => next + k);
+    next += size;
+    const own = new Set(units);
+    const list = nodes.filter((x) => (x.kind === 'final' ? i === count - 1 : own.has(x.unit)));
+    const done = list.filter((x) => x.state === 'done').length;
+    out.push({
+      index: i,
+      units,
+      nodes: list,
+      done,
+      total: list.length,
+      state: list.length > 0 && done === list.length ? 'done' : list.some((x) => x.state === 'current') ? 'current' : 'later',
+    });
+  }
+  return out;
+}
+
+/** 단계(0부터)가 든 섹션 번호 (0부터). 나누지 않은 길이면 null */
+export function sectionOfUnit(sections: CourseSection[] | null, unit: number): number | null {
+  if (!sections) return null;
+  return sections.find((x) => x.units.includes(unit))?.index ?? null;
 }
 
 export function courseStats(plan: CoursePlan, progress: CourseProgress): { total: number; done: number; lessons: number; checks: number } {

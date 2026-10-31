@@ -16,7 +16,7 @@ import {
   vocabCards,
   VOCAB_CARDS_MAX,
 } from '@/lib/material-questions';
-import { appendMergePrompt, checkPrompt, mergePrompt, organizePrompt, problemsPrompt, quizPrompt, type QuizOptions } from '@/lib/ai/prompts';
+import { appendMergePlanPrompt, checkPrompt, mergePlanPrompt, organizePrompt, problemsPrompt, quizPrompt, type QuizOptions } from '@/lib/ai/prompts';
 import { organizeJsonSchema, problemsJsonSchema } from '@/lib/ai/schemas';
 import { estimateEnergy } from '@/lib/ai/models';
 import { problemPieces, problemsOutTokens, vocabHeadroom } from '@/lib/ai/scale';
@@ -156,11 +156,11 @@ describe('prompts by material type', () => {
     expect(both).toContain('For a question that asks for a calculation (other than one with origin "material")');
   });
 
-  it('merging: word lists keep their terms and examples out of the AI answer only when asked', () => {
-    expect(mergePrompt(2, { min: 4, max: 9 })).not.toContain('word list');
-    expect(mergePrompt(2, { min: 4, max: 9 }, { listsKept: true })).toContain('the app adds back itself');
-    expect(appendMergePrompt(1, 12)).not.toContain('word list');
-    expect(appendMergePrompt(1, 12, { listsKept: true })).toContain('the app adds back itself');
+  it('merging: only a plan comes from the AI, so terms and examples never go through its answer', () => {
+    // 합치기는 계획만 받는다: 용어·예문은 늘 앱이 옮긴다 (단어장도 AI 에 보내지 않는다)
+    expect(mergePlanPrompt(2, { min: 4, max: 9 })).toContain('The app copies the key points and every term');
+    expect(appendMergePlanPrompt(1, 12)).toContain('The app copies the key points and every term');
+    expect(appendMergePlanPrompt(1, 12)).toContain('Use at most 12 items');
   });
 
   it('problems: copy, never invent; pages and pictures by material kind', () => {

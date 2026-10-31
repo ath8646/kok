@@ -8,6 +8,7 @@ import { driveSource } from '@/lib/server/drive';
 export const maxDuration = 300;
 
 export async function POST(req: NextRequest, ctx: RouteContext<'/api/sources/[id]/retry'>) {
+  const startedAt = Date.now();
   try {
     assertSameOrigin(req);
     const { id } = await ctx.params;
@@ -44,7 +45,7 @@ export async function POST(req: NextRequest, ctx: RouteContext<'/api/sources/[id
     if (refusal) throw refusal;
     if (v.result === 'not_error') return Response.json({ ok: true, status: v.status ?? 'queued' });
     const origin = req.nextUrl.origin;
-    after(() => driveSource(id, origin));
+    after(() => driveSource(id, origin, startedAt));
     return Response.json({ ok: true, status: 'queued' });
   } catch (e) {
     return errorResponse(e);

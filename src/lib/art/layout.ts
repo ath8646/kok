@@ -145,36 +145,97 @@ export type DiagramLayout = {
  * 도식 자리: 칸 너비는 고르게, 줄 높이는 그 줄의 가장 큰 상자에 맞춘다. 묶음이 시작하는 줄은 이름 자리를 위에 더 둔다.
  * 칸이 많아도 폰 너비(360~400)에 그린다: 칸 사이를 좁히고 긴 이름은 줄을 바꾼다 (옆으로 밀거나 글이 작아지지 않게)
  */
+/**
+ * 같은 줄에서 칸이 겹치는 상자를 옆의 빈칸으로 옮긴다 (AI 가 두 상자를 같은 칸에 두면 글이 겹쳐 보였다).
+ * 그 줄에 빈칸이 없으면 아래에 줄을 하나 더 만들어 둔다. 옮긴 자리 (번호 → {col,row,span}) 와 줄 수
+ */
+export function placeDiagramNodes(d: Pick<DiagramArt, 'cols' | 'rows' | 'nodes'>): {
+  at: Map<string, { col: number; row: number; span: number }>;
+  rows: number;
+} {
+  const used = new Map<number, boolean[]>();
+  const cells = (row: number) => {
+    let c = used.get(row);
+    if (!c) {
+      c = Array.from({ length: d.cols }, () => false);
+      used.set(row, c);
+    }
+    return c;
+  };
+  const free = (row: number, col: number, span: number) =>
+    col >= 0 &&
+    col + span <= d.cols &&
+    cells(row)
+      .slice(col, col + span)
+      .every((x) => !x);
+  const take = (row: number, col: number, span: number) => {
+    for (let k = col; k < col + span; k++) cells(row)[k] = true;
+  };
+  const at = new Map<string, { col: number; row: number; span: number }>();
+  let rows = d.rows;
+  for (const n of d.nodes) {
+    const span = Math.max(1, Math.min(n.span, d.cols));
+    let col = Math.max(0, Math.min(n.col, d.cols - span));
+    let row = n.row;
+    if (!free(row, col, span)) {
+      // 가까운 빈칸부터 (오른쪽 → 왼쪽 번갈아)
+      let found = -1;
+      for (let off = 1; off < d.cols && found < 0; off++) {
+        if (free(row, col + off, span)) found = col + off;
+        else if (free(row, col - off, span)) found = col - off;
+      }
+      if (found >= 0) col = found;
+      else {
+        // 줄이 꽉 찼다: 아래에 새 줄
+        row = rows;
+        rows += 1;
+      }
+    }
+    take(row, col, span);
+    at.set(n.id, { col, row, span });
+  }
+  return { at, rows };
+}
+
 export function layoutDiagram(d: DiagramArt): DiagramLayout {
   const W = d.cols <= 4 ? 360 : 400;
   const gapX = d.cols >= 5 ? 8 : d.cols === 4 ? 10 : 14;
   const padX = d.cols >= 5 ? 5 : DG.padX;
   const cw = (W - DG.pad * 2) / d.cols;
-  const sized = d.nodes.map((n) => {
+  const placed = placeDiagramNodes(d);
+  const nodesAt = d.nodes.map((n) => ({ ...n, ...placed.at.get(n.id)! }));
+  const sized = nodesAt.map((n) => {
     const room = n.span * cw - gapX;
     const maxW = Math.max(24, room - padX * 2);
     const label = n.label || ' ';
     const lines = wrapText(label, DG.size, maxW, 3);
     const textW = Math.max(...lines.map((l) => textWidth(l, DG.size)));
-    // 여러 칸을 차지하는 상자는 그 칸을 다 채운다 (신분 구조처럼 너비가 뜻을 가진 그림), 한 칸짜리는 글에 맞게
-    let w = n.span >= 2 && n.shape !== 'plain' ? room : Math.min(room, Math.max(Math.min(56, room), textW + padX * 2 + (n.shape === 'ellipse' ? 18 : 0)));
+    const round = n.shape === 'ellipse' || n.shape === 'circle';
+    // 여러 칸을 차지하는 네모는 그 칸을 다 채운다 (신분 구조처럼 너비가 뜻을 가진 그림), 한 칸짜리·타원·원은 글에 맞게
+    // (원·타원이 여러 칸을 다 채우면 판만큼 커져 다른 상자를 덮었다)
+    let w =
+      n.span >= 2 && n.shape !== 'plain' && !round
+        ? room
+        : Math.min(room, Math.max(Math.min(56, room), textW + padX * 2 + (n.shape === 'ellipse' ? 18 : n.shape === 'circle' ? 10 : 0)));
     let h = Math.max(34, lines.length * DG.line + DG.padY * 2 + (n.shape === 'ellipse' ? 8 : 0));
     if (n.shape === 'circle') {
-      const r = Math.min(Math.max(w, h), room);
+      // 원은 글이 들어가는 만큼만 (너무 크지 않게: 지름 120 까지)
+      const r = Math.min(Math.max(w, h, 44), room, 120);
       w = r;
       h = r;
     }
     if (n.shape === 'plain') h = Math.max(24, lines.length * DG.line + 6);
     return { n, w, h, lines };
   });
-  const rowH = Array.from({ length: d.rows }, (_, r) => Math.max(18, ...sized.filter((s) => s.n.row === r).map((s) => s.h)));
-  const extra = Array.from({ length: d.rows }, (_, r) => (d.groups.some((g) => g.row === r) ? DG.groupTop : 0));
+  const rowCount = placed.rows;
+  const rowH = Array.from({ length: rowCount }, (_, r) => Math.max(18, ...sized.filter((s) => s.n.row === r).map((s) => s.h)));
+  const extra = Array.from({ length: rowCount }, (_, r) => (d.groups.some((g) => g.row === r) ? DG.groupTop : 0));
   const rowTop: number[] = [];
   let y = DG.pad;
-  for (let r = 0; r < d.rows; r++) {
+  for (let r = 0; r < rowCount; r++) {
     y += extra[r];
     rowTop.push(y);
-    y += rowH[r] + (r < d.rows - 1 ? DG.rowGap : 0);
+    y += rowH[r] + (r < rowCount - 1 ? DG.rowGap : 0);
   }
   const H = Math.ceil(y + DG.pad);
   const boxes = new Map<string, NodeBox>();
@@ -186,7 +247,7 @@ export function layoutDiagram(d: DiagramArt): DiagramLayout {
   const groups = d.groups.map((g) => {
     const x = DG.pad + g.col * cw + 2;
     const top = rowTop[g.row] - DG.groupTop + 2;
-    const last = Math.min(d.rows - 1, g.row + g.rows - 1);
+    const last = Math.min(rowCount - 1, g.row + g.rows - 1);
     const bottom = rowTop[last] + rowH[last] + 8;
     return { x, y: top, w: g.cols * cw - 4, h: bottom - top };
   });

@@ -1,7 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
   estimateTokens,
-  growthOfParts,
   keepFromCurrent,
   mergeFits,
   mergeGrowth,
@@ -168,7 +167,7 @@ describe('노트에 자료 더하기: 지금 버전에 다시 합치기', () => 
   });
 });
 
-describe('노트에 자료 더하기: 합친 노트가 답 길이에 들어갈지', () => {
+describe("'AI로 다시 정리': 다시 쓴 노트가 답 길이에 들어갈지", () => {
   it('한글은 한 글자에 1, 영어·기호는 0.3 으로 넉넉히 센다', () => {
     expect(estimateTokens('가나다')).toBe(3);
     expect(estimateTokens('abcdefghij')).toBe(3);
@@ -188,14 +187,6 @@ describe('노트에 자료 더하기: 합친 노트가 답 길이에 들어갈�
     expect(mergeGrowth(900)).toBe(900);
     expect(mergeGrowth(50_000)).toBe(MERGE_GROWTH_MAX);
     expect(mergeGrowth(Number.NaN)).toBe(MERGE_GROWTH_MAX);
-    expect(growthOfParts(JSON.stringify({ summary: '나'.repeat(4000) }))).toBeGreaterThan(2000);
-  });
-
-  it('짧은 노트에 아주 긴 자료(90쪽 PDF 정리 여러 개)를 더해도 합친다', () => {
-    const short = noteForMerge(note())!;
-    const parts = JSON.stringify(Array.from({ length: 20 }, () => ({ summary: '가'.repeat(1900) })));
-    expect(estimateTokens(parts)).toBeGreaterThan(MERGE_OUT_TOKENS * 2);
-    expect(mergeFits(short, growthOfParts(parts))).toBe(true);
   });
 
   it('노트가 길면 새 자료가 늘릴 양까지 보고 막는다', () => {
@@ -203,6 +194,5 @@ describe('노트에 자료 더하기: 합친 노트가 답 길이에 들어갈�
     const big = noteForMerge(note({ summary: '가'.repeat(Math.round(MERGE_OUT_TOKENS * 0.9) - 300 - MERGE_GROWTH_MIN - 800) }))!;
     expect(mergeFits(big)).toBe(true);
     expect(mergeFits(big, MERGE_GROWTH_MAX)).toBe(false);
-    expect(mergeFits(big, growthOfParts(JSON.stringify({ summary: '나'.repeat(4000) })))).toBe(false);
   });
 });

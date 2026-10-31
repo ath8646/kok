@@ -399,6 +399,37 @@ describe('그래프·연표·도식 자리', () => {
     expect(route[1].y).toBeCloseTo(route[2].y);
   });
 
+  it('도식: 같은 칸에 둔 상자는 옆 빈칸으로 (꽉 찬 줄이면 아래 새 줄로), 여러 칸에 걸친 원은 판만큼 커지지 않는다', () => {
+    const d = normalizeArt('diagram', {
+      redrawable: true,
+      title: '',
+      notes: '',
+      cols: 3,
+      rows: 2,
+      nodes: [
+        { id: 'a', label: '세포막', col: 0, row: 0, span: 1, shape: 'box', tone: 'gray', strong: false },
+        { id: 'b', label: '세포벽', col: 0, row: 0, span: 1, shape: 'box', tone: 'gray', strong: false },
+        { id: 'c', label: '핵', col: 0, row: 1, span: 3, shape: 'circle', tone: 'blue', strong: false },
+        { id: 'd', label: '엽록체', col: 1, row: 0, span: 1, shape: 'box', tone: 'gray', strong: false },
+        { id: 'e', label: '액포', col: 2, row: 0, span: 1, shape: 'box', tone: 'gray', strong: false },
+        { id: 'f', label: '리보솜', col: 1, row: 0, span: 1, shape: 'box', tone: 'gray', strong: false },
+      ],
+      links: [],
+      groups: [],
+    });
+    if (d?.kind !== 'diagram') throw new Error('diagram');
+    const L = layoutDiagram(d);
+    const boxes = [...L.boxes.values()];
+    for (let i = 0; i < boxes.length; i++)
+      for (let j = i + 1; j < boxes.length; j++) {
+        const a = boxes[i];
+        const b = boxes[j];
+        const apart = Math.abs(a.cx - b.cx) * 2 >= a.w + b.w || Math.abs(a.cy - b.cy) * 2 >= a.h + b.h;
+        expect(apart, `${i} ${j}`).toBe(true);
+      }
+    expect(L.boxes.get('c')!.w).toBeLessThanOrEqual(120);
+  });
+
   it('지도 선 이름: 다른 선보다 제 선에 가깝고, 놓인 글과 겹치지 않으며, 그림 안에 있다', () => {
     const mid = pointAlong(
       [

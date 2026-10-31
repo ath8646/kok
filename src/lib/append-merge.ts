@@ -1,12 +1,10 @@
 // 노트에 자료를 더할 때 쓰는 계산 (서버의 처리 파이프라인과 시험이 같이 쓴다)
 import type { Note } from '@/lib/ai/schemas';
 
-/** 합칠 때 AI 에 보내는 지금 노트의 최대 길이 (글자). 넘으면 합치지 않고 새 노트로 넣으라고 안내한다 */
+/** 'AI로 다시 정리'에 보내는 노트의 최대 길이 (글자). 넘으면 다시 정리하지 않고 안내한다 */
 export const NOTE_MERGE_MAX_CHARS = 24_000;
 
-export const NOTE_TOO_LONG = '노트가 너무 길어서 새 자료를 합치지 못했어요. 이 자료는 새 노트로 넣어 주세요.';
-
-/** 합친 노트를 한 번에 돌려받는 답의 최대 길이 (토큰). 파이프라인의 합치기 단계 max_tokens 와 같다 */
+/** 노트 전체를 한 번에 다시 써서 받는 답의 최대 길이 (토큰): 'AI로 다시 정리' */
 export const MERGE_OUT_TOKENS = 14_000;
 
 /**
@@ -30,8 +28,8 @@ export function estimateTokens(text: string): number {
 }
 
 /**
- * 새 자료가 합친 노트를 늘리는 양 (토큰). 새 자료의 양만큼 개념이 늘 수 있지만(lib/ai/scale.ts appendKeyPointMax, 한 조각 16개까지)
- * 개념 하나가 약 400토큰이라 아무리 길어도 MERGE_GROWTH_MAX 보다 크게 늘지 않고, 짧아도 MERGE_GROWTH_MIN 은 늘어난다고 본다.
+ * 'AI로 다시 정리'(노트 전체를 다시 쓴다)의 답이 늘어나는 양 (토큰): 짧아도 MERGE_GROWTH_MIN, 길어도 MERGE_GROWTH_MAX 안으로 본다.
+ * (자료 더하기·조각 합치기는 계획만 받아서 노트 길이에 막히지 않는다: lib/merge-plan.ts)
  */
 export const MERGE_GROWTH_MIN = 600;
 export const MERGE_GROWTH_MAX = 6000;
@@ -40,15 +38,7 @@ export function mergeGrowth(estimate: number): number {
   return Math.min(MERGE_GROWTH_MAX, Math.max(MERGE_GROWTH_MIN, Math.ceil(Number.isFinite(estimate) ? estimate : MERGE_GROWTH_MAX)));
 }
 
-/** 합치는 단계에서: 새 자료의 정리(JSON)가 노트를 늘리는 양은 그 절반쯤으로 본다 */
-export function growthOfParts(newPartsJson: string): number {
-  return Math.ceil(estimateTokens(newPartsJson) * 0.5);
-}
-
-/**
- * 합친 노트가 답 길이 안에 들어갈지: 지금 노트는 다시 다 써야 하고, 새 자료는 줄여서 들어간다.
- * growth: 새 자료가 늘릴 양의 어림 (자료를 넣을 때는 글이면 글 길이, 파일이면 가장 크게. 합칠 때는 growthOfParts)
- */
+/** 다시 쓴 노트가 답 길이 안에 들어갈지: 지금 노트를 다시 다 써야 한다 ('AI로 다시 정리') */
 export function mergeFits(noteJson: string, growth = 0): boolean {
   return estimateTokens(noteJson) + mergeGrowth(growth) + 300 <= MERGE_OUT_TOKENS * 0.9;
 }

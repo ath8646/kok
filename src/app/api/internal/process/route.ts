@@ -9,6 +9,7 @@ export const maxDuration = 300;
 const Body = z.object({ id: z.string().uuid() });
 
 export async function POST(req: NextRequest) {
+  const startedAt = Date.now();
   let body: unknown = null;
   try {
     body = await req.json();
@@ -20,6 +21,6 @@ export async function POST(req: NextRequest) {
   const { id } = parsed.data;
   if (!verifyInternal(id, req.headers.get('x-kok-internal'))) return Response.json({ error: 'forbidden' }, { status: 403 });
   const origin = req.nextUrl.origin;
-  after(() => driveSource(id, origin));
+  after(() => driveSource(id, origin, startedAt));
   return Response.json({ ok: true }, { status: 202 });
 }

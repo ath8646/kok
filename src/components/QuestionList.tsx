@@ -1,6 +1,7 @@
 'use client';
-// 문제 관리: 보기, 고치기, 잠그기, 쉬게 하기, 지우기, 이상해요 신고
-import { useMemo, useState } from 'react';
+// 문제 관리: 보기, 고치기, 잠그기, 쉬게 하기, 지우기, 이상해요 신고.
+// 꾹 누르면(키보드는 Shift+F10) 여러 개 고르기: 아래 띠에서 한꺼번에 쉬게 하기·다시 내기·잠그기·지우기 (노트의 문제 탭·문제 모아 보기)
+import { useMemo, useState, type ReactNode } from 'react';
 import type { QuestionRow } from '@/lib/types';
 import { THINK_OUT, estimateSmallTask } from '@/lib/ai/models';
 import { clientModel } from '@/lib/client-model';
@@ -13,7 +14,13 @@ import { readQuestionFigure } from '@/lib/source-figures';
 import { QuestionEditor, type QuestionDraft } from './QuestionEditor';
 import { answerText, type ReviewQuestion } from './QuestionCard';
 import { RichText } from './RichText';
-import { Button, Chip, Energy, ICONS, Icon, Sheet, cx, inputClass, api, useToast, DONE } from './ui';
+import { PromptText } from './PromptText';
+import { Button, Chip, Energy, ICONS, Icon, IconButton, Sheet, cx, inputClass, api, useToast, DONE } from './ui';
+import { BarAction, PICKED_RING, PickBadge, SelectionBar, pickKeyHandler, useMultiSelect } from './SelectionBar';
+import { useLongPress } from './useLongPress';
+
+/** 한 번에 고치는 문제 수 (주소 길이를 넘지 않게) */
+const BULK = 100;
 
 const TYPE_LABEL = { mcq: '객관식', ox: 'OX', cloze: '빈칸', short: '단답' } as const;
 
@@ -31,7 +38,7 @@ export function QuestionPreview({
   return (
     <div className="grid gap-1.5">
       <p className="font-semibold leading-relaxed">
-        <RichText text={q.prompt} />
+        <PromptText text={q.prompt} />
       </p>
       <QuestionFigure solution={solution} className="my-1" />
       {sourceFig ? (
@@ -82,6 +89,7 @@ export function QuestionList({
   keyPoints,
   onChanged,
   removal,
+  removeMany,
   conceptEdit,
   emptyText = '문제가 없어요.',
 }: {
@@ -90,6 +98,8 @@ export function QuestionList({
   keyPoints?: Array<{ id: string; title: string }>;
   onChanged: () => void;
   removal?: (q: QuestionRow) => QuestionRemoval;
+  /** 여러 개 지우기를 바꿀 때 (노트 버전: 다른 버전에 있는 문제는 이 버전에서만 뺀다). 없으면 모두 지운다 */
+  removeMany?: (qs: QuestionRow[]) => QuestionRemoval;
   /**
    * 지난 버전을 보고 있을 때: 문제의 개념 바꾸기는 문제 행 대신 이것으로 (그 버전의 개념 기록만 고친다).
    * 문제 행의 개념은 지금 버전의 것이라 그대로 둔다
@@ -105,6 +115,8 @@ export function QuestionList({
   const [saving, setSaving] = useState(false);
   const [open, setOpen] = useState<string | null>(null);
   const [solving, setSolving] = useState<string | null>(null);
+  const { selecting, picked, setPicked, startSelect, endSelect, togglePick } = useMultiSelect();
+  const [bulk, setBulk] = useState<'rest' | 'lock' | 'remove' | null>(null);
   const figuresOn = !!me?.features.figures;
   // 그림 풀이 만들기 (Pro): 문제 하나 (먼저 생각하고 답해서 답이 조금 길다)
   const solveEst = me ? Math.round(estimateSmallTask(clientModel(me, me.settings.models.quiz), me.usdPerEnergy, 4500, THINK_OUT.solveOne) * 10) / 10 : 0;
@@ -132,104 +144,233 @@ export function QuestionList({
     }
   };
 
+  // 고른 문제 (목록에 남아 있는 것만: 고르는 사이 목록이 바뀌어도)
+  const chosen = questions.filter((q) => picked.has(q.id));
+  const restable = chosen.filter((q) => q.status !== 'hidden');
+  const anyActive = restable.some((q) => q.status === 'active');
+  const anyUnlocked = chosen.some((q) => !q.locked);
+  const allPicked = questions.length > 0 && chosen.length === questions.length;
+
+  /** 고른 문제를 한꺼번에 고친다 (100개씩). 다 되면 고르기를 끝낸다 */
+  const updateMany = async (ids: string[], patch: Record<string, unknown>, msg: string, kind: 'rest' | 'lock') => {
+    if (!ids.length || bulk) return;
+    setBulk(kind);
+    let ok = true;
+    for (let i = 0; i < ids.length; i += BULK) {
+      const { error } = await sb()
+        .from('questions')
+        .update(patch)
+        .in('id', ids.slice(i, i + BULK));
+      if (error) ok = false;
+    }
+    setBulk(null);
+    if (!ok) toast('몇 개는 저장하지 못했어요. 다시 해 주세요.', 'bad');
+    else {
+      toast(msg, 'ok', DONE);
+      endSelect();
+    }
+    onChanged();
+  };
+
+  const removePicked = async () => {
+    if (!chosen.length || bulk) return;
+    const n = chosen.length;
+    const r = removeMany?.(chosen) ?? {
+      label: '지우기',
+      confirm: `고른 문제 ${n}개를 지울까요?`,
+      note: '푼 기록도 같이 지워지고 되돌릴 수 없어요.',
+      danger: true,
+      run: async () => {
+        let ok = true;
+        for (let i = 0; i < chosen.length; i += BULK) {
+          const { error } = await sb()
+            .from('questions')
+            .delete()
+            .in(
+              'id',
+              chosen.slice(i, i + BULK).map((q) => q.id),
+            );
+          if (error) ok = false;
+        }
+        return ok;
+      },
+    };
+    if (!(await ask({ title: r.danger ? '문제 지우기' : '문제 빼기', body: r.confirm, note: r.note, ok: r.label, danger: r.danger }))) return;
+    setBulk('remove');
+    const ok = await r.run();
+    setBulk(null);
+    if (!ok) toast('몇 개는 지우지 못했어요. 다시 해 주세요.', 'bad');
+    else {
+      toast(r.danger ? `${n}개를 지웠어요.` : `${n}개를 뺐어요.`, 'ok', DONE);
+      endSelect();
+    }
+    onChanged();
+  };
+
   if (!questions.length) return <p className="rounded-2xl border border-dashed border-line p-5 text-center text-sm text-muted">{emptyText}</p>;
 
   return (
-    <div className="grid gap-2">
+    <div className={cx('grid gap-2', selecting && 'pb-24')}>
+      {selecting ? (
+        // 고르는 중: 몇 개 골랐는지·모두 고르기·끝내기 (Esc 도 끝낸다)
+        <div className="flex min-h-11 items-center gap-2 rounded-2xl bg-accent-soft py-1 pl-4 pr-1" role="status">
+          <span className="min-w-0 flex-1 truncate text-sm font-semibold text-accent">
+            {chosen.length ? `${chosen.length}개 골랐어요` : '문제를 눌러 골라 주세요'}
+          </span>
+          <button
+            type="button"
+            className="press rounded-full bg-surface px-3 py-1.5 text-sm font-semibold text-accent hover:brightness-95"
+            onClick={() => setPicked(allPicked ? new Set() : new Set(questions.map((q) => q.id)))}
+          >
+            {allPicked ? '모두 풀기' : '모두 고르기'}
+          </button>
+          <IconButton label="고르기 끝내기" onClick={endSelect}>
+            <Icon d={ICONS.close} />
+          </IconButton>
+        </div>
+      ) : questions.length > 1 ? (
+        <p className="px-1 text-xs text-muted">문제를 꾹 누르면 여러 개를 골라 한꺼번에 쉬게 하거나 지울 수 있어요.</p>
+      ) : null}
       {questions.map((q) => {
         const c = cards?.get(q.id);
         const isOpen = open === q.id;
         return (
-          <div key={q.id} className={cx('kok-card p-4', q.status === 'suspended' && 'opacity-70 outline-1 outline-dashed outline-line')}>
-            <button type="button" className="flex w-full items-start gap-3 text-left" onClick={() => setOpen(isOpen ? null : q.id)} aria-expanded={isOpen}>
-              <span className="min-w-0 flex-1">
-                <span className="mb-1 flex flex-wrap items-center gap-1.5">
-                  <Chip>{TYPE_LABEL[q.type]}</Chip>
-                  {q.created_by === 'ai' ? <Chip>AI</Chip> : <Chip tone="ok">내가 만듦</Chip>}
-                  {q.locked ? (
-                    <Chip tone="hl">
-                      <Icon d={ICONS.lock} size={12} strokeWidth={2.4} />
-                      잠금
-                    </Chip>
-                  ) : null}
-                  {q.edited ? <Chip tone="accent">고침</Chip> : null}
-                  {q.status === 'suspended' || (q.status === 'hidden' && q.rested_hidden) ? <Chip tone="warn">쉬는 중</Chip> : null}
-                  {q.status === 'hidden' ? <Chip>지금 버전엔 없음</Chip> : null}
-                  {q.steps ? <Chip tone="accent">{q.figure ? '그림 풀이' : '단계 풀이'}</Chip> : null}
-                  {c && c.wrong_count > 0 ? <Chip tone="bad">틀림 {c.wrong_count}</Chip> : null}
-                </span>
-                {!isOpen ? (
-                  <span className="line-clamp-2 block font-semibold">
-                    <RichText text={q.prompt} />
-                  </span>
+          <QuestionItem
+            key={q.id}
+            q={q}
+            selecting={selecting}
+            picked={picked.has(q.id)}
+            onPick={() => togglePick(q.id)}
+            onLongPress={() => (selecting ? togglePick(q.id) : startSelect(q.id))}
+            isOpen={isOpen}
+            onToggle={() => setOpen(isOpen ? null : q.id)}
+            chips={
+              <>
+                <Chip>{TYPE_LABEL[q.type]}</Chip>
+                {q.created_by === 'ai' ? <Chip>AI</Chip> : <Chip tone="ok">내가 만듦</Chip>}
+                {q.locked ? (
+                  <Chip tone="hl">
+                    <Icon d={ICONS.lock} size={12} strokeWidth={2.4} />
+                    잠금
+                  </Chip>
                 ) : null}
-              </span>
-              <span className="shrink-0 text-sm text-muted">{isOpen ? '접기' : '보기'}</span>
-            </button>
-            {isOpen ? (
-              <div className="mt-3 grid gap-3 border-t border-line pt-3">
-                <QuestionPreview q={q} />
-                <div className="flex flex-wrap gap-2">
-                  <Button size="sm" variant="secondary" onClick={() => setEditing(q)}>
-                    고치기
-                  </Button>
-                  <Button
-                    size="sm"
-                    variant="secondary"
-                    onClick={() => update(q.id, { locked: !q.locked }, q.locked ? '잠금을 풀었어요.' : '잠갔어요. AI가 다시 만들어도 그대로 남아요.')}
-                  >
-                    {q.locked ? '잠금 풀기' : '잠그기'}
-                  </Button>
-                  {/* 지금 버전에 없는 문제(hidden)는 복습에 나오지 않으므로 쉬기·다시 내기가 없다 */}
-                  {q.status !== 'hidden' ? (
-                    <Button
-                      size="sm"
-                      variant="secondary"
-                      onClick={() =>
-                        update(
-                          q.id,
-                          { status: q.status === 'active' ? 'suspended' : 'active' },
-                          q.status === 'active' ? '복습에서 뺐어요.' : '다시 복습에 넣었어요.',
-                        )
-                      }
-                    >
-                      {q.status === 'active' ? '잠깐 쉬기' : '다시 내기'}
-                    </Button>
-                  ) : null}
-                  {figuresOn && me?.canFigures && !q.steps && !q.source_figure ? (
-                    <Button size="sm" variant="secondary" busy={solving === q.id} disabled={!!solving && solving !== q.id} onClick={() => solve(q)}>
-                      그림 풀이 만들기 <Energy n={solveEst} />
-                    </Button>
-                  ) : null}
-                  <Button size="sm" variant="ghost" onClick={() => setReporting(q)}>
-                    이상해요
-                  </Button>
-                  <Button
-                    size="sm"
-                    variant="ghost"
-                    className="ml-auto text-bad"
-                    onClick={async () => {
-                      const r = removal?.(q) ?? {
-                        label: '지우기',
-                        confirm: '이 문제를 지울까요?',
-                        note: '푼 기록도 같이 지워지고 되돌릴 수 없어요.',
-                        danger: true,
-                        run: async () => !(await sb().from('questions').delete().eq('id', q.id)).error,
-                      };
-                      if (!(await ask({ title: r.danger ? '문제 지우기' : '문제 빼기', body: r.confirm, note: r.note, ok: r.label, danger: r.danger }))) return;
-                      const ok = await r.run();
-                      if (!ok) toast('지우지 못했어요.', 'bad');
-                      else onChanged();
-                    }}
-                  >
-                    {removal?.(q).label ?? '지우기'}
-                  </Button>
-                </div>
-              </div>
-            ) : null}
-          </div>
+                {q.edited ? <Chip tone="accent">고침</Chip> : null}
+                {q.status === 'suspended' || (q.status === 'hidden' && q.rested_hidden) ? <Chip tone="warn">쉬는 중</Chip> : null}
+                {q.status === 'hidden' ? <Chip>지금 버전엔 없음</Chip> : null}
+                {q.steps ? <Chip tone="accent">{q.figure ? '그림 풀이' : '단계 풀이'}</Chip> : null}
+                {c && c.wrong_count > 0 ? <Chip tone="bad">틀림 {c.wrong_count}</Chip> : null}
+              </>
+            }
+          >
+            <QuestionPreview q={q} />
+            <div className="flex flex-wrap gap-2">
+              <Button size="sm" variant="secondary" onClick={() => setEditing(q)}>
+                고치기
+              </Button>
+              <Button
+                size="sm"
+                variant="secondary"
+                onClick={() => update(q.id, { locked: !q.locked }, q.locked ? '잠금을 풀었어요.' : '잠갔어요. AI가 다시 만들어도 그대로 남아요.')}
+              >
+                {q.locked ? '잠금 풀기' : '잠그기'}
+              </Button>
+              {/* 지금 버전에 없는 문제(hidden)는 복습에 나오지 않으므로 쉬기·다시 내기가 없다 */}
+              {q.status !== 'hidden' ? (
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  onClick={() =>
+                    update(
+                      q.id,
+                      { status: q.status === 'active' ? 'suspended' : 'active' },
+                      q.status === 'active' ? '복습에서 뺐어요.' : '다시 복습에 넣었어요.',
+                    )
+                  }
+                >
+                  {q.status === 'active' ? '잠깐 쉬기' : '다시 내기'}
+                </Button>
+              ) : null}
+              {figuresOn && me?.canFigures && !q.steps && !q.source_figure ? (
+                <Button size="sm" variant="secondary" busy={solving === q.id} disabled={!!solving && solving !== q.id} onClick={() => solve(q)}>
+                  그림 풀이 만들기 <Energy n={solveEst} />
+                </Button>
+              ) : null}
+              <Button size="sm" variant="ghost" onClick={() => setReporting(q)}>
+                이상해요
+              </Button>
+              <Button
+                size="sm"
+                variant="ghost"
+                className="ml-auto text-bad"
+                onClick={async () => {
+                  const r = removal?.(q) ?? {
+                    label: '지우기',
+                    confirm: '이 문제를 지울까요?',
+                    note: '푼 기록도 같이 지워지고 되돌릴 수 없어요.',
+                    danger: true,
+                    run: async () => !(await sb().from('questions').delete().eq('id', q.id)).error,
+                  };
+                  if (!(await ask({ title: r.danger ? '문제 지우기' : '문제 빼기', body: r.confirm, note: r.note, ok: r.label, danger: r.danger }))) return;
+                  const ok = await r.run();
+                  if (!ok) toast('지우지 못했어요.', 'bad');
+                  else onChanged();
+                }}
+              >
+                {removal?.(q).label ?? '지우기'}
+              </Button>
+            </div>
+          </QuestionItem>
         );
       })}
+
+      {/* 여러 개 고르기: 아래 띠 (폰은 아래 메뉴 자리, 넓은 화면은 가운데 떠 있는 띠) */}
+      {selecting ? (
+        <SelectionBar count={chosen.length} noun="문제">
+          <BarAction
+            icon={anyActive || !restable.length ? ICONS.reviewOff : ICONS.review}
+            label={anyActive || !restable.length ? '쉬기' : '다시 내기'}
+            disabled={!restable.length || !!bulk}
+            busy={bulk === 'rest'}
+            onClick={() =>
+              anyActive
+                ? updateMany(
+                    restable.filter((q) => q.status === 'active').map((q) => q.id),
+                    { status: 'suspended' },
+                    '고른 문제를 복습에서 잠깐 뺐어요.',
+                    'rest',
+                  )
+                : updateMany(
+                    restable.map((q) => q.id),
+                    { status: 'active' },
+                    '고른 문제를 다시 복습에 넣었어요.',
+                    'rest',
+                  )
+            }
+          />
+          <BarAction
+            icon={anyUnlocked || !chosen.length ? ICONS.lock : ICONS.unlock}
+            label={anyUnlocked || !chosen.length ? '잠그기' : '잠금 풀기'}
+            disabled={!chosen.length || !!bulk}
+            busy={bulk === 'lock'}
+            onClick={() =>
+              updateMany(
+                chosen.map((q) => q.id),
+                { locked: anyUnlocked },
+                anyUnlocked ? '잠갔어요. AI가 다시 만들어도 그대로 남아요.' : '잠금을 풀었어요.',
+                'lock',
+              )
+            }
+          />
+          <BarAction
+            icon={ICONS.trash}
+            label={removeMany && chosen.length ? removeMany(chosen).label : '지우기'}
+            danger
+            disabled={!chosen.length || !!bulk}
+            busy={bulk === 'remove'}
+            onClick={removePicked}
+          />
+        </SelectionBar>
+      ) : null}
 
       <Sheet open={!!editing} onClose={() => setEditing(null)} title="문제 고치기">
         {editing ? (
@@ -270,6 +411,90 @@ export function QuestionList({
       </Sheet>
 
       <ReportSheet q={reporting} onClose={() => setReporting(null)} onChanged={onChanged} figuresOn={figuresOn} />
+    </div>
+  );
+}
+
+/**
+ * 문제 카드 하나: 누르면 펼치고, 꾹 누르면 여러 개 고르기. 고르는 동안은 카드 모양 그대로 어디를 눌러도 고르기만 한다
+ * (모서리에 동그라미, 고른 카드는 고리)
+ */
+function QuestionItem({
+  q,
+  selecting,
+  picked,
+  onPick,
+  onLongPress,
+  isOpen,
+  onToggle,
+  chips,
+  children,
+}: {
+  q: QuestionRow;
+  selecting: boolean;
+  picked: boolean;
+  onPick: () => void;
+  onLongPress: () => void;
+  isOpen: boolean;
+  onToggle: () => void;
+  chips: ReactNode;
+  children: ReactNode;
+}) {
+  const press = useLongPress(onLongPress, true);
+  const selectProps = selecting
+    ? { role: 'checkbox' as const, 'aria-checked': picked, 'aria-label': q.prompt.slice(0, 80), tabIndex: 0, onKeyDown: pickKeyHandler(onPick) }
+    : {};
+  return (
+    <div
+      className="kok-no-callout relative"
+      data-question={q.id}
+      {...press}
+      onClickCapture={(e) => {
+        press.onClickCapture(e);
+        if (e.defaultPrevented) return;
+        // 고르는 중에는 카드 안 어디를 눌러도 고르기만 한다
+        if (selecting) {
+          e.preventDefault();
+          e.stopPropagation();
+          onPick();
+        }
+      }}
+    >
+      <div
+        className={cx(
+          'kok-card p-4',
+          q.status === 'suspended' && 'opacity-70 outline-1 outline-dashed outline-line',
+          selecting && 'cursor-pointer',
+          selecting && picked && PICKED_RING,
+        )}
+        {...selectProps}
+      >
+        <button
+          type="button"
+          className="flex w-full items-start gap-3 text-left"
+          onClick={onToggle}
+          aria-expanded={isOpen}
+          tabIndex={selecting ? -1 : undefined}
+          aria-hidden={selecting || undefined}
+        >
+          <span className="min-w-0 flex-1">
+            <span className="mb-1 flex flex-wrap items-center gap-1.5">{chips}</span>
+            {!isOpen ? (
+              <span className="line-clamp-2 block font-semibold">
+                <RichText text={q.prompt} />
+              </span>
+            ) : null}
+          </span>
+          <span className="shrink-0 text-sm text-muted">{isOpen ? '접기' : '보기'}</span>
+        </button>
+        {/* 펼친 내용은 고르는 동안에도 보이지만 누를 수 없다 (누르면 카드를 고른다: 카드가 줄어들어 밀리지 않게) */}
+        {isOpen ? (
+          <div className="mt-3 grid gap-3 border-t border-line pt-3" inert={selecting || undefined} aria-hidden={selecting || undefined}>
+            {children}
+          </div>
+        ) : null}
+      </div>
+      {selecting ? <PickBadge picked={picked} /> : null}
     </div>
   );
 }

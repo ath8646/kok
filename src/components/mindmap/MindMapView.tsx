@@ -12,6 +12,12 @@ import { prefersReducedMotion } from '@/components/useReducedMotion';
 import { BranchCards } from './BranchCards';
 import { BranchSheet } from './BranchSheet';
 import { MindAtlas } from './MindAtlas';
+import { ONE_RING_MAX } from '@/lib/mindmap-atlas';
+import { radioKeys, cx } from '@/components/ui';
+
+/** 가지가 많을 때 거르기: 전체·헷갈려요·복습할 때 */
+type Filter = 'all' | 'weak' | 'due';
+const FILTER_LABEL: Record<Filter, string> = { all: '전체', weak: '헷갈려요', due: '복습할 때' };
 
 export type MindMapMode = 'cards' | 'map';
 type Mode = MindMapMode;
@@ -107,6 +113,20 @@ export function MindMapView({
   // 고치기·가리기는 큰 지도에서
   const view: Mode = editable || hideMode ? 'map' : mode;
 
+  // 가지가 많으면(9개부터) 헷갈리는 가지·복습할 때인 가지만 골라 볼 수 있다 (한눈 지도와 가지 카드 모두)
+  const [filter, setFilter] = useState<Filter>('all');
+  const statusOf = (b: Branch) => (b.keyPointId ? memory?.get(b.keyPointId)?.status : undefined);
+  const counts: Record<Filter, number> = {
+    all: branches.length,
+    weak: branches.filter((b) => statusOf(b) === 'weak').length,
+    due: branches.filter((b) => statusOf(b) === 'due').length,
+  };
+  const filters = (['all', 'weak', 'due'] as const).filter((f) => f === 'all' || counts[f] > 0);
+  const canFilter = branches.length > ONE_RING_MAX && filters.length > 1;
+  // 고른 거르기의 가지가 없어지면(복습해서 나아짐) 전체로
+  const on: Filter = canFilter && counts[filter] > 0 ? filter : 'all';
+  const shown = on === 'all' ? branches : branches.filter((b) => statusOf(b) === on);
+
   if (compact) {
     return (
       <div className="kok-card overflow-hidden p-2">
@@ -120,6 +140,7 @@ export function MindMapView({
           active={hlBranch}
           onPick={() => onOpen?.()}
           onRoot={onOpen}
+          limit={12}
         />
       </div>
     );
@@ -166,10 +187,32 @@ export function MindMapView({
     <div className="grid gap-3">
       {view === 'cards' ? (
         <div key="cards" className="kok-appear grid gap-3">
+          {canFilter ? (
+            <div role="radiogroup" aria-label="가지 거르기" className="flex flex-wrap gap-1.5">
+              {filters.map((f, i) => (
+                <button
+                  key={f}
+                  type="button"
+                  role="radio"
+                  aria-checked={on === f}
+                  tabIndex={on === f ? 0 : -1}
+                  onClick={() => setFilter(f)}
+                  onKeyDown={(e) => radioKeys(e, i, filters.length, (n) => setFilter(filters[n]))}
+                  className={cx(
+                    'kok-chip press inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-sm font-semibold',
+                    on === f ? 'kok-chip-on bg-accent text-accent-ink' : 'kok-chip-off bg-surface-2 text-ink',
+                  )}
+                >
+                  {f !== 'all' ? <span className={cx('h-2 w-2 rounded-full', f === 'weak' ? 'bg-bad' : 'bg-warn')} aria-hidden="true" /> : null}
+                  {FILTER_LABEL[f]} {counts[f]}
+                </button>
+              ))}
+            </div>
+          ) : null}
           <div className="kok-card kok-canvas overflow-hidden px-2 pb-3 pt-2">
             <MindAtlas
               rootLabel={rootLabel}
-              branches={branches}
+              branches={shown}
               colorOf={colorOf}
               memory={memory}
               icons={settings.icons}
@@ -182,7 +225,7 @@ export function MindMapView({
               {legend}
             </div>
           </div>
-          <BranchCards branches={branches} colorOf={colorOf} memory={memory} icons={settings.icons} flash={flash} highlight={hlBranch} onOpen={setOpen} />
+          <BranchCards branches={shown} colorOf={colorOf} memory={memory} icons={settings.icons} flash={flash} highlight={hlBranch} onOpen={setOpen} />
         </div>
       ) : (
         <div key="map" className="kok-appear">

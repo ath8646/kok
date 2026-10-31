@@ -26,23 +26,50 @@ const KIND_ICON: Record<FigKind, string> = {
 
 type View = 'art' | 'original';
 
+/** 이보다 가로로 긴 그림은 카드에서 너무 납작해 글을 읽을 수 없어서, 읽을 수 있는 높이로 두고 옆으로 넘겨 본다 */
+const WIDE_RATIO = 3.2;
+/** 가로로 긴 그림을 카드에서 보여 주는 높이 (px) */
+const WIDE_HEIGHT = 128;
+/** 카드에서 그림의 가장 큰 높이 (세로로 긴 그림·다시 그린 그림. 크게 보기에서는 다 보인다) */
+const CARD_MAX_H = 420;
+
 /** 원본에서 자른 그림 (받는 동안은 같은 비율의 자리) */
 function Original({ fig, alt, tall }: { fig: QuestionFigure; alt: string; tall?: boolean }) {
   const { url, failed } = useCropUrl(fig.crop);
   // 주소는 받았는데 그림을 못 읽었다 (지워졌거나 주소가 끝남)
   const [broken, setBroken] = useState<string | null>(null);
   const ratio = `${fig.w} / ${fig.h}`;
+  const wide = !tall && fig.h > 0 && fig.w / fig.h > WIDE_RATIO;
+  if (wide && url && broken !== url && !failed) {
+    // 가로로 아주 긴 그림 (연표·띠 그림): 납작하게 줄이지 않고 읽을 수 있는 높이로, 옆으로 넘겨 본다
+    return (
+      <div className="overflow-x-auto bg-white" tabIndex={0} role="group" aria-label={`${alt} (옆으로 넘겨 보기)`}>
+        {/* eslint-disable-next-line @next/next/no-img-element -- 비공개 저장소의 서명 주소라 Next 이미지 최적화를 거치지 않는다 */}
+        <img
+          src={url}
+          alt=""
+          width={fig.w}
+          height={fig.h}
+          draggable={false}
+          onError={() => setBroken(url)}
+          className="kok-fade block max-w-none"
+          style={{ height: WIDE_HEIGHT, width: Math.round((WIDE_HEIGHT * fig.w) / fig.h) }}
+        />
+      </div>
+    );
+  }
   if (failed || (url && broken === url)) {
     return (
       <div
         className="grid place-items-center bg-surface-2 px-4 py-8 text-center text-sm text-muted"
-        style={{ aspectRatio: ratio, maxHeight: tall ? undefined : 420 }}
+        style={{ aspectRatio: ratio, maxHeight: tall ? undefined : CARD_MAX_H }}
       >
         그림을 불러오지 못했어요.
       </div>
     );
   }
-  if (!url) return <div className="kok-shimmer w-full bg-surface-2" style={{ aspectRatio: ratio, maxHeight: tall ? undefined : 420 }} aria-hidden="true" />;
+  if (!url)
+    return <div className="kok-shimmer w-full bg-surface-2" style={{ aspectRatio: ratio, maxHeight: tall ? undefined : CARD_MAX_H }} aria-hidden="true" />;
   return (
     // eslint-disable-next-line @next/next/no-img-element -- 비공개 저장소의 서명 주소라 Next 이미지 최적화를 거치지 않는다
     <img
@@ -53,7 +80,7 @@ function Original({ fig, alt, tall }: { fig: QuestionFigure; alt: string; tall?:
       draggable={false}
       onError={() => setBroken(url)}
       className="kok-fade mx-auto block h-auto w-full bg-white object-contain"
-      style={{ aspectRatio: ratio, maxHeight: tall ? undefined : 420 }}
+      style={{ aspectRatio: ratio, maxHeight: tall ? undefined : CARD_MAX_H }}
     />
   );
 }
@@ -117,7 +144,8 @@ export function SourceFigureView({
 
   const body = (tall: boolean) =>
     shown === 'art' && fig.art ? (
-      <div className="bg-surface p-2">
+      // 다시 그린 그림이 세로로 아주 길면(줄이 많은 도식) 카드에서는 높이를 줄여 한눈에 (크게 보기에서는 원래 크기)
+      <div className={cx('bg-surface p-2', !tall && '[&_svg]:max-h-[420px]')}>
         <ArtView art={fig.art} title={question ? `자료 그림 (${kindLabel})` : artAlt(fig.art)} hideTitle={question} />
       </div>
     ) : (

@@ -3,9 +3,10 @@ import 'server-only';
 import { runSteps } from './pipeline';
 import { signInternal } from './internal';
 
-export async function driveSource(id: string, origin: string): Promise<void> {
+/** startedAt: 요청이 시작된 때 (서버 함수 시간은 after() 앞의 일부터 센다) */
+export async function driveSource(id: string, origin: string, startedAt = Date.now()): Promise<void> {
   try {
-    const outcome = await runSteps(id);
+    const outcome = await runSteps(id, startedAt);
     if (outcome === 'continue') await kick(id, origin);
   } catch (e) {
     console.error('[kok] drive failed', id, e);

@@ -44,6 +44,8 @@ export type MaterialMeta = {
   keyPoints?: { min: number; max: number };
   /** 학생이 자료 넣기 창에서 고른 자료 종류 (없으면 AI 가 이 조각을 읽고 고른다: material_type) */
   materialPick?: MaterialType;
+  /** 이 조각의 지난 답이 너무 길어 잘렸다: 짧게 다시 (pipeline stepOrganize) */
+  compact?: boolean;
 };
 
 /**
@@ -95,7 +97,7 @@ function figureRules(max: number, kind: 'pdf' | 'image' | 'doc', firstPage: numb
       : kind === 'doc'
         ? '  - page: the number N of the attached picture ("Picture N:") it is. List each picture at most once.'
         : '  - page: the original photo number where it appears.',
-    '  - kind: "map" | "chart" | "table" | "timeline" | "diagram" | "photo" | "artwork" | "document" | "cartoon" | "other". Use "map" only for a map drawn for the material that shows regions, routes, places or distributions on real geography. An old map made in the past (like 대동여지도 or 천하도) is "document", a painting of a landscape or a town is "artwork", and a plan of a city, a palace or a site is "other".',
+    '  - kind: "map" | "chart" | "table" | "timeline" | "diagram" | "photo" | "artwork" | "document" | "cartoon" | "other". Use "map" only for a map drawn for the material that shows regions, routes, places or distributions on real geography. An old map made in the past (like 대동여지도 or 천하도) is "document", a painting of a landscape or a town is "artwork", and a plan of a city, a palace or a site is "other". Use "diagram" only for a chart of labeled boxes or shapes joined by arrows or lines (a process, a cycle, a flow, a classification or an organization chart); a drawing of a real thing (a cell or an organ, a plant or an animal, lab equipment or an experiment setup, a cross-section, layers of rock, a machine) is "other", even when it has labels and arrows.',
     '  - title: a short name, at most 20 characters, as the material names it (like "5세기 고구려의 영토").',
     '  - caption: what the picture shows, in 1 to 3 short sentences: the labels, names, numbers, places, periods and arrow directions a test could use. Copy markers like (가), (나), A, B exactly, and say what a marker stands for only if the material says so.',
     '  - asks: what an exam would ask with this picture, in one sentence.',
@@ -138,6 +140,9 @@ export function organizePrompt(meta: MaterialMeta): string {
     '- unit: the unit or chapter the material covers, at most 20 characters. Use the name written in the material if there is one (like "2. 광합성"); otherwise a short topic name.',
     '- summary: one sentence.',
     `- key_points: ${kp.min} to ${kp.max} items, ordered as in the material: the more the material covers, the more key points, so that every topic a test could ask about has its own key point and nothing is squeezed into one. Each has id ("k1", "k2", ...), title, explanation (at most 2 short sentences in plain words), why (why it matters for exams, one sentence), importance ("high" | "medium" | "low"), pages.`,
+    meta.compact
+      ? '- Keep this note compact, because the last answer for this part was too long: one short sentence for each explanation and each why, and only the most important terms, pitfalls and examples.'
+      : '',
     '- terms: { term, meaning } for every technical term.',
     '- formulas: { latex, label } only if the material contains math formulas; latex without $ signs. Program code is not a formula.',
     '- pitfalls: common confusions and exam traps, each with the key_point_id it belongs to.',
@@ -204,40 +209,36 @@ export function locatePrompt(o: { kind: 'pdf' | 'image'; images: Array<{ page: n
     .join('\n');
 }
 
-/** 단어장의 용어·예문은 합칠 때 AI 에 보내지 않는다 (앱이 그대로 옮긴다: lib/material-questions.ts placeExamples) */
-const LISTS_KEPT_RULE =
-  '- Where terms and examples are empty, that material is a word list whose terms and example sentences the app adds back itself: do not write terms or examples for it.';
+/** 계획의 번호 하나짜리 개념은 앱이 그대로 옮긴다 (lib/merge-plan.ts) */
+const PLAN_KEEP_RULE =
+  '- In an item with one id, leave title, explanation and why as "": the app keeps that key point exactly as it is. Write them only in an item that merges two or more ids.';
+/** 용어·공식·함정·예시는 앱이 옮긴다 */
+const PLAN_APP_RULE = 'The app copies the key points and every term, formula, pitfall and example by your plan, so you only decide the key points.';
 
-export function mergePrompt(parts: number, keyPoints: { min: number; max: number } = { min: 3, max: 7 }, o: { listsKept?: boolean } = {}): string {
+/**
+ * 정리 조각 합치기 (PRD 15장 B): 조각들의 개념(<parts>, 번호 "p1.k3")을 하나의 노트로 합치는 계획만 받는다 (lib/merge-plan.ts).
+ * keyPoints: 합친 노트의 개념 수 (조각들의 합, 노트 끝까지)
+ */
+export function mergePlanPrompt(parts: number, keyPoints: { min: number; max: number } = { min: 3, max: 7 }): string {
   return [
-    `The JSON in <partials> holds study notes for ${parts} consecutive parts of one material. Merge them into one study note with the same fields.`,
-    `- Keep ${keyPoints.min} to ${keyPoints.max} key points overall: keep every key point of the parts, in order, merging only the ones that say the same thing. Do not drop or squeeze together key points about different topics. Renumber their ids "k1", "k2", ... and update every key_point_id in pitfalls and examples to match.`,
-    '- Keep all page numbers that still apply.',
-    '- Merge terms, formulas, pitfalls and examples, dropping duplicates.',
-    o.listsKept ? LISTS_KEPT_RULE : '',
+    `The JSON in <parts> holds the key points of study notes for ${parts} consecutive parts of one material. Plan how to merge them into one study note. ${PLAN_APP_RULE}`,
+    '- key_points: the key points of the merged note, in order. from: the ids of the part key points it is made of, copied exactly (like "p1.k3"). Use every id exactly once.',
+    `- Keep every key point of the parts, in order, each in its own item. Put two or more ids in one item only when they say the same thing; then write the title, explanation and why of the merged key point, keeping every fact of each. Use ${keyPoints.min} to ${keyPoints.max} items: if there are more key points than that, also merge closely related key points about the same topic.`,
+    PLAN_KEEP_RULE,
     '- title: one short title for the whole material, at most 30 characters. unit: the unit or chapter it covers, at most 20 characters. summary: one sentence for the whole material.',
-    '- Keep "checks" and "changes" items as they are.',
-  ]
-    .filter(Boolean)
-    .join('\n');
+  ].join('\n');
 }
 
-/** 노트에 자료를 더할 때: 지금 노트(<note>)에 새 자료의 정리(<new_parts>)를 합친다 */
-export function appendMergePrompt(parts: number, maxKeyPoints = 9, o: { listsKept?: boolean } = {}): string {
+/** 노트에 자료를 더할 때 (PRD 15장 H): 지금 노트(<note>, 번호 "k3")에 새 자료의 개념(<new_parts>, 번호 "p1.k3")을 합치는 계획만 받는다 */
+export function appendMergePlanPrompt(parts: number, maxKeyPoints = 9): string {
   return [
-    `The study note in <note> is the student's current note. The JSON in <new_parts> holds study notes made from new material the student added to it (${parts} part${parts > 1 ? 's' : ''}).`,
-    'Merge the new material into the current note and return one study note with the same fields.',
-    "- Keep the current note's structure, wording and key point order where you can. Add the new material where it fits, as new key points or inside existing ones.",
-    '- The student may mark text in the current note with **bold**, ==highlight== and !!red!!, start lines with "- " or "1. " to make lists, write math as $...$ and code as `...` or ``` blocks. Keep these marks exactly as written; do not add the first five to the new material.',
-    `- Keep every key point of the current note; merge two only if they say the same thing. Use at most ${maxKeyPoints} key points in total, so put new material inside existing key points when there is no room. Existing key points keep their ids ("k1", "k2", ...); new key points get the next unused ids. Update every key_point_id in pitfalls and examples to match.`,
-    '- Keep the page numbers of the current note. Page numbers in <new_parts> belong to the new material, so use [] as pages for anything that comes only from it.',
-    '- Merge terms, formulas, pitfalls and examples, dropping duplicates.',
-    o.listsKept ? LISTS_KEPT_RULE : '',
+    `The JSON in <note> holds the key points of the student's current study note. The JSON in <new_parts> holds the key points of study notes made from new material the student added to it (${parts} part${parts > 1 ? 's' : ''}). Plan how to merge the new material into the current note. ${PLAN_APP_RULE}`,
+    '- key_points: the key points of the merged note, in order. from: the ids of the key points it is made of, copied exactly: "k1", "k2", ... from <note> and "p1.k3", ... from <new_parts>. Use every id exactly once.',
+    '- Keep every key point of the current note, in its order, each in its own item. Put each new key point where it fits, in its own item.',
+    `- When a new key point says the same thing as a key point of the current note, or there is no room for it, put it in the item of that current key point (its id first) and write the title, explanation and why of the merged key point: keep the current text, wording and marks (**bold**, ==highlight==, !!red!!, lists, $math$, code) exactly as they are and add only the new facts. Never put two key points of the current note in one item. Use at most ${maxKeyPoints} items.`,
+    PLAN_KEEP_RULE,
     '- title: keep the current title unless the new material changes the topic. unit: the unit or chapter the note covers, at most 20 characters. summary: one sentence for the whole note.',
-    '- Keep the "checks" and "changes" items of both.',
-  ]
-    .filter(Boolean)
-    .join('\n');
+  ].join('\n');
 }
 
 /**
@@ -343,6 +344,13 @@ function materialQuizRules(
   return { extra: '' };
 }
 
+/**
+ * 실제 시험의 <보기> 문제 (ㄱ·ㄴ·ㄷ 중 옳은 것 고르기): 문제 글 끝에 '<보기>' 줄과 ㄱ.·ㄴ.·ㄷ. 줄. 화면은 이것을 보기 상자로 그린다
+ * (lib/bogi.ts). 객관식의 일부에만 (여러 사실을 한 번에 확인할 때)
+ */
+const BOGI_RULE =
+  '- For some mcq that check several facts of one key point at once (at most about a quarter of the mcq), use the exam <보기> form: the prompt asks "… 옳은 것만을 <보기>에서 있는 대로 고른 것은?" and ends with a line "<보기>" followed by three lines "ㄱ. …", "ㄴ. …", "ㄷ. …" (one statement each); the 4 choices are combinations like "ㄱ", "ㄴ", "ㄱ, ㄷ", "ㄴ, ㄷ", exactly one of them right.';
+
 export function quizPrompt(
   o: QuizOptions,
   scope: { onlyNew?: boolean; material?: MaterialType; originals?: number; covered?: readonly string[]; cards?: number } = {},
@@ -364,6 +372,7 @@ export function quizPrompt(
     `Difficulty mix: about ${o.mix.easy}% easy, ${o.mix.medium}% medium, ${o.mix.hard}% hard.`,
     lang,
     '- mcq: exactly 4 choices and one correct answer; set answer_index (0-3). Build wrong choices from the pitfalls.',
+    BOGI_RULE,
     '- ox: a statement that is clearly true or false; set answer_bool.',
     '- cloze: a sentence from the note with the key word replaced by "____"; set answer_text to the missing word.',
     '- short: a question with a short answer (a term, name or number); set answer_text.',
@@ -382,6 +391,7 @@ export function quizPrompt(
       ? [
           `- Also write one question for each picture in <figures> (${o.figures} in total) and set its figure_id to the picture's id. Every other question has figure_id "".`,
           '- The student sees the picture right below the question but not its title or caption, so the question must need the picture: ask about what it shows or what it relates to, and refer to it as "다음 지도", "다음 그래프", "다음 자료" and so on.',
+          '- Word picture questions like real Korean school exams: begin with one sentence that says what the picture shows without giving the answer away ("그림은 식물 세포의 구조를 나타낸 것이다.", "표는 지역별 인구를 나타낸 것이다."), then ask.',
           "- Base the answer only on the picture's caption and the note. Never put the answer in the question. If the picture uses a marker like (가), ask about the marker instead of naming it.",
         ].join('\n')
       : '',
@@ -465,26 +475,66 @@ const COURSE_LEVELS: Record<CourseLevelKey, string> = {
   ].join('\n'),
 };
 
+type CoursePlanSize = { units: { min: number; max: number }; lessons: { min: number; max: number } };
+
+/** 학습 길의 글 규칙 (한 번에 만들기·뼈대·한 단계 모두) */
+const COURSE_GROUND =
+  'Use the note as the ground truth. The attached original material (if any), <questions> and <figures> are extra context for examples and wording: never add facts the note or material does not support.';
+const COURSE_PATH_RULES = (plan: CoursePlanSize) => [
+  '- title: a short name for the whole path, at most 24 characters. intro: one or two sentences that tell the student what they will be able to do at the end.',
+  `- units: ${plan.units.min} to ${plan.units.max} stages in learning order, from the basics to application. Each unit has a title (at most 16 characters), a summary (one sentence: what this stage covered) and 2 to 4 lessons; ${plan.lessons.min} to ${plan.lessons.max} lessons in total, so that a note with more key points gets more lessons.`,
+  '- Each lesson covers one or two key points of the note. key_point_ids holds their ids copied from <note>. Order lessons so each one builds on the previous.',
+  '- lesson.title: at most 20 characters. lesson.goal: one sentence starting with what the student will be able to do ("~을 설명할 수 있어요", "~을 구별할 수 있어요").',
+];
+const COURSE_LESSON_RULES = [
+  '- cards: 3 to 6 cards that teach the lesson one idea at a time, in order. kind is "concept" (the idea itself), "example" (a worked example or everyday case), "compare" (how it differs from something it is confused with) or "tip" (a memory trick or pitfall). heading: at most 20 characters. text: 1 to 3 short sentences fit for the level (at most 220 characters). tip: an optional one-line memory hook or warning (at most 60 characters), or "".',
+  '- checks: 2 to 4 questions that confirm the lesson, each answerable from the cards of that lesson. type is "mcq" (exactly 4 choices, answer is the correct choice copied exactly), "ox" (answer is "O" or "X"), "cloze" (the sentence has "____" and answer is the missing word) or "short" (answer is a term, name or number; put other correct spellings in accepted). explanation: one or two sentences. Do not copy questions from <questions>; write new ones that fit the level.',
+];
+const COURSE_STYLE =
+  '- Write everything in Korean in a warm, encouraging tone (해요체), keeping terms, formulas ($...$), code (`...` or ``` blocks) and foreign-language examples in their original form. No markup other than these.';
+const COURSE_COVER = '- Cover every key point of the note at least once across the lessons. Do not invent key_point_ids.';
+
 /**
- * 단계별 학습: 노트를 단계 → 레슨 → 카드·확인 문제로 나눈다 (PRD 15장 N).
+ * 단계별 학습: 노트를 단계 → 레슨 → 카드·확인 문제로 나눈다 (PRD 15장 N). 레슨이 적은 노트는 한 번에 만든다.
  * plan: 노트의 개념 수에 따른 단계·레슨 수 (lib/ai/scale.ts coursePlanRange): 개념 하나나 둘에 레슨 하나
  */
-export function coursePrompt(
-  level: CourseLevelKey,
-  plan: { units: { min: number; max: number }; lessons: { min: number; max: number } } = { units: { min: 2, max: 5 }, lessons: { min: 4, max: 12 } },
-): string {
+export function coursePrompt(level: CourseLevelKey, plan: CoursePlanSize = { units: { min: 2, max: 5 }, lessons: { min: 4, max: 12 } }): string {
   return [
     'Design a step-by-step learning path (like a language-app lesson path) for the study note in <note>, so the student can learn it in small steps.',
-    'Use the note as the ground truth. The attached original material (if any), <questions> and <figures> are extra context for examples and wording: never add facts the note or material does not support.',
+    COURSE_GROUND,
     COURSE_LEVELS[level],
-    '- title: a short name for the whole path, at most 24 characters. intro: one or two sentences that tell the student what they will be able to do at the end.',
-    `- units: ${plan.units.min} to ${plan.units.max} stages in learning order, from the basics to application. Each unit has a title (at most 16 characters), a summary (one sentence: what this stage covered) and 2 to 4 lessons; ${plan.lessons.min} to ${plan.lessons.max} lessons in total, so that a note with more key points gets more lessons.`,
-    '- Each lesson covers one or two key points of the note. key_point_ids holds their ids copied from <note>. Order lessons so each one builds on the previous.',
-    '- lesson.title: at most 20 characters. lesson.goal: one sentence starting with what the student will be able to do ("~을 설명할 수 있어요", "~을 구별할 수 있어요").',
-    '- cards: 3 to 6 cards that teach the lesson one idea at a time, in order. kind is "concept" (the idea itself), "example" (a worked example or everyday case), "compare" (how it differs from something it is confused with) or "tip" (a memory trick or pitfall). heading: at most 20 characters. text: 1 to 3 short sentences fit for the level (at most 220 characters). tip: an optional one-line memory hook or warning (at most 60 characters), or "".',
-    '- checks: 2 to 4 questions that confirm the lesson, each answerable from the cards of that lesson. type is "mcq" (exactly 4 choices, answer is the correct choice copied exactly), "ox" (answer is "O" or "X"), "cloze" (the sentence has "____" and answer is the missing word) or "short" (answer is a term, name or number; put other correct spellings in accepted). explanation: one or two sentences. Do not copy questions from <questions>; write new ones that fit the level.',
-    '- Write everything in Korean in a warm, encouraging tone (해요체), keeping terms, formulas ($...$), code (`...` or ``` blocks) and foreign-language examples in their original form. No markup other than these.',
-    '- Cover every key point of the note at least once across the lessons. Do not invent key_point_ids.',
+    ...COURSE_PATH_RULES(plan),
+    ...COURSE_LESSON_RULES,
+    COURSE_STYLE,
+    COURSE_COVER,
+  ].join('\n');
+}
+
+/**
+ * 큰 노트의 학습 길 1: 뼈대만 (단계·레슨의 이름·목표·개념 번호). 레슨의 카드·문제는 단계마다 따로 (courseUnitPrompt, PRD 15장 N)
+ */
+export function courseOutlinePrompt(level: CourseLevelKey, plan: CoursePlanSize): string {
+  return [
+    'Design a step-by-step learning path (like a language-app lesson path) for the study note in <note>, so the student can learn it in small steps. This is the first pass: write only the plan of the path. The cards and checks of each lesson are written next, one stage at a time, from your lesson titles, goals and key_point_ids.',
+    COURSE_GROUND,
+    COURSE_LEVELS[level],
+    ...COURSE_PATH_RULES(plan),
+    COURSE_STYLE,
+    COURSE_COVER,
+  ].join('\n');
+}
+
+/**
+ * 큰 노트의 학습 길 2: 한 단계의 레슨들 (뼈대 <path> 의 stage 번째 단계, 레슨 차례대로 카드·확인 문제).
+ * <note> 에는 그 단계의 개념만 보낸다 (다른 단계와 겹치지 않게 길 전체는 <path> 로)
+ */
+export function courseUnitPrompt(level: CourseLevelKey, stage: { index: number; title: string; lessons: number }): string {
+  return [
+    `You are writing one stage of a step-by-step learning path (like a language-app lesson path) for a study note. <path> holds the plan of the whole path; write the lessons of stage ${stage.index + 1}, "${stage.title}": exactly ${stage.lessons} item${stage.lessons > 1 ? 's' : ''} in "lessons", one for each lesson of this stage in the same order. Teach what each lesson's title, goal and key_point_ids say, and leave what other stages teach to them.`,
+    '<note> holds the key points of this stage (with their terms, formulas, pitfalls and examples). ' + COURSE_GROUND,
+    COURSE_LEVELS[level],
+    ...COURSE_LESSON_RULES,
+    COURSE_STYLE,
   ].join('\n');
 }
 
@@ -791,6 +841,7 @@ const REDRAW_BY_KIND: Record<ArtKind, string[]> = {
   ],
   diagram: [
     'This is a diagram of boxes and arrows (an organization chart, a class structure, a process or a flow).',
+    '- redrawable: also false when the picture is a drawing of a real thing rather than boxes and arrows (a cell or an organ, a living thing, lab equipment or an experiment setup, a cross-section): the original picture shows it better.',
     '- Place the boxes on a grid that follows the picture: cols and rows (at most 6 columns and 8 rows); each node sits at col and row (0-based, the top-left cell is 0, 0) and spans span columns.',
     '- nodes: id (short and unique), label as written, shape (box, round, ellipse, circle, or plain for text without a frame), tone, strong (true for highlighted boxes).',
     '- links: each line or arrow between two nodes (from and to are node ids) with its label as written. kind: arrow (one way), both (two ways), line (no head), dashed.',

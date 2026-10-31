@@ -456,6 +456,19 @@ export default function HomePage() {
           </span>
         </Link>
       </div>
+      {/* 오답노트: 아래 메뉴에서 빠져 복습 탭 안에 있다. 홈에서는 틀린 문제 수로 바로 간다 */}
+      <Link
+        href="/wrong"
+        className="kok-card kok-card-hover press flex items-center gap-3 px-4 py-3"
+        aria-label={ready ? `오답노트 ${wrongCount ? `${wrongCount}문제` : '비어 있어요'}` : '오답노트'}
+      >
+        <span className="kok-well grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-bad-soft text-bad" aria-hidden="true">
+          <Icon d="M6 3h12a1 1 0 0 1 1 1v17l-7-4-7 4V4a1 1 0 0 1 1-1zM9.5 8.5l5 5M14.5 8.5l-5 5" size={19} />
+        </span>
+        <span className="min-w-0 flex-1 font-bold">오답노트</span>
+        <span className="h-5 text-sm text-muted">{known(wrongCount ? `${wrongCount}문제` : '비어 있어요', 'w-12')}</span>
+        <Icon d={ICONS.chevronRight} size={18} className="shrink-0 text-muted" />
+      </Link>
       {err && plan ? <p className="text-sm text-bad">새 복습 정보를 불러오지 못했어요. 새로 고침해 주세요.</p> : null}
 
       {/* 오늘의 KOK 처음부터: 저장한 진행을 지우고 새로 고른다 (빛나는 카드 밖에 둔다: 카드가 isolation 이라 안에 두면 아래 메뉴 밑에 깔린다) */}

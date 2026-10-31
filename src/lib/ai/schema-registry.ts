@@ -7,11 +7,13 @@ import {
   chatFigureJsonSchema,
   checkJsonSchema,
   courseJsonSchema,
+  courseOutlineJsonSchema,
+  courseUnitJsonSchema,
   gradeJsonSchema,
   homeChatJsonSchema,
   locateJsonSchema,
+  mergePlanJsonSchema,
   noteChatJsonSchema,
-  noteJsonSchema,
   organizeJsonSchema,
   problemsJsonSchema,
   quizFiguresJsonSchema,
@@ -48,7 +50,7 @@ export function schemaProps(s: unknown): number {
 /** 앱이 AI 에 보내는 모든 답 모양 (이름은 관리자 화면에 보인다) */
 export function aiSchemas(): Array<{ name: string; schema: JsonSchema }> {
   return [
-    { name: '노트 합치기', schema: noteJsonSchema },
+    { name: '노트 합치기 (계획)', schema: mergePlanJsonSchema },
     { name: '노트 정리 (글)', schema: organizeJsonSchema({ figures: false, pageNumbers: false }) },
     { name: '노트 정리 + 쪽 번호 (PDF)', schema: organizeJsonSchema({ figures: false, pageNumbers: true }) },
     { name: '노트 정리 + 자료 그림 (PDF)', schema: organizeJsonSchema({ figures: true, pageNumbers: true }) },
@@ -71,6 +73,8 @@ export function aiSchemas(): Array<{ name: string; schema: JsonSchema }> {
     { name: 'AI에게 물어보기 (Pro)', schema: homeChatJsonSchema(true) },
     { name: '채팅 풀이 그림 (Pro)', schema: chatFigureJsonSchema },
     { name: '단계별 학습 (Pro)', schema: courseJsonSchema },
+    { name: '단계별 학습: 길의 뼈대 (큰 노트)', schema: courseOutlineJsonSchema },
+    { name: '단계별 학습: 한 단계의 레슨 (큰 노트)', schema: courseUnitJsonSchema },
     { name: '표지 그림 (Pro)', schema: coverJsonSchema },
     { name: '테마 만들기', schema: themeJsonSchema },
     { name: '테마 그림 다시 그리기', schema: themeImageJsonSchema },

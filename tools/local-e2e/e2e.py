@@ -1358,7 +1358,7 @@ async def tab_steps(browser):
     데이터를 바꾼 뒤에는 기억해 둔 옛 화면을 보이지 않는다. 복습을 끝낸 뒤 '홈으로'는 미리 읽어 둔 홈이 바로 보인다"""
     student = USERS["student"][0]
     step("switching tabs: a screen comes back as it was at once, and no placeholder words show and change a moment later")
-    # 오답노트에 두 문제, 복습할 차례인 문제 셋 (오늘의 KOK·오답노트가 바뀌는 것을 본다)
+    # 오답노트에 두 문제, 복습할 차례인 문제 셋 (홈의 바로 가기 '오답노트 N문제'·오늘의 KOK 이 바뀌는 것을 본다)
     live_q = (
         f"select c.question_id from public.cards c join public.questions q on q.id = c.question_id join public.notes n on n.id = q.note_id "
         f"join public.sources s on s.id = n.source_id where c.user_id = '{student}' and q.status = 'active' and s.in_review"
@@ -1398,15 +1398,15 @@ async def tab_steps(browser):
     await page.goto(BASE + "/home")
     await settle(today_ring)
     rows = await rows_since(0)
-    home_h1, home_sub = seq(rows, "h1"), seq(rows, "sub")
+    home_h1, home_sub, home_wrong = seq(rows, "h1"), seq(rows, "sub"), seq(rows, "wrong")
     assert len(home_h1) == 1 and home_h1[0] != "오늘", f"home title changed while loading: {home_h1}"
     assert len(home_sub) == 1, f"home subtitle changed while loading: {home_sub}"
-    # 홈 바로 가기는 자료 공유·문제 모아 보기 (오답노트는 아래 메뉴의 '오답')
-    assert not seq(rows, "wrong"), f"home should not have a wrong-note shortcut: {seq(rows, 'wrong')}"
-    n_wrong = int(db(f"select count(*) from public.cards c join public.questions q on q.id = c.question_id join public.notes n on n.id = q.note_id join public.sources s on s.id = n.source_id where c.user_id = '{student}' and c.in_wrong_note and q.status = 'active' and s.in_review"))
+    m = re.fullmatch(r"오답노트(\d+)문제", home_wrong[-1])
+    assert m and set(home_wrong) <= {"오답노트", home_wrong[-1]}, f"wrong-note shortcut showed other words while loading: {home_wrong}"
+    n_wrong = int(m.group(1))
     assert n_wrong >= 2, n_wrong
-    home_h1, home_sub = home_h1[0], home_sub[0]
-    print("   home:", home_h1, "/", home_sub, "/ 오답", n_wrong)
+    home_h1, home_sub, home_wrong = home_h1[0], home_sub[0], home_wrong[-1]
+    print("   home:", home_h1, "/", home_sub, "/", home_wrong)
 
     # 2) 홈 → 자료함 → 홈: 다시 들어온 홈은 처음 그린 모습부터 다 읽은 글 그대로 ('불러오는 중' 자리 없이)
     await nav.get_by_role("link", name="자료함").first.click()
@@ -1418,8 +1418,8 @@ async def tab_steps(browser):
     await page.wait_for_url(re.compile(r"/home$"))
     await settle(today_ring)
     rows = await rows_since(i, leave=("자료함",))
-    assert rows and (rows[0]["h1"], rows[0]["sub"]) == (home_h1, home_sub), f"home did not come back as it was: {rows[:3]}"
-    assert seq(rows, "h1") == [home_h1] and seq(rows, "sub") == [home_sub], rows
+    assert rows and (rows[0]["h1"], rows[0]["sub"], rows[0]["wrong"]) == (home_h1, home_sub, home_wrong), f"home did not come back as it was: {rows[:3]}"
+    assert seq(rows, "h1") == [home_h1] and seq(rows, "sub") == [home_sub] and seq(rows, "wrong") == [home_wrong], rows
     assert not any(r["busy"] for r in rows), "home showed a loading placeholder when coming back"
     await shot(page, "120-home-back", full=False)
 
@@ -1432,44 +1432,52 @@ async def tab_steps(browser):
     assert rows and rows[0]["h1"] == "자료함" and rows[0]["sub"] == lib_sub[-1], f"library did not come back as it was: {rows[:3]}, {lib_sub}"
     assert seq(rows, "sub") == [lib_sub[-1]] and not any(r["busy"] for r in rows), rows
 
-    # 4) 복습 탭·오답 탭: 처음 열 때도 부제는 다 읽은 글 하나만, 다시 들어오면 처음부터 그대로
+    # 4) 복습 탭·오답노트: 처음 열 때도 부제는 다 읽은 글 하나만, 다시 들어오면 처음부터 그대로.
+    #    오답노트는 아래 메뉴에서 빠져 복습 탭 안에 있다 (복습 시작 화면 위·홈의 '오답노트 N문제' 줄로 들어간다)
+    wrong_link = page.locator("main a[href='/wrong']")
     tabs = (
-        ("복습", r"/review$", "복습", page.get_by_role("radiogroup", name="언제 공부한 문제를 풀까요?")),
-        ("오답", r"/wrong$", "오답노트", page.get_by_text(f"틀린 문제 {n_wrong}개 · 3번 연속 맞히면 졸업해요")),
+        ("복습", nav.get_by_role("link", name="복습").first, r"/review$", "복습", page.get_by_role("radiogroup", name="언제 공부한 문제를 풀까요?")),
+        ("오답노트", wrong_link.first, r"/wrong$", "오답노트", page.get_by_text(f"틀린 문제 {n_wrong}개 · 3번 연속 맞히면 졸업해요")),
     )
-    for tab, url, title, ready in tabs:
+    for tab, opener, url, title, ready in tabs:
         here = (await page.evaluate("document.querySelector('main h1')?.textContent || ''")).strip()
         i = await mark()
-        await nav.get_by_role("link", name=tab).first.click()
+        await opener.click()
         await page.wait_for_url(re.compile(url))
         await settle(ready)
         first_sub = seq(await rows_since(i, leave=(here,)), "sub")
         assert len(first_sub) == 1, f"{tab}: subtitle changed while loading: {first_sub}"
-        await expect(nav.get_by_role("link", name=tab).first).to_have_attribute("aria-current", "page")
+        if tab == "복습":
+            # 복습 탭이 켜진 채 오답노트로 (아래 메뉴의 복습 칸이 고른 칸)
+            await expect(page.locator("main a[href='/wrong']")).to_contain_text(f"{n_wrong}문제")
+        else:
+            await expect(nav.get_by_role("link", name="복습").first).to_have_attribute("aria-current", "page")
         await nav.get_by_role("link", name="홈").first.click()
         await page.wait_for_url(re.compile(r"/home$"))
         await settle(today_ring)
         i = await mark()
-        await nav.get_by_role("link", name=tab).first.click()
+        await opener.click()
         await page.wait_for_url(re.compile(url))
         await settle(ready)
         rows = await rows_since(i, leave=(home_h1,))
         assert rows and (rows[0]["h1"], rows[0]["sub"]) == (title, first_sub[0]), f"{tab} did not come back as it was: {rows[:3]}"
         assert seq(rows, "sub") == first_sub and not any(r["busy"] for r in rows), (tab, rows)
 
-    # 5) 오답노트에서 한 문제를 빼면(저장) 기억해 둔 화면은 쓰지 않는다: 홈은 제목·부제가 한 번만 나타나고,
-    #    돌아간 오답노트는 뺀 뒤의 목록 그대로 (화면에서 바로 고친 목록을 저장한 뒤 다시 기억해 둔다)
+    # 5) 오답노트에서 한 문제를 빼면(저장) 기억해 둔 홈은 쓰지 않는다: 빼기 전 수가 잠깐 보였다가 바뀌지 않고, 바뀐 수만 나타난다
     await page.get_by_role("button", name="다 외웠어요 · 빼기").first.click()
     await expect(page.get_by_text("다 외운 문제로 뺐어요.")).to_be_visible()
     await expect(page.get_by_text(f"틀린 문제 {n_wrong - 1}개 · 3번 연속 맞히면 졸업해요")).to_be_visible()
     i = await mark()
     await nav.get_by_role("link", name="홈").first.click()
     await page.wait_for_url(re.compile(r"/home$"))
-    await settle(today_ring)
+    await expect(page.locator("main a[href='/wrong']")).to_contain_text(f"{n_wrong - 1}문제")
+    await page.wait_for_timeout(800)
     rows = await rows_since(i, leave=("오답노트",))
+    assert seq(rows, "wrong") in ([f"오답노트{n_wrong - 1}문제"], ["오답노트", f"오답노트{n_wrong - 1}문제"]), f"stale count shown after a change: {seq(rows, 'wrong')}"
     assert len(seq(rows, "h1")) == 1 and len(seq(rows, "sub")) == 1, rows
+    # 돌아간 오답노트는 뺀 뒤의 목록 그대로 (화면에서 바로 고친 목록을 저장한 뒤 다시 기억해 둔다)
     i = await mark()
-    await nav.get_by_role("link", name="오답").first.click()
+    await page.locator("main a[href='/wrong']").first.click()
     await page.wait_for_url(re.compile(r"/wrong$"))
     await settle(page.get_by_text(f"틀린 문제 {n_wrong - 1}개 · 3번 연속 맞히면 졸업해요"))
     rows = await rows_since(i, leave=(seq(rows, "h1")[0],))
@@ -1500,7 +1508,7 @@ async def tab_steps(browser):
 
 
 async def share_steps(browser):
-    """자료 공유(커뮤니티): 홈 바로 가기 '자료 공유' → 갤러리 만들기 → 갤러리 안에서 파일·노트를 붙인 글 → 다른 학생이 받기(무료 하루 2개)·열기·내 자료함에 넣기·KOK으로 정리
+    """자료 공유(커뮤니티): 아래 메뉴 '공유' → 갤러리 만들기 → 갤러리 안에서 파일·노트를 붙인 글 → 다른 학생이 받기(무료 하루 2개)·열기·내 자료함에 넣기·KOK으로 정리
     → 댓글(익명·답글)·좋아요 → 갤러리 만든 사람의 지우기 → 신고가 쌓이면 가림 → 차단 → 찾기·고치기 → 운영자(실제 글쓴이·다시 보이기·지우기) → 갤러리 지우기"""
     student, admin, other = (USERS[k][0] for k in ("student", "admin", "other"))
     db(f"delete from public.rate_hits where user_id in ('{student}', '{other}', '{admin}')")
@@ -1511,18 +1519,19 @@ async def share_steps(browser):
     assert s_nick and o_subject, (s_nick, o_subject)
     files_root = pathlib.Path(__file__).parent / "fakebase" / "files"
 
-    step("share: the bottom tabs stay 홈·자료함·복습·오답·설정; the home shortcut '자료 공유' opens the hub (writing is inside a gallery)")
+    step("share: the bottom tabs are 홈·자료함·복습·공유·설정, home shortcuts are 자료 공유 · 문제 모아 보기 (+ 오답노트), and the tab '공유' opens the hub (writing is inside a gallery)")
     ctx, page = await new_ctx(browser, "student")
     await page.goto(BASE + "/home")
     nav = page.get_by_role("navigation", name="주 메뉴")
-    await expect(nav.get_by_role("link")).to_have_text(["홈", "자료함", "복습", "오답", "설정"])
-    # 홈 바로 가기: 자료 공유·문제 모아 보기 (오답노트는 아래 메뉴의 '오답')
+    await expect(nav.get_by_role("link")).to_have_text(["홈", "자료함", "복습", "공유", "설정"])
+    await expect(page.get_by_role("link", name=re.compile("^자료 공유"))).to_be_visible()
     await expect(page.get_by_role("link", name=re.compile("^문제 모아 보기"))).to_be_visible()
-    await expect(page.locator("main a[href='/wrong']")).to_have_count(0)
-    await page.get_by_role("link", name=re.compile("^자료 공유")).click()
+    await expect(page.locator("main a[href='/wrong']")).to_be_visible()
+    await nav.get_by_role("link", name="공유", exact=True).first.click()
     await page.wait_for_url(re.compile(r"/share$"))
     await expect(page.get_by_role("heading", name="자료 공유")).to_be_visible()
     await expect(page.get_by_role("link", name=re.compile("^중학교 갤러리, 글"))).to_be_visible()
+    await expect(nav.get_by_role("link", name="공유", exact=True).first).to_have_attribute("aria-current", "page")
     # 첫 화면에는 글쓰기 단추가 없다 (글은 갤러리에 들어가서 쓴다)
     await expect(page.get_by_role("link", name="글쓰기")).to_have_count(0)
     await shot(page, "140-share-hub")
@@ -2388,6 +2397,43 @@ async def main():
         # 다음 시험들을 위해 카드 보기로 되돌린다
         await mm_view.get_by_role("radio", name="카드").click()
 
+        step("mind map with many branches: two rings up to 16, a numbered index map beyond, filter chips by memory")
+        mm_before = db(f"select v.spec::text from public.visuals v join public.notes n on n.id = v.note_id where n.source_id = '{sid}' and v.type = 'mindmap'")
+        many = {"root_label": "생명 과학", "nodes": [{"id": f"b{i}", "parent_id": "", "label": f"가지 {i} 개념", "icon": "", "key_point_id": "", "pages": [], "hint": ""} for i in range(1, 21)]}
+        db(
+            f"update public.visuals v set spec = $j${json.dumps(many, ensure_ascii=False)}$j$::jsonb from public.notes n "
+            f"where n.id = v.note_id and n.source_id = '{sid}' and v.type = 'mindmap'"
+        )
+        await page.reload()
+        assert await wait_ready(page)
+        await page.get_by_role("tab", name="그림").click()
+        index_map = page.get_by_role("group", name="한눈 지도: 생명 과학, 가지 20개")
+        await expect(index_map).to_be_visible()
+        await expect(index_map.get_by_role("button", name=re.compile(r"^\d+\. 가지"))).to_have_count(20)
+        await shot(page, "13b-mindmap-index", full=False)
+        await no_hscroll(page, "mindmap index")
+        await index_map.get_by_role("button", name="17. 가지 17 개념").click()
+        await expect(page.locator("#branch-b17")).to_be_in_viewport()
+        # 12개는 두 겹 궤도 (알약끼리 겹치지 않는다: lib/mindmap-atlas.ts 시험)
+        many["nodes"] = many["nodes"][:12]
+        db(
+            f"update public.visuals v set spec = $j${json.dumps(many, ensure_ascii=False)}$j$::jsonb from public.notes n "
+            f"where n.id = v.note_id and n.source_id = '{sid}' and v.type = 'mindmap'"
+        )
+        await page.reload()
+        assert await wait_ready(page)
+        await page.get_by_role("tab", name="그림").click()
+        rings = page.get_by_role("group", name="한눈 지도: 생명 과학, 가지 12개")
+        await expect(rings).to_be_visible()
+        assert await rings.locator("ellipse").count() == 2, "two dashed rings"
+        await shot(page, "13c-mindmap-rings", full=False)
+        db(
+            f"update public.visuals v set spec = $j${mm_before}$j$::jsonb from public.notes n "
+            f"where n.id = v.note_id and n.source_id = '{sid}' and v.type = 'mindmap'"
+        )
+        await page.reload()
+        assert await wait_ready(page)
+
         step("questions tab")
         await page.get_by_role("tab", name=re.compile("문제")).click()
         await expect(page.get_by_text("광합성이 일어나는 세포 소기관은?")).to_be_visible()
@@ -2439,6 +2485,68 @@ async def main():
         await expect(page.get_by_text("새 문제로 바꿨어요.")).to_be_visible()
         await page.wait_for_timeout(500)
         await shot(page, "15-questions")
+        step("questions: long-press to pick several, rest them together, then bring them back (cards keep their shape)")
+        qcards = page.locator("[data-question]")
+        assert await qcards.count() >= 2
+        picked_ids = [await qcards.nth(0).get_attribute("data-question"), await qcards.nth(1).get_attribute("data-question")]
+        id_list = ",".join(f"'{x}'" for x in picked_ids)
+
+        async def press_card(loc):
+            # 알림(위에 잠깐 뜨는 글)에 가리지 않게 카드를 화면 가운데로
+            await loc.evaluate("el => el.scrollIntoView({ block: 'center' })")
+            await page.wait_for_timeout(150)
+            box = await loc.bounding_box()
+            await page.mouse.move(box["x"] + 60, box["y"] + 18)
+            await page.mouse.down()
+            await page.wait_for_timeout(650)
+            await page.mouse.up()
+
+        h_before = (await qcards.nth(1).bounding_box())["height"]
+        await press_card(qcards.nth(0))
+        await expect(page.get_by_role("toolbar", name="고른 문제 1개")).to_be_visible()
+        await qcards.nth(1).click()
+        bar = page.get_by_role("toolbar", name="고른 문제 2개")
+        await expect(bar).to_be_visible()
+        assert abs((await qcards.nth(1).bounding_box())["height"] - h_before) < 1, "a picked card keeps its shape"
+        await expect(page.get_by_role("checkbox", checked=True)).to_have_count(2)
+        await shot(page, "15b-questions-pick", full=False)
+        await bar.get_by_role("button", name="쉬기").click()
+        await expect(page.get_by_text("고른 문제를 복습에서 잠깐 뺐어요.")).to_be_visible()
+        assert db(f"select string_agg(distinct status, ',') from public.questions where id in ({id_list})") == "suspended"
+        await expect(page.get_by_role("toolbar", name=re.compile("^고른 문제"))).to_have_count(0)
+        for k in range(2):
+            await expect(qcards.nth(k)).to_contain_text("쉬는 중")
+        await expect(page.get_by_text("고른 문제를 복습에서 잠깐 뺐어요.")).to_be_hidden(timeout=10000)
+        # 둘 다 쉬는 중이면 띠의 단추는 '다시 내기', Esc 는 고르기만 끝낸다
+        await press_card(qcards.nth(0))
+        await expect(page.get_by_role("toolbar", name="고른 문제 1개")).to_be_visible()
+        await page.keyboard.press("Escape")
+        await expect(page.get_by_role("toolbar", name=re.compile("^고른 문제"))).to_have_count(0)
+        await press_card(qcards.nth(0))
+        await expect(page.get_by_role("toolbar", name="고른 문제 1개")).to_be_visible()
+        await qcards.nth(1).click()
+        await page.get_by_role("toolbar", name="고른 문제 2개").get_by_role("button", name="다시 내기").click()
+        await expect(page.get_by_text("고른 문제를 다시 복습에 넣었어요.")).to_be_visible()
+        assert db(f"select string_agg(distinct status, ',') from public.questions where id in ({id_list})") == "active"
+        # 실제 시험처럼 <보기> 상자 (ㄱ·ㄴ·ㄷ): 문제 글의 '<보기>' 줄 다음 줄들을 상자에 그린다
+        q_note, q_subj = db(f"select note_id || '|' || subject_id from public.questions where id = '{picked_ids[0]}'").split("|")
+        bogi_prompt = "그림은 식물 세포를 나타낸 것이다. 옳은 것만을 <보기>에서 있는 대로 고른 것은?\n\n<보기>\nㄱ. 엽록체에서 광합성이 일어난다.\nㄴ. 핵에는 유전 물질이 있다.\nㄷ. 세포벽은 동물 세포에도 있다."
+        db(
+            "insert into public.questions (user_id, note_id, subject_id, type, prompt, choices, answer, explanation) values "
+            f"('{USERS['student'][0]}', '{q_note}', '{q_subj}', 'mcq', $q${bogi_prompt}$q$, '[\"ㄱ\", \"ㄴ\", \"ㄱ, ㄴ\", \"ㄴ, ㄷ\"]'::jsonb, '2'::jsonb, 'ㄱ과 ㄴ만 옳아요.')"
+        )
+        await page.reload()
+        assert await wait_ready(page)
+        await page.get_by_role("tab", name=re.compile("문제")).click()
+        await page.get_by_text("그림은 식물 세포를 나타낸 것이다.").first.click()
+        bogi = page.get_by_role("group", name="보기")
+        await expect(bogi).to_be_visible()
+        await expect(bogi.get_by_text("ㄴ. 핵에는 유전 물질이 있다.")).to_be_visible()
+        await shot(page, "15c-question-bogi", full=False)
+        # 뒤 시험의 문제 수가 바뀌지 않게 지운다 (복습 카드 없이 넣은 문제)
+        db("delete from public.questions where prompt like '그림은 식물 세포를 나타낸 것이다.%'")
+        await page.reload()
+        assert await wait_ready(page)
         step("original tab")
         await page.get_by_role("tab", name="원본").click()
         await expect(page.get_by_text("내가 쓴 원문")).to_be_visible()
@@ -2791,7 +2899,7 @@ async def main():
         await shot(page, "23-subject")
         # 과목 메뉴에서 눌러 들어가도 그 과목으로 (예전에는 오늘 복습·모든 과목이 열렸다)
         await page.get_by_role("button", name="과목 메뉴").click()
-        await page.get_by_role("menuitem", name="이 과목만 복습").click()
+        await page.get_by_role("menuitem", name="이 과목 복습하기").click()
         await page.wait_for_url(re.compile(r"/review\?subject="))
         await expect(page.get_by_role("heading", name="복습", exact=True)).to_be_visible()
         await expect(page.get_by_role("radiogroup", name="언제 공부한 문제를 풀까요?")).to_be_visible()
@@ -2860,7 +2968,9 @@ async def main():
         after = json.loads(urllib.request.urlopen("http://localhost:54321/__stats").read())
         assert after["maxDocBytes"] <= 12000, after["maxDocBytes"]
         assert after["docs"] - before["docs"] >= 2, (before["docs"], after["docs"])  # 조각 2개 이상
-        assert after["tasks"].get("organize", 0) - before["tasks"].get("organize", 0) >= 3, (before["tasks"], after["tasks"])  # 조각 정리 + 합치기
+        assert after["tasks"].get("organize", 0) - before["tasks"].get("organize", 0) >= 2, (before["tasks"], after["tasks"])  # 조각마다 정리
+        # 합치기는 계획만 받는다 (lib/merge-plan.ts: 합친 노트를 AI 가 다시 쓰지 않는다)
+        assert after["tasks"].get("merge", 0) - before["tasks"].get("merge", 0) == 1, (before["tasks"], after["tasks"])
         pdf_sid = page.url.rstrip("/").split("/")[-1].split("?")[0]
         parts_dir = pathlib.Path(__file__).parent / "fakebase" / "files" / "sources" / USERS["student"][0] / pdf_sid / "parts"
         assert not parts_dir.exists() or not any(parts_dir.iterdir()), list(parts_dir.iterdir())
@@ -3942,6 +4052,82 @@ async def main():
         r = await page.request.delete(BASE + f"/api/notes/{fig_nid}/course", headers={"origin": BASE})
         assert r.ok, await r.text()
         assert psql(f"select count(*) from public.note_courses where note_id = '{fig_nid}'") == "0"
+
+        step("course: a big note (12 concepts) is made in two passes — the path's outline, then every stage at once — and a stage the AI cannot write comes from the note")
+        stats_of = lambda: json.loads(urllib.request.urlopen("http://localhost:54321/__stats").read())  # noqa: E731
+        body_before = psql(f"select body::text from public.notes where id = '{fig_nid}'")
+        big_kps = [
+            {"id": f"k{i + 1}", "title": f"개념 {i + 1}", "explanation": f"개념 {i + 1}의 설명이에요.", "why": "시험에 나와요.", "importance": "medium", "pages": []}
+            for i in range(12)
+        ]
+        psql(f"update public.notes set body = jsonb_set(body, '{{key_points}}', '{json.dumps(big_kps, ensure_ascii=False)}'::jsonb) where id = '{fig_nid}'")
+        psql(f"delete from public.rate_hits where user_id = '{student_id}'")
+        s0 = stats_of()["tasks"]
+        r = await page.request.post(BASE + f"/api/notes/{fig_nid}/course", headers={"origin": BASE}, data={"level": "high"})
+        assert r.ok, await r.text()
+        s1 = stats_of()["tasks"]
+        assert s1.get("course_outline", 0) == s0.get("course_outline", 0) + 1, (s0, s1)
+        assert s1.get("course_unit", 0) == s0.get("course_unit", 0) + 4, (s0, s1)
+        assert s1.get("course", 0) == s0.get("course", 0), "a big note is not made in one pass"
+        shape = psql(
+            f"select jsonb_array_length(plan->'units') || ' ' || (select count(*) from jsonb_array_elements(plan->'units') u, jsonb_array_elements(u->'lessons') l) "
+            f"from public.note_courses where note_id = '{fig_nid}'"
+        )
+        assert shape == "4 12", shape
+        # 단계마다 따로 받은 카드 (가짜 AI: '단계 레슨 N')
+        assert psql(f"select plan->'units'->1->'lessons'->0->'cards'->0->>'text' from public.note_courses where note_id = '{fig_nid}'").startswith("단계 레슨 1"), "stage cards"
+        # 긴 길은 섹션으로: 섹션 1(1~2단계) · 섹션 2(3~4단계, 총정리). 지금 하는 섹션만 펼치고, 머리를 누르면 그 섹션을 펼친다
+        await page.goto(BASE + f"/notes/{fig_sid}?tab=course")
+        assert await wait_ready(page), "course tab did not open"
+        sec1 = page.get_by_role("button", name=re.compile(r"^섹션 1 · 1~2단계 · 지금 하는 섹션"))
+        sec2 = page.get_by_role("button", name=re.compile(r"^섹션 2 · 3~4단계"))
+        await expect(sec1).to_have_attribute("aria-expanded", "true")
+        await expect(sec2).to_have_attribute("aria-expanded", "false")
+        await expect(page.get_by_role("region", name=re.compile(r"^1단계"))).to_be_visible()
+        await expect(page.get_by_role("region", name=re.compile(r"^3단계"))).to_have_count(0)
+        await expect(page.get_by_role("region", name="총정리")).to_have_count(0)
+        await shot(page, "101-course-sections")
+        await no_hscroll(page, "course sections")
+        await sec2.click()
+        await expect(sec2).to_have_attribute("aria-expanded", "true")
+        await expect(sec1).to_have_attribute("aria-expanded", "false")
+        await expect(page.get_by_role("region", name=re.compile(r"^3단계"))).to_be_visible()
+        await expect(page.get_by_role("region", name=re.compile(r"^1단계"))).to_have_count(0)
+        await expect(page.get_by_role("region", name="총정리")).to_be_visible()
+        # 뒤 섹션의 칸은 아직 차례가 아니다 (누르면 건너뛸지 묻는다)
+        await expect(page.get_by_role("button", name=re.compile(r"아직 차례가 아니에요")).first).to_be_visible()
+        await shot(page, "101-course-section-2", full=False)
+        # 다시 누르면 접힌다 (모든 섹션이 접힌 채로)
+        await sec2.click()
+        await expect(sec2).to_have_attribute("aria-expanded", "false")
+        await expect(page.get_by_role("region", name=re.compile(r"단계 "))).to_have_count(0)
+        # 이어서 하기는 섹션과 상관없이 지금 할 레슨을 연다 (레슨 창 위에 섹션·단계)
+        await page.get_by_role("button", name=re.compile("첫 레슨 시작")).click()
+        first_lesson = page.get_by_role("dialog", name=re.compile(r"^레슨"))
+        await expect(first_lesson.get_by_text(re.compile(r"^섹션 1 · 1단계 · "))).to_be_visible()
+        await first_lesson.get_by_role("button", name="레슨 닫기").click()
+        await expect(first_lesson).to_have_count(0)
+        # 모든 단계가 안 되면 노트로만 채운 길을 주지 않고 AI 가 바쁘다고 알린다 (지금 길은 그대로)
+        psql(f"delete from public.rate_hits where user_id = '{student_id}'")
+        urllib.request.urlopen("http://localhost:54321/__fail?task=course_unit")
+        try:
+            r = await page.request.post(BASE + f"/api/notes/{fig_nid}/course", headers={"origin": BASE}, data={"level": "middle"})
+        finally:
+            urllib.request.urlopen("http://localhost:54321/__fail?task=")
+        assert r.status == 503 and (await r.json())["error"] == "ai_busy", (r.status, await r.text())
+        assert psql(f"select level from public.note_courses where note_id = '{fig_nid}'") == "high"
+        # 뼈대를 못 받으면 개념 차례대로 뼈대를 만들고 단계는 AI 로 (한 번에 만들지 않는다)
+        psql(f"delete from public.rate_hits where user_id = '{student_id}'")
+        urllib.request.urlopen("http://localhost:54321/__fail?task=course_outline")
+        try:
+            r = await page.request.post(BASE + f"/api/notes/{fig_nid}/course", headers={"origin": BASE}, data={"level": "college"})
+        finally:
+            urllib.request.urlopen("http://localhost:54321/__fail?task=")
+        assert r.ok, await r.text()
+        assert psql(f"select level || ' ' || (plan->'units'->0->'lessons'->0->'key_point_ids'->>0) from public.note_courses where note_id = '{fig_nid}'") == "college k1"
+        r = await page.request.delete(BASE + f"/api/notes/{fig_nid}/course", headers={"origin": BASE})
+        assert r.ok, await r.text()
+        psql(f"update public.notes set body = $kok${body_before}$kok$::jsonb where id = '{fig_nid}'")
 
         step("course: a free account sees that Max has it, and the API refuses")
         octx, opage = await new_ctx(browser, "other")
@@ -5129,13 +5315,20 @@ async def main():
         r = await page.request.post(BASE + "/api/sources/delete", headers={"origin": BASE}, data={"ids": [db(f"select id from public.sources where user_id <> '{me_id}' limit 1") or "00000000-0000-4000-8000-000000000000"]})
         assert r.status == 404, (r.status, await r.text())
 
-        # 과목 안에서 순서 바꾸기 (키보드): 별표하지 않은 자료끼리
+        # 과목 안에서 순서 바꾸기 (키보드): 별표하지 않은 자료끼리. 과목 메뉴는 다섯 가지뿐이라 자료함 메뉴의 '자료 순서 바꾸기'에서 과목 칩으로 고른다
         sci_id = db(f"select subject_id from public.sources where id = '{oldest}'")
-        await page.goto(BASE + f"/library/{sci_id}")
-        await page.get_by_role("button", name="과목 메뉴").click()
-        await page.get_by_role("menuitem", name="순서 바꾸기").click()
+        sci_name = db(f"select name from public.subjects where id = '{sci_id}'")
+        await page.goto(BASE + "/library")
+        await expect(page.locator("main [data-flip]").first).to_be_visible()
+        await page.get_by_role("button", name="자료함 메뉴").click()
+        await page.get_by_role("menuitem", name="자료 순서 바꾸기").click()
         sheet = page.get_by_role("dialog", name=re.compile("순서 바꾸기$"))
         await expect(sheet).to_be_visible()
+        chip = sheet.get_by_role("group", name="과목").get_by_role("button", name=sci_name, exact=True)
+        if await chip.count():
+            await chip.click()
+        await expect(page.get_by_role("dialog", name=f"{sci_name} 순서 바꾸기")).to_be_visible()
+        await page.wait_for_url(re.compile(rf"/library/{sci_id}$"))
         # 별표하지 않은 자료가 둘 이상인 목록 (단원마다 목록이 따로다)
         lists = sheet.get_by_role("list", name=re.compile("(^| · )자료 순서$"))
         rows_ = None
@@ -5169,7 +5362,7 @@ async def main():
         await page.goto(BASE + "/library")
         await expect(page.locator("main [data-flip]").first).to_be_visible()
         await page.get_by_role("button", name="자료함 메뉴").click()
-        await page.get_by_role("menuitem", name="순서 바꾸기").click()
+        await page.get_by_role("menuitem", name="자료 순서 바꾸기").click()
         await expect(page.get_by_role("dialog", name=re.compile("순서 바꾸기$"))).to_be_visible()
         assert re.search(r"/library/[0-9a-f-]{36}$", page.url), page.url
         await page.keyboard.press("Escape")
@@ -5870,7 +6063,7 @@ async def main():
         await spage.keyboard.press("Escape")
         await expect(sform).to_be_hidden()
         # 과목 삭제: 메뉴에서 바로 (한 번 묻는다)
-        gone_sid = db(f"insert into public.subjects (user_id, name, color) values ('{me_id}', '지울 과목', 'blue') returning id")
+        gone_sid = db(f"insert into public.subjects (user_id, name, color) values ('{me_id}', '지울 과목', 'blue') returning id").splitlines()[0]
         await spage.goto(BASE + f"/library/{gone_sid}")
         await spage.get_by_role("button", name="과목 메뉴").click()
         await spage.get_by_role("menuitem", name="과목 삭제").click()

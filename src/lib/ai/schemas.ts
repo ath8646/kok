@@ -43,6 +43,17 @@ export const noteJsonSchema: JsonSchema = obj({
 });
 
 /**
+ * 정리 조각 합치기·노트에 자료 더하기: 합치는 계획만 (lib/merge-plan.ts). 개념을 차례대로, from = 그 개념이 된 개념들의 번호.
+ * 번호 하나면 이름·설명·왜는 "" (앱이 그대로 옮긴다), 둘 이상을 묶을 때만 새로 쓴다. 용어·공식·함정·예시는 앱이 옮긴다
+ */
+export const mergePlanJsonSchema: JsonSchema = obj({
+  title: str,
+  unit: str,
+  summary: str,
+  key_points: { type: 'array', items: obj({ from: strArr, title: str, explanation: str, why: str }) },
+});
+
+/**
  * 합친 노트를 AI 로 다시 정리 (Pro): 정리 노트 + 개념 번호 옮김 (예전 번호 → 그 내용이 들어간 번호).
  * 옮김은 노트 뒤에 쓴다: 개념을 다 정한 뒤에 어디로 갔는지 적을 수 있다
  */
@@ -493,6 +504,64 @@ export const courseJsonSchema: JsonSchema = obj({
   },
 });
 
+/**
+ * 큰 노트의 학습 길은 두 번에 나눠 만든다 (lib/course.ts COURSE_STAGED_FROM): 먼저 길의 뼈대(단계·레슨 이름·목표·개념 번호)를 받고,
+ * 단계마다 따로(동시에) 레슨의 카드·확인 문제를 받는다. 한 번에 받으면 레슨이 많을 때 답이 길어 시간 안에 끝나지 않는다
+ */
+export const courseOutlineJsonSchema: JsonSchema = obj({
+  title: str,
+  intro: str,
+  units: {
+    type: 'array',
+    items: obj({
+      title: str,
+      summary: str,
+      lessons: { type: 'array', items: obj({ title: str, goal: str, key_point_ids: strArr }) },
+    }),
+  },
+});
+/** 한 단계의 레슨들: 뼈대의 레슨 차례대로 카드·확인 문제 */
+export const courseUnitJsonSchema: JsonSchema = obj({
+  lessons: {
+    type: 'array',
+    items: obj({
+      cards: { type: 'array', items: obj({ kind: { type: 'string', enum: ['concept', 'example', 'compare', 'tip'] }, heading: str, text: str, tip: str }) },
+      checks: { type: 'array', items: courseCheckSchema },
+    }),
+  },
+});
+
+const zCourseCard = z.object({
+  kind: z
+    .string()
+    .transform((v) => v.toLowerCase())
+    .pipe(z.enum(['concept', 'example', 'compare', 'tip']))
+    .catch('concept'),
+  heading: z.string().catch(''),
+  text: z.string().catch(''),
+  tip: z.string().catch(''),
+});
+
+export const zCourseOutline = z.object({
+  title: z.string().catch(''),
+  intro: z.string().catch(''),
+  units: z
+    .array(
+      z.object({
+        title: z.string().catch(''),
+        summary: z.string().catch(''),
+        lessons: z.array(z.object({ title: z.string().catch(''), goal: z.string().catch(''), key_point_ids: z.array(z.string()).catch([]) })).catch([]),
+      }),
+    )
+    .catch([]),
+});
+export type CourseOutline = z.infer<typeof zCourseOutline>;
+
+export const zCourseUnit = z.object({
+  lessons: z.array(z.object({ cards: z.array(zCourseCard).catch([]), checks: z.array(z.unknown()).catch([]) })).catch([]),
+});
+export type CourseUnitAi = z.infer<typeof zCourseUnit>;
+
 export const zCourseAi = z.object({
   title: z.string().catch(''),
   intro: z.string().catch(''),
@@ -507,20 +576,7 @@ export const zCourseAi = z.object({
               title: z.string().catch(''),
               goal: z.string().catch(''),
               key_point_ids: z.array(z.string()).catch([]),
-              cards: z
-                .array(
-                  z.object({
-                    kind: z
-                      .string()
-                      .transform((v) => v.toLowerCase())
-                      .pipe(z.enum(['concept', 'example', 'compare', 'tip']))
-                      .catch('concept'),
-                    heading: z.string().catch(''),
-                    text: z.string().catch(''),
-                    tip: z.string().catch(''),
-                  }),
-                )
-                .catch([]),
+              cards: z.array(zCourseCard).catch([]),
               checks: z.array(z.unknown()).catch([]),
             }),
           )

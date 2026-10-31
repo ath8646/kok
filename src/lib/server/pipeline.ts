@@ -5,7 +5,7 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import { adminClient, SOURCES_BUCKET } from '@/lib/supabase/admin';
 import {
   checkJsonSchema,
-  noteJsonSchema,
+  mergePlanJsonSchema,
   organizeJsonSchema,
   problemsJsonSchema,
   zMindmap,
@@ -25,9 +25,9 @@ import {
   type VisualResult,
 } from '@/lib/ai/schemas';
 import {
-  appendMergePrompt,
+  appendMergePlanPrompt,
   checkPrompt,
-  mergePrompt,
+  mergePlanPrompt,
   organizePrompt,
   problemsPrompt,
   quizPrompt,
@@ -56,7 +56,8 @@ import {
   type FoundFigure,
   type SourceFigure,
 } from '@/lib/source-figures';
-import { growthOfParts, keepFromCurrent, mergeFits, noteForMerge, remergeState, MERGE_OUT_TOKENS, NOTE_TOO_LONG } from '@/lib/append-merge';
+import { keepFromCurrent, remergeState } from '@/lib/append-merge';
+import { applyMergePlan, fallbackMergePlan, noteForPlan, partsForPlan, planOutTokens, zMergePlan, type MergePlan } from '@/lib/merge-plan';
 import { modelForTier, type AiTask, type UserSettings } from '@/lib/settings';
 import { planChunks, slicePdf, splitPdfBySize, splitText, PdfError } from '@/lib/pdf';
 import { isOfficeText } from '@/lib/office/names';
@@ -69,21 +70,10 @@ import { UserFacingError } from './errors';
 import { adminDetail } from './tasks';
 import { removePaths } from './files';
 import { normalizeAnswer } from '@/lib/grading';
+import { noteMaterialType, readMaterialPick, readMaterialType, readPartTypes, type MaterialType, type NoteMaterial } from '@/lib/material-type';
 import {
-  noteMaterialType,
-  readMaterialPick,
-  readMaterialType,
-  readNoteMaterial,
-  readPartTypes,
-  type MaterialType,
-  type NoteMaterial,
-} from '@/lib/material-type';
-import {
-  addMissingTerms,
   forSaving,
   halveJob,
-  mergeTerms,
-  placeExamples,
   problemJobs,
   readJobs,
   readOriginals,
@@ -101,7 +91,9 @@ import { buildPageLabels, offsetOf, printedPage, type PageAnchor, type PageEvide
 import { cleanMindmap, maxNodesFor, visualOutTokens } from '@/lib/mindmap-clean';
 import {
   KEY_POINTS_MAX,
+  NOTE_OUT_MAX,
   QUESTIONS_MAX,
+  aiWaitMs,
   appendKeyPointMax,
   keyPointRange,
   mergedKeyPointRange,
@@ -117,7 +109,10 @@ import {
 
 export const IMAGES_PER_CHUNK = 6;
 export const TEXT_CHARS_PER_CHUNK = 40000;
-const LOCK_SECONDS = 240;
+/** 단계 하나를 잡아 두는 시간: 서버 함수 한 번(300초)보다 길게 (단계가 끝나기 전에 다른 요청이 같은 단계를 잡지 않게) */
+const LOCK_SECONDS = 300;
+/** 서버 함수 한 번에서 단계를 끝내야 하는 때 (시작부터, 300초에서 저장·다음 요청 부르기 여유를 뺀 값) */
+const RUN_MS = 272_000;
 const MAX_ATTEMPTS = 3;
 /**
  * 그림 풀이(Pro): 한 번에 풀이를 만드는 문제 수와 최대 횟수.
@@ -204,6 +199,8 @@ type Ctx = {
   acc: Account;
   app: AppSettings;
   settings: UserSettings;
+  /** 이때까지 끝내야 한다 (ms, 서버 함수 한 번의 끝) */
+  deadline: number;
 };
 
 function modelFor(ctx: Ctx, task: AiTask): string {
@@ -216,10 +213,34 @@ function modelFor(ctx: Ctx, task: AiTask): string {
   return modelForTier(ctx.app.models, tier, ctx.acc.canCareful, ctx.acc.isAdmin);
 }
 
+/** AI 를 기다릴 수 있는 가장 짧은 시간: 이보다 적게 남았으면 부르지 않고 새 요청으로 넘긴다 */
+const MIN_AI_WAIT_MS = 20_000;
+
+/**
+ * 이번 요청(서버 함수 한 번)에 남은 시간이 AI 를 기다리기에 모자라다: 단계를 그대로 두고 새 요청에서 처음부터 한다.
+ * (부르고 나서 함수가 끊기면 단계가 잠긴 채 5분 동안 멈춘다.) runOneStep 이 받아 시도로 세지 않고 'handoff'.
+ * 단계 안에서 실패를 삼키는 곳(그림 자리 찾기·다시 그리기·원래 문제·검사·그림 풀이·표지)은 이것을 그대로 던진다 (passHandoff)
+ */
+class StepHandoff extends Error {
+  constructor() {
+    super('step_handoff');
+    this.name = 'StepHandoff';
+  }
+}
+
+/** 실패를 삼키는 catch 에서 먼저 부른다: 시간이 모자라 넘기는 것은 실패가 아니다 */
+function passHandoff(e: unknown): void {
+  if (e instanceof StepHandoff) throw e;
+}
+
 async function ai(ctx: Ctx, task: AiTask, content: ContentPart[], schema: Record<string, unknown>, maxTokens: number, think = false) {
   const model = modelFor(ctx, task);
+  // 답이 길 수 있는 만큼 기다린다 (느린 모델로 긴 정리도 끝나게). 서버 함수가 끝나기 전까지만
+  const left = ctx.deadline - Date.now() - 8_000;
+  if (left < MIN_AI_WAIT_MS) throw new StepHandoff();
   try {
-    const res = await callJson({ model, effort: ctx.app.models.effort[task], content, schema, maxTokens, maxRetries: 0, timeoutMs: 150_000, think });
+    const timeoutMs = Math.min(aiWaitMs(maxTokens), left);
+    const res = await callJson({ model, effort: ctx.app.models.effort[task], content, schema, maxTokens, maxRetries: 0, timeoutMs, think });
     await charge(ctx.admin, {
       acc: ctx.acc,
       task,
@@ -528,6 +549,7 @@ async function stepCutFigures(ctx: Ctx): Promise<Partial<SourceRow>> {
             .map((f) => (group.includes(f) ? { ...f, tried: [...new Set([...(f.tried ?? []), ...pages, ...seen])], calls: calls + 1 } : f));
         }
       } catch (e) {
+        passHandoff(e);
         if (e instanceof UserFacingError) throw e;
         if (e instanceof AiCallError && e.kind === 'retryable' && fails + 1 < LOCATE_FAILS_MAX) {
           // AI 서버가 잠깐 바쁘다: 다음 번에 같은 쪽을 다시 본다
@@ -595,6 +617,7 @@ async function stepFigures(ctx: Ctx): Promise<Partial<SourceRow>> {
       } catch (e) {
         // 다시 그리지 못해도 원본 그림으로 노트를 만든다 (다시 그린 그림은 더해 주는 것일 뿐).
         // AI 서버가 잠깐 바쁘면 조금 쉬었다가 두 번까지 다시 한다 (마지막 시도에서는 던지지 않아 자료가 실패하지 않는다)
+        passHandoff(e);
         if (e instanceof UserFacingError) throw e;
         if (e instanceof AiCallError && e.kind === 'retryable' && Number(ctx.src.draft.attempts ?? 0) < MAX_ATTEMPTS - 1) throw e;
         console.warn('[kok] redraw failed, keeping the original only', ctx.src.id, f.id, e);
@@ -741,6 +764,7 @@ async function stepProblems(ctx: Ctx): Promise<Partial<SourceRow>> {
         o.figure_id ? { ...o, figure_crop: crops.get(o.figure_id) } : o,
       );
     } catch (e) {
+      passHandoff(e);
       if (e instanceof UserFacingError && e.code !== 'file_missing') throw e;
       if (e instanceof AiCallError && e.kind === 'retryable' && Number(ctx.src.draft.attempts ?? 0) < MAX_ATTEMPTS - 1) throw e;
       // 답이 잘렸다 (문제가 많은 쪽): 반으로 나눠 다시 꺼낸다. 쪽 하나·사진 한 장·짧은 글이면 그 부분만 빼고 넘어간다
@@ -771,6 +795,12 @@ async function storePdfParts(ctx: Ctx, original: Uint8Array): Promise<PdfPart[]>
   return parts;
 }
 
+/** 지난 답이 잘린 조각이면 짧게 다시 정리하는 단계 (1: 개념 70%, 2: 개념 반·그림 없이). 다른 조각이면 0 */
+function compactLevel(draft: Record<string, unknown>, chunk: number): number {
+  const c = draft.compact as { part?: unknown; level?: unknown } | null | undefined;
+  return c && Number(c.part) === chunk ? Math.min(2, Math.max(0, Number(c.level) || 0)) : 0;
+}
+
 async function stepOrganize(ctx: Ctx): Promise<Partial<SourceRow>> {
   const { src, admin } = ctx;
   const i = src.chunk_index;
@@ -781,12 +811,14 @@ async function stepOrganize(ctx: Ctx): Promise<Partial<SourceRow>> {
   // 이 조각의 마지막 시도면(두 번 실패) 그림은 찾지 않는다: 그림 때문에(답이 길어 잘리는 등) 노트가 실패하지 않게
   const prevCuts = i === 0 ? [] : cutsOf(src.draft);
   const lastTry = Number(src.draft.attempts ?? 0) >= MAX_ATTEMPTS - 1;
+  // 지난 답이 너무 길어 잘린 조각: 개념을 줄이고 짧게 다시 (2번째는 그림도 찾지 않는다)
+  const compact = compactLevel(src.draft, i);
   const off = await sourceFiguresOff(ctx);
   // 문서 속 그림은 그림 하나가 곧 자료 그림이라 자리를 찾지 않는다 (AI 를 더 부르지 않으니 한 조각에서 자료 하나의 끝까지)
   const perPart = src.kind === 'text' ? MAX_FIGURES : MAX_FIGURES_PER_PART;
-  const room = !lastTry && !off ? Math.min(perPart, MAX_FIGURES - prevCuts.length) : 0;
+  const room = !lastTry && !off && compact < 2 ? Math.min(perPart, MAX_FIGURES - prevCuts.length) : 0;
   const figLog = i === 0 ? figLogOf({}) : figLogOf(src.draft);
-  if (room <= 0) figLog.skipped = off ?? (lastTry ? 'last_try' : 'full');
+  if (room <= 0) figLog.skipped = off ?? (lastTry || compact >= 2 ? 'last_try' : 'full');
   let holder: FigureHolder | null = null;
   /** 문서 속 그림 (그림 번호 → JPEG): 이 조각에 자리가 있는 것 */
   let docPics: Map<number, Uint8Array> | null = null;
@@ -882,21 +914,39 @@ async function stepOrganize(ctx: Ctx): Promise<Partial<SourceRow>> {
   }
   // PDF: 쪽마다 인쇄된 쪽 번호도 받는다 (PDF 글자에서 읽었으면 그것을 쓰지만, 스캔 PDF 가 많아서 늘 받는다)
   if (src.kind === 'pdf') meta.pageNumbers = true;
-  // 자료 양에 따라 개념 수를 정한다 (조각마다 적어 두고 합칠 때 더한다)
+  // 자료 양에 따라 개념 수를 정한다 (조각마다 적어 두고 합칠 때 더한다). 짧게 다시 할 때는 70%·50%
   meta.keyPoints = keyPointRange(size);
+  if (compact) {
+    const f = compact === 1 ? 0.7 : 0.5;
+    const max = Math.max(4, Math.round(meta.keyPoints.max * f));
+    meta.keyPoints = { min: Math.min(max - 1, Math.max(3, Math.round(meta.keyPoints.min * f))), max };
+    meta.compact = true;
+  }
   // 자료 종류: 학생이 고른 것이 있으면 그 지침으로, 없으면 AI 가 이 조각을 읽고 고른다 (답의 맨 앞 칸)
   const pick = pickOf(src.draft);
   if (pick !== 'auto') meta.materialPick = pick;
   content.push(textBlock(organizePrompt(meta)));
 
-  // 답 길이는 개념 수에 따라, 그림을 찾으면 그만큼 더, 단어장일 수 있으면 낱말 수만큼 더 (쓴 만큼만 낸다)
-  const json = await ai(
-    ctx,
-    'organize',
-    content,
-    organizeJsonSchema({ figures: !!meta.figures, pageNumbers: !!meta.pageNumbers }),
-    Math.min(16_000, noteOutTokens(meta.keyPoints.max, meta.figures ?? 0) + (meta.pageNumbers ? 200 : 0) + vocabHeadroom(size, pick)),
-  );
+  // 답 길이는 개념 수에 따라, 그림을 찾으면 그만큼 더, 단어장일 수 있으면 낱말 수만큼 더 (쓴 만큼만 낸다). 짧게 다시 할 때는 끝까지
+  let json: unknown;
+  try {
+    json = await ai(
+      ctx,
+      'organize',
+      content,
+      organizeJsonSchema({ figures: !!meta.figures, pageNumbers: !!meta.pageNumbers }),
+      compact
+        ? NOTE_OUT_MAX
+        : Math.min(NOTE_OUT_MAX, noteOutTokens(meta.keyPoints.max, meta.figures ?? 0) + (meta.pageNumbers ? 200 : 0) + vocabHeadroom(size, pick)),
+    );
+  } catch (e) {
+    // 답이 너무 길어 잘렸다: 같은 조각을 개념을 줄여 짧게 다시 정리한다 (실패로 세지 않는다: 다시 해도 같은 길이라)
+    if (e instanceof AiCallError && e.truncated && compact < 2) {
+      console.warn('[kok] organize answer too long, again shorter', src.id, i, compact + 1);
+      return { draft: { ...src.draft, compact: { part: i, level: compact + 1 } } };
+    }
+    throw e;
+  }
   const note = normalizeNote(zNote.parse(json), meta.keyPoints.max);
   // 이 조각의 종류 (조각의 양과 함께: 노트의 종류는 양이 반을 넘는 종류). 기출 조각은 노트가 정해진 뒤 원래 문제를 몇 쪽씩 꺼낸다
   const ptype: MaterialType = pick !== 'auto' ? pick : readMaterialType((json as { material_type?: unknown } | null)?.material_type);
@@ -946,6 +996,7 @@ async function stepOrganize(ctx: Ctx): Promise<Partial<SourceRow>> {
   const partRanges = [...(i === 0 ? [] : rangesOf(src.draft)), meta.keyPoints];
   const kept: Record<string, unknown> = {
     ...src.draft,
+    compact: null,
     attempts: 0,
     figCuts: [...prevCuts, ...docCuts],
     figLog,
@@ -966,7 +1017,7 @@ async function stepOrganize(ctx: Ctx): Promise<Partial<SourceRow>> {
   // 여러 조각이거나 노트에 더하는 자료면 합치기 단계로
   if (total > 1 || src.parent_id) return { partials, chunk_index: next, step: 'merge', progress, draft: kept };
   // 한 조각짜리: 그림이 있으면 자리를 찾아 자른 뒤 개념에 붙이고 다음 단계를 정한다 (stepCutFigures)
-  const one: Record<string, unknown> = { ...src.draft, note, attempts: 0, figLog, pageEvidence: evidence, partTypes, problemsTodo: todo };
+  const one: Record<string, unknown> = { ...src.draft, note, compact: null, attempts: 0, figLog, pageEvidence: evidence, partTypes, problemsTodo: todo };
   delete one.pageAnchors;
   delete one.originals;
   if (figFound) return { partials: [], chunk_index: next, step: 'visual', progress: 62, draft: { ...one, figCuts: [], figFound } };
@@ -1061,6 +1112,22 @@ function rangesOf(draft: Record<string, unknown>): Range[] {
     .filter((r): r is Range => !!r && Number.isFinite(r.min) && Number.isFinite(r.max) && r.min >= 1 && r.max >= r.min);
 }
 
+/**
+ * 합치는 계획을 AI 에 받는다 (lib/merge-plan.ts). 답이 잘렸거나 읽을 수 없으면 AI 없이 만든 계획(같은 이름의 개념만 묶기)으로:
+ * 합치기 때문에 노트가 멈추지 않게. AI 서버가 바쁜 것은 다시 해 본다 (단계 다시 하기)
+ */
+async function mergePlanOf(ctx: Ctx, content: ContentPart[], items: number, maxKeyPoints: number, fallback: () => MergePlan): Promise<MergePlan> {
+  try {
+    const plan = zMergePlan.parse(await ai(ctx, 'merge', content, mergePlanJsonSchema, planOutTokens(items, maxKeyPoints)));
+    if (plan.key_points.length) return plan;
+    console.warn('[kok] merge plan empty, merging by titles', ctx.src.id);
+  } catch (e) {
+    if (!(e instanceof AiCallError && e.kind === 'bad_output')) throw e;
+    console.warn('[kok] merge plan unreadable, merging by titles', ctx.src.id, e.truncated ? 'truncated' : 'bad');
+  }
+  return fallback();
+}
+
 async function stepMerge(ctx: Ctx): Promise<Partial<SourceRow>> {
   const parts = (ctx.src.partials ?? []).map((p) => zNote.parse(p));
   if (ctx.src.parent_id) return stepAppendMerge(ctx, parts);
@@ -1069,17 +1136,13 @@ async function stepMerge(ctx: Ctx): Promise<Partial<SourceRow>> {
   const range = mergedKeyPointRange(
     ranges.length === parts.length ? ranges : parts.map((p) => ({ min: Math.max(3, p.key_points.length), max: Math.max(5, p.key_points.length) })),
   );
-  // 단어장 조각의 용어·예문은 AI 에 보내지 않고 조각에서 그대로 옮긴다 (낱말이 많아도 합친 답이 잘리지 않고, 빠지거나 뜻이 바뀌지 않게)
+  // AI 는 개념을 어떻게 합칠지(차례·같은 것 묶기)만 정하고, 개념·용어·공식·함정·예시는 앱이 옮긴다: 노트가 커도 답이 잘리지 않는다.
+  // 단어장 조각의 용어는 낱말·뜻이 같을 때만 하나로 (같은 낱말의 다른 뜻은 둘 다)
   const lists = wordListParts(ctx.src.draft, parts.length);
-  const sent = parts.map((p, k) => (lists[k] ? { ...p, terms: [], examples: [] } : p));
-  const content = [textBlock(wrap('partials', JSON.stringify(sent))), textBlock(mergePrompt(parts.length, range, { listsKept: lists.some(Boolean) }))];
-  const json = await ai(ctx, 'merge', content, noteJsonSchema, noteOutTokens(range.max));
-  const note = normalizeNote(zNote.parse(json), range.max);
-  if (lists.some(Boolean)) {
-    const words = parts.filter((_, k) => lists[k]);
-    note.terms = mergeTerms(...words.map((p) => p.terms), note.terms);
-    note.examples = placeExamples([{ key_points: note.key_points, examples: note.examples, sameIds: true }, ...words], note, note.terms);
-  }
+  const items = parts.reduce((a, p) => a + p.key_points.length, 0);
+  const content = [textBlock(wrap('parts', partsForPlan(parts))), textBlock(mergePlanPrompt(parts.length, range))];
+  const plan = await mergePlanOf(ctx, content, items, range.max, () => fallbackMergePlan(parts));
+  const note = normalizeNote(applyMergePlan(plan, parts, { maxKeyPoints: range.max, wordLists: lists.some(Boolean) }), range.max);
   // 조각마다 자른 그림을 합친 노트의 개념에 붙인다 (개념 이름으로)
   const figures = toSourceFigures(cutsOf(ctx.src.draft), note.key_points);
   const draft: Record<string, unknown> = { ...ctx.src.draft, note, figures, attempts: 0 };
@@ -1111,61 +1174,61 @@ async function readMergeBase(ctx: Ctx): Promise<{ id: string; body: unknown; bas
 }
 
 /**
+ * 노트의 다른 곳이 가리키는 개념 번호: 문제(모든 버전·숨긴 문제까지)·지난 버전의 문제 개념(qkeys)·마인드맵·자료 그림·함정·예시.
+ * 노트에 자료를 더할 때 새 개념에 이 번호를 다시 쓰지 않는다 (학생이 지운 개념의 문제·그림이 엉뚱한 새 개념에 붙지 않게).
+ * 지난 버전·마인드맵은 읽지 못해도(칸이 없는 예전 DB) 건너뛴다
+ */
+async function usedKeyPointIds(ctx: Ctx, noteId: string, note: Note, body: unknown): Promise<Set<string>> {
+  const ids = new Set<string>();
+  const add = (v: unknown) => {
+    if (typeof v === 'string' && v.trim()) ids.add(v.trim());
+  };
+  const [qs, vis, vers] = await Promise.all([
+    ctx.admin.from('questions').select('key_point_id').eq('note_id', noteId),
+    ctx.admin.from('visuals').select('spec').eq('note_id', noteId).eq('type', 'mindmap'),
+    ctx.admin.from('note_versions').select('qkeys').eq('note_id', noteId),
+  ]);
+  if (qs.error) throw qs.error;
+  for (const r of qs.data ?? []) add(r.key_point_id);
+  for (const r of vis.error ? [] : (vis.data ?? [])) {
+    const nodes = (r.spec as { nodes?: unknown } | null)?.nodes;
+    if (Array.isArray(nodes)) for (const nd of nodes) add((nd as { key_point_id?: unknown } | null)?.key_point_id);
+  }
+  for (const r of vers.error ? [] : (vers.data ?? [])) {
+    const q = (r as { qkeys?: unknown }).qkeys;
+    if (q && typeof q === 'object') for (const v of Object.values(q as Record<string, unknown>)) add(v);
+  }
+  for (const f of readFigures(body)) add(f.key_point_id);
+  for (const p of [...note.pitfalls, ...note.examples]) add(p.key_point_id);
+  return ids;
+}
+
+/**
  * 노트에 더하는 자료: 지금 노트에 새 자료의 정리를 합친다 (기존 개념 번호는 그대로).
+ * AI 는 합치는 계획만 쓰고(지금 노트의 개념은 그대로 옮기고, 새 내용을 넣는 개념만 다시 쓴다) 앱이 옮기니 노트가 커도 합친다.
  * 합칠 때 쓴 노트의 지문(base)을 남겨, 끝내기 전에 노트가 바뀌었으면 지금 노트에 다시 합친다
  */
 async function stepAppendMerge(ctx: Ctx, parts: Note[]): Promise<Partial<SourceRow>> {
   const n = await readMergeBase(ctx);
   const current = zNote.parse(n.body ?? {});
-  // 단어장(지금 노트나 새 자료)의 용어·예문은 AI 에 보내지 않고 앱이 옮긴다 (낱말이 많아도 합친 답이 길어져 잘리지 않게)
-  const lists = wordListParts(ctx.src.draft, parts.length);
-  const curList = readNoteMaterial(n.body)?.type === 'vocab';
-  // 지금 노트는 자르지 않고 모두 보낸다 (잘라 보내면 긴 설명이 잘린 채 새 버전에 남는다)
-  const full = noteForMerge(curList ? { ...current, terms: [], examples: [] } : current);
-  const partsJson = JSON.stringify(parts.map((p, k) => (lists[k] ? { ...p, terms: [], examples: [] } : p)));
-  // 합친 노트가 답 길이에 들어가지 않을 노트는 AI 를 부르기 전에 막는다
-  if (!full || !mergeFits(full, growthOfParts(partsJson))) throw new UserFacingError('note_too_long', NOTE_TOO_LONG, 400);
   // 지금 개념은 모두 지키고 새 자료의 양만큼 늘어날 수 있다 (노트 끝까지)
   const ranges = rangesOf(ctx.src.draft);
   const maxKeyPoints = appendKeyPointMax(
     current.key_points.length,
     ranges.length === parts.length ? ranges : parts.map((p) => ({ min: 3, max: Math.max(5, p.key_points.length) })),
   );
+  const items = current.key_points.length + parts.reduce((a, p) => a + p.key_points.length, 0);
   const content = [
-    textBlock(wrap('note', full)),
-    textBlock(wrap('new_parts', partsJson)),
-    textBlock(appendMergePrompt(parts.length, maxKeyPoints, { listsKept: curList || lists.some(Boolean) })),
+    textBlock(wrap('note', noteForPlan(current))),
+    textBlock(wrap('new_parts', partsForPlan(parts))),
+    textBlock(appendMergePlanPrompt(parts.length, maxKeyPoints)),
   ];
-  let json: unknown;
-  try {
-    json = await ai(ctx, 'merge', content, noteJsonSchema, MERGE_OUT_TOKENS);
-  } catch (e) {
-    // 합친 노트가 답 길이 한도를 넘었다: 다시 해도 같으니 바로 알려 준다
-    if (e instanceof AiCallError && e.truncated) throw new UserFacingError('note_too_long', NOTE_TOO_LONG, 400);
-    throw e;
-  }
-  // 지금 노트의 개념 수보다 줄이지 않는다 (내가 더한 개념이 잘리지 않게)
-  const merged = normalizeNote(zNote.parse(json), maxKeyPoints);
+  const plan = await mergePlanOf(ctx, content, items, maxKeyPoints, () => fallbackMergePlan(parts, current));
+  // 새 개념 번호는 문제·마인드맵·그림이 가리키는 번호를 피한다 (지운 개념의 문제가 새 개념에 붙지 않게)
+  const reserved = await usedKeyPointIds(ctx, n.id, current, n.body);
+  // 지금 노트의 개념 수보다 줄이지 않는다 (내가 더한 개념이 잘리지 않게). 별표·고침·순서는 지금 노트대로
+  const merged = normalizeNote(applyMergePlan(plan, parts, { current, maxKeyPoints, reserved }), Math.max(maxKeyPoints, current.key_points.length));
   const note = keepFromCurrent(current, merged, parts);
-  if (curList || lists.some(Boolean)) {
-    // 용어: 지금 단어장의 낱말(고친 뜻 그대로) → AI 가 합친 용어 → 새 단어장의 낱말 (이미 있는 낱말은 그대로)
-    const words = parts.filter((_, k) => lists[k]);
-    const terms = addMissingTerms(
-      curList ? addMissingTerms(current.terms, note.terms) : note.terms,
-      words.flatMap((p) => p.terms),
-    );
-    // 예문: 지금 단어장의 예문(개념 번호는 그대로) → AI 가 합친 예문 → 새 단어장의 예문 (개념은 이름·낱말로 다시 붙인다)
-    note.examples = placeExamples(
-      [
-        ...(curList ? [{ key_points: current.key_points, examples: current.examples, sameIds: true }] : []),
-        { key_points: note.key_points, examples: note.examples, sameIds: true },
-        ...words,
-      ],
-      note,
-      terms,
-    );
-    note.terms = terms;
-  }
   // 자료 그림: 지금 노트의 그림은 그대로 두고, 새 자료의 그림을 번호를 이어 합친 노트의 개념에 붙인다.
   // 다시 합칠 때(노트가 바뀌었을 때)는 이미 다시 그린 그림을 그대로 쓴다 (같은 자른 그림이면)
   const baseFigures = readFigures(n.body);
@@ -1231,7 +1294,8 @@ async function stepVisual(ctx: Ctx): Promise<Partial<SourceRow>> {
   if (await baseIsStale(ctx)) return remergePatch(ctx.src);
   const note = zNote.parse(ctx.src.draft.note);
   const v = ctx.settings.visual;
-  const maxNodes = maxNodesFor(v.depth, note.key_points.length);
+  // 지난 답이 너무 길어 잘렸으면 가지를 줄여 다시 (마인드맵 때문에 노트가 멈추지 않게)
+  const maxNodes = Math.max(12, Math.round(maxNodesFor(v.depth, note.key_points.length) * (ctx.src.draft.visualShort ? 0.6 : 1)));
   const content = [textBlock(wrap('note', noteForPrompt(note)))];
   // 노트에 더할 때는 지금 마인드맵에서 학생이 고친 노드와 가운데 이름을 그대로 둔다
   let locked: Mindmap['nodes'] = [];
@@ -1254,7 +1318,16 @@ async function stepVisual(ctx: Ctx): Promise<Partial<SourceRow>> {
     }
   }
   content.push(textBlock(visualPrompt({ depth: v.depth, labelStyle: v.labels, maxNodes })));
-  const json = await ai(ctx, 'visual', content, visualJsonSchema, visualOutTokens(maxNodes));
+  let json: unknown;
+  try {
+    json = await ai(ctx, 'visual', content, visualJsonSchema, visualOutTokens(maxNodes));
+  } catch (e) {
+    if (e instanceof AiCallError && e.truncated && !ctx.src.draft.visualShort) {
+      console.warn('[kok] mind map answer too long, again with fewer branches', ctx.src.id);
+      return { draft: { ...ctx.src.draft, visualShort: true } };
+    }
+    throw e;
+  }
   const visual = zVisualResult.parse(json);
   visual.mindmap = cleanMindmap(visual.mindmap, maxNodes, locked);
   if (rootLabel !== null) {
@@ -1313,12 +1386,22 @@ async function stepQuiz(ctx: Ctx): Promise<Partial<SourceRow>> {
       textBlock(wrap('existing_questions', JSON.stringify([...existing, ...[...originals, ...vocab].map((o) => o.prompt.slice(0, 300))]))),
       textBlock(
         quizPrompt(
-          { types: q.types, mix: q.mix, language: q.language, perKeyPoint: q.perKeyPoint, figures: figures.length },
+          // 지난 답이 너무 길어 잘렸으면 개념마다 하나씩 (문제 수가 줄어 답이 짧다)
+          { types: q.types, mix: q.mix, language: q.language, perKeyPoint: ctx.src.draft.quizShort ? 1 : q.perKeyPoint, figures: figures.length },
           { onlyNew: !!pid, material, originals: originals.length, covered, cards: vocab.length },
         ),
       ),
     ];
-    const json = await ai(ctx, 'quiz', content, figures.length ? quizFiguresJsonSchema : quizJsonSchema, quizOutTokens(note.key_points.length, figures.length));
+    let json: unknown;
+    try {
+      json = await ai(ctx, 'quiz', content, figures.length ? quizFiguresJsonSchema : quizJsonSchema, quizOutTokens(note.key_points.length, figures.length));
+    } catch (e) {
+      if (e instanceof AiCallError && e.truncated && !ctx.src.draft.quizShort) {
+        console.warn('[kok] quiz answer too long, again with fewer questions', ctx.src.id);
+        return { draft: { ...ctx.src.draft, quizShort: true } };
+      }
+      throw e;
+    }
     raw = zQuiz.parse(json).questions;
   }
   const figIds = new Set(figures.map((f) => f.id));
@@ -1445,6 +1528,7 @@ async function stepCover(ctx: Ctx, note: Note): Promise<Partial<SourceRow>> {
     cover = settleCover(await ai(ctx, 'cover', coverContent(excerpt), coverJsonSchema, COVER_OUT_TOKENS));
     if (!cover) console.warn('[kok] cover: nothing drawable', ctx.src.id);
   } catch (e) {
+    passHandoff(e);
     console.warn('[kok] cover failed, the note goes on without it', ctx.src.id, e);
   }
   return { progress: 98, ...(cover ? { cover } : {}), draft: { ...ctx.src.draft, coverDone: true, attempts: 0 } };
@@ -1494,6 +1578,7 @@ async function stepCheckAndFinish(ctx: Ctx): Promise<'done' | Partial<SourceRow>
         kept = questions.filter((_, i) => !drop.has(i));
       } catch (e) {
         // 검사가 실패해도 문제는 살린다 (검사는 품질을 높이는 단계일 뿐)
+        passHandoff(e);
         if (e instanceof UserFacingError) throw e;
         console.warn('[kok] check step failed, keeping questions', e);
       }
@@ -1512,6 +1597,7 @@ async function stepCheckAndFinish(ctx: Ctx): Promise<'done' | Partial<SourceRow>
         next = await solveRound(ctx, note, kept);
       } catch (e) {
         // 그림 풀이가 안 돼도 노트와 문제는 그대로 만든다 (그림은 더해 주는 것일 뿐)
+        passHandoff(e);
         if (e instanceof UserFacingError) throw e;
         console.warn('[kok] solve step failed, keeping questions without figures', e);
       }
@@ -1613,7 +1699,7 @@ async function stepCheckAndFinish(ctx: Ctx): Promise<'done' | Partial<SourceRow>
 }
 
 // ------------------------------------------------------------- 실행기
-export type StepOutcome = 'continue' | 'retry' | 'done' | 'error' | 'locked' | 'missing';
+export type StepOutcome = 'continue' | 'retry' | 'done' | 'error' | 'locked' | 'missing' | 'handoff';
 
 async function release(admin: SupabaseClient, id: string, patch: Partial<SourceRow>) {
   const { error } = await admin
@@ -1641,7 +1727,38 @@ function isFinal(e: unknown): boolean {
   return false;
 }
 
-export async function runOneStep(sourceId: string): Promise<StepOutcome> {
+/**
+ * 이 단계의 AI 를 가장 오래 기다릴 시간 (ms): 서버 함수 한 번에 남은 시간이 이것보다 적으면 새 요청으로 넘긴다.
+ * 긴 답(정리·문제·그림 풀이)은 새 요청의 처음에만 시작해서 서버 함수가 중간에 끊기지 않게 한다
+ */
+function stepWaitMs(src: SourceRow): number {
+  if (src.draft.figFound) return aiWaitMs(4000);
+  if (problemsDue(src)) return aiWaitMs(12_000);
+  switch (src.step) {
+    case 'organize':
+      return aiWaitMs(NOTE_OUT_MAX);
+    case 'merge':
+      return aiWaitMs(9000);
+    case 'figures':
+      return aiWaitMs(REDRAW_OUT_TOKENS);
+    case 'visual':
+      return aiWaitMs(10_000);
+    case 'quiz':
+      return aiWaitMs(16_000);
+    case 'check':
+      // 검사 → 그림 풀이(먼저 생각하고 답한다) → 표지 그림
+      return aiWaitMs(!src.draft.checked ? 6000 : Number(src.draft.solveRound ?? SOLVE_ROUNDS) < SOLVE_ROUNDS ? 16_000 : COVER_OUT_TOKENS);
+    default:
+      return 0;
+  }
+}
+
+/**
+ * 단계 하나를 한다. deadline: 서버 함수 한 번의 끝 (ms). first: 이번 요청의 첫 단계 (남은 시간이 가장 많으니 늘 한다).
+ * 첫 단계가 아니고 남은 시간이 이 단계에 모자라면 손대지 않고 'handoff' (부른 쪽이 새 요청으로 이어 간다)
+ */
+export async function runOneStep(sourceId: string, o: { deadline?: number; first?: boolean } = {}): Promise<StepOutcome> {
+  const deadline = o.deadline ?? Date.now() + RUN_MS;
   const admin = adminClient();
   const { data, error } = await admin.rpc('kok_claim_source', { p_id: sourceId, p_seconds: LOCK_SECONDS });
   if (error) throw error;
@@ -1654,9 +1771,14 @@ export async function runOneStep(sourceId: string): Promise<StepOutcome> {
     return 'locked';
   }
 
+  if (!o.first && deadline - Date.now() < stepWaitMs(src) + 20_000) {
+    await release(admin, src.id, {});
+    return 'handoff';
+  }
+
   const acc = await getAccount(admin, src.user_id);
   const app = await getAppSettings(admin);
-  const ctx: Ctx = { admin, src, acc, app, settings: acc.settings };
+  const ctx: Ctx = { admin, src, acc, app, settings: acc.settings, deadline };
 
   try {
     if (acc.banned) throw new UserFacingError('banned', '이 계정은 AI 기능을 쓸 수 없어요.', 403);
@@ -1705,6 +1827,11 @@ export async function runOneStep(sourceId: string): Promise<StepOutcome> {
     await release(admin, src.id, { ...patch, status: 'processing', error: null });
     return 'continue';
   } catch (e) {
+    if (e instanceof StepHandoff) {
+      // 이번 요청에 시간이 모자랐다: 시도로 세지 않고 새 요청에서 같은 단계를 처음부터
+      await release(admin, src.id, {});
+      return 'handoff';
+    }
     // 마무리 저장은 끝났는데 응답만 못 받은 경우: 이미 완료됐으면 그대로 둔다
     const { data: cur } = await admin.from('sources').select('status').eq('id', src.id).maybeSingle();
     if (cur?.status === 'ready') return 'done';
@@ -1725,20 +1852,24 @@ export async function runOneStep(sourceId: string): Promise<StepOutcome> {
 }
 
 /**
- * 시간 예산 안에서 여러 단계를 진행한다. 끝나지 않았으면 'continue'.
- * 한 단계는 길면 2분 넘게 걸리므로, budgetMs 가 지나기 전에만 새 단계를 시작한다.
- * (Vercel 300초 제한: 새 단계 시작은 90초까지 + AI 대기 최대 150초 + 다음 요청 부르기 10초 + 요청 앞부분·여유)
+ * 서버 함수 한 번(300초) 안에서 여러 단계를 진행한다. 끝나지 않았으면 'continue' (부른 쪽이 새 요청으로 이어 간다).
+ * 단계마다 AI 를 가장 오래 기다릴 시간(stepWaitMs)이 남았을 때만 시작하고, AI 를 기다리는 시간도 이 함수가 끝나기 전까지로 자른다.
+ * (Vercel 300초 제한: 단계 끝 RUN_MS 272초 + 다음 요청 부르기 10초 + 여유. startedAt: 요청이 시작된 때)
  */
-export async function runSteps(sourceId: string, budgetMs = 90_000): Promise<StepOutcome> {
-  const started = Date.now();
+export async function runSteps(sourceId: string, startedAt = Date.now()): Promise<StepOutcome> {
+  // 요청이 시작된 때부터 센다 (after() 앞의 일도 서버 함수 시간에 든다)
+  const deadline = Math.min(startedAt, Date.now()) + RUN_MS;
   let outcome: StepOutcome = 'continue';
-  while (outcome === 'continue' && Date.now() - started < budgetMs) {
-    outcome = await runOneStep(sourceId);
+  let first = true;
+  while (outcome === 'continue' && deadline - Date.now() > 30_000) {
+    outcome = await runOneStep(sourceId, { deadline, first });
+    first = false;
     if (outcome === 'retry') {
       // AI 서버가 바쁠 때 바로 다시 부르지 않고 조금 쉰다
       await new Promise((r) => setTimeout(r, 5000));
       outcome = 'continue';
     }
+    if (outcome === 'handoff') return 'continue';
   }
   return outcome;
 }

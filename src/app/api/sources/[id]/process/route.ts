@@ -7,6 +7,7 @@ import { driveSource } from '@/lib/server/drive';
 export const maxDuration = 300;
 
 export async function POST(req: NextRequest, ctx: RouteContext<'/api/sources/[id]/process'>) {
+  const startedAt = Date.now();
   try {
     assertSameOrigin(req);
     const { id } = await ctx.params;
@@ -18,7 +19,7 @@ export async function POST(req: NextRequest, ctx: RouteContext<'/api/sources/[id
     const locked = src.locked_until && Date.parse(src.locked_until) > Date.now();
     if (!locked) {
       const origin = req.nextUrl.origin;
-      after(() => driveSource(id, origin));
+      after(() => driveSource(id, origin, startedAt));
     }
     return Response.json({ ok: true, status: src.status, resumed: !locked });
   } catch (e) {

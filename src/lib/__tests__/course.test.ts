@@ -1,6 +1,20 @@
 import { describe, expect, it } from 'vitest';
 import { zCourseAi } from '@/lib/ai/schemas';
-import { COURSE_LIMITS, courseNodes, courseStats, finalChecks, lessonKey, pickChecks, readCoursePlan, readProgress, recapChecks, settleCourse, starsFor } from '@/lib/course';
+import {
+  COURSE_LIMITS,
+  courseNodes,
+  courseSections,
+  courseStats,
+  finalChecks,
+  lessonKey,
+  pickChecks,
+  readCoursePlan,
+  readProgress,
+  recapChecks,
+  sectionOfUnit,
+  settleCourse,
+  starsFor,
+} from '@/lib/course';
 
 const aiRaw = {
   title: '광합성 학습 길',
@@ -20,7 +34,14 @@ const aiRaw = {
             { kind: 'weird', heading: '예', text: '나무도 광합성을 해요.', tip: '' },
           ],
           checks: [
-            { type: 'mcq', prompt: '광합성이 일어나는 곳은?', choices: ['잎', '뿌리', '줄기', '꽃'], answer: '잎', accepted: [], explanation: '잎의 엽록체에서요.' },
+            {
+              type: 'mcq',
+              prompt: '광합성이 일어나는 곳은?',
+              choices: ['잎', '뿌리', '줄기', '꽃'],
+              answer: '잎',
+              accepted: [],
+              explanation: '잎의 엽록체에서요.',
+            },
             { type: 'ox', prompt: '광합성은 밤에 잘 된다.', choices: [], answer: 'X', accepted: [], explanation: '빛이 필요해요.' },
             { type: 'cloze', prompt: '잎의 작은 구멍은 ____이다.', choices: [], answer: '기공', accepted: ['stoma'], explanation: '' },
             { type: 'mcq', prompt: '답을 읽을 수 없는 문제', choices: ['가', '나', '다', '라'], answer: '마', accepted: [], explanation: '' },
@@ -57,7 +78,16 @@ describe('settleCourse', () => {
 
   it('레슨이 하나도 없으면 null', () => {
     expect(settleCourse(zCourseAi.parse({ title: 'x', intro: '', units: [] }), ['k1'])).toBeNull();
-    expect(settleCourse(zCourseAi.parse({ title: 'x', intro: '', units: [{ title: 'u', summary: '', lessons: [{ title: 'l', goal: '', key_point_ids: [], cards: [], checks: [] }] }] }), [])).toBeNull();
+    expect(
+      settleCourse(
+        zCourseAi.parse({
+          title: 'x',
+          intro: '',
+          units: [{ title: 'u', summary: '', lessons: [{ title: 'l', goal: '', key_point_ids: [], cards: [], checks: [] }] }],
+        }),
+        [],
+      ),
+    ).toBeNull();
   });
 
   it('수를 줄인다 (단계·레슨·카드·문제)', () => {
@@ -114,8 +144,20 @@ describe('길과 진도', () => {
 
   it('복습·총정리 문제는 레슨들에서 고루 뽑고, 같은 seed 면 같다', () => {
     const lessons = [
-      { title: 'a', goal: '', key_point_ids: [], cards: [], checks: ['a1', 'a2', 'a3'].map((p) => ({ type: 'ox' as const, prompt: p, choices: null, answer: true, accepted: [], explanation: '' })) },
-      { title: 'b', goal: '', key_point_ids: [], cards: [], checks: ['b1'].map((p) => ({ type: 'ox' as const, prompt: p, choices: null, answer: true, accepted: [], explanation: '' })) },
+      {
+        title: 'a',
+        goal: '',
+        key_point_ids: [],
+        cards: [],
+        checks: ['a1', 'a2', 'a3'].map((p) => ({ type: 'ox' as const, prompt: p, choices: null, answer: true, accepted: [], explanation: '' })),
+      },
+      {
+        title: 'b',
+        goal: '',
+        key_point_ids: [],
+        cards: [],
+        checks: ['b1'].map((p) => ({ type: 'ox' as const, prompt: p, choices: null, answer: true, accepted: [], explanation: '' })),
+      },
     ];
     const picked = pickChecks(lessons, 3, 'seed');
     expect(picked).toHaveLength(3);
@@ -125,5 +167,77 @@ describe('길과 진도', () => {
     expect(recapChecks(plan, 0, 's')).toHaveLength(3);
     expect(recapChecks(plan, 5, 's')).toEqual([]);
     expect(finalChecks(plan, 's')).toHaveLength(3);
+  });
+});
+
+describe('긴 길은 섹션으로', () => {
+  // 단계 n개, 단계마다 레슨 per개인 길
+  const planOf = (n: number, per = 3) => ({
+    title: '길',
+    intro: '',
+    units: Array.from({ length: n }, (_, ui) => ({
+      title: `단계 ${ui + 1}`,
+      summary: '',
+      lessons: Array.from({ length: per }, (_, li) => ({
+        title: `레슨 ${ui + 1}-${li + 1}`,
+        goal: '',
+        key_point_ids: [],
+        cards: [{ kind: 'concept' as const, heading: '', text: '글', tip: '' }],
+        checks: [],
+      })),
+    })),
+  });
+
+  it('단계가 적고 칸도 많지 않으면 나누지 않는다', () => {
+    const p = planOf(3);
+    expect(courseSections(p, courseNodes(p, readProgress({})))).toBeNull();
+    const one = planOf(1, 4);
+    expect(courseSections(one, courseNodes(one, readProgress({})))).toBeNull();
+  });
+
+  it('4단계부터 고르게 나누고 단계 번호는 이어지며, 총정리는 마지막 섹션에', () => {
+    const sizes = (n: number) => {
+      const p = planOf(n);
+      return courseSections(p, courseNodes(p, readProgress({})))!.map((x) => x.units.length);
+    };
+    expect(sizes(4)).toEqual([2, 2]);
+    expect(sizes(5)).toEqual([3, 2]);
+    expect(sizes(7)).toEqual([3, 2, 2]);
+    expect(sizes(8)).toEqual([3, 3, 2]);
+    const p = planOf(5);
+    const nodes = courseNodes(p, readProgress({}));
+    const secs = courseSections(p, nodes)!;
+    expect(secs.map((x) => x.units)).toEqual([
+      [0, 1, 2],
+      [3, 4],
+    ]);
+    // 모든 칸이 꼭 한 섹션에
+    expect(secs.flatMap((x) => x.nodes.map((n) => n.id))).toEqual(nodes.map((n) => n.id));
+    expect(secs[1].nodes.at(-1)?.kind).toBe('final');
+    expect(sectionOfUnit(secs, 3)).toBe(1);
+    expect(sectionOfUnit(null, 3)).toBeNull();
+  });
+
+  it('단계는 적어도 레슨이 많으면 나눈다 (단계보다 잘게는 나누지 않는다)', () => {
+    const p = planOf(3, 6);
+    const secs = courseSections(p, courseNodes(p, readProgress({})))!;
+    expect(secs.map((x) => x.units)).toEqual([[0, 1], [2]]);
+    const two = planOf(2, 20);
+    expect(courseSections(two, courseNodes(two, readProgress({})))!.map((x) => x.units)).toEqual([[0], [1]]);
+  });
+
+  it('섹션의 상태: 모두 끝냄·지금 할 칸이 있는 섹션·아직', () => {
+    const p = planOf(4, 2);
+    // 1단계 레슨 둘과 복습을 끝냈다: 지금 할 칸은 2단계 첫 레슨 (섹션 1)
+    const progress = readProgress({ lessons: { [lessonKey(0, 0)]: { stars: 3 }, [lessonKey(0, 1)]: { stars: 2 } }, recaps: { '0': { stars: 3 } } });
+    let secs = courseSections(p, courseNodes(p, progress))!;
+    expect(secs.map((x) => `${x.state} ${x.done}/${x.total}`)).toEqual(['current 3/6', 'later 0/7']);
+    // 섹션 1을 다 끝내면 섹션 2가 지금 섹션
+    const all = readProgress({
+      lessons: Object.fromEntries([0, 1].flatMap((u) => [0, 1].map((l) => [lessonKey(u, l), { stars: 3 }]))),
+      recaps: { '0': { stars: 3 }, '1': { stars: 3 } },
+    });
+    secs = courseSections(p, courseNodes(p, all))!;
+    expect(secs.map((x) => x.state)).toEqual(['done', 'current']);
   });
 });

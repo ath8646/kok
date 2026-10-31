@@ -13,9 +13,12 @@ import { perkNeed, perkTierName } from '@/lib/plans';
 import {
   COURSE_LEVELS,
   COURSE_LEVEL_INFO,
-  courseOut,
+  courseCost,
+  courseStaged,
   courseNodes,
+  courseSections,
   courseStats,
+  sectionOfUnit,
   finalChecks,
   lessonKey,
   readCoursePlan,
@@ -107,6 +110,8 @@ export function CoursePanel({
   }, [noteId, tick]);
 
   const nodes = useMemo(() => (course ? courseNodes(course.plan, course.progress) : []), [course]);
+  // 길이 길면 섹션으로 (섹션 1 → 1~2단계, 섹션 2 → …)
+  const sections = useMemo(() => (course ? courseSections(course.plan, nodes) : null), [course, nodes]);
   const stats = useMemo(() => (course ? courseStats(course.plan, course.progress) : null), [course]);
   const current = nodes.find((n) => n.state === 'current') ?? null;
 
@@ -218,6 +223,11 @@ export function CoursePanel({
     { label: '지우기', icon: ICONS.trash, onSelect: () => setConfirmDelete(true), danger: true },
   ];
   const seed = `${course.id}:${course.updatedAt}`;
+  /** 레슨 창 위 글의 섹션 ('섹션 2 · '), 나누지 않은 길이면 없음 */
+  const sectionLabel = (unit: number) => {
+    const k = sectionOfUnit(sections, unit);
+    return k === null ? '' : `섹션 ${k + 1} · `;
+  };
   const lessonOf = (n: CourseNode) => (n.kind === 'lesson' ? course.plan.units[n.unit]?.lessons[n.lesson] : undefined);
 
   return (
@@ -273,14 +283,14 @@ export function CoursePanel({
         )}
       </section>
 
-      <CoursePath plan={course.plan} nodes={nodes} onOpen={setOpen} onLocked={setSkipTo} />
+      <CoursePath plan={course.plan} nodes={nodes} sections={sections} onOpen={setOpen} onLocked={setSkipTo} />
 
       {open ? (
         open.kind === 'lesson' ? (
           <LessonPlayer
             key={open.id}
             title={open.title}
-            subtitle={`${open.unit + 1}단계 · ${course.plan.units[open.unit]?.title ?? ''}`}
+            subtitle={`${sectionLabel(open.unit)}${open.unit + 1}단계 · ${course.plan.units[open.unit]?.title ?? ''}`}
             goal={lessonOf(open)?.goal}
             cards={lessonOf(open)?.cards ?? []}
             checks={lessonOf(open)?.checks ?? []}
@@ -292,7 +302,7 @@ export function CoursePanel({
           <LessonPlayer
             key={open.id}
             title={open.kind === 'final' ? '총정리' : open.title}
-            subtitle={open.kind === 'final' ? '모든 단계에서 뽑은 문제' : `${open.unit + 1}단계에서 뽑은 문제`}
+            subtitle={open.kind === 'final' ? '모든 단계에서 뽑은 문제' : `${sectionLabel(open.unit)}${open.unit + 1}단계에서 뽑은 문제`}
             cards={[]}
             checks={open.kind === 'final' ? finalChecks(course.plan, seed) : recapChecks(course.plan, open.unit, seed)}
             reportTarget={`${noteId}:${open.id}`}
@@ -380,7 +390,9 @@ function CreateCourse({
   remake?: { current: CourseLevel | null; onCancel: () => void };
 }) {
   const model = clientModel(me, me.settings.models.organize);
-  const est = estimateSmallTask(model, me.usdPerEnergy, Math.min(26_000, 3000 + noteChars * 0.9), courseOut(keyPoints).estimate);
+  // 서버와 같은 계산 (큰 노트는 뼈대 + 단계마다 나눠 만든다: lib/course.ts courseCost)
+  const cost = courseCost(keyPoints, noteChars);
+  const est = estimateSmallTask(model, me.usdPerEnergy, cost.inputTokens, cost.outTokens);
   const idx = COURSE_LEVELS.indexOf(level);
   return (
     <div className="grid gap-4">
@@ -445,7 +457,7 @@ function CreateCourse({
           </Button>
           <p className="text-center text-xs text-muted">
             {creating ? (
-              '1~2분쯤 걸려요. 이 화면을 떠나도 계속 만들어요.'
+              `${courseStaged(keyPoints) ? '레슨이 많아서 단계마다 나눠 만들어요. 2~3분' : '1~2분'}쯤 걸려요. 이 화면을 떠나도 계속 만들어요.`
             ) : disabled ? (
               '지금 노트 버전에서, 자료를 더하는 중이 아닐 때 만들 수 있어요.'
             ) : (

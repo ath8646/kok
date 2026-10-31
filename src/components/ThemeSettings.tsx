@@ -6,6 +6,7 @@
 //   눌러서 펼친다. 다른 화면에서 /settings#skins 로 오면 펼친 채로 그 자리까지 내려간다
 // - 기본 테마 9가지·내 테마 (밝을 때·어두울 때 따로 고를 수도 있다). 내 테마의 '+' → 새 테마, 고른 내 테마의 연필 → 테마 만들기 화면(ThemeStudio)
 // - 별표 빛, 글꼴, 노트 종이
+import { perkNeed, perkTierName } from '@/lib/plans';
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import type { MeResponse } from '@/lib/types';
 import {
@@ -95,12 +96,13 @@ function toReady(rows: ThemeRow[]): Ready[] {
   return out;
 }
 
-const PRO_ONLY = '테마는 Pro에서 쓸 수 있어요.';
-
 export function ThemeSettings({ me, theme, onChange }: { me: MeResponse; theme: Theme; onChange: (patch: Partial<Theme>) => void }) {
   const toast = useToast();
   const ask = useConfirm();
   const canTheme = me.canTheme;
+  /** '테마는 Pro에서 쓸 수 있어요.' (요금제 혜택을 관리자가 바꾸면 그 요금제 이름으로) */
+  const PRO_ONLY = perkNeed(me.perkTiers, 'theme');
+  const SKIN_ONLY = perkNeed(me.perkTiers, 'skins', '시그니처 테마');
   const themesOn = me.features.themes;
   const [customs, setCustomsState] = useState<Ready[] | null>(null);
   // 목록의 지금 값 (차례로 저장할 때 바로 앞 저장의 updated_at 을 써야 해서 화면이 다시 그려지기 전에도 읽는다)
@@ -200,6 +202,7 @@ export function ThemeSettings({ me, theme, onChange }: { me: MeResponse; theme: 
   /** 시그니처 테마 고르기: 두 모드에 같이 (따로 고르던 중이면 같게로) */
   const pickSkin = (id: SkinId) => {
     if (!canTheme) return toast(PRO_ONLY);
+    if (!me.canSkins) return toast(SKIN_ONLY);
     setSeparate(false);
     pick('both', `skin:${id}`);
   };
@@ -422,9 +425,7 @@ export function ThemeSettings({ me, theme, onChange }: { me: MeResponse; theme: 
     <div className="grid gap-7">
       {!canTheme ? (
         <div className="flex flex-wrap items-center justify-between gap-2 rounded-2xl bg-surface-2 px-3.5 py-3">
-          <p className="min-w-0 flex-1 text-sm">
-            테마는 Pro에서 쓸 수 있어요. 네온·글리치 같은 시그니처 테마, 색, 별표 빛, 배경 그림, 글꼴을 내 마음대로 바꿔요.
-          </p>
+          <p className="min-w-0 flex-1 text-sm">{PRO_ONLY} 색, 별표 빛, 배경 그림, 글꼴을 내 마음대로 바꿔요.</p>
           <LinkButton href="/plan" size="sm" variant="secondary">
             요금제 보기
           </LinkButton>
@@ -504,7 +505,10 @@ export function ThemeSettings({ me, theme, onChange }: { me: MeResponse; theme: 
         </h3>
         {skinsOpen ? (
           <div id="theme-skin-panel" className="kok-unfold grid gap-3">
-            <p className="text-xs text-muted">색만이 아니라 카드·버튼·글꼴·바탕 그림까지 통째로 바뀌는 테마예요. 밝기는 테마가 정해요.</p>
+            <p className="text-xs text-muted">
+              색만이 아니라 카드·버튼·글꼴·바탕 그림까지 통째로 바뀌는 테마예요. 밝기는 테마가 정해요.
+              {canTheme && !me.canSkins ? ` ${SKIN_ONLY}` : ''}
+            </p>
             <SkinGrid
               selected={!separate && lightRef === darkRef && lightRef.startsWith('skin:') ? (lightRef.slice(5) as SkinId) : null}
               disabled={!canTheme}
@@ -663,17 +667,23 @@ export function ThemeSettings({ me, theme, onChange }: { me: MeResponse; theme: 
           </p>
         ) : null}
       </Field>
-      <p className="text-xs text-muted">테마는 이 계정의 모든 기기에 같이 적용돼요. Pro가 끝나면 기본 모양으로 돌아가고, 고른 테마는 남아 있어요.</p>
+      <p className="text-xs text-muted">
+        테마는 이 계정의 모든 기기에 같이 적용돼요. 요금제가 끝나면 기본 모양으로(시그니처 테마는 비슷한 기본 테마 색으로) 돌아가고, 고른 테마는 남아 있어요.
+      </p>
 
       <NewThemeSheet
         open={adding}
         est={est}
         aiEnabled={me.aiEnabled}
+        aiTier={me.canAiTheme ? null : perkTierName(me.perkTiers, 'aiTheme')}
+        skinTier={me.canSkins ? null : perkTierName(me.perkTiers, 'skins')}
         onClose={() => setAdding(false)}
         onAi={() => {
+          if (!me.canAiTheme) return toast(perkNeed(me.perkTiers, 'aiTheme', 'AI로 테마 만들기'));
           setAdding(false);
           setMaking(true);
         }}
+        onLocked={() => toast(SKIN_ONLY)}
         onStart={(s) => {
           setAdding(false);
           setStudio(s);
@@ -919,15 +929,24 @@ function NewThemeSheet({
   open,
   est,
   aiEnabled,
+  aiTier,
+  skinTier,
   onClose,
   onAi,
+  onLocked,
   onStart,
 }: {
   open: boolean;
   est: number;
   aiEnabled: boolean;
+  /** AI 테마 혜택이 없으면 그 혜택이 생기는 요금제 이름 ('' 이면 어디에도 없음), 있으면 null */
+  aiTier: string | null;
+  /** 시그니처 테마 혜택이 없으면 그 혜택이 생기는 요금제 이름, 있으면 null */
+  skinTier: string | null;
   onClose: () => void;
   onAi: () => void;
+  /** 시그니처 테마에서 시작을 눌렀는데 혜택이 없을 때 */
+  onLocked: () => void;
   onStart: (s: StudioStart) => void;
 }) {
   const looks = useMemo(() => THEME_COLORS.map((c) => ({ c, looks: { light: presetLookFx(c, 'light'), dark: presetLookFx(c, 'dark') } })), []);
@@ -944,9 +963,15 @@ function NewThemeSheet({
           <span className="flex flex-wrap items-center gap-2 font-display text-lg">
             <Icon d={ICONS.sparkle} size={20} className="text-accent" />
             AI로 만들기
-            <span className="text-sm font-semibold text-muted">
-              <Energy n={est} />
-            </span>
+            {aiTier !== null ? (
+              aiTier ? (
+                <Chip tone="accent">{aiTier}</Chip>
+              ) : null
+            ) : (
+              <span className="text-sm font-semibold text-muted">
+                <Energy n={est} />
+              </span>
+            )}
           </span>
           <span className="text-sm text-muted">
             {aiEnabled
@@ -954,13 +979,17 @@ function NewThemeSheet({
               : '지금은 AI 기능을 잠깐 쉬고 있어요. 직접 만들기는 할 수 있어요.'}
           </span>
         </button>
-        <StartGroup id="new-theme-skin" title="시그니처 테마에서 시작" hint="모양은 그대로, 두 가지 색만 내 마음대로 바꿔요.">
+        <StartGroup
+          id="new-theme-skin"
+          title={skinTier ? `시그니처 테마에서 시작 (${skinTier})` : '시그니처 테마에서 시작'}
+          hint="모양은 그대로, 두 가지 색만 내 마음대로 바꿔요."
+        >
           <div className="grid grid-cols-3 gap-x-2 gap-y-3">
             {SKIN_IDS.map((id) => (
               <button
                 key={id}
                 type="button"
-                onClick={() => onStart({ kind: 'skin', id })}
+                onClick={() => (skinTier !== null ? onLocked() : onStart({ kind: 'skin', id }))}
                 aria-label={`${SKINS[id].label}에서 시작하기`}
                 className="press group grid min-w-0 gap-1.5 rounded-[18px] text-xs font-semibold"
               >

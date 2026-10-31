@@ -40,9 +40,11 @@ export async function GET(req: NextRequest) {
         role: u.role ?? 'student',
         plan: u.plan ?? 'free',
         pro_until: u.pro_until ?? null,
+        max_until: u.max_until ?? null,
         banned: !!u.banned,
         created_at: u.created_at ?? null,
         pro_active: u.plan === 'pro' && typeof u.pro_until === 'string' && Date.parse(u.pro_until) > now,
+        max_active: typeof u.max_until === 'string' && Date.parse(u.max_until) > now,
         custom_plan: active ? { id: String(u.custom_plan_id), name: names.get(String(u.custom_plan_id))!, until: String(u.custom_plan_until) } : null,
       };
     });

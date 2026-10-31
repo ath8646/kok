@@ -903,6 +903,8 @@ export function ReviewSession({
     return (
       <div key={round} className={cx('grid gap-3', round > 0 && 'kok-page')}>
         <LargeHeader title={MODE_TITLE[mode.kind]} subtitle={subtitle} />
+        {/* 오답노트는 복습 탭 안에 있다 (아래 메뉴에서 빠졌다): 오늘·과목 복습 시작 화면 맨 위에서 들어간다 */}
+        {periods && ready && plan ? <WrongNoteLink count={plan.cards.filter((c) => c.in_review && c.in_wrong_note).length} /> : null}
         {phase === 'start' && failed ? (
           <div className="kok-fill">
             <EmptyState
@@ -1168,5 +1170,26 @@ function QuestionSkeleton() {
         </div>
       </div>
     </div>
+  );
+}
+
+/** 복습 시작 화면 위의 오답노트 줄 (틀린 문제 수) */
+function WrongNoteLink({ count }: { count: number }) {
+  return (
+    <Link
+      href="/wrong"
+      className="kok-card kok-card-hover press kok-fill flex items-center gap-3 px-4 py-3"
+      aria-label={`오답노트 ${count ? `${count}문제` : '비어 있어요'}`}
+    >
+      <span className="kok-well grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-bad-soft text-bad" aria-hidden="true">
+        <Icon d="M6 3h12a1 1 0 0 1 1 1v17l-7-4-7 4V4a1 1 0 0 1 1-1zM9.5 8.5l5 5M14.5 8.5l-5 5" size={19} />
+      </span>
+      <span className="min-w-0 flex-1">
+        <span className="block font-bold">오답노트</span>
+        <span className="block text-xs text-muted">틀린 문제를 모아 보고 다시 풀어요</span>
+      </span>
+      <span className="text-sm text-muted tabular-nums">{count ? `${count}문제` : '비어 있어요'}</span>
+      <Icon d={ICONS.chevronRight} size={18} className="shrink-0 text-muted" />
+    </Link>
   );
 }

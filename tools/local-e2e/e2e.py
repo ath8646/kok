@@ -1425,24 +1425,31 @@ async def tab_steps(browser):
     assert rows and rows[0]["h1"] == "자료함" and rows[0]["sub"] == lib_sub[-1], f"library did not come back as it was: {rows[:3]}, {lib_sub}"
     assert seq(rows, "sub") == [lib_sub[-1]] and not any(r["busy"] for r in rows), rows
 
-    # 4) 복습 탭·오답 탭: 처음 열 때도 부제는 다 읽은 글 하나만, 다시 들어오면 처음부터 그대로
+    # 4) 복습 탭·오답노트: 처음 열 때도 부제는 다 읽은 글 하나만, 다시 들어오면 처음부터 그대로.
+    #    오답노트는 아래 메뉴에서 빠져 복습 탭 안에 있다 (복습 시작 화면 위·홈의 '오답노트 N문제' 줄로 들어간다)
+    wrong_link = page.locator("main a[href='/wrong']")
     tabs = (
-        ("복습", r"/review$", "복습", page.get_by_role("radiogroup", name="언제 공부한 문제를 풀까요?")),
-        ("오답", r"/wrong$", "오답노트", page.get_by_text(f"틀린 문제 {n_wrong}개 · 3번 연속 맞히면 졸업해요")),
+        ("복습", nav.get_by_role("link", name="복습").first, r"/review$", "복습", page.get_by_role("radiogroup", name="언제 공부한 문제를 풀까요?")),
+        ("오답노트", wrong_link.first, r"/wrong$", "오답노트", page.get_by_text(f"틀린 문제 {n_wrong}개 · 3번 연속 맞히면 졸업해요")),
     )
-    for tab, url, title, ready in tabs:
+    for tab, opener, url, title, ready in tabs:
         here = (await page.evaluate("document.querySelector('main h1')?.textContent || ''")).strip()
         i = await mark()
-        await nav.get_by_role("link", name=tab).first.click()
+        await opener.click()
         await page.wait_for_url(re.compile(url))
         await settle(ready)
         first_sub = seq(await rows_since(i, leave=(here,)), "sub")
         assert len(first_sub) == 1, f"{tab}: subtitle changed while loading: {first_sub}"
+        if tab == "복습":
+            # 복습 탭이 켜진 채 오답노트로 (아래 메뉴의 복습 칸이 고른 칸)
+            await expect(page.locator("main a[href='/wrong']")).to_contain_text(f"{n_wrong}문제")
+        else:
+            await expect(nav.get_by_role("link", name="복습").first).to_have_attribute("aria-current", "page")
         await nav.get_by_role("link", name="홈").first.click()
         await page.wait_for_url(re.compile(r"/home$"))
         await settle(today_ring)
         i = await mark()
-        await nav.get_by_role("link", name=tab).first.click()
+        await opener.click()
         await page.wait_for_url(re.compile(url))
         await settle(ready)
         rows = await rows_since(i, leave=(home_h1,))
@@ -1463,7 +1470,7 @@ async def tab_steps(browser):
     assert len(seq(rows, "h1")) == 1 and len(seq(rows, "sub")) == 1, rows
     # 돌아간 오답노트는 뺀 뒤의 목록 그대로 (화면에서 바로 고친 목록을 저장한 뒤 다시 기억해 둔다)
     i = await mark()
-    await nav.get_by_role("link", name="오답").first.click()
+    await page.locator("main a[href='/wrong']").first.click()
     await page.wait_for_url(re.compile(r"/wrong$"))
     await settle(page.get_by_text(f"틀린 문제 {n_wrong - 1}개 · 3번 연속 맞히면 졸업해요"))
     rows = await rows_since(i, leave=(seq(rows, "h1")[0],))
@@ -1491,6 +1498,423 @@ async def tab_steps(browser):
     assert rows[0]["h1"] == seq(rows, "h1")[0] and rows[0]["sub"] == seq(rows, "sub")[0], rows[:3]
     await shot(page, "121-home-after-review", full=False)
     await ctx.close()
+
+
+async def share_steps(browser):
+    """자료 공유(커뮤니티): 아래 메뉴 '공유' → 갤러리 만들기 → 파일·노트를 붙인 글 → 다른 학생이 받기(무료 하루 2개)·열기·내 자료함에 넣기·KOK으로 정리
+    → 댓글(익명·답글)·좋아요 → 갤러리 만든 사람의 지우기 → 신고가 쌓이면 가림 → 차단 → 찾기·고치기 → 운영자(실제 글쓴이·다시 보이기·지우기) → 갤러리 지우기"""
+    student, admin, other = (USERS[k][0] for k in ("student", "admin", "other"))
+    db(f"delete from public.rate_hits where user_id in ('{student}', '{other}', '{admin}')")
+    db(f"delete from public.energy_ledger where user_id = '{other}'")
+    db(f"delete from public.community_downloads where user_id in ('{student}', '{other}')")
+    s_nick = db(f"select nickname from public.profiles where id = '{student}'")
+    o_subject = db(f"select name from public.subjects where user_id = '{other}' and not coalesce(archived, false) order by created_at limit 1")
+    assert s_nick and o_subject, (s_nick, o_subject)
+    files_root = pathlib.Path(__file__).parent / "fakebase" / "files"
+
+    step("share: home shortcuts are 자료 공유 · 문제 모아 보기 and the bottom tab '공유' opens the hub")
+    ctx, page = await new_ctx(browser, "student")
+    await page.goto(BASE + "/home")
+    await expect(page.get_by_role("link", name=re.compile("^자료 공유"))).to_be_visible()
+    await expect(page.get_by_role("link", name=re.compile("^문제 모아 보기"))).to_be_visible()
+    await expect(page.locator("main a[href='/wrong']")).to_be_visible()
+    nav = page.get_by_role("navigation", name="주 메뉴")
+    await expect(nav.get_by_role("link", name="오답", exact=True)).to_have_count(0)
+    await nav.get_by_role("link", name="공유", exact=True).first.click()
+    await page.wait_for_url(re.compile(r"/share$"))
+    await expect(page.get_by_role("heading", name="자료 공유")).to_be_visible()
+    await expect(page.get_by_role("link", name=re.compile("^중학교 갤러리, 글"))).to_be_visible()
+    await expect(nav.get_by_role("link", name="공유", exact=True).first).to_have_attribute("aria-current", "page")
+    await shot(page, "140-share-hub")
+    await no_hscroll(page, "share hub")
+
+    step("share: anyone makes a gallery (category + free name); names that look official are refused")
+    await page.get_by_role("button", name="만들기", exact=True).click()
+    gsheet = page.get_by_role("dialog", name="갤러리 만들기")
+    await gsheet.get_by_label("이름", exact=True).fill("KOK 공식 자료실")
+    await expect(gsheet.get_by_text("'운영자'·'공식'·'KOK' 같은 말은 갤러리 이름에 쓸 수 없어요.")).to_be_visible()
+    await expect(gsheet.get_by_role("button", name="만들기", exact=True)).to_be_disabled()
+    await gsheet.get_by_label("이름", exact=True).fill("동성중 2학년")
+    await gsheet.get_by_label("소개 (없어도 돼요)").fill("2학년 과학·수학 자료 나눔")
+    await gsheet.get_by_role("radio", name="중학교").click()
+    await gsheet.get_by_role("button", name="만들기", exact=True).click()
+    await page.wait_for_url(re.compile(r"/share/g/[0-9a-f-]{36}$"))
+    gid = page.url.rsplit("/", 1)[-1]
+    await expect(page.get_by_role("heading", name="동성중 2학년")).to_be_visible()
+    # 만든 갤러리는 즐겨찾기에 들어가고, 처음에는 글이 없다
+    await expect(page.get_by_role("button", name="즐겨찾기에서 빼기")).to_be_visible()
+    await expect(page.get_by_text("아직 글이 없어요")).to_be_visible()
+    assert db(f"select category || ':' || owner_id from public.community_galleries where id = '{gid}'") == f"middle:{student}"
+
+    step("share: a post with a PDF and a KOK note (the note carries its mindmap and questions, no AI)")
+    await page.get_by_role("link", name="글쓰기", exact=True).click()
+    await page.wait_for_url(re.compile(r"/share/write\?g="))
+    await expect(page.get_by_text("동성중 2학년", exact=True)).to_be_visible()
+    await page.get_by_label("제목", exact=True).fill("광합성 정리 PDF와 노트")
+    await page.get_by_label("내용", exact=True).fill("2학년 과학 1단원 정리예요.\n시험 전에 보세요!")
+    await page.locator("input[type=file]").set_input_files([{"name": "광합성 정리.pdf", "mimeType": "application/pdf", "buffer": make_pdf(2)}])
+    await expect(page.get_by_text("광합성 정리.pdf")).to_be_visible()
+    # 못 올리는 파일은 거절 (알림)
+    await page.locator("input[type=file]").set_input_files([{"name": "setup.exe", "mimeType": "application/octet-stream", "buffer": b"MZ\x90\x00"}])
+    await expect(page.get_by_text(re.compile("'setup.exe'는 올릴 수 없는 파일이에요"))).to_be_visible()
+    await page.get_by_role("button", name="내 노트 붙이기").click()
+    npick = page.get_by_role("dialog", name="내 노트 붙이기")
+    await npick.get_by_role("button", name=re.compile("광합성")).first.click()
+    await expect(page.get_by_text("정리·마인드맵·문제가 담겨요")).to_be_visible()
+    await shot(page, "141-share-write")
+    await no_hscroll(page, "share write")
+    await page.get_by_role("button", name="글 올리기").click()
+    await page.wait_for_url(re.compile(r"/share/p/[0-9a-f-]{36}$"), timeout=30000)
+    pa = page.url.rsplit("/", 1)[-1]
+    await expect(page.get_by_role("heading", name="광합성 정리 PDF와 노트")).to_be_visible()
+    await expect(page.get_by_role("list", name="파일").get_by_text("광합성 정리.pdf")).to_be_visible()
+    # 내 글의 노트는 넣기 대신 안내 (이미 내 자료함에 있다)
+    await expect(page.get_by_text(re.compile("^내 노트를 담았어요"))).to_be_visible()
+    await expect(page.get_by_role("button", name="내 자료함에 넣기")).to_have_count(0)
+    assert db(f"select has_files::text || ',' || has_note::text || ',' || author_name from public.community_posts where id = '{pa}'") == f"true,true,{s_nick}"
+    # 브라우저가 만든 첫 쪽 미리보기와 쪽 수
+    assert db(f"select kind || ':' || coalesce(pages, 0) || ':' || (preview_path is not null)::text from public.community_files where post_id = '{pa}'") == "pdf:2:true"
+    assert int(db(f"select questions from public.community_notes where post_id = '{pa}'")) > 0
+    assert db(f"select count(*) from public.community_uploads where post_id = '{pa}'") == "0", "upload tickets are cleared once the post is made"
+    await shot(page, "142-share-post-mine")
+
+    step("share: the note menu's '자료 공유에 올리기' opens the writer with that note attached")
+    sid0 = db(f"select source_id from public.community_notes c join public.notes n on n.title = c.title where c.post_id = '{pa}' and n.user_id = '{student}' limit 1") or db(f"select id from public.sources where user_id = '{student}' and status = 'ready' order by created_at limit 1")
+    await page.goto(BASE + f"/notes/{sid0}")
+    assert await wait_ready(page)
+    await page.get_by_role("button", name="노트 메뉴").click()
+    await page.get_by_role("menuitem", name="자료 공유에 올리기").click()
+    await page.wait_for_url(re.compile(r"/share/write\?note="))
+    await expect(page.get_by_text("정리·마인드맵·문제가 담겨요")).to_be_visible()
+    await page.get_by_role("button", name="그만두기").first.click()
+    await app_confirm(page)
+    await page.wait_for_url(re.compile(r"/share$"))
+
+    step("share: a post with a text file (old Korean encoding) and a photo, and a short question post")
+    await page.goto(BASE + f"/share/write?g={gid}")
+    await page.get_by_label("제목", exact=True).fill("세포 분열 요약")
+    await page.locator("input[type=file]").set_input_files(
+        [
+            {"name": "세포 분열.txt", "mimeType": "text/plain", "buffer": "세포 분열은 체세포 분열과 감수 분열이 있다.\n".encode("euc-kr")},
+            {"name": "현미경 사진.jpg", "mimeType": "image/jpeg", "buffer": make_jpeg()},
+        ]
+    )
+    await page.get_by_role("button", name="글 올리기").click()
+    await page.wait_for_url(re.compile(r"/share/p/[0-9a-f-]{36}$"), timeout=30000)
+    pb = page.url.rsplit("/", 1)[-1]
+    await page.goto(BASE + f"/share/write?g={gid}")
+    await page.get_by_label("제목", exact=True).fill("화학 반응 문제지")
+    await page.locator("input[type=file]").set_input_files([{"name": "문제지.pdf", "mimeType": "application/pdf", "buffer": make_pdf(1)}])
+    await page.get_by_role("button", name="글 올리기").click()
+    await page.wait_for_url(re.compile(r"/share/p/[0-9a-f-]{36}$"), timeout=30000)
+    pc = page.url.rsplit("/", 1)[-1]
+    await page.goto(BASE + f"/share/write?g={gid}")
+    await page.get_by_label("제목", exact=True).fill("시험 범위 아는 사람?")
+    await page.get_by_label("내용", exact=True).fill("2학년 과학 시험 범위가 어디까지예요?")
+    await page.get_by_text("익명으로 쓰기").click()
+    await page.get_by_role("button", name="글 올리기").click()
+    await page.wait_for_url(re.compile(r"/share/p/[0-9a-f-]{36}$"), timeout=30000)
+    pd = page.url.rsplit("/", 1)[-1]
+    await expect(page.get_by_text("익명", exact=True).first).to_be_visible()
+    assert db(f"select author_name || ',' || anonymous::text from public.community_posts where id = '{pd}'") == "익명,true"
+    await page.goto(BASE + f"/share/g/{gid}")
+    await expect(page.get_by_role("link", name=re.compile("세포 분열 요약"))).to_be_visible()
+    # 자료만 / 글만 거르기
+    await page.get_by_role("radio", name="글", exact=True).click()
+    await expect(page.get_by_role("link", name=re.compile("시험 범위 아는 사람"))).to_be_visible()
+    await expect(page.get_by_role("link", name=re.compile("세포 분열 요약"))).to_have_count(0)
+    await page.get_by_role("radio", name="전체", exact=True).click()
+    await shot(page, "143-share-gallery")
+    await no_hscroll(page, "share gallery")
+
+    step("share: another student sees the files locked, takes the post (free: 2 a day), opens the PDF")
+    octx, opage = await new_ctx(browser, "other")
+    await opage.goto(BASE + f"/share/p/{pa}")
+    await expect(opage.get_by_role("heading", name="광합성 정리 PDF와 노트")).to_be_visible()
+    await expect(opage.get_by_text("오늘 2개 더 받을 수 있어요 (하루 2개). 받은 자료는 언제든 다시 열 수 있어요.")).to_be_visible()
+    await expect(opage.get_by_role("button", name="내 자료함에 넣기")).to_be_disabled()
+    await expect(opage.get_by_role("list", name="파일").get_by_role("button", name="열기", exact=True)).to_have_count(0)
+    # 받기 전에는 파일 주소를 주지 않는다
+    fid = db(f"select id from public.community_files where post_id = '{pa}'")
+    n0 = len(ERRORS)
+    r = await opage.request.post(BASE + f"/api/share/files/{fid}", data={"download": False})
+    assert r.status == 403 and (await r.json())["error"] == "not_unlocked", (r.status, await r.text())
+    del ERRORS[n0:]
+    await shot(opage, "144-share-post-locked")
+    await opage.get_by_role("button", name="자료 받기").click()
+    await expect(opage.get_by_text("자료를 받았어요. 오늘 1개 더 받을 수 있어요.")).to_be_visible()
+    await opage.get_by_role("list", name="파일").get_by_role("button", name="열기", exact=True).click()
+    viewer = opage.get_by_role("dialog", name=re.compile("^PDF 보기"))
+    await expect(viewer).to_be_visible()
+    await expect(viewer.get_by_text("2쪽", exact=True)).to_be_visible(timeout=20000)
+    await viewer.get_by_role("button", name="PDF 닫기").click()
+    await expect(viewer).to_be_hidden()
+    assert db(f"select download_count from public.community_posts where id = '{pa}'") == "1"
+
+    step("share: the shared note goes into my library with no AI and no energy (note, mindmap, questions)")
+    await opage.get_by_role("button", name="내 자료함에 넣기").click()
+    isheet = opage.get_by_role("dialog", name="내 자료함에 넣기")
+    await isheet.get_by_role("radio", name=re.compile(re.escape(o_subject))).click()
+    await isheet.get_by_role("button", name="넣기 · 에너지 0").click()
+    await opage.wait_for_url(re.compile(r"/notes/[0-9a-f-]{36}"), timeout=30000)
+    assert await wait_ready(opage), "imported note not ready"
+    await expect(opage.get_by_role("link", name="공유받은 노트")).to_be_visible()
+    new_sid = opage.url.split("/notes/")[1].split("?")[0]
+    assert int(db(f"select count(*) from public.questions q join public.notes n on n.id = q.note_id where n.source_id = '{new_sid}'")) > 0
+    assert int(db(f"select count(*) from public.cards c join public.questions q on q.id = c.question_id join public.notes n on n.id = q.note_id where n.source_id = '{new_sid}' and c.user_id = '{other}'")) > 0
+    assert db(f"select count(*) from public.visuals v join public.notes n on n.id = v.note_id where n.source_id = '{new_sid}' and v.type = 'mindmap'") == "1"
+    assert db(f"select count(*) from public.energy_ledger where user_id = '{other}'") == "0", "importing uses no energy"
+    assert db(f"select body #>> '{{shared,post}}' from public.notes where source_id = '{new_sid}'") == pa
+    await shot(opage, "145-share-imported-note", full=False)
+    # 공유받은 노트는 다시 나누지 않는다 (메뉴에 없고, 서버도 막는다)
+    await opage.get_by_role("button", name="노트 메뉴").click()
+    await expect(opage.get_by_role("menuitem", name="자료 공유에 올리기")).to_have_count(0)
+    await opage.keyboard.press("Escape")
+
+    step("share: 'KOK으로 정리' hands the PDF to 자료 넣기 in the subject I pick")
+    await opage.goto(BASE + f"/share/p/{pa}")
+    await opage.get_by_role("button", name="광합성 정리.pdf 메뉴").click()
+    await opage.get_by_role("menuitem", name="KOK으로 정리").click()
+    osheet = opage.get_by_role("dialog", name="KOK으로 정리")
+    await osheet.get_by_role("radio", name=re.compile(re.escape(o_subject))).click()
+    await osheet.get_by_role("button", name=f"'{o_subject}'에 정리하기").click()
+    await opage.wait_for_url(LIBRARY_SUBJECT, timeout=15000)
+    await poll_db(f"select count(*) from public.sources where user_id = '{other}' and kind = 'pdf' and title like '광합성 정리%'", "1", timeout=40)
+
+    step("share: likes, an anonymous comment (익명1), the writer's reply (글쓴이)")
+    await opage.goto(BASE + f"/share/p/{pa}")
+    await opage.get_by_role("button", name="좋아요 0").first.click()
+    await expect(opage.get_by_role("button", name="좋아요 1").first).to_be_visible()
+    await poll_db(f"select like_count from public.community_posts where id = '{pa}'", "1")
+    await opage.get_by_role("textbox", name="댓글", exact=True).fill("고마워요! 시험에 도움이 됐어요")
+    await opage.get_by_text("익명으로", exact=True).click()
+    await opage.get_by_role("button", name="댓글 달기").click()
+    await expect(opage.get_by_text("익명1", exact=True)).to_be_visible()
+    await expect(opage.get_by_text("고마워요! 시험에 도움이 됐어요")).to_be_visible()
+    await page.goto(BASE + f"/share/p/{pa}")
+    await page.get_by_role("button", name="답글", exact=True).first.click()
+    await page.get_by_role("textbox", name="답글", exact=True).fill("도움이 됐다니 다행이에요")
+    await page.get_by_role("button", name="답글 달기").click()
+    await expect(page.get_by_text("도움이 됐다니 다행이에요")).to_be_visible()
+    await expect(page.get_by_text("글쓴이", exact=True)).to_be_visible()
+    assert db(f"select comment_count from public.community_posts where id = '{pa}'") == "2"
+    # 다른 학생은 내 글을 지우거나 고칠 수 없다 (메뉴에 없다)
+    await opage.reload()
+    await opage.get_by_role("button", name="글 메뉴", exact=True).click()
+    await expect(opage.get_by_role("menuitem", name="지우기")).to_have_count(0)
+    await expect(opage.get_by_role("menuitem", name="고치기")).to_have_count(0)
+    await opage.keyboard.press("Escape")
+
+    step("share: the gallery maker deletes someone else's comment (a comment with replies keeps its place)")
+    await page.reload()
+    thread = page.get_by_role("region", name="댓글")
+    await thread.get_by_role("button", name="댓글 메뉴").first.click()
+    await page.get_by_role("menuitem", name="지우기").click()
+    msg = await app_confirm(page)
+    assert "내가 만든 갤러리의 댓글" in msg, msg
+    await expect(page.get_by_text("지운 댓글이에요.")).to_be_visible()
+    await expect(page.get_by_text("도움이 됐다니 다행이에요")).to_be_visible()
+
+    step("share: the second post opens a text file (EUC-KR) and a photo; the third hits the free daily limit")
+    await opage.goto(BASE + f"/share/p/{pb}")
+    await opage.get_by_role("button", name="자료 받기").click()
+    await expect(opage.get_by_text("자료를 받았어요. 오늘 0개 더 받을 수 있어요.")).to_be_visible()
+    await opage.get_by_role("button", name="세포 분열.txt 열기").click()
+    tsheet = opage.get_by_role("dialog", name="세포 분열.txt")
+    await expect(tsheet.get_by_text("세포 분열은 체세포 분열과 감수 분열이 있다.")).to_be_visible()
+    await opage.keyboard.press("Escape")
+    await opage.get_by_role("button", name="현미경 사진.jpg 열기").click()
+    await expect(opage.get_by_role("dialog", name="현미경 사진.jpg")).to_be_visible()
+    await opage.keyboard.press("Escape")
+    await opage.goto(BASE + f"/share/p/{pc}")
+    await expect(opage.get_by_text("오늘 받을 수 있는 자료 2개를 다 받았어요. 내일 다시 받을 수 있어요.")).to_be_visible()
+    await opage.get_by_role("button", name="더 받는 방법 보기").click()
+    lsheet = opage.get_by_role("dialog", name="오늘 받을 수 있는 자료를 다 받았어요")
+    await expect(lsheet.get_by_text("하루 30개")).to_be_visible()
+    await shot(opage, "146-share-limit", full=False)
+    await opage.keyboard.press("Escape")
+    # 서버도 막는다 (화면을 거치지 않아도)
+    n0 = len(ERRORS)
+    r = await opage.request.post(BASE + f"/api/share/posts/{pc}/unlock")
+    assert r.status == 429 and (await r.json())["error"] == "download_limit", (r.status, await r.text())
+    del ERRORS[n0:]
+    # 이미 받은 글은 다시 세지 않는다
+    r = await opage.request.post(BASE + f"/api/share/posts/{pa}/unlock")
+    assert r.ok and (await r.json())["left"] == 0, await r.text()
+    await opage.goto(BASE + "/share/me?tab=received")
+    await expect(opage.get_by_role("link", name=re.compile("광합성 정리 PDF와 노트"))).to_be_visible()
+    await expect(opage.get_by_role("link", name=re.compile("세포 분열 요약"))).to_be_visible()
+
+    step("share: reports from 5 different people hide a post until the admin looks at it")
+    for i in range(4):
+        rid = f"dddddddd-dddd-4ddd-8ddd-00000000000{i}"
+        db(f"insert into auth.users (id, email) values ('{rid}', 'reporter{i}@example.com') on conflict do nothing")
+        db(f"insert into public.reports (reporter_id, target_type, target_id, reason) values ('{rid}', 'share_post', '{pc}', '광고·도배예요')")
+    await opage.goto(BASE + f"/share/p/{pc}")
+    await opage.get_by_role("button", name="글 메뉴", exact=True).click()
+    await opage.get_by_role("menuitem", name="신고").click()
+    rsheet = opage.get_by_role("dialog", name="신고하기")
+    await expect(rsheet.get_by_role("button", name="신고 보내기")).to_be_disabled()
+    await rsheet.get_by_role("button", name="광고·도배예요").click()
+    await rsheet.get_by_role("button", name="신고 보내기").click()
+    await expect(opage.get_by_text("신고했어요. 운영자가 확인할게요.")).to_be_visible()
+    await poll_db(f"select hidden::text from public.community_posts where id = '{pc}'", "true")
+    assert "글쓴이:" in db(f"select snapshot from public.reports where reporter_id = '{other}' and target_id = '{pc}'")
+    n0 = len(ERRORS)
+    await opage.reload()
+    await expect(opage.get_by_text("가려진 글이에요", exact=True)).to_be_visible()
+    del ERRORS[n0:]
+    await page.goto(BASE + f"/share/p/{pc}")
+    await expect(page.get_by_text("신고가 쌓여 가려진 글이에요. 운영자가 확인할 때까지 나와 운영자만 볼 수 있어요.")).to_be_visible()
+
+    step("share: blocking the writer hides their posts for me (anonymous ones too); unblock from 내 활동")
+    await opage.goto(BASE + f"/share/p/{pa}")
+    await opage.get_by_role("button", name="글 메뉴", exact=True).click()
+    await opage.get_by_role("menuitem", name="글쓴이 차단").click()
+    await app_confirm(opage)
+    await opage.wait_for_url(re.compile(rf"/share/g/{gid}$"))
+    await expect(opage.get_by_text("아직 글이 없어요")).to_be_visible()
+    await opage.goto(BASE + "/share/me?tab=blocks")
+    await expect(opage.get_by_text(s_nick, exact=True)).to_be_visible()
+    await opage.get_by_role("button", name="풀기").click()
+    await app_confirm(opage)
+    await expect(opage.get_by_text("차단한 사람이 없어요")).to_be_visible()
+    await opage.goto(BASE + f"/share/g/{gid}")
+    await expect(opage.get_by_role("link", name=re.compile("시험 범위 아는 사람"))).to_be_visible()
+
+    step("share: search finds posts by every word and galleries by name")
+    await page.goto(BASE + "/share")
+    search = page.get_by_label("자료 공유에서 찾기")
+    await search.fill("광합성 노트")
+    await search.press("Enter")
+    await page.wait_for_url(re.compile(r"/share\?q="))
+    await expect(page.get_by_role("link", name=re.compile("광합성 정리 PDF와 노트"))).to_be_visible()
+    await expect(page.get_by_role("link", name=re.compile("세포 분열 요약"))).to_have_count(0)
+    await search.fill("동성중")
+    await search.press("Enter")
+    await expect(page.get_by_role("link", name=re.compile("^동성중 2학년, 글"))).to_be_visible()
+    await shot(page, "147-share-search")
+
+    step("share: the writer edits the title and takes out a file")
+    await page.goto(BASE + f"/share/p/{pb}")
+    await page.get_by_role("button", name="글 메뉴", exact=True).click()
+    await page.get_by_role("menuitem", name="고치기").click()
+    await page.wait_for_url(re.compile(r"/share/write\?edit="))
+    title = page.get_by_label("제목", exact=True)
+    await expect(title).to_have_value("세포 분열 요약")
+    await title.fill("세포 분열 요약 (고침)")
+    await page.get_by_role("button", name="현미경 사진.jpg 빼기").click()
+    await page.get_by_role("button", name="저장하기").click()
+    await page.wait_for_url(re.compile(rf"/share/p/{pb}$"))
+    await expect(page.get_by_role("heading", name="세포 분열 요약 (고침)")).to_be_visible()
+    await expect(page.get_by_text("· 고침")).to_be_visible()
+    assert db(f"select count(*) from public.community_files where post_id = '{pb}'") == "1"
+
+    step("share: the gallery maker deletes another student's post in their gallery")
+    await opage.goto(BASE + f"/share/write?g={gid}")
+    await opage.get_by_label("제목", exact=True).fill("광고 아니에요")
+    await opage.get_by_label("내용", exact=True).fill("제 블로그도 와 주세요")
+    await opage.get_by_role("button", name="글 올리기").click()
+    await opage.wait_for_url(re.compile(r"/share/p/[0-9a-f-]{36}$"), timeout=30000)
+    pe = opage.url.rsplit("/", 1)[-1]
+    await page.goto(BASE + f"/share/p/{pe}")
+    await page.get_by_role("button", name="글 메뉴", exact=True).click()
+    await page.get_by_role("menuitem", name="지우기").click()
+    msg = await app_confirm(page)
+    assert "내가 만든 갤러리의 글" in msg, msg
+    await page.wait_for_url(re.compile(rf"/share/g/{gid}$"))
+    assert db(f"select count(*) from public.community_posts where id = '{pe}'") == "0"
+    await octx.close()
+
+    step("share: the admin sees who wrote an anonymous post, shows a hidden post again, and can delete any post")
+    actx, apage = await new_ctx(browser, "admin", width=1280)
+    await apage.goto(BASE + f"/share/p/{pd}")
+    await expect(apage.get_by_text(re.compile(rf"실제 글쓴이: {re.escape(s_nick)} \(student@example.com\)"))).to_be_visible()
+    await apage.goto(BASE + f"/share/p/{pc}")
+    await apage.get_by_role("button", name="다시 보이기").click()
+    await poll_db(f"select hidden::text from public.community_posts where id = '{pc}'", "false")
+    await apage.get_by_role("button", name="글 메뉴", exact=True).click()
+    await apage.get_by_role("menuitem", name="지우기").click()
+    msg = await app_confirm(apage)
+    assert "운영자로 지워요" in msg, msg
+    await apage.wait_for_url(re.compile(rf"/share/g/{gid}$"))
+    assert db(f"select count(*) from public.community_posts where id = '{pc}'") == "0"
+    assert not (files_root / "community" / student / pc).exists() or not any((files_root / "community" / student / pc).iterdir()), "deleted post's files are removed"
+    # 신고함에 자료 공유 신고가 보인다
+    await apage.goto(BASE + "/admin")
+    await expect(apage.get_by_role("link", name="글 보기").first).to_be_visible()
+    await actx.close()
+
+    step("share: the maker deletes the gallery (only their posts left): posts, files and the note's pictures go")
+    await page.goto(BASE + f"/share/g/{gid}")
+    await page.get_by_role("button", name="갤러리 메뉴").click()
+    await page.get_by_role("menuitem", name="갤러리 지우기").click()
+    await app_confirm(page)
+    await page.wait_for_url(re.compile(r"/share$"))
+    assert db(f"select count(*) from public.community_galleries where id = '{gid}'") == "0"
+    assert db(f"select count(*) from public.community_posts where gallery_id = '{gid}'") == "0"
+    left = [p for p in (files_root / "community" / student).rglob("*") if p.is_file()] if (files_root / "community" / student).exists() else []
+    assert not left, left
+    shared_figs = files_root / "sources" / student / "share"
+    assert not shared_figs.exists() or not [p for p in shared_figs.rglob("*") if p.is_file()], "the shared note's pictures go with the posts"
+    # 받은 노트는 남는다 (내 자료함의 노트는 글과 따로)
+    assert db(f"select status from public.sources where id = '{new_sid}'") == "ready"
+    await ctx.close()
+
+
+async def plan_tier_steps(browser):
+    """요금제: 관리자가 무료·Pro·Max 혜택 숫자를 바꾸면 요금제 화면·받기 한도에 바로, Max 코드는 Max 를 켜고 남은 Pro 는 그 뒤로"""
+    other = USERS["other"][0]
+    db(f"delete from public.rate_hits where user_id = '{other}'")
+    step("plans: admin changes Pro's downloads a day in 요금제 혜택; the plan page shows it")
+    actx, apage = await new_ctx(browser, "admin", width=1280)
+    await apage.goto(BASE + "/admin")
+    field = apage.get_by_label("Pro 자료 받기 (하루)", exact=True)
+    await field.fill("12")
+    await apage.get_by_role("button", name="혜택 저장").click()
+    await expect(apage.get_by_text("요금제 혜택을 저장했어요. 곧 모든 사람에게 적용돼요.")).to_be_visible()
+    assert db("select value #>> '{pro,downloadsDaily}' from public.app_settings where key = 'plans'") == "12"
+
+    step("plans: a Max code turns on Max (cover pictures, lessons, signature themes …)")
+    await apage.get_by_role("button", name=re.compile("^켜 줄 플랜")).click()
+    await apage.get_by_role("option", name="Max", exact=True).click()
+    await apage.get_by_label("기간(일)").fill("5")
+    await apage.get_by_role("button", name="Max 코드 만들기").click()
+    code_btn = apage.locator("button.font-mono").first
+    await expect(code_btn).to_be_visible()
+    max_code = (await code_btn.inner_text()).strip()
+    assert db(f"select tier || ':' || days from public.coupons where code = '{max_code}'") == "max:5"
+    octx, opage = await new_ctx(browser, "other")
+    await opage.goto(BASE + "/plan")
+    await expect(opage.get_by_text("하루 12개").first).to_be_visible(timeout=20000)
+    await opage.get_by_label("쿠폰 번호").fill(max_code)
+    await opage.get_by_role("button", name="쿠폰 쓰기").click()
+    await expect(opage.get_by_text(re.compile("Max가 켜졌어요!"))).to_be_visible()
+    me = await (await opage.request.get(BASE + "/api/me")).json()
+    assert me["planInfo"]["kind"] == "max", me["planInfo"]
+    assert me["canCover"] and me["canCourse"] and me["canSkins"] and me["canReorganize"], me
+    assert me["share"]["downloadsDaily"] == 30, me["share"]
+    await shot(opage, "148-plan-max")
+    await no_hscroll(opage, "plan (max)")
+    # 관리자가 Max 를 끄면 무료로
+    await apage.get_by_label("사용자 찾기").fill("other@example.com")
+    await apage.get_by_role("button", name="찾기", exact=True).click()
+    await expect(apage.get_by_text(re.compile("^Max ~"))).to_be_visible()
+    await apage.get_by_role("button", name="Max 기간").click()
+    box = apage.locator(CONFIRM)
+    await box.get_by_label("며칠").fill("0")
+    await box.locator('[data-confirm="ok"]').click()
+    await expect(apage.get_by_text(re.compile("^Max ~"))).to_have_count(0)
+    me = await (await opage.request.get(BASE + "/api/me")).json()
+    assert me["planInfo"]["kind"] == "free" and me["share"]["downloadsDaily"] == 2, (me["planInfo"], me["share"])
+    # 처음 값으로 되돌린다 (다음 시험에 남지 않게)
+    await apage.get_by_role("button", name="처음 값으로").click()
+    await app_confirm(apage)
+    await apage.get_by_role("button", name="혜택 저장").click()
+    await expect(apage.get_by_text("요금제 혜택을 저장했어요. 곧 모든 사람에게 적용돼요.").last).to_be_visible()
+    assert db("select value #>> '{pro,downloadsDaily}' from public.app_settings where key = 'plans'") == "10"
+    await octx.close()
+    await actx.close()
 
 
 async def main():
@@ -2313,7 +2737,7 @@ async def main():
         assert glow_note, "a note card in the library"
         for width in (390, 1280):
             gctx, gpage = await new_ctx(browser, "student", width=width)
-            for path in ["/home", "/library", "/review", "/wrong", "/questions", "/settings", glow_note, glow_note + "?tab=visual", glow_note + "?tab=questions"]:
+            for path in ["/home", "/library", "/review", "/wrong", "/questions", "/settings", "/share", "/share/me", glow_note, glow_note + "?tab=visual", glow_note + "?tab=questions"]:
                 await gpage.goto(BASE + path)
                 await gpage.wait_for_timeout(1200)
                 bad = await gpage.evaluate(ON_BG_JS)
@@ -2611,8 +3035,10 @@ async def main():
         await apage.keyboard.type("베타 테스터")
         await expect(sheet.get_by_label("플랜 이름")).to_have_value("베타 테스터")
         await sheet.get_by_label("에너지 총량").fill("100")
-        await sheet.get_by_label("PDF 쪽수 (한 번에)").fill("33")
-        await sheet.get_by_text("꼼꼼 모델 쓰기").click()  # 끈다
+        await sheet.get_by_label("PDF 한 번에 (쪽)").fill("33")
+        # 새 플랜은 Pro 값으로 채워져 있다: 꼼꼼 모델과 원본 계속 보관을 끈다 (원본은 플랜이 끝나고 무료 보관 일수 뒤에 지운다)
+        await sheet.get_by_text("꼼꼼 모델", exact=True).click()
+        await sheet.get_by_text("원본 파일 계속 보관", exact=True).click()
         await shot(apage, "35-admin-plan-form", full=False)
         await sheet.get_by_role("button", name="플랜 만들기").click()
         await expect(apage.get_by_text(re.compile("'베타 테스터' 플랜을 만들었어요"))).to_be_visible()
@@ -5480,6 +5906,8 @@ async def main():
         await material_steps(browser)
         await office_code_steps(browser)
         await office_picture_steps(browser)
+        await share_steps(browser)
+        await plan_tier_steps(browser)
         await browser.close()
 
     # 실제 Claude 처럼 가짜 서버도 속성이 42개를 넘는 답 모양은 거절한다: 시험 내내 한 번도 없어야 하고, 채팅 풀이 그림은 두 번째 호출로 받았다

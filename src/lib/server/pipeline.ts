@@ -317,7 +317,7 @@ function draftFigures(draft: Record<string, unknown>): SourceFigure[] {
 
 /** 노트가 정해진 다음 단계: Pro 이고 다시 그릴 그림(지도·그래프·표·연표·도식)이 있으면 그림 다시 그리기, 아니면 그림(마인드맵) */
 function afterNote(ctx: Ctx, figures: SourceFigure[]): 'figures' | 'visual' {
-  return ctx.acc.canFigures && figures.some((f) => canRedraw(f.kind) && !f.art) ? 'figures' : 'visual';
+  return ctx.acc.canRedraw && figures.some((f) => canRedraw(f.kind) && !f.art) ? 'figures' : 'visual';
 }
 
 /** 그림을 자를 원본: AI 에 보낸 PDF 조각(첫 쪽의 원래 쪽 번호와 함께) 또는 사진들(원래 사진 번호마다) */
@@ -567,7 +567,7 @@ async function stepFigures(ctx: Ctx): Promise<Partial<SourceRow>> {
   if (await baseIsStale(ctx)) return remergePatch(ctx.src);
   const figures = draftFigures(ctx.src.draft);
   const from = Number(ctx.src.draft.figRound ?? 0);
-  const todo = ctx.acc.canFigures ? figures.map((f, i) => ({ f, i })).filter(({ f, i }) => i >= from && canRedraw(f.kind) && !f.art) : [];
+  const todo = ctx.acc.canRedraw ? figures.map((f, i) => ({ f, i })).filter(({ f, i }) => i >= from && canRedraw(f.kind) && !f.art) : [];
   if (!todo.length) {
     const draft: Record<string, unknown> = { ...ctx.src.draft, attempts: 0 };
     delete draft.figRound;
@@ -1432,7 +1432,7 @@ async function finalizeAppend(ctx: Ctx, args: { p_note: unknown; p_visuals: unkn
 /** 표지 그림을 그릴 차례인지: 새 노트(더한 자료는 지금 노트의 표지를 그대로), Pro 혜택, 설정에서 켬, DB 칸이 있음, 아직 안 그림 */
 async function coverPending(ctx: Ctx): Promise<boolean> {
   if (ctx.src.draft.coverDone === true) return false;
-  if (!coverWanted({ canFigures: ctx.acc.canFigures, autoCover: ctx.settings.visual.autoCover, featureOn: true, append: !!parentNoteId(ctx) })) return false;
+  if (!coverWanted({ canCover: ctx.acc.canCover, autoCover: ctx.settings.visual.autoCover, featureOn: true, append: !!parentNoteId(ctx) })) return false;
   return (await getFeatures(ctx.admin)).covers;
 }
 

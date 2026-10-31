@@ -1,5 +1,5 @@
 // 매일 한 번 청소 (Vercel Cron): 기간이 지난 원본 파일 지우기, 정리를 시작하지 않은 올리기 지우기,
-// 멈춘 처리 정리, 오래된 요청·탈퇴 기록 지우기, 어느 테마도 쓰지 않는 배경 그림 지우기
+// 멈춘 처리 정리, 오래된 요청·탈퇴 기록 지우기, 어느 테마도 쓰지 않는 배경 그림 지우기, 글이 되지 않은 자료 공유 파일 지우기
 import type { NextRequest } from 'next/server';
 import { timingSafeEqual } from 'node:crypto';
 import { adminClient } from '@/lib/supabase/admin';
@@ -8,6 +8,7 @@ import { sweepUnusedImages } from '@/lib/server/themes';
 import { removeFolder, sweepOrphanUploads } from '@/lib/server/files';
 import { errorResponse } from '@/lib/server/errors';
 import { TOMBSTONE_KEEP_MS } from '@/lib/server/tombstone';
+import { COMMUNITY_BUCKET } from '@/lib/server/share';
 
 export const maxDuration = 300;
 
@@ -89,7 +90,37 @@ export async function GET(req: NextRequest) {
       }
     }
 
-    return Response.json({ ok: true, filesRemoved, orphans, stuck, themeImages });
+    // 6) 자료 공유: 올리고 하루가 지나도 글이 되지 않은 파일 (글이 된 파일의 자리는 글을 만들 때 지운다)
+    let shareOrphans = 0;
+    if ((await getFeatures(admin)).community) {
+      try {
+        const { data: old } = await admin.from('community_uploads').select('id, path').lt('created_at', dayAgo).limit(1000);
+        const rows = (old ?? []) as Array<{ id: number; path: string }>;
+        if (rows.length) {
+          // 그사이 글이 되어 파일 행이 생긴 것은 지우지 않는다 (자리만 지운다)
+          const paths = rows.map((r) => r.path);
+          const [{ data: used }, { data: previews }] = await Promise.all([
+            admin.from('community_files').select('path').in('path', paths),
+            admin.from('community_files').select('preview_path').in('preview_path', paths),
+          ]);
+          const keep = new Set([...(used ?? []).map((u) => String(u.path)), ...(previews ?? []).map((u) => String(u.preview_path))]);
+          const drop = paths.filter((p) => !keep.has(p));
+          for (let i = 0; i < drop.length; i += 100) await admin.storage.from(COMMUNITY_BUCKET).remove(drop.slice(i, i + 100));
+          await admin
+            .from('community_uploads')
+            .delete()
+            .in(
+              'id',
+              rows.map((r) => r.id),
+            );
+          shareOrphans = drop.length;
+        }
+      } catch (e) {
+        console.warn('[kok] share upload sweep failed', (e as Error).message);
+      }
+    }
+
+    return Response.json({ ok: true, filesRemoved, orphans, stuck, themeImages, shareOrphans });
   } catch (e) {
     return errorResponse(e);
   }

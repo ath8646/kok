@@ -3,7 +3,7 @@ import 'server-only';
 import { randomUUID } from 'node:crypto';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import type { Account, AppSettings } from './account';
-import { getFeatures } from './account';
+import { assertPerk, getFeatures } from './account';
 import { UserFacingError } from './errors';
 import { cloudflareReady, generateImage, ImageGenError } from './cloudflare';
 import { sniffImage } from '@/lib/themes/image-sniff';
@@ -31,10 +31,11 @@ export const THEME_WRITES_PER_HOUR = 120;
 
 const SCHEMA_OUTDATED = '테마를 만들려면 관리자가 Supabase 에서 schema.sql 을 다시 실행해야 해요.';
 
-/** 테마를 만들고 고칠 수 있는지 (Pro, 새 표가 있는지) */
-export async function requireThemes(admin: SupabaseClient, acc: Account): Promise<void> {
+/** 테마를 만들고 고칠 수 있는지 (테마 혜택, 새 표가 있는지). ai: AI 로 테마·그림을 만드는 일이면 AI 테마 혜택도 */
+export async function requireThemes(admin: SupabaseClient, acc: Account, opts: { ai?: boolean } = {}): Promise<void> {
   if (!(await getFeatures(admin)).themes) throw new UserFacingError('schema_outdated', SCHEMA_OUTDATED, 503);
-  if (!acc.canTheme) throw new UserFacingError('pro_only', '테마는 Pro 기능이에요.', 403);
+  assertPerk(acc, 'theme');
+  if (opts.ai) assertPerk(acc, 'aiTheme', 'AI로 테마 만들기');
 }
 
 /** 하루 한도 (24시간 안 횟수): 하나 쓰고, 다 썼으면 오류 */

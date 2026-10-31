@@ -38,7 +38,7 @@ export async function POST(req: NextRequest) {
       cut: { ...cut, ms: Date.now() - started },
       dbReady: features.sourceFigures,
       settingOn: acc.settings.quiz.sourceFigures,
-      redraw: acc.canFigures,
+      redraw: acc.canRedraw,
     });
   } catch (e) {
     return errorResponse(e);

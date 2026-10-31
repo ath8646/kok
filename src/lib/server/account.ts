@@ -8,15 +8,23 @@ import {
   countFrom,
   customPlanActive,
   energyWindow,
-  planFlags,
+  perkNeed,
+  perkTiers,
   planEndedAt,
   planLimits,
+  readPlans,
   refillText,
   resolvePlan,
+  specFor,
+  tierEnergy,
   toCustomPlan,
   type CustomPlan,
+  type Perk,
+  type PerkTiers,
   type PlanInfo,
   type PlanLimits,
+  type PlanSpec,
+  type PlansConfig,
 } from '@/lib/plans';
 
 import { UserFacingError } from './errors';
@@ -25,9 +33,27 @@ import { accountKeys, deletedSince } from './tombstone';
 export type { PlanInfo, PlanLimits };
 export { refillText };
 
-/** 이 사람에게 지금 적용되는 한도 (파일·쪽수·사진·글자) */
-export function limitsFor(acc: Pick<Account, 'plan' | 'custom'>, L: Limits): PlanLimits {
-  return planLimits(acc.plan.kind, acc.custom, L);
+/** 이 사람에게 지금 적용되는 한도 (파일·쪽수·사진·글자·자료 공유)와 혜택 */
+export function limitsFor(acc: Pick<Account, 'lim'>): PlanLimits {
+  return acc.lim;
+}
+
+/** 이 혜택이 없을 때 알려 줄 글과 함께 던진다 ('표지 그림은 Max에서 쓸 수 있어요.') */
+export function assertPerk(acc: Pick<Account, 'lim' | 'perkTiers'>, perk: Perk, what?: string): void {
+  const on: Record<Perk, boolean> = {
+    careful: acc.lim.canCareful,
+    keepFiles: acc.lim.keepFiles,
+    append: acc.lim.canAppend,
+    figures: acc.lim.canFigures,
+    theme: acc.lim.canTheme,
+    course: acc.lim.canCourse,
+    reorganize: acc.lim.canReorganize,
+    cover: acc.lim.canCover,
+    redraw: acc.lim.canRedraw,
+    skins: acc.lim.canSkins,
+    aiTheme: acc.lim.canAiTheme,
+  };
+  if (!on[perk]) throw new UserFacingError('pro_only', perkNeed(acc.perkTiers, perk, what), 403);
 }
 
 export type Account = {
@@ -37,23 +63,43 @@ export type Account = {
   provider: string | null;
   nickname: string | null;
   isAdmin: boolean;
-  /** 지금 적용되는 플랜이 Pro 인지 (테스트 플랜이 켜져 있으면 false) */
+  /** 지금 적용되는 플랜이 Pro 인지 (테스트 플랜·Max 가 켜져 있으면 false) */
   isPro: boolean;
   proUntil: string | null;
-  /** 지금 적용되는 플랜 (관리자 > 테스트 플랜 > Pro > 무료) */
+  /** Max 가 끝나는 때 (없으면 null) */
+  maxUntil: string | null;
+  /** 지금 적용되는 플랜 (관리자 > 테스트 플랜 > Max > Pro > 무료) */
   plan: PlanInfo;
   /** 켜져 있는 테스트 플랜 (없으면 null) */
   custom: CustomPlan | null;
+  /** 지금 플랜의 혜택 전부 (에너지·한도·자료 공유·혜택 스위치) */
+  spec: PlanSpec;
+  /** 지금 플랜의 한도와 혜택 (파일 크기는 저장소 한도까지) */
+  lim: PlanLimits;
+  /** 혜택마다 처음 주는 요금제 ('…은 Max에서 쓸 수 있어요' 안내) */
+  perkTiers: PerkTiers;
   /** 꼼꼼 모델을 쓸 수 있는지 */
   canCareful: boolean;
-  /** 원본 파일을 기한 없이 보관하는지 */
+  /** 원본 파일을 기한 없이 보관하는지 (채팅에 붙인 파일도) */
   keepFiles: boolean;
-  /** 노트에 자료 더하기(버전)를 쓸 수 있는지 (Pro·관리자, 켠 테스트 플랜) */
+  /** 노트에 자료 더하기(버전)를 쓸 수 있는지 */
   canAppend: boolean;
-  /** 테마를 쓸 수 있는지 (Pro·관리자, 켠 테스트 플랜) */
+  /** 테마를 쓸 수 있는지 (기본 테마 색·내 테마·별표 빛·글꼴·종이) */
   canTheme: boolean;
-  /** 그림 풀이를 쓸 수 있는지: 노트를 만들 때 문제 그림·단계 풀이, 채팅의 그림 풀이 (Pro·관리자, 켠 테스트 플랜) */
+  /** 그림 풀이를 쓸 수 있는지: 노트를 만들 때 문제 그림·단계 풀이, 채팅의 그림 풀이 */
   canFigures: boolean;
+  /** 단계별 학습(레슨)을 만들 수 있는지 */
+  canCourse: boolean;
+  /** AI로 다시 정리를 쓸 수 있는지 */
+  canReorganize: boolean;
+  /** 표지 그림을 그릴 수 있는지 */
+  canCover: boolean;
+  /** 자료 그림을 KOK 스타일로 다시 그리는지 */
+  canRedraw: boolean;
+  /** 시그니처 테마·터미널 */
+  canSkins: boolean;
+  /** AI 테마 그림 */
+  canAiTheme: boolean;
   /** 마지막 테스트 플랜이 끝난 시각 (무료·Pro 에너지는 이 뒤부터 센다, 켜져 있으면 null) */
   planEndedAt: string | null;
   banned: boolean;
@@ -98,7 +144,9 @@ export async function getAccount(admin: SupabaseClient, userId: string, email?: 
     if (cp) customRow = toCustomPlan(cp);
   }
   const { info: plan, custom } = resolvePlan(row, customRow, isAdmin);
-  const caps = planFlags(plan.kind, custom);
+  // 요금제 혜택은 관리자가 고친다 (운영 설정, 15초 기억)
+  const { plans } = await getAppSettings(admin);
+  const lim = planLimits(plan.kind, custom, plans);
   return {
     userId,
     email: mail,
@@ -107,13 +155,23 @@ export async function getAccount(admin: SupabaseClient, userId: string, email?: 
     isAdmin,
     isPro: plan.kind === 'pro',
     proUntil,
+    maxUntil: (row.max_until as string | null | undefined) ?? null,
     plan,
     custom,
-    canCareful: caps.canCareful,
-    keepFiles: caps.keepFiles,
-    canAppend: caps.canAppend,
-    canTheme: caps.canTheme,
-    canFigures: caps.canFigures,
+    spec: specFor(plan.kind, custom, plans),
+    lim,
+    perkTiers: perkTiers(plans),
+    canCareful: lim.canCareful,
+    keepFiles: lim.keepFiles,
+    canAppend: lim.canAppend,
+    canTheme: lim.canTheme,
+    canFigures: lim.canFigures,
+    canCourse: lim.canCourse,
+    canReorganize: lim.canReorganize,
+    canCover: lim.canCover,
+    canRedraw: lim.canRedraw,
+    canSkins: lim.canSkins,
+    canAiTheme: lim.canAiTheme,
     planEndedAt: plan.kind === 'custom' ? null : planEndedAt(row),
     banned: !!row.banned,
     consented: !!row.consented_at,
@@ -158,6 +216,10 @@ export type Features = {
   sessions: boolean;
   /** 자료함 카드의 표지 그림 (sources.cover, Pro): 서버만 쓰고 학생은 읽기만 */
   covers: boolean;
+  /** Max 요금제와 테스트 플랜의 모든 혜택 칸 (profiles.max_until, coupons.tier, custom_plans.extra, kok_set_paid_plan) */
+  maxPlan: boolean;
+  /** 자료 공유 (community_* 표와 함수) */
+  community: boolean;
 };
 
 /** schema.sql 을 다시 실행하기 전의 DB 에는 함수가 없다 (PostgREST 가 함수를 못 찾음) */
@@ -174,7 +236,7 @@ let featuresCache: { at: number; value: Features } | null = null;
  */
 export async function getFeatures(admin: SupabaseClient): Promise<Features> {
   if (featuresCache && Date.now() - featuresCache.at < 60_000) return featuresCache.value;
-  const [v, p, r, c, f, t, ti, ac, qf, pf, cf, og, sf, sd, vk, rs, nc, np, se, cv] = await Promise.all([
+  const [v, p, r, c, f, t, ti, ac, qf, pf, cf, og, sf, sd, vk, rs, nc, np, se, cv, mx, cm] = await Promise.all([
     admin.from('note_versions').select('id').limit(1),
     admin.from('sources').select('parent_id').limit(1),
     admin.from('questions').select('rested_hidden').limit(1),
@@ -196,6 +258,8 @@ export async function getFeatures(admin: SupabaseClient): Promise<Features> {
     admin.from('note_pdfs').select('id').limit(1),
     admin.from('review_sessions').select('key').limit(1),
     admin.from('sources').select('cover').limit(1),
+    admin.from('custom_plans').select('extra').limit(1),
+    admin.from('community_posts').select('id').limit(1),
   ]);
   const value: Features = {
     versions: !v.error && !p.error,
@@ -213,6 +277,8 @@ export async function getFeatures(admin: SupabaseClient): Promise<Features> {
     pdfs: !np.error,
     sessions: !se.error,
     covers: !cv.error,
+    maxPlan: !mx.error,
+    community: !cm.error,
   };
   featuresCache = { at: Date.now(), value };
   return value;
@@ -221,6 +287,8 @@ export async function getFeatures(admin: SupabaseClient): Promise<Features> {
 // ------------------------------------------------------------- 운영 설정
 export type AppSettings = {
   limits: Limits;
+  /** 무료·Pro·Max 혜택 (관리자 화면 '요금제 혜택') */
+  plans: PlansConfig;
   models: ModelsConfig;
   notice: Notice;
   aiEnabled: boolean;
@@ -235,8 +303,10 @@ export async function getAppSettings(admin: SupabaseClient, fresh = false): Prom
   if (error) throw error;
   const map = new Map<string, unknown>((data ?? []).map((r) => [r.key as string, r.value]));
   const site = (map.get('site') ?? {}) as Record<string, unknown>;
+  const limits = readLimits(map.get('limits'));
   const value: AppSettings = {
-    limits: readLimits(map.get('limits')),
+    limits,
+    plans: readPlans(map.get('plans'), limits),
     models: readModels(map.get('models')),
     notice: zNotice.catch({ active: false, text: '' }).parse(map.get('notice') ?? {}),
     aiEnabled: map.get('ai_enabled') !== false,
@@ -257,11 +327,13 @@ export function clearSettingsCache() {
 export type EnergyStatus = {
   unlimited: boolean;
   remaining: number;
-  /** 오늘(무료), 이번 달(Pro) 또는 플랜 기간 전체(테스트 플랜) 한도 */
+  /** 오늘(하루만 세는 요금제), 이번 달(한 달을 세는 요금제) 또는 플랜 기간 전체(테스트 플랜) 한도 */
   limit: number;
   period: 'day' | 'month' | 'plan';
   usedToday: number;
   usedMonth: number;
+  /** 한 달을 세는 요금제의 하루 최대 (없으면 null) */
+  dailyMax?: number | null;
   /** 테스트 플랜: 플랜을 켠 뒤 쓴 번개, 하루 최대 */
   usedPlan?: number;
   planDaily?: number | null;
@@ -273,8 +345,8 @@ async function sumEnergy(admin: SupabaseClient, userId: string, since: Date): Pr
   return Number(data ?? 0);
 }
 
-export async function energyStatus(admin: SupabaseClient, acc: Account, limits: Limits): Promise<EnergyStatus> {
-  // 테스트 플랜이 오늘·이번 달 안에 끝났으면, 무료·Pro 에너지는 플랜이 끝난 뒤부터 센다 (energyWindows 와 같게)
+export async function energyStatus(admin: SupabaseClient, acc: Account): Promise<EnergyStatus> {
+  // 테스트 플랜이 오늘·이번 달 안에 끝났으면, 무료·Pro·Max 에너지는 플랜이 끝난 뒤부터 센다 (energyWindows 와 같게)
   const [usedToday, usedMonth] = await Promise.all([
     sumEnergy(admin, acc.userId, countFrom(kstDayStart(), acc.planEndedAt)),
     sumEnergy(admin, acc.userId, countFrom(kstMonthStart(), acc.planEndedAt)),
@@ -292,12 +364,9 @@ export async function energyStatus(admin: SupabaseClient, acc: Account, limits: 
     const remaining = Math.max(0, Math.min(acc.custom.energyTotal - usedPlan, daily === null ? Infinity : daily - planToday));
     return { unlimited: false, remaining, limit: acc.custom.energyTotal, period: 'plan', usedToday: planToday, usedMonth, usedPlan, planDaily: daily };
   }
-  if (acc.isPro) {
-    const remaining = Math.max(0, Math.min(limits.proMonthly - usedMonth, limits.proDaily - usedToday));
-    return { unlimited: false, remaining, limit: limits.proMonthly, period: 'month', usedToday, usedMonth };
-  }
-  const remaining = Math.max(0, limits.freeDaily - usedToday);
-  return { unlimited: false, remaining, limit: limits.freeDaily, period: 'day', usedToday, usedMonth };
+  // 무료·Pro·Max: 관리자가 정한 하루·한 달 에너지 (lib/plans.ts tierEnergy)
+  const t = tierEnergy(acc.spec, usedToday, usedMonth);
+  return { unlimited: false, remaining: t.remaining, limit: t.limit, period: t.period, usedToday, usedMonth, dailyMax: t.dailyMax };
 }
 
 /** AI를 써도 되는지 검사. 안 되면 한국어 메시지로 던진다 */
@@ -337,11 +406,11 @@ export async function assertAiAllowed(
     if (error) throw error;
     if (data === false) throw new UserFacingError('rate_limited', '요청이 너무 빨라요. 1분 뒤에 다시 해 주세요.', 429);
   }
-  const status = await energyStatus(admin, acc, app.limits);
+  const status = await energyStatus(admin, acc);
   if (!status.unlimited && status.remaining < opts.estimate) {
     throw new UserFacingError(
       'no_energy',
-      `에너지가 부족해요. 필요: 약 ${Math.ceil(opts.estimate)}, 남음: ${Math.floor(status.remaining)}. ${refillText(acc.plan, energyWindow({ ...status, proDaily: acc.isPro ? app.limits.proDaily : null }))}`,
+      `에너지가 부족해요. 필요: 약 ${Math.ceil(opts.estimate)}, 남음: ${Math.floor(status.remaining)}. ${refillText(acc.plan, energyWindow(status))}`,
       402,
     );
   }
@@ -353,9 +422,9 @@ export const MAX_PARALLEL_SOURCES = 3;
 
 /**
  * 자료 만들기·다시 하기에서 DB 가 검사할 에너지 한도 (null = 검사 안 함).
- * 두 번째 창(p_month_*)은 Pro 는 이번 달, 테스트 플랜은 플랜을 켠 때부터 끝날 때까지다.
+ * 두 번째 창(p_month_*)은 무료·Pro·Max 는 이번 달, 테스트 플랜은 플랜을 켠 때부터 끝날 때까지다.
  */
-export function energyWindows(acc: Pick<Account, 'isAdmin' | 'isPro' | 'plan' | 'custom' | 'planEndedAt'>, limits: Limits) {
+export function energyWindows(acc: Pick<Account, 'isAdmin' | 'plan' | 'custom' | 'planEndedAt' | 'spec'>) {
   const day = countFrom(kstDayStart(), acc.planEndedAt).toISOString();
   const month = countFrom(kstMonthStart(), acc.planEndedAt).toISOString();
   if (acc.isAdmin) return { p_day_start: day, p_day_limit: null, p_month_start: month, p_month_limit: null };
@@ -364,8 +433,7 @@ export function energyWindows(acc: Pick<Account, 'isAdmin' | 'isPro' | 'plan' | 
     const planDay = Date.parse(acc.plan.start) > Date.parse(day) ? acc.plan.start : day;
     return { p_day_start: planDay, p_day_limit: acc.custom.energyDaily, p_month_start: acc.plan.start, p_month_limit: acc.custom.energyTotal };
   }
-  if (acc.isPro) return { p_day_start: day, p_day_limit: limits.proDaily, p_month_start: month, p_month_limit: limits.proMonthly };
-  return { p_day_start: day, p_day_limit: limits.freeDaily, p_month_start: month, p_month_limit: null };
+  return { p_day_start: day, p_day_limit: acc.spec.energyDaily, p_month_start: month, p_month_limit: acc.spec.energyMonthly };
 }
 
 export type ReserveResult = {

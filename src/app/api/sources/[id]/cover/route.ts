@@ -5,7 +5,7 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import { zNote } from '@/lib/ai/schemas';
 import { COVER_OUT_TOKENS, coverJsonSchema, coverNoteExcerpt } from '@/lib/cover';
 import { assertSameOrigin, assertUuid, requireAccount } from '@/lib/server/auth';
-import { getAppSettings, getFeatures } from '@/lib/server/account';
+import { assertPerk, getAppSettings, getFeatures } from '@/lib/server/account';
 import { coverContent, settleCover } from '@/lib/server/cover';
 import { UserFacingError, errorResponse } from '@/lib/server/errors';
 import { assertNoteHasContent } from '@/lib/server/notes';
@@ -36,7 +36,7 @@ export async function POST(req: NextRequest, ctx: RouteContext<'/api/sources/[id
     assertUuid(id);
     const { admin, acc } = await requireAccount();
     await assertCoversOn(admin);
-    if (!acc.canFigures) throw new UserFacingError('pro_only', '표지 그림은 Pro에서 쓸 수 있어요.', 403);
+    assertPerk(acc, 'cover');
     const src = await ownSource(admin, id, acc.userId);
     if (src.status !== 'ready') throw new UserFacingError('not_ready', '노트가 다 만들어진 뒤에 그릴 수 있어요.', 409);
     const [{ data: noteRow, error: noteErr }, { data: subj }] = await Promise.all([

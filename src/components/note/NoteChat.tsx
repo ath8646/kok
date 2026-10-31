@@ -4,6 +4,7 @@
 // 사진·파일을 붙이거나 사진을 찍어 물어볼 수 있다: 문제를 보내면 단계로 풀어 주고(Pro 는 그림으로), 푼 문제는 이 노트 문제로 넣을 수 있다.
 // 붙인 파일은 Pro 만 기록에 보관하고, 아니면 이름만 남는다.
 // AI 가 문제·노트에 넣자고 하면 미리보기를 보여 주고, 학생이 [넣기]를 눌러야 들어간다.
+import { perkNeed } from '@/lib/plans';
 import { useRouter } from 'next/navigation';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { RichText } from '@/components/RichText';
@@ -222,7 +223,7 @@ export function NoteChat({
 
   const pickTier = (t: ModelTier) => {
     if (locked(t)) {
-      toast('꼼꼼 모델은 Pro에서 쓸 수 있어요.');
+      toast(perkNeed(me.perkTiers, 'careful'));
       return;
     }
     setTier(t);

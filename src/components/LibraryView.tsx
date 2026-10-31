@@ -1048,7 +1048,7 @@ export function LibraryView() {
                     onStar={() => starOne(s)}
                     onReview={() => reviewOne(s)}
                     onInfo={() => setInfo(s)}
-                    onCover={coversOn && me?.canFigures ? () => setCoverId(s.id) : undefined}
+                    onCover={coversOn && me?.canCover ? () => setCoverId(s.id) : undefined}
                     tint={subjects.find((x) => x.id === s.subject_id)?.color ?? null}
                     onDelete={async () => {
                       const name = s.title?.trim() ? `'${s.title.trim()}'` : '이 자료';

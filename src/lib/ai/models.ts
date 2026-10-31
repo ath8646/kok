@@ -147,7 +147,7 @@ export function estimateFigures(model: ModelId, usdPerEnergy: number): number {
 }
 
 /**
- * Pro 자료 그림 다시 그리기의 예상 에너지: PDF·사진에서 찾은 지도·그래프·표·연표·도식을 그림마다 한 번 (4장으로 센다).
+ * 자료 그림 다시 그리기(혜택)의 예상 에너지: PDF·사진에서 찾은 지도·그래프·표·연표·도식을 그림마다 한 번 (4장으로 센다).
  * 노트 만들기 예상에 더한다 (model: 그림 모델)
  */
 export function estimateRedraws(model: ModelId, usdPerEnergy: number): number {
@@ -156,7 +156,7 @@ export function estimateRedraws(model: ModelId, usdPerEnergy: number): number {
 }
 
 /**
- * Pro 표지 그림 한 장의 예상 에너지: 노트 줄임(약 1500토큰) + 지시·스키마를 보내고 도표의 모양과 짧은 낱말(그래프면 설계도)을 받는다.
+ * 표지 그림(혜택) 한 장의 예상 에너지: 노트 줄임(약 1500토큰) + 지시·스키마를 보내고 도표의 모양과 짧은 낱말(그래프면 설계도)을 받는다.
  * 자료를 넣을 때 자동으로 그리면 노트 만들기 예상에 더하고, 다시 그리기 화면에도 보인다 (model: 그림 모델)
  */
 export function estimateCover(model: ModelId, usdPerEnergy: number): number {
@@ -164,26 +164,26 @@ export function estimateCover(model: ModelId, usdPerEnergy: number): number {
   return estimateSmallTask(model, usdPerEnergy, 4000, 900);
 }
 
-/** 자료를 넣을 때 표지 그림을 그리는지 (Pro 혜택, 설정에서 켜 둠, DB 칸이 있음. 노트에 더하는 자료는 그리지 않는다) */
-export function coverWanted(o: { canFigures: boolean; autoCover: boolean; featureOn: boolean; append?: boolean }): boolean {
-  return o.canFigures && o.autoCover && o.featureOn && !o.append;
+/** 자료를 넣을 때 표지 그림을 그리는지 (표지 그림 혜택, 설정에서 켜 둠, DB 칸이 있음. 노트에 더하는 자료는 그리지 않는다) */
+export function coverWanted(o: { canCover: boolean; autoCover: boolean; featureOn: boolean; append?: boolean }): boolean {
+  return o.canCover && o.autoCover && o.featureOn && !o.append;
 }
 
 /**
- * 자료를 넣을 때 자료 그림을 KOK 스타일로 다시 그리는지 (PDF·사진·그림이 든 한글·워드·PPT, Pro 혜택, 설정에서 켜 둠, DB 칸이 있음).
+ * 자료를 넣을 때 자료 그림을 KOK 스타일로 다시 그리는지 (PDF·사진·그림이 든 한글·워드·PPT, 다시 그리기 혜택, 설정에서 켜 둠, DB 칸이 있음).
  * pictures: 글 자료에 딸린 문서 속 그림 수
  */
 export function redrawsWanted(o: {
   kind: 'text' | 'pdf' | 'image';
   pictures?: number;
-  canFigures: boolean;
+  canRedraw: boolean;
   sourceFiguresSetting: boolean;
   featureOn: boolean;
 }): boolean {
-  return (o.kind !== 'text' || (o.pictures ?? 0) > 0) && o.canFigures && o.sourceFiguresSetting && o.featureOn;
+  return (o.kind !== 'text' || (o.pictures ?? 0) > 0) && o.canRedraw && o.sourceFiguresSetting && o.featureOn;
 }
 
-/** 노트를 만들 때 그림 풀이를 만드는지 (Pro 혜택, 설정에서 켜 둠, DB 칸이 있음) */
+/** 노트를 만들 때 그림 풀이를 만드는지 (그림 풀이 혜택, 설정에서 켜 둠, DB 칸이 있음) */
 export function figuresWanted(o: { canFigures: boolean; figuresSetting: boolean; featureOn: boolean }): boolean {
   return o.canFigures && o.figuresSetting && o.featureOn;
 }

@@ -1,14 +1,32 @@
 'use client';
-// 관리자 화면: 키 상태, 숫자, 비상 스위치, 공지, 모델, 한도, 사용자, 테스트 플랜·쿠폰, 신고함, 운영자 정보
+// 관리자 화면: 키 상태, 숫자, 비상 스위치, 공지, 모델, 요금제 혜택, 한도, 사용자, 테스트 플랜·쿠폰, 신고함, 운영자 정보
 import { useCallback, useEffect, useState } from 'react';
 import { AdminPlans } from '@/components/AdminPlans';
+import { AdminTiers } from '@/components/AdminTiers';
 import { useAskText, useConfirm } from '@/components/Confirm';
 import { useMe } from '@/components/AppShell';
 import { QuestionPreview } from '@/components/QuestionList';
 import { Select } from '@/components/Select';
-import { Button, Card, Chip, EmptyState, Field, LargeHeader, SectionTitle, Segmented, Toggle, api, cx, inputClass, useToast, DONE } from '@/components/ui';
+import {
+  Button,
+  Card,
+  Chip,
+  EmptyState,
+  Field,
+  LargeHeader,
+  LinkButton,
+  SectionTitle,
+  Segmented,
+  Toggle,
+  api,
+  cx,
+  inputClass,
+  useToast,
+  DONE,
+} from '@/components/ui';
 import { costMultiplier } from '@/lib/ai/models';
-import { MAX_FILE_MB, type Limits, type ModelsConfig, type Notice } from '@/lib/settings';
+import { type Limits, type ModelsConfig, type Notice } from '@/lib/settings';
+import type { PlansConfig } from '@/lib/plans';
 import type { QuestionRow } from '@/lib/types';
 import { accountLabel } from '@/lib/login';
 import { REPORT_LABEL } from '@/lib/report';
@@ -17,6 +35,8 @@ type Overview = {
   stats: {
     users: number;
     pro_users: number;
+    /** Max 를 쓰는 사람 (schema.sql 을 다시 실행하기 전에는 없음) */
+    max_users?: number;
     /** 테스트 플랜을 쓰는 사람 (schema.sql 을 다시 실행하기 전에는 없음) */
     custom_users?: number;
     active_today: number;
@@ -27,7 +47,14 @@ type Overview = {
     open_reports: number;
   };
   key: { connected: boolean; hint: string | null };
-  settings: { limits: Limits; models: ModelsConfig; notice: Notice; aiEnabled: boolean; site: { contactEmail: string; operatorName: string } };
+  settings: {
+    limits: Limits;
+    plans: PlansConfig;
+    models: ModelsConfig;
+    notice: Notice;
+    aiEnabled: boolean;
+    site: { contactEmail: string; operatorName: string };
+  };
   env: { supabaseSecret: boolean; adminEmails: boolean; cronSecret: boolean; cloudflare?: boolean };
 };
 type UserRow = {
@@ -40,6 +67,9 @@ type UserRow = {
   plan: string;
   pro_until: string | null;
   pro_active: boolean;
+  /** Max (schema.sql 을 다시 실행하기 전에는 없음) */
+  max_until?: string | null;
+  max_active?: boolean;
   /** 켜져 있는 테스트 플랜 */
   custom_plan: { id: string; name: string; until: string } | null;
   banned: boolean;
@@ -57,22 +87,12 @@ type Report = {
   snapshot?: string | null;
 };
 
+/** 요금제와 상관없는 한도 (요금제마다 다른 값은 '요금제 혜택' 표에서) */
 const LIMIT_LABELS: Array<[keyof Limits, string]> = [
-  ['freeDaily', '무료 하루 에너지'],
-  ['proMonthly', 'Pro 한 달 에너지'],
-  ['proDaily', 'Pro 하루 최대'],
   ['freeMonthlyBudgetUsd', '무료 전체 월 예산 ($)'],
   ['usdPerEnergy', '1 에너지 = $'],
-  ['pdfPagesFree', '무료 PDF 쪽수'],
-  ['pdfPagesPro', 'Pro PDF 쪽수'],
-  ['imagesFree', '무료 사진 장수'],
-  ['imagesPro', 'Pro 사진 장수'],
-  ['textCharsFree', '무료 글자 수'],
-  ['textCharsPro', 'Pro 글자 수'],
-  ['fileMbFree', '무료 파일 MB'],
-  ['fileMbPro', 'Pro 파일 MB'],
   ['ratePerMinute', '1분 요청 수'],
-  ['freeFileDays', '무료 원본 보관 일수'],
+  ['freeFileDays', '원본 보관 일수 (계속 보관이 아닐 때)'],
 ];
 
 const EFFORT_TASKS: Array<[keyof ModelsConfig['effort'], string]> = [
@@ -290,7 +310,7 @@ export default function AdminPage() {
         {(
           [
             ['사용자', s.users],
-            ['Pro · 테스트 플랜', `${s.pro_users} · ${s.custom_users ?? 0}`],
+            ['Pro · Max · 테스트 플랜', `${s.pro_users} · ${s.max_users ?? 0} · ${s.custom_users ?? 0}`],
             ['오늘 복습한 사람', s.active_today],
             ['이번 달 자료', s.sources_month],
             ['이번 달 AI 비용', usd(s.usd_month)],
@@ -351,8 +371,8 @@ export default function AdminPage() {
       <Card className="grid gap-3">
         {(
           [
-            ['fast', '빠름 (무료·Pro)'],
-            ['careful', '꼼꼼 (Pro)'],
+            ['fast', '빠름 (모든 요금제)'],
+            ['careful', '꼼꼼 (꼼꼼 모델 혜택)'],
             ['adminTest', '최고 (관리자 시험용)'],
           ] as const
         ).map(([k, label]) => (
@@ -384,6 +404,8 @@ export default function AdminPage() {
         </Button>
       </Card>
 
+      <AdminTiers key={JSON.stringify(ov.settings.plans)} plans={ov.settings.plans} usdPerEnergy={limits.usdPerEnergy} onSaved={() => load().catch(() => {})} />
+
       <SectionTitle>한도</SectionTitle>
       <Card className="grid gap-3">
         <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
@@ -401,7 +423,8 @@ export default function AdminPage() {
           ))}
         </div>
         <p className="text-xs text-muted">
-          파일 MB는 {MAX_FILE_MB}까지 정할 수 있어요 (Supabase 저장소 한도). 20MB보다 큰 PDF는 AI에 보낼 수 있는 크기로 자동으로 나눠 정리해요.
+          요금제마다 다른 에너지·쪽수·파일 크기·자료 받기는 위 &lsquo;요금제 혜택&rsquo; 표에서 정해요. 원본 보관 일수는 &lsquo;원본 파일 계속 보관&rsquo;을 끈
+          요금제(무료)의 원본을 처리 뒤 며칠 두는지예요.
         </p>
         <Button size="sm" className="justify-self-start" busy={busy === 'limits'} onClick={() => saveSetting('limits', limits, '한도를')}>
           한도 저장
@@ -431,7 +454,13 @@ export default function AdminPage() {
                   <span className="font-semibold">{u.nickname ?? '(닉네임 없음)'}</span>
                   <span className="text-sm text-muted">{accountLabel(u.email, u.provider)}</span>
                   {u.role === 'admin' ? <Chip tone="accent">관리자</Chip> : null}
-                  {pro ? <Chip tone="hl">Pro ~{new Date(u.pro_until!).toLocaleDateString('ko-KR')}</Chip> : null}
+                  {u.max_active ? <Chip tone="hl">Max ~{new Date(u.max_until!).toLocaleDateString('ko-KR')}</Chip> : null}
+                  {pro ? (
+                    <Chip tone={u.max_active ? 'plain' : 'hl'}>
+                      Pro ~{new Date(u.pro_until!).toLocaleDateString('ko-KR')}
+                      {u.max_active ? ' (Max 뒤)' : ''}
+                    </Chip>
+                  ) : null}
                   {u.custom_plan ? (
                     <Chip tone="accent">
                       {u.custom_plan.name} ~{new Date(u.custom_plan.until).toLocaleDateString('ko-KR')}
@@ -440,32 +469,43 @@ export default function AdminPage() {
                   {u.banned ? <Chip tone="bad">정지</Chip> : null}
                 </div>
                 <div className="flex flex-wrap gap-2">
-                  <Button
-                    size="sm"
-                    variant="secondary"
-                    onClick={async () => {
-                      const typed = await askText({
-                        title: 'Pro 기간',
-                        body: `${accountLabel(u.email, u.provider)}의 Pro를 며칠 켤까요? 0이면 꺼요. 테스트 플랜이 켜져 있으면 플랜이 끝난 뒤부터 세요.`,
-                        label: '며칠',
-                        value: '30',
-                        inputMode: 'numeric',
-                        ok: '정하기',
-                        cancel: '그만두기',
-                        check: (v) => (/^\d{1,4}$/.test(v.trim()) && Number(v) <= 3650 ? null : '0부터 3650까지 숫자로 적어 주세요.'),
-                      });
-                      if (typed === null) return;
-                      const days = Number(typed.trim());
-                      try {
-                        await api(`/api/admin/users/${u.id}`, { method: 'PATCH', body: JSON.stringify({ proDays: Math.round(days) }) });
-                        loadUsers(q);
-                      } catch (e) {
-                        toast((e as Error).message, 'bad');
-                      }
-                    }}
-                  >
-                    Pro 기간
-                  </Button>
+                  {(['pro', 'max'] as const)
+                    .filter((tier) => tier === 'pro' || me.features.maxPlan)
+                    .map((tier) => {
+                      const name = tier === 'max' ? 'Max' : 'Pro';
+                      return (
+                        <Button
+                          key={tier}
+                          size="sm"
+                          variant="secondary"
+                          onClick={async () => {
+                            const typed = await askText({
+                              title: `${name} 기간`,
+                              body:
+                                tier === 'max'
+                                  ? `${accountLabel(u.email, u.provider)}의 Max를 오늘부터 며칠 켤까요? 0이면 꺼요. 테스트 플랜이 켜져 있으면 플랜이 끝난 뒤부터 세고, 남은 Pro는 Max가 끝난 뒤로 미뤄져요.`
+                                  : `${accountLabel(u.email, u.provider)}의 Pro를 며칠 켤까요? 0이면 꺼요. 테스트 플랜·Max가 켜져 있으면 그게 끝난 뒤부터 세요.`,
+                              label: '며칠',
+                              value: '30',
+                              inputMode: 'numeric',
+                              ok: '정하기',
+                              cancel: '그만두기',
+                              check: (v) => (/^\d{1,4}$/.test(v.trim()) && Number(v) <= 3650 ? null : '0부터 3650까지 숫자로 적어 주세요.'),
+                            });
+                            if (typed === null) return;
+                            const days = Number(typed.trim());
+                            try {
+                              await api(`/api/admin/users/${u.id}`, { method: 'PATCH', body: JSON.stringify({ paid: { tier, days: Math.round(days) } }) });
+                              loadUsers(q);
+                            } catch (e) {
+                              toast((e as Error).message, 'bad');
+                            }
+                          }}
+                        >
+                          {name} 기간
+                        </Button>
+                      );
+                    })}
                   {u.custom_plan ? (
                     <Button
                       size="sm"
@@ -528,13 +568,7 @@ export default function AdminPage() {
         </ul>
       </Card>
 
-      <AdminPlans
-        limits={ov.settings.limits}
-        refreshKey={plansKey}
-        planFlags={me.features.planFlags}
-        figuresOn={me.features.figures}
-        onChanged={() => loadUsers(q).catch(() => {})}
-      />
+      <AdminPlans tiers={ov.settings.plans} refreshKey={plansKey} maxOn={me.features.maxPlan} onChanged={() => loadUsers(q).catch(() => {})} />
 
       <SectionTitle>신고함</SectionTitle>
       <Card className="grid gap-3">
@@ -570,6 +604,17 @@ export default function AdminPage() {
                 </div>
               ) : null}
               <div className="flex flex-wrap gap-2">
+                {/* 자료 공유 신고: 글로 가서 보고 가리기·지우기 (댓글은 그 글에서) */}
+                {r.target_id && (r.target_type === 'share_post' || r.target_type === 'share_gallery') ? (
+                  <LinkButton size="sm" href={r.target_type === 'share_post' ? `/share/p/${r.target_id}` : `/share/g/${r.target_id}`}>
+                    {r.target_type === 'share_post' ? '글 보기' : '갤러리 보기'}
+                  </LinkButton>
+                ) : null}
+                {r.target_type === 'share_comment' && r.snapshot && /글 번호: ([0-9a-f-]{36})/.test(r.snapshot) ? (
+                  <LinkButton size="sm" href={`/share/p/${/글 번호: ([0-9a-f-]{36})/.exec(r.snapshot)![1]}`}>
+                    댓글이 있는 글 보기
+                  </LinkButton>
+                ) : null}
                 {q ? (
                   <Button
                     size="sm"

@@ -52,7 +52,7 @@ export async function POST(req: NextRequest, ctx: RouteContext<'/api/notes/[id]/
     }
     const note = await loadOwnedNote(admin, id, acc.userId);
     const app = await getAppSettings(admin);
-    const files = await readChatFiles(parsed.data.attachments, limitsFor(acc, app.limits).pdfPages);
+    const files = await readChatFiles(parsed.data.attachments, limitsFor(acc).pdfPages);
     const message = parsed.data.message || FILE_ONLY_MESSAGE;
     // 풀이 칸(chatFiles)이 있는 DB 에서만 단계 풀이를 받는다. 그림은 Pro
     const solve = features.chatFiles;

@@ -5,6 +5,7 @@
 //   미리보기를 누르면 그 부분을 바꾸는 칸으로 가고, 칸에 손을 올리거나 초점을 두면 미리보기의 그 부분에 테두리와 이름표가 생긴다.
 //   '처음 모습'을 누르고 있는 동안은 고치기 전 모습.
 // - 칸: 스타일(보통·시그니처 테마 6) / 색 / 배경 / 효과 / 글자. 칸마다 무엇이 어디서 바뀌는지 한 줄로 알려 준다.
+import { perkNeed } from '@/lib/plans';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import type { MeResponse } from '@/lib/types';
 import { GLOW_TONES, SKIN_IDS, THEME_FONTS, THEME_PAPERS, type Glow, type ThemeColor, type ThemeFont, type ThemePaper } from '@/lib/settings';
@@ -592,7 +593,14 @@ export function ThemeStudio({
               <Icon d={ICONS.phone} size={15} className="shrink-0" />
               미리보기를 누르면 그 부분을 바꾸는 칸으로 와요. 아래 칸을 고르거나 손을 올리면 미리보기에서 어디가 바뀌는지 보여 줘요.
             </p>
-            {tab === 'style' ? <StylePanel spec={spec} setSpec={setSpec} hoverProps={hoverProps} /> : null}
+            {tab === 'style' ? (
+              <StylePanel
+                spec={spec}
+                setSpec={setSpec}
+                hoverProps={hoverProps}
+                skinLock={me.canSkins ? null : () => toast(perkNeed(me.perkTiers, 'skins', '시그니처 스타일'))}
+              />
+            ) : null}
             {tab === 'color' ? <ColorPanel spec={spec} setSpec={setSpec} hoverProps={hoverProps} looks={looks} /> : null}
             {tab === 'bg' ? (
               skin ? (
@@ -746,16 +754,29 @@ function SkinNote({ skinId, what, onNormal }: { skinId: SkinId; what: string; on
 }
 
 // ------------------------------------------------------------------ 스타일
-function StylePanel({ spec, setSpec, hoverProps }: { spec: ThemeSpec; setSpec: SetSpec; hoverProps: HoverProps }) {
+function StylePanel({
+  spec,
+  setSpec,
+  hoverProps,
+  skinLock,
+}: {
+  spec: ThemeSpec;
+  setSpec: SetSpec;
+  hoverProps: HoverProps;
+  /** 시그니처 스타일 혜택이 없으면: 다른 시그니처 스타일을 고를 때 알린다 (지금 쓰는 스타일·보통은 고를 수 있다) */
+  skinLock: (() => void) | null;
+}) {
   const options: Array<'normal' | SkinId> = ['normal', ...SKIN_IDS];
   const cur = spec.skin?.id ?? 'normal';
   const index = Math.max(0, options.indexOf(cur));
-  const choose = (o: 'normal' | SkinId) =>
+  const choose = (o: 'normal' | SkinId) => {
+    if (skinLock && o !== 'normal' && o !== cur) return skinLock();
     setSpec((s) => {
       if (o === 'normal') return { ...s, skin: null };
       if (s.skin?.id === o) return s;
       return specFromSkin(o, s);
     });
+  };
   const looks = useMemo(() => ({ light: specLookFx({ ...spec, skin: null }, 'light'), dark: specLookFx({ ...spec, skin: null }, 'dark') }), [spec]);
   return (
     <Block

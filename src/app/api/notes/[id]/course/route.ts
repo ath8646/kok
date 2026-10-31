@@ -4,7 +4,7 @@
 import type { NextRequest } from 'next/server';
 import { z } from 'zod';
 import { assertSameOrigin, assertUuid, readJson, requireAccount } from '@/lib/server/auth';
-import { getAppSettings, getFeatures } from '@/lib/server/account';
+import { assertPerk, getAppSettings, getFeatures } from '@/lib/server/account';
 import { UserFacingError, errorResponse } from '@/lib/server/errors';
 import { assertNoteHasContent, loadOwnedNote, noteForPrompt } from '@/lib/server/notes';
 import { runTaskFull } from '@/lib/server/tasks';
@@ -23,15 +23,13 @@ export const maxDuration = 300;
 
 const Body = z.object({ level: z.enum(COURSE_LEVELS) });
 
-const PRO_ONLY = '단계별 학습은 Pro에서 쓸 수 있어요.';
-
 export async function POST(req: NextRequest, ctx: RouteContext<'/api/notes/[id]/course'>) {
   try {
     assertSameOrigin(req);
     const { id } = await ctx.params;
     assertUuid(id);
     const { admin, acc } = await requireAccount();
-    if (!acc.canAppend) throw new UserFacingError('pro_only', PRO_ONLY, 403);
+    assertPerk(acc, 'course', '단계별 학습');
     const features = await getFeatures(admin);
     if (!features.courses) throw new UserFacingError('not_ready', '아직 준비 중이에요. 잠시 뒤에 다시 해 주세요.', 503);
     const parsed = Body.safeParse(await readJson(req, 2_000));

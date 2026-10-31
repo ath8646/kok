@@ -2,6 +2,7 @@
 // 홈의 'AI에게 물어보기': 위쪽 물어보기 줄을 누르면 자료 넣기 창처럼 채팅 창이 뜬다.
 // 아무 과목이나 묻고, 사진·파일로 문제를 보내면 단계로 풀어 준다 (Pro 는 그림으로 보는 단계).
 // 대화는 저장하지 않는다: 홈에 있는 동안만 남고 홈을 떠나면 사라진다. 푼 문제는 과목·단원·노트를 골라 노트 문제로 넣을 수 있다.
+import { perkNeed } from '@/lib/plans';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -151,7 +152,7 @@ export function HomeAsk() {
 
   const pickTier = (t: ModelTier) => {
     if (locked(t)) {
-      toast('꼼꼼 모델은 Pro에서 쓸 수 있어요.');
+      toast(perkNeed(me.perkTiers, 'careful'));
       return;
     }
     setTier(t);

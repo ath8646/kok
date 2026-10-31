@@ -167,7 +167,7 @@ export async function POST(req: NextRequest, ctx: RouteContext<'/api/notes/[id]/
 
     // Pro: 다시 그린 그림도 새 그림으로 (못 그리면 원본만)
     let art: Art | null = null;
-    if (acc.canFigures && canRedraw(fig.kind)) {
+    if (acc.canRedraw && canRedraw(fig.kind)) {
       try {
         const json = await runTask(admin, acc, app, {
           task: 'redraw',

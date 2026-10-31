@@ -325,6 +325,26 @@ create table if not exists public.coupons (
 -- 이 코드가 주는 플랜 (null = Pro). 플랜을 지우면 그 플랜의 코드도 지워진다
 alter table public.coupons add column if not exists plan_id uuid references public.custom_plans(id) on delete cascade;
 
+-- ---------------------------------------------------------------------
+-- Max 요금제 (Pro 보다 위) 와 테스트 플랜의 나머지 혜택
+-- ---------------------------------------------------------------------
+-- Max 가 끝나는 때. Max 가 켜져 있는 동안 남은 Pro 는 그만큼 뒤로 미뤄진다 (kok_redeem_coupon·kok_set_paid_plan)
+alter table public.profiles add column if not exists max_until timestamptz;
+-- 쿠폰이 켜는 요금제 (plan_id 가 없을 때): 'pro' 또는 'max'
+alter table public.coupons add column if not exists tier text not null default 'pro';
+-- 테스트 플랜의 나머지 칸: 혜택 스위치 전부(perks)와 자료 공유 숫자 (lib/plans.ts toCustomPlan, 없으면 예전 칸으로 채운다)
+alter table public.custom_plans add column if not exists extra jsonb;
+do $$
+begin
+  if not exists (select 1 from pg_constraint where conrelid = 'public.coupons'::regclass and conname = 'coupons_tier_check') then
+    alter table public.coupons add constraint coupons_tier_check check (tier in ('pro', 'max'));
+  end if;
+  if not exists (select 1 from pg_constraint where conrelid = 'public.custom_plans'::regclass and conname = 'custom_plans_extra_check') then
+    alter table public.custom_plans add constraint custom_plans_extra_check
+      check (extra is null or (jsonb_typeof(extra) = 'object' and pg_column_size(extra) <= 8192));
+  end if;
+end $$;
+
 create table if not exists public.coupon_redemptions (
   code text not null references public.coupons(code) on delete cascade,
   user_id uuid not null references auth.users(id) on delete cascade,
@@ -352,6 +372,7 @@ create index if not exists reports_reporter_idx on public.reports (reporter_id, 
 alter table public.reports add column if not exists snapshot text;
 do $$
 begin
+  -- (공유 글·댓글·갤러리까지 받는 새 모양은 아래 '자료 공유' 구역이 만든다: 이미 새 모양이면 그대로 둔다)
   if not exists (
     select 1 from pg_constraint
      where conrelid = 'public.reports'::regclass and conname = 'reports_target_type_check'
@@ -1345,10 +1366,11 @@ begin
 end;
 $$;
 
--- 쿠폰 사용: 한 번에 검사하고 Pro 또는 테스트 플랜을 켠다.
--- 테스트 플랜이 켜져 있는 동안 Pro 는 멈춘다:
---   * Pro 코드는 켜진 테스트 플랜이 끝난 뒤에 이어 붙인다
---   * 테스트 플랜 코드는 남은 Pro 기간을 플랜이 끝난 뒤로 미룬다 (Pro 가 숨어 있는 동안 줄지 않게)
+-- 쿠폰 사용: 한 번에 검사하고 Pro·Max 또는 테스트 플랜을 켠다.
+-- 요금제는 테스트 플랜 > Max > Pro 차례로 적용되고, 위 요금제가 켜져 있는 동안 아래 요금제는 멈춘다(줄지 않는다):
+--   * Pro 코드는 켜진 테스트 플랜·Max 가 끝난 뒤에 이어 붙인다
+--   * Max 코드는 켜진 테스트 플랜이 끝난 뒤에 이어 붙이고, 그 뒤에 남은 Pro 는 Max 날수만큼 뒤로 미룬다
+--   * 테스트 플랜 코드는 남은 Max·Pro 기간을 플랜이 끝난 뒤로 미룬다
 --   * 다른 테스트 플랜이 켜져 있으면 p_replace 가 true 일 때만 바꾼다 ('plan_active')
 -- 번개 총량은 테스트 플랜을 켠 때부터 새로 센다
 drop function if exists public.kok_redeem_coupon(text, uuid);
@@ -1363,6 +1385,8 @@ declare
   p public.profiles%rowtype;
   plan_end timestamptz;
   new_end timestamptz;
+  start_at timestamptz;
+  max_end timestamptz;
 begin
   select * into c from public.coupons where code = upper(trim(p_code)) for update;
   if not found then
@@ -1391,13 +1415,28 @@ begin
   insert into public.coupon_redemptions (code, user_id) values (c.code, p_user);
   update public.coupons set used = used + 1 where code = c.code;
 
-  if c.plan_id is null then
+  if c.plan_id is null and coalesce(c.tier, 'pro') = 'max' then
+    -- Max: 테스트 플랜이 끝난 뒤부터 켜진다(starts). 켜진 Max 가 있으면 그 끝에 이어 붙이고, 그 뒤에 남은 Pro 는 Max 날수만큼 미룬다
+    start_at := greatest(coalesce(p.max_until, now()), plan_end);
     update public.profiles
-       set plan = 'pro',
-           pro_until = greatest(coalesce(pro_until, now()), plan_end) + make_interval(days => c.days)
+       set max_until = start_at + make_interval(days => c.days),
+           pro_until = case when plan = 'pro' and pro_until > start_at then pro_until + make_interval(days => c.days) else pro_until end
      where id = p_user
     returning * into p;
-    return jsonb_build_object('kind', 'pro', 'until', p.pro_until, 'starts', plan_end);
+    return jsonb_build_object('kind', 'max', 'until', p.max_until, 'starts', plan_end,
+      'pro_until', case when p.plan = 'pro' and p.pro_until > p.max_until then p.pro_until end);
+  end if;
+
+  if c.plan_id is null then
+    -- Pro: 테스트 플랜과 Max 가 끝난 뒤부터 켜진다(starts). 켜진 Pro 가 있으면 그 끝에 이어 붙인다
+    max_end := case when p.max_until > now() then p.max_until else now() end;
+    start_at := greatest(case when p.plan = 'pro' and p.pro_until > now() then p.pro_until else now() end, plan_end, max_end);
+    update public.profiles
+       set plan = 'pro',
+           pro_until = start_at + make_interval(days => c.days)
+     where id = p_user
+    returning * into p;
+    return jsonb_build_object('kind', 'pro', 'until', p.pro_until, 'starts', greatest(plan_end, max_end));
   end if;
 
   new_end := now() + make_interval(days => c.days);
@@ -1405,19 +1444,21 @@ begin
      set custom_plan_id = c.plan_id,
          custom_plan_start = now(),
          custom_plan_until = new_end,
+         max_until = case when max_until > plan_end then max_until + (new_end - plan_end) else max_until end,
          pro_until = case when plan = 'pro' and pro_until > plan_end then pro_until + (new_end - plan_end) else pro_until end
    where id = p_user
   returning * into p;
   return jsonb_build_object(
     'kind', 'custom',
     'until', new_end,
+    'max_until', case when p.max_until > new_end then p.max_until end,
     'pro_until', case when p.plan = 'pro' and p.pro_until > new_end then p.pro_until end
   );
 end;
 $$;
 
--- 테스트 플랜을 지금 끝낸다 (한 사람 또는 한 플랜을 쓰는 모든 사람). 플랜 뒤로 미뤘던 Pro 는 다시 당긴다.
--- 끝난 시각은 custom_plan_until 에 남겨, 그 뒤의 무료·Pro 에너지를 플랜에서 쓴 것과 따로 센다
+-- 테스트 플랜을 지금 끝낸다 (한 사람 또는 한 플랜을 쓰는 모든 사람). 플랜 뒤로 미뤘던 Max·Pro 는 다시 당긴다.
+-- 끝난 시각은 custom_plan_until 에 남겨, 그 뒤의 무료·Pro·Max 에너지를 플랜에서 쓴 것과 따로 센다
 create or replace function public.kok_end_custom_plan(p_user uuid default null, p_plan uuid default null)
 returns int
 language sql
@@ -1427,6 +1468,7 @@ as $$
   with ended as (
     update public.profiles
        set pro_until = case when plan = 'pro' and pro_until > custom_plan_until then pro_until - (custom_plan_until - now()) else pro_until end,
+           max_until = case when max_until > custom_plan_until then max_until - (custom_plan_until - now()) else max_until end,
            custom_plan_id = null,
            custom_plan_until = now()
      where custom_plan_id is not null
@@ -1439,6 +1481,49 @@ as $$
   select count(*)::int from ended;
 $$;
 
+-- 관리자: 한 사람의 Pro 나 Max 를 오늘부터 p_days 일로 정한다 (0 이면 끈다). 테스트 플랜이 켜져 있으면 플랜이 끝난 뒤부터 센다.
+--   * Max 를 정하면 그 뒤에 남은 Pro 를 늘어난(줄어든) Max 만큼 밀거나 당긴다 (Max 동안 Pro 는 멈춘다)
+--   * Pro 를 정하면 켜진 Max 가 끝난 뒤부터 센다
+create or replace function public.kok_set_paid_plan(p_user uuid, p_tier text, p_days int)
+returns jsonb
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  p public.profiles%rowtype;
+  from_at timestamptz;
+  old_max_end timestamptz;
+  new_max_end timestamptz;
+begin
+  if p_tier not in ('pro', 'max') or p_days < 0 or p_days > 3650 then
+    raise exception 'bad_plan';
+  end if;
+  select * into p from public.profiles where id = p_user for update;
+  if not found then
+    raise exception 'profile_not_found';
+  end if;
+  from_at := case when p.custom_plan_id is not null and p.custom_plan_until > now() then p.custom_plan_until else now() end;
+  if p_tier = 'max' then
+    old_max_end := greatest(coalesce(p.max_until, from_at), from_at);
+    new_max_end := case when p_days = 0 then from_at else from_at + make_interval(days => p_days) end;
+    update public.profiles
+       set max_until = case when p_days = 0 then null else new_max_end end,
+           pro_until = case when plan = 'pro' and pro_until > from_at then greatest(pro_until + (new_max_end - old_max_end), new_max_end) else pro_until end
+     where id = p_user
+    returning * into p;
+  else
+    if p_days = 0 then
+      update public.profiles set plan = 'free', pro_until = null where id = p_user returning * into p;
+    else
+      from_at := greatest(from_at, case when p.max_until > now() then p.max_until else now() end);
+      update public.profiles set plan = 'pro', pro_until = from_at + make_interval(days => p_days) where id = p_user returning * into p;
+    end if;
+  end if;
+  return jsonb_build_object('pro_until', p.pro_until, 'max_until', p.max_until);
+end;
+$$;
+
 -- 관리자 화면 숫자
 create or replace function public.kok_admin_stats(p_month_start timestamptz, p_day_start timestamptz)
 returns jsonb
@@ -1449,7 +1534,9 @@ set search_path = public
 as $$
   select jsonb_build_object(
     'users', (select count(*) from public.profiles),
-    'pro_users', (select count(*) from public.profiles where plan = 'pro' and pro_until > now()),
+    'pro_users', (select count(*) from public.profiles where plan = 'pro' and pro_until > now()
+                    and not (max_until is not null and max_until > now())),
+    'max_users', (select count(*) from public.profiles where max_until > now()),
     'custom_users', (select count(*) from public.profiles where custom_plan_id is not null and custom_plan_until > now()),
     'active_today', (select count(distinct user_id) from public.review_logs where reviewed_at >= p_day_start),
     'usd_month', (select coalesce(sum(usd), 0) from public.energy_ledger where created_at >= p_month_start),
@@ -2281,6 +2368,7 @@ revoke execute on function public.kok_bump_counter(text, int) from public, anon,
 revoke execute on function public.kok_take_unused_theme_images(timestamptz, uuid, int) from public, anon, authenticated;
 revoke execute on function public.kok_redeem_coupon(text, uuid, boolean) from public, anon, authenticated;
 revoke execute on function public.kok_end_custom_plan(uuid, uuid) from public, anon, authenticated;
+revoke execute on function public.kok_set_paid_plan(uuid, text, int) from public, anon, authenticated;
 revoke execute on function public.kok_admin_stats(timestamptz, timestamptz) from public, anon, authenticated;
 revoke execute on function public.kok_handle_new_user() from public, anon, authenticated;
 revoke execute on function public.kok_inflight_energy(uuid) from public, anon, authenticated;
@@ -2298,7 +2386,358 @@ grant execute on function public.kok_bump_counter(text, int) to service_role;
 grant execute on function public.kok_take_unused_theme_images(timestamptz, uuid, int) to service_role;
 grant execute on function public.kok_redeem_coupon(text, uuid, boolean) to service_role;
 grant execute on function public.kok_end_custom_plan(uuid, uuid) to service_role;
+grant execute on function public.kok_set_paid_plan(uuid, text, int) to service_role;
 grant execute on function public.kok_admin_stats(timestamptz, timestamptz) to service_role;
+
+-- =====================================================================
+-- 자료 공유 (커뮤니티): 갤러리·글·파일·공유 노트·댓글·좋아요·받기·차단·즐겨찾기.
+-- 모두 서버만 읽고 쓴다(학생 정책 없음): 익명 글의 글쓴이를 숨기고, 차단한 사람의 글을 빼고, 하루 받기 수를 세야 해서
+-- 학생 화면은 /api/share 를 거친다. 글·댓글은 쓴 사람이 탈퇴하면 같이 지워지고, 갤러리는 남는다(운영자가 관리).
+-- =====================================================================
+create table if not exists public.community_galleries (
+  id uuid primary key default gen_random_uuid(),
+  name text not null check (char_length(name) between 2 and 30),
+  -- 같은 이름을 두 번 만들지 않게 (띄어쓰기를 빼고 소문자로)
+  name_key text not null check (char_length(name_key) between 1 and 30),
+  description text not null default '' check (char_length(description) <= 200),
+  category text not null default 'etc' check (category in ('elementary', 'middle', 'high', 'college', 'license', 'language', 'etc')),
+  -- 만든 사람 (그 갤러리의 글·댓글을 지울 수 있다). 탈퇴하면 비워지고 운영자가 관리한다. 운영자가 처음에 만든 갤러리도 비어 있다
+  owner_id uuid references auth.users(id) on delete set null,
+  post_count int not null default 0,
+  last_post_at timestamptz,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+create unique index if not exists community_galleries_name_key on public.community_galleries (name_key);
+create index if not exists community_galleries_cat_idx on public.community_galleries (category, post_count desc);
+create index if not exists community_galleries_owner_idx on public.community_galleries (owner_id);
+drop trigger if exists community_galleries_touch on public.community_galleries;
+create trigger community_galleries_touch before update on public.community_galleries
+  for each row execute function public.kok_touch_updated_at();
+
+create table if not exists public.community_posts (
+  id uuid primary key default gen_random_uuid(),
+  gallery_id uuid not null references public.community_galleries(id) on delete cascade,
+  author_id uuid not null references auth.users(id) on delete cascade,
+  -- 쓸 때의 닉네임 (익명이면 화면에는 '익명'으로만 보인다)
+  author_name text not null check (char_length(author_name) between 1 and 20),
+  anonymous boolean not null default false,
+  title text not null check (char_length(title) between 1 and 80),
+  body text not null default '' check (char_length(body) <= 5000),
+  -- 파일이나 노트가 붙어 있으면 '자료' 글
+  has_files boolean not null default false,
+  has_note boolean not null default false,
+  like_count int not null default 0,
+  comment_count int not null default 0,
+  download_count int not null default 0,
+  view_count int not null default 0,
+  -- 신고가 쌓여 가린 글 (운영자가 보고 다시 보이게 하거나 지운다)
+  hidden boolean not null default false,
+  edited_at timestamptz,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+create index if not exists community_posts_gallery_idx on public.community_posts (gallery_id, created_at desc);
+create index if not exists community_posts_recent_idx on public.community_posts (created_at desc);
+create index if not exists community_posts_author_idx on public.community_posts (author_id, created_at desc);
+drop trigger if exists community_posts_touch on public.community_posts;
+create trigger community_posts_touch before update on public.community_posts
+  for each row execute function public.kok_touch_updated_at();
+
+-- 글에 붙인 파일 ('community' 버킷: 쓴 사람id/글id/파일id.확장자, 미리보기는 .preview.jpg)
+create table if not exists public.community_files (
+  id uuid primary key default gen_random_uuid(),
+  post_id uuid not null references public.community_posts(id) on delete cascade,
+  owner_id uuid not null references auth.users(id) on delete cascade,
+  kind text not null check (kind in ('pdf', 'image', 'hwp', 'hwpx', 'docx', 'pptx', 'xlsx', 'txt')),
+  name text not null check (char_length(name) between 1 and 120),
+  size bigint not null check (size > 0),
+  path text not null check (char_length(path) <= 200),
+  preview_path text check (preview_path is null or char_length(preview_path) <= 200),
+  pages int check (pages is null or pages between 0 and 100000),
+  position int not null default 0,
+  created_at timestamptz not null default now()
+);
+create index if not exists community_files_post_idx on public.community_files (post_id, position);
+
+-- 글에 붙인 KOK 노트 (붙일 때의 모습 그대로: 정리·그림 설계도·문제). 그림 파일은 'sources' 버킷의 쓴 사람id/share/글id/
+create table if not exists public.community_notes (
+  post_id uuid primary key references public.community_posts(id) on delete cascade,
+  owner_id uuid not null references auth.users(id) on delete cascade,
+  title text not null default '' check (char_length(title) <= 120),
+  subject_name text not null default '' check (char_length(subject_name) <= 40),
+  key_points int not null default 0,
+  questions int not null default 0,
+  snapshot jsonb not null check (jsonb_typeof(snapshot) = 'object' and pg_column_size(snapshot) <= 1572864),
+  figure_paths text[] not null default '{}',
+  created_at timestamptz not null default now()
+);
+
+create table if not exists public.community_comments (
+  id uuid primary key default gen_random_uuid(),
+  post_id uuid not null references public.community_posts(id) on delete cascade,
+  -- 답글이면 그 댓글 (한 단계만)
+  parent_id uuid references public.community_comments(id) on delete cascade,
+  author_id uuid not null references auth.users(id) on delete cascade,
+  author_name text not null check (char_length(author_name) between 1 and 20),
+  anonymous boolean not null default false,
+  body text not null check (char_length(body) between 1 and 1000),
+  like_count int not null default 0,
+  -- 답글이 달린 댓글을 지우면 내용만 지운다 ('지운 댓글이에요')
+  deleted boolean not null default false,
+  hidden boolean not null default false,
+  edited_at timestamptz,
+  created_at timestamptz not null default now()
+);
+create index if not exists community_comments_post_idx on public.community_comments (post_id, created_at);
+create index if not exists community_comments_author_idx on public.community_comments (author_id, created_at desc);
+
+create table if not exists public.community_likes (
+  user_id uuid not null references auth.users(id) on delete cascade,
+  target_type text not null check (target_type in ('post', 'comment')),
+  target_id uuid not null,
+  created_at timestamptz not null default now(),
+  primary key (user_id, target_type, target_id)
+);
+create index if not exists community_likes_target_idx on public.community_likes (target_type, target_id);
+
+-- 받은 자료 (글 하나 = 한 번). 하루에 받는 수는 요금제마다 (lib/plans.ts downloadsDaily), 한 번 받은 글은 다시 받아도 세지 않는다
+create table if not exists public.community_downloads (
+  user_id uuid not null references auth.users(id) on delete cascade,
+  post_id uuid not null references public.community_posts(id) on delete cascade,
+  created_at timestamptz not null default now(),
+  primary key (user_id, post_id)
+);
+create index if not exists community_downloads_user_idx on public.community_downloads (user_id, created_at desc);
+
+-- 차단: 그 사람의 글·댓글이 내 화면에서 빠진다 (익명으로 쓴 것도). label: 차단할 때 보인 이름
+create table if not exists public.community_blocks (
+  -- 풀 때 쓰는 번호 (차단한 사람의 계정 번호는 화면에 보내지 않는다: 익명 글쓴이를 알아내지 못하게)
+  id uuid not null default gen_random_uuid() unique,
+  user_id uuid not null references auth.users(id) on delete cascade,
+  blocked_id uuid not null references auth.users(id) on delete cascade,
+  label text not null default '' check (char_length(label) <= 40),
+  created_at timestamptz not null default now(),
+  primary key (user_id, blocked_id),
+  check (user_id <> blocked_id)
+);
+
+create table if not exists public.community_favs (
+  user_id uuid not null references auth.users(id) on delete cascade,
+  gallery_id uuid not null references public.community_galleries(id) on delete cascade,
+  created_at timestamptz not null default now(),
+  primary key (user_id, gallery_id)
+);
+
+-- 올리기 자리 (글을 만들 때 내 것인지 확인하고 지운다. 하루가 지나도 글이 안 된 파일은 청소가 지운다)
+create table if not exists public.community_uploads (
+  id bigint generated always as identity primary key,
+  user_id uuid not null references auth.users(id) on delete cascade,
+  post_id uuid not null,
+  path text not null check (char_length(path) <= 200),
+  created_at timestamptz not null default now()
+);
+create index if not exists community_uploads_user_idx on public.community_uploads (user_id, created_at desc);
+create index if not exists community_uploads_time_idx on public.community_uploads (created_at);
+
+-- 운영자가 처음에 만들어 두는 갤러리 (만든 사람 없음 = 운영자가 관리). 이미 있으면 그대로 둔다
+insert into public.community_galleries (id, name, name_key, description, category) values
+  ('c0000000-0000-4000-8000-000000000001', '초등학교 갤러리', '초등학교갤러리', '초등학생 공부 자료와 이야기', 'elementary'),
+  ('c0000000-0000-4000-8000-000000000002', '중학교 갤러리', '중학교갤러리', '중학교 시험·수행평가 자료와 이야기', 'middle'),
+  ('c0000000-0000-4000-8000-000000000003', '고등학교 갤러리', '고등학교갤러리', '내신·모의고사·수능 자료와 이야기', 'high'),
+  ('c0000000-0000-4000-8000-000000000004', '대학 갤러리', '대학갤러리', '전공·교양 강의 자료와 이야기', 'college'),
+  ('c0000000-0000-4000-8000-000000000005', '자격증 갤러리', '자격증갤러리', '자격증·공무원·시험 준비 자료', 'license'),
+  ('c0000000-0000-4000-8000-000000000006', '어학 갤러리', '어학갤러리', '영어·제2외국어·어학 시험 자료', 'language'),
+  ('c0000000-0000-4000-8000-000000000007', '자유 갤러리', '자유갤러리', '공부 이야기·질문·응원', 'etc')
+on conflict do nothing;
+
+-- 수 세기: 글이 생기고 지워지면 갤러리의 글 수, 댓글이 생기고 지워지면 글의 댓글 수. 지운 글·댓글의 좋아요도 지운다
+create or replace function public.kok_share_count()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  if tg_table_name = 'community_posts' then
+    if tg_op = 'INSERT' then
+      update public.community_galleries set post_count = post_count + 1, last_post_at = new.created_at where id = new.gallery_id;
+    elsif tg_op = 'DELETE' then
+      update public.community_galleries set post_count = greatest(0, post_count - 1) where id = old.gallery_id;
+      delete from public.community_likes where target_type = 'post' and target_id = old.id;
+    end if;
+  elsif tg_table_name = 'community_comments' then
+    if tg_op = 'INSERT' then
+      update public.community_posts set comment_count = comment_count + 1 where id = new.post_id;
+    elsif tg_op = 'DELETE' then
+      if not old.deleted then
+        update public.community_posts set comment_count = greatest(0, comment_count - 1) where id = old.post_id;
+      end if;
+      delete from public.community_likes where target_type = 'comment' and target_id = old.id;
+    elsif tg_op = 'UPDATE' and new.deleted and not old.deleted then
+      update public.community_posts set comment_count = greatest(0, comment_count - 1) where id = new.post_id;
+    end if;
+  end if;
+  return coalesce(new, old);
+end;
+$$;
+drop trigger if exists community_posts_count on public.community_posts;
+create trigger community_posts_count after insert or delete on public.community_posts
+  for each row execute function public.kok_share_count();
+drop trigger if exists community_comments_count on public.community_comments;
+create trigger community_comments_count after insert or delete or update of deleted on public.community_comments
+  for each row execute function public.kok_share_count();
+
+-- 좋아요 켜기·끄기와 수 고치기를 한 번에. 돌려주는 값: 지금 좋아요 수 (없는 글·댓글이면 null)
+create or replace function public.kok_share_like(p_user uuid, p_type text, p_id uuid, p_on boolean)
+returns int
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  changed int := 0;
+  cnt int;
+begin
+  if p_type = 'post' then
+    perform 1 from public.community_posts where id = p_id for update;
+  elsif p_type = 'comment' then
+    perform 1 from public.community_comments where id = p_id and not deleted for update;
+  else
+    raise exception 'bad_type';
+  end if;
+  if not found then
+    return null;
+  end if;
+  if p_on then
+    insert into public.community_likes (user_id, target_type, target_id) values (p_user, p_type, p_id) on conflict do nothing;
+  else
+    delete from public.community_likes where user_id = p_user and target_type = p_type and target_id = p_id;
+  end if;
+  get diagnostics changed = row_count;
+  if p_type = 'post' then
+    update public.community_posts
+       set like_count = greatest(0, like_count + case when changed > 0 then (case when p_on then 1 else -1 end) else 0 end)
+     where id = p_id
+    returning like_count into cnt;
+  else
+    update public.community_comments
+       set like_count = greatest(0, like_count + case when changed > 0 then (case when p_on then 1 else -1 end) else 0 end)
+     where id = p_id
+    returning like_count into cnt;
+  end if;
+  return cnt;
+end;
+$$;
+
+-- 자료 받기: 이미 받은 글이면 다시 세지 않고, 오늘(p_since 부터) 받은 수가 p_limit 이면 막는다 (null 이면 제한 없음).
+-- 한 사람의 받기는 한 줄로 세운다 (동시에 눌러도 하루 수를 넘지 않게)
+create or replace function public.kok_share_unlock(p_user uuid, p_post uuid, p_since timestamptz, p_limit int)
+returns jsonb
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  used int;
+begin
+  perform pg_advisory_xact_lock(hashtext('kok_share_unlock:' || p_user::text));
+  if exists (select 1 from public.community_downloads where user_id = p_user and post_id = p_post) then
+    select count(*) into used from public.community_downloads where user_id = p_user and created_at >= p_since;
+    return jsonb_build_object('result', 'already', 'used', used);
+  end if;
+  if not exists (select 1 from public.community_posts where id = p_post) then
+    return jsonb_build_object('result', 'not_found');
+  end if;
+  select count(*) into used from public.community_downloads where user_id = p_user and created_at >= p_since;
+  if p_limit is not null and used >= p_limit then
+    return jsonb_build_object('result', 'limit', 'used', used);
+  end if;
+  insert into public.community_downloads (user_id, post_id) values (p_user, p_post);
+  update public.community_posts set download_count = download_count + 1 where id = p_post;
+  return jsonb_build_object('result', 'ok', 'used', used + 1);
+end;
+$$;
+
+-- 글을 연 수 (쓴 사람이 연 것은 서버가 세지 않는다)
+create or replace function public.kok_share_view(p_post uuid)
+returns void
+language sql
+security definer
+set search_path = public
+as $$
+  update public.community_posts set view_count = view_count + 1 where id = p_post;
+$$;
+
+-- 글 목록·찾기: 갤러리·쓴 사람·종류(material 자료 / text 글)·낱말(모두 제목이나 내용에 있어야, 이미 \ % _ 를 \ 로 막은 글)·
+-- 뺄 사람(차단)·가린 글 포함(운영자)·차례(new 새 글 / hot 좋아요+받기)
+create or replace function public.kok_share_posts(
+  p_gallery uuid, p_words text[], p_kind text, p_sort text, p_author uuid, p_exclude uuid[], p_hidden boolean, p_limit int, p_offset int
+)
+returns setof public.community_posts
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select p.* from public.community_posts p
+   where (p_gallery is null or p.gallery_id = p_gallery)
+     and (p_author is null or p.author_id = p_author)
+     and (coalesce(p_hidden, false) or not p.hidden)
+     and (p_kind is null
+          or (p_kind = 'material' and (p.has_files or p.has_note))
+          or (p_kind = 'text' and not p.has_files and not p.has_note))
+     and (p_exclude is null or not (p.author_id = any(p_exclude)))
+     and not exists (
+       select 1 from unnest(coalesce(p_words, '{}'::text[])) w
+        where not (p.title ilike '%' || w || '%' escape '\' or p.body ilike '%' || w || '%' escape '\')
+     )
+   order by case when p_sort = 'hot' then p.like_count * 2 + p.download_count + p.comment_count end desc nulls last, p.created_at desc
+   limit least(greatest(coalesce(p_limit, 20), 1), 50) offset greatest(coalesce(p_offset, 0), 0);
+$$;
+
+alter table public.community_galleries enable row level security;
+alter table public.community_posts enable row level security;
+alter table public.community_files enable row level security;
+alter table public.community_notes enable row level security;
+alter table public.community_comments enable row level security;
+alter table public.community_likes enable row level security;
+alter table public.community_downloads enable row level security;
+alter table public.community_blocks enable row level security;
+alter table public.community_favs enable row level security;
+alter table public.community_uploads enable row level security;
+-- 정책 없음 = 서버(비밀 키)만 쓴다
+revoke all on
+  public.community_galleries, public.community_posts, public.community_files, public.community_notes, public.community_comments,
+  public.community_likes, public.community_downloads, public.community_blocks, public.community_favs, public.community_uploads
+from anon, authenticated;
+grant all on
+  public.community_galleries, public.community_posts, public.community_files, public.community_notes, public.community_comments,
+  public.community_likes, public.community_downloads, public.community_blocks, public.community_favs, public.community_uploads
+to service_role;
+revoke execute on function public.kok_share_count() from public, anon, authenticated;
+revoke execute on function public.kok_share_like(uuid, text, uuid, boolean) from public, anon, authenticated;
+revoke execute on function public.kok_share_unlock(uuid, uuid, timestamptz, int) from public, anon, authenticated;
+revoke execute on function public.kok_share_posts(uuid, text[], text, text, uuid, uuid[], boolean, int, int) from public, anon, authenticated;
+revoke execute on function public.kok_share_view(uuid) from public, anon, authenticated;
+grant execute on function public.kok_share_view(uuid) to service_role;
+grant execute on function public.kok_share_like(uuid, text, uuid, boolean) to service_role;
+grant execute on function public.kok_share_unlock(uuid, uuid, timestamptz, int) to service_role;
+grant execute on function public.kok_share_posts(uuid, text[], text, text, uuid, uuid[], boolean, int, int) to service_role;
+
+-- 공유 글·댓글·갤러리 신고 (운영자 신고함에 같이 보인다)
+do $$
+begin
+  if not exists (
+    select 1 from pg_constraint
+     where conrelid = 'public.reports'::regclass and conname = 'reports_target_type_check'
+       and pg_get_constraintdef(oid) like '%share_post%'
+  ) then
+    alter table public.reports drop constraint if exists reports_target_type_check;
+    alter table public.reports add constraint reports_target_type_check
+      check (target_type in ('question', 'note', 'visual', 'other', 'chat', 'cover', 'theme', 'course', 'share_post', 'share_comment', 'share_gallery'));
+  end if;
+end $$;
 
 -- =====================================================================
 -- 파일 저장소: 'sources' 버킷 (비공개).
@@ -2311,6 +2750,24 @@ insert into storage.buckets (id, name, public, file_size_limit, allowed_mime_typ
 values (
   'sources', 'sources', false, 209715200,
   array['application/pdf', 'image/jpeg', 'image/png', 'image/webp']
+)
+on conflict (id) do update
+  set public = false,
+      file_size_limit = excluded.file_size_limit,
+      allowed_mime_types = excluded.allowed_mime_types;
+
+-- 자료 공유 파일 (비공개, 50MB: lib/plans.ts SHARE_MAX_FILE_MB 와 같게). 올리기는 서버가 준 한 번짜리 주소로만, 받기는 서버가 받은 글인지 보고 준 주소로만
+insert into storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
+values (
+  'community', 'community', false, 52428800,
+  array[
+    'application/pdf', 'image/jpeg', 'image/png', 'image/webp', 'text/plain',
+    'application/x-hwp', 'application/haansofthwp', 'application/vnd.hancom.hwp',
+    'application/hwp+zip', 'application/vnd.hancom.hwpx',
+    'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+    'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+    'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+  ]
 )
 on conflict (id) do update
   set public = false,

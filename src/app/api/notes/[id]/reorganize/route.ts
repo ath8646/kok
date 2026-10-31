@@ -3,7 +3,7 @@
 // 마인드맵은 개념 번호만 바꿔 두고, 화면이 이어서 그림 다시 만들기(/api/notes/[id]/visual)로 새로 그린다
 import type { NextRequest } from 'next/server';
 import { assertSameOrigin, assertUuid, requireAccount } from '@/lib/server/auth';
-import { getAppSettings } from '@/lib/server/account';
+import { assertPerk, getAppSettings } from '@/lib/server/account';
 import { UserFacingError, errorResponse } from '@/lib/server/errors';
 import { assertNoAppendRunning, assertNoteHasContent, loadOwnedNote } from '@/lib/server/notes';
 import { assertMergeReady, dbError } from '@/lib/server/organize';
@@ -35,7 +35,7 @@ export async function POST(req: NextRequest, ctx: RouteContext<'/api/notes/[id]/
     const { id } = await ctx.params;
     assertUuid(id);
     const { admin, acc } = await requireAccount();
-    if (!acc.canAppend) throw new UserFacingError('pro_only', 'AI로 다시 정리하기는 Pro에서 쓸 수 있어요.', 403);
+    assertPerk(acc, 'reorganize', 'AI로 다시 정리하기');
     await assertMergeReady(admin);
     const note = await loadOwnedNote(admin, id, acc.userId);
     if (!readMergedMark(note.raw)) throw new UserFacingError('not_merged', '여러 노트를 합친 노트만 AI로 다시 정리할 수 있어요.', 400);
@@ -95,12 +95,7 @@ export async function POST(req: NextRequest, ctx: RouteContext<'/api/notes/[id]/
 
     // 마인드맵은 AI 를 기다린 뒤에 다시 읽어서 개념 번호만 바꾼다 (그동안 다른 곳에서 고친 가지를 덮어쓰지 않게:
     // 저장하는 사이에 또 바뀌면 DB 함수가 updated_at 을 보고 멈춘다)
-    const { data: mmNow, error: mmErr } = await admin
-      .from('visuals')
-      .select('spec, updated_at')
-      .eq('note_id', note.id)
-      .eq('type', 'mindmap')
-      .maybeSingle();
+    const { data: mmNow, error: mmErr } = await admin.from('visuals').select('spec, updated_at').eq('note_id', note.id).eq('type', 'mindmap').maybeSingle();
     if (mmErr) throw mmErr;
     const mindmapNow = mmNow ? (zMindmap.safeParse(mmNow.spec).data ?? null) : null;
     const nextMap = remapMindmap(mindmapNow, qmap, finalIds);

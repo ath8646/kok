@@ -22,6 +22,7 @@ export default function manifest(): MetadataRoute.Manifest {
     shortcuts: [
       { name: '자료 넣기', short_name: '자료 넣기', url: '/library?compose=1', icons: [{ src: '/icons/icon-192.png', sizes: '192x192', type: 'image/png' }] },
       { name: '오늘 복습', short_name: '복습', url: '/review', icons: [{ src: '/icons/icon-192.png', sizes: '192x192', type: 'image/png' }] },
+      { name: '자료 공유', short_name: '공유', url: '/share', icons: [{ src: '/icons/icon-192.png', sizes: '192x192', type: 'image/png' }] },
     ],
   };
 }

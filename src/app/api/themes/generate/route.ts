@@ -44,7 +44,7 @@ export async function POST(req: NextRequest) {
   try {
     assertSameOrigin(req);
     const { admin, acc } = await requireAccount();
-    await requireThemes(admin, acc);
+    await requireThemes(admin, acc, { ai: true });
     const parsed = Body.safeParse(await readJson(req, 4_000));
     if (!parsed.success) throw new UserFacingError('bad_body', parsed.error.issues[0]?.message ?? '보낸 내용이 올바르지 않아요.', 400);
     const { prompt, image } = parsed.data;

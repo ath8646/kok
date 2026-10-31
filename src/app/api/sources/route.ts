@@ -64,7 +64,7 @@ export async function POST(req: NextRequest) {
     sourceId = b.id;
     const app = await getAppSettings(admin);
     const L = app.limits;
-    const lim = limitsFor(acc, L);
+    const lim = limitsFor(acc);
 
     // 노트에 자료 더하기: Pro 기능, 정리가 끝난 내 노트에만, 과목은 그 노트의 과목
     const parentId = b.parentId ?? null;
@@ -158,12 +158,12 @@ export async function POST(req: NextRequest) {
     const redraws = redrawsWanted({
       kind: b.kind,
       pictures: b.kind === 'text' ? images : 0,
-      canFigures: acc.canFigures,
+      canRedraw: acc.canRedraw,
       sourceFiguresSetting: acc.settings.quiz.sourceFigures,
       featureOn: feats.sourceFigures,
     });
     const visualModel = modelForTier(app.models, acc.settings.models.visual, acc.canCareful, acc.isAdmin);
-    const cover = coverWanted({ canFigures: acc.canFigures, autoCover: acc.settings.visual.autoCover, featureOn: feats.covers, append: !!parentId });
+    const cover = coverWanted({ canCover: acc.canCover, autoCover: acc.settings.visual.autoCover, featureOn: feats.covers, append: !!parentId });
     // 노트에 더할 때는 지금 노트와 합치는 단계가 하나 더 있다. Pro 그림 풀이·자료 그림 다시 그리기·표지 그림을 하면 그 값도 (화면 계산과 같게)
     const estimate =
       estimateEnergy({ kind: b.kind, pages, images, chars: text?.length ?? 0 }, model, L.usdPerEnergy, { exam: b.material === 'exam' }) +
@@ -193,7 +193,7 @@ export async function POST(req: NextRequest) {
         ...(parentId ? { parent_id: parentId } : {}),
       },
       p_max_parallel: acc.isAdmin ? null : MAX_PARALLEL_SOURCES,
-      ...energyWindows(acc, L),
+      ...energyWindows(acc),
     });
     if (error) throw error;
     const v = verdict as ReserveResult;

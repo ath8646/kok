@@ -1,9 +1,10 @@
-// 관리자: 한도·모델·공지·비상 스위치·운영자 정보 바꾸기
+// 관리자: 한도·요금제 혜택·모델·공지·비상 스위치·운영자 정보 바꾸기
 import type { NextRequest } from 'next/server';
 import { z } from 'zod';
 import { assertSameOrigin, readJson, requireAccount } from '@/lib/server/auth';
 import { clearSettingsCache } from '@/lib/server/account';
 import { MAX_FILE_MB } from '@/lib/settings';
+import { ENERGY_MAX, PERKS, PLAN_NUMBERS, PRICE_MAX, TIER_NAME, TIERS, type Perk, type PlanNumberKey } from '@/lib/plans';
 import { UserFacingError, errorResponse } from '@/lib/server/errors';
 
 const num = (min: number, max: number) => z.number().finite().min(min).max(max);
@@ -46,13 +47,44 @@ const Models = z.object({
     chat: effort.catch('low'),
     theme: effort.catch('low'),
     solve: effort.catch('medium'),
+    redraw: effort.catch('medium'),
+    locate: effort.catch('low'),
+    cover: effort.catch('low'),
+    problems: effort.catch('medium'),
   }),
 });
+
+/** 요금제 한 칸 (오류 글에 요금제와 칸 이름) */
+function planSpec(tier: (typeof TIERS)[number]) {
+  const who = TIER_NAME[tier];
+  const n = (label: string, min: number, max: number) =>
+    z
+      .number({ error: `${who} '${label}' 칸에는 숫자를 적어 주세요.` })
+      .finite()
+      .min(min, `${who} '${label}' 칸은 ${min.toLocaleString('ko-KR')} 이상이어야 해요.`)
+      .max(max, `${who} '${label}' 칸은 ${max.toLocaleString('ko-KR')}까지 정할 수 있어요.`);
+  const nums = Object.fromEntries(PLAN_NUMBERS.map((f) => [f.key, n(f.label, f.min, f.max).int(`${who} '${f.label}' 칸은 정수로 적어 주세요.`)])) as Record<
+    PlanNumberKey,
+    z.ZodNumber
+  >;
+  return z
+    .object({
+      price: n('값', 0, PRICE_MAX).int(`${who} '값' 칸은 정수로 적어 주세요.`),
+      energyDaily: n('하루 에너지', 0, ENERGY_MAX).nullable(),
+      energyMonthly: n('한 달 에너지', 0, ENERGY_MAX).nullable(),
+      ...nums,
+      perks: z.object(Object.fromEntries(PERKS.map((p) => [p, z.boolean()])) as Record<Perk, z.ZodBoolean>),
+    })
+    .refine((v) => v.energyDaily !== null || v.energyMonthly !== null, `${who}는 하루나 한 달 에너지 중 하나는 정해 주세요.`)
+    .refine((v) => v.energyMonthly === null || v.energyDaily === null || v.energyDaily <= v.energyMonthly, `${who}의 하루 에너지가 한 달 에너지보다 많아요.`);
+}
+const Plans = z.object({ free: planSpec('free'), pro: planSpec('pro'), max: planSpec('max') });
 const Notice = z.object({ active: z.boolean(), text: z.string().max(300) });
 const Site = z.object({ contactEmail: z.string().max(120), operatorName: z.string().max(60) });
 
 const Body = z.discriminatedUnion('key', [
   z.object({ key: z.literal('limits'), value: Limits }),
+  z.object({ key: z.literal('plans'), value: Plans }),
   z.object({ key: z.literal('models'), value: Models }),
   z.object({ key: z.literal('notice'), value: Notice }),
   z.object({ key: z.literal('ai_enabled'), value: z.boolean() }),

@@ -9,9 +9,9 @@ export async function GET() {
   try {
     const { admin, acc } = await requireAccount({ consent: false });
     const app = await getAppSettings(admin);
-    const [e, features] = await Promise.all([energyStatus(admin, acc, app.limits), getFeatures(admin)]);
+    const [e, features] = await Promise.all([energyStatus(admin, acc), getFeatures(admin)]);
     const L = app.limits;
-    const lim = limitsFor(acc, L);
+    const lim = limitsFor(acc);
     const body: MeResponse = {
       userId: acc.userId,
       email: acc.email,
@@ -25,6 +25,13 @@ export async function GET() {
       canAppend: acc.canAppend,
       canTheme: acc.canTheme,
       canFigures: acc.canFigures,
+      canCourse: acc.canCourse,
+      canReorganize: acc.canReorganize,
+      canCover: acc.canCover,
+      canRedraw: acc.canRedraw,
+      canSkins: acc.canSkins,
+      canAiTheme: acc.canAiTheme,
+      perkTiers: acc.perkTiers,
       keepChatFiles: acc.keepFiles,
       features,
       consented: acc.consented,
@@ -36,7 +43,7 @@ export async function GET() {
         period: e.period,
         usedToday: Math.round(e.usedToday * 10) / 10,
         usedMonth: Math.round(e.usedMonth * 10) / 10,
-        proDaily: acc.isPro ? L.proDaily : null,
+        dailyMax: e.dailyMax ?? null,
         usedPlan: e.usedPlan === undefined ? null : Math.round(e.usedPlan * 10) / 10,
         planDaily: e.planDaily ?? null,
       },
@@ -49,6 +56,12 @@ export async function GET() {
         textChars: lim.textChars,
         fileMb: lim.fileMb,
         fileDays: lim.keepFiles ? null : L.freeFileDays,
+      },
+      share: {
+        downloadsDaily: lim.downloadsDaily,
+        galleries: lim.galleries,
+        fileMb: lim.shareFileMb,
+        files: lim.shareFiles,
       },
       usdPerEnergy: L.usdPerEnergy,
       models: { fast: app.models.fast, careful: app.models.careful, adminTest: app.models.adminTest },

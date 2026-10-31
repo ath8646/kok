@@ -1,6 +1,7 @@
 // 터미널의 setting(KOK 관리 모드)이 쓰는 데이터 길: 앱의 다른 화면과 같은 길로만 읽고 쓴다
 // (브라우저 Supabase 는 RLS·칸 단위 GRANT 가 내 것만 허락하고, 지우기·옮기기·합치기는 서버 API).
 // 쓰기는 sb()·api() 를 거쳐서 기억해 둔 화면(view-cache)도 옛것이 된다.
+import { perkTierName } from '@/lib/plans';
 import { api } from '@/components/ui';
 import { zNote } from '@/lib/ai/schemas';
 import { deleteSession, fetchAll, fetchPlanData, fetchQuestionsByIds, fetchSubjects, sb, topLevelSources } from '@/lib/data';
@@ -23,8 +24,8 @@ type ConfigDef = {
   min?: number;
   max?: number;
   values?: string[];
-  /** Pro 혜택 (아니면 바꿀 수 없다) */
-  pro?: boolean;
+  /** 이 혜택이 있어야 바꿀 수 있다 (lib/plans.ts) */
+  perk?: 'figures' | 'cover';
   /** DB 에 칸이 있어야 보인다 */
   feature?: keyof Features;
 };
@@ -37,8 +38,8 @@ const CONFIG: ConfigDef[] = [
   { key: 'review.minutes', label: '복습 시간 (5·15·30분)', kind: 'enum', values: ['5', '15', '30'] },
   { key: 'quiz.language', label: '문제 언어 (ko: 한국어, material: 자료의 언어)', kind: 'enum', values: ['ko', 'material'] },
   { key: 'quiz.sourceFigures', label: '자료의 그림으로 문제 만들기', kind: 'bool', feature: 'sourceFigures' },
-  { key: 'quiz.figures', label: '필요한 문제에 그림과 단계 풀이 붙이기 (Pro)', kind: 'bool', pro: true, feature: 'figures' },
-  { key: 'visual.autoCover', label: '자료를 넣으면 표지 그림 그리기 (Pro)', kind: 'bool', pro: true, feature: 'covers' },
+  { key: 'quiz.figures', label: '필요한 문제에 그림과 단계 풀이 붙이기', kind: 'bool', perk: 'figures', feature: 'figures' },
+  { key: 'visual.autoCover', label: '자료를 넣으면 표지 그림 그리기', kind: 'bool', perk: 'cover', feature: 'covers' },
   { key: 'visual.icons', label: '마인드맵 그림 기호(이모지) 보이기', kind: 'bool' },
   { key: 'chat.allowQuestions', label: "채팅에서 '문제로 넣어 줘'", kind: 'bool', feature: 'chat' },
   { key: 'chat.allowNote', label: "채팅에서 '노트에 넣어 줘'", kind: 'bool', feature: 'chat' },
@@ -391,7 +392,10 @@ export function makeKokApi(me: MeResponse, refreshMe: () => Promise<void>): KokA
     async setConfig(key, raw) {
       const def = visibleConfig().find((d) => d.key === key);
       if (!def) throw new SettingError(`config: '${key}': 그런 설정이 없어요 (config 로 목록을 봐요)`);
-      if (def.pro && !me.canFigures) throw new SettingError(`config: ${key} 는 Pro에서 바꿀 수 있어요`);
+      if (def.perk && !(def.perk === 'cover' ? me.canCover : me.canFigures)) {
+        const tier = perkTierName(me.perkTiers, def.perk);
+        throw new SettingError(`config: ${key} 는 ${tier ? `${tier}에서` : '지금은'} 바꿀 수 ${tier ? '있어요' : '없어요'}`);
+      }
       const value = parseValue(def, raw);
       const before = shown(def, getPath(settings, key));
       const [sec, name] = key.split('.');

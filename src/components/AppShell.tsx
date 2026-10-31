@@ -6,7 +6,7 @@ import { usePathname, useRouter } from 'next/navigation';
 import { createContext, useCallback, useContext, useEffect, useState, type ReactNode } from 'react';
 import type { MeResponse } from '@/lib/types';
 import { QuickAddProvider } from './QuickAdd';
-import { applyTheme, clearTheme, missingCustomIds, rememberCustomThemes, type CustomTheme, type Theme } from '@/lib/theme';
+import { applyTheme, clearTheme, missingCustomIds, rememberCustomThemes, setSkinsAllowed, type CustomTheme, type Theme } from '@/lib/theme';
 import { sb } from '@/lib/data';
 import { Button, ICONS, Icon, Spinner, cx, setShowDoneToasts } from './ui';
 import { BrandMark, Wordmark } from './Brand';
@@ -24,11 +24,12 @@ export function useMe() {
   return useContext(Ctx);
 }
 
-const TABS = [
+const TABS: Array<{ href: string; label: string; icon: string; also?: string[] }> = [
   { href: '/home', label: '홈', icon: 'M3 10.5 12 3l9 7.5V20a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z' },
   { href: '/library', label: '자료함', icon: 'M3 6.5A1.5 1.5 0 0 1 4.5 5h4.6l2 2h8.4A1.5 1.5 0 0 1 21 8.5v9a1.5 1.5 0 0 1-1.5 1.5h-15A1.5 1.5 0 0 1 3 17.5z' },
-  { href: '/review', label: '복습', icon: 'M12 3a9 9 0 1 0 9 9M12 7v5l3 2M21 3v6h-6' },
-  { href: '/wrong', label: '오답', icon: 'M6 3h12a1 1 0 0 1 1 1v17l-7-4-7 4V4a1 1 0 0 1 1-1zM9.5 8.5l5 5M14.5 8.5l-5 5' },
+  // 오답노트(/wrong)는 복습 탭 안 (복습 시작 화면 위·홈의 오답 수에서 들어간다)
+  { href: '/review', label: '복습', icon: 'M12 3a9 9 0 1 0 9 9M12 7v5l3 2M21 3v6h-6', also: ['/wrong'] },
+  { href: '/share', label: '공유', icon: ICONS.share },
   {
     href: '/settings',
     label: '설정',
@@ -131,8 +132,11 @@ export function AppShell({ children }: { children: ReactNode }) {
   const theme = me ? (me.canTheme ? me.settings.theme : null) : undefined;
   const themeKey = theme === undefined ? '' : JSON.stringify(theme);
   const themesOn = !!me?.features.themes;
+  // 시그니처 테마는 그 혜택이 있을 때만 (없으면 비슷한 기본 테마 색으로: 고른 테마는 설정에 남는다)
+  const skinsOk = !!me?.canSkins;
   useEffect(() => {
     if (!themeKey) return;
+    setSkinsAllowed(skinsOk);
     const t = JSON.parse(themeKey) as Theme | null;
     if (!t) {
       applyTheme(null);
@@ -168,7 +172,7 @@ export function AppShell({ children }: { children: ReactNode }) {
       alive = false;
       if (timer) clearTimeout(timer);
     };
-  }, [themeKey, themesOn]);
+  }, [themeKey, themesOn, skinsOk]);
 
   // 완료 알림('지웠어요' …)을 보일지: 설정 > 알림 (오류·꼭 알아야 할 안내는 늘 보인다)
   const showDone = me ? me.settings.notify?.done !== false : true;
@@ -224,7 +228,7 @@ export function AppShell({ children }: { children: ReactNode }) {
                 <Wordmark mark={30} className="text-[26px]" />
               </Link>
               {TABS.map((t) => {
-                const on = under(pathname, t.href);
+                const on = under(pathname, t.href) || !!t.also?.some((a) => under(pathname, a));
                 return (
                   <Link
                     key={t.href}
@@ -278,7 +282,7 @@ export function AppShell({ children }: { children: ReactNode }) {
           {!bare ? (
             <nav className="kok-tabbar fixed z-40 grid grid-cols-5 px-1 pt-1 md:hidden" aria-label="주 메뉴">
               {TABS.map((t) => {
-                const on = under(pathname, t.href);
+                const on = under(pathname, t.href) || !!t.also?.some((a) => under(pathname, a));
                 return (
                   <Link
                     key={t.href}

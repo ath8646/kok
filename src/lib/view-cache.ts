@@ -15,6 +15,14 @@ const store = new Map<string, Entry>();
 
 /** 데이터를 바꾸는 요청이 시작되거나 끝난 횟수 */
 let writes = 0;
+/**
+ * 자료 공유(커뮤니티)의 쓰기만 센 횟수: 좋아요·댓글·글쓰기는 홈·자료함·복습 화면을 바꾸지 않아서 그 기억은 그대로 두고,
+ * 자료 공유 화면의 기억('share:' 로 시작하는 열쇠)만 옛것으로 만든다
+ */
+let shareWrites = 0;
+const isShareKey = (key: string) => key.startsWith('share:');
+/** 이 열쇠의 기억이 맞는지 볼 때의 번호 (자료 공유 화면은 두 횟수를 함께 본다) */
+const stampOf = (key: string) => (isShareKey(key) ? writes * 1_000_000 + shareWrites : writes);
 /** 아직 끝나지 않은 쓰기 요청 수와, 모두 끝나기를 기다리는 쪽 */
 let inflight = 0;
 let waiters: Array<() => void> = [];
@@ -26,9 +34,9 @@ function listen() {
   for (const ev of [SOURCES_CHANGED, SUBJECTS_CHANGED]) window.addEventListener(ev, () => store.clear());
 }
 
-/** 지금까지 센 쓰기: 읽기를 시작할 때 받아 두었다가 writeView 에 넘긴다 */
-export function viewStamp(): number {
-  return writes;
+/** 지금까지 센 쓰기: 읽기를 시작할 때 받아 두었다가 writeView 에 넘긴다 (자료 공유 화면은 그 열쇠를 같이 준다) */
+export function viewStamp(key?: string): number {
+  return key ? stampOf(key) : writes;
 }
 
 /** 데이터를 바꾸는 요청이 시작되거나 끝났다 (기억해 둔 화면은 모두 옛것이 된다) */
@@ -54,7 +62,7 @@ function writeEnded(): void {
 export function readView<T>(key: string, owner: string | null | undefined, now = Date.now()): T | undefined {
   if (!owner) return undefined;
   const e = store.get(key);
-  if (!e || e.owner !== owner || e.stamp !== writes || now - e.at > MAX_AGE_MS) return undefined;
+  if (!e || e.owner !== owner || e.stamp !== stampOf(key) || now - e.at > MAX_AGE_MS) return undefined;
   return e.value as T;
 }
 
@@ -65,8 +73,8 @@ export function readView<T>(key: string, owner: string | null | undefined, now =
 export function writeView<T>(key: string, owner: string | null | undefined, value: T, opts: { stamp?: number; now?: number } = {}): void {
   if (!owner) return;
   listen();
-  const stamp = opts.stamp ?? writes;
-  if (stamp !== writes) {
+  const stamp = opts.stamp ?? stampOf(key);
+  if (stamp !== stampOf(key)) {
     store.delete(key);
     return;
   }
@@ -83,8 +91,26 @@ export function dropView(key?: string): void {
 
 /** POST 로 부르지만 읽기만 하는 Supabase 함수 */
 const READ_RPCS = new Set(['kok_my_study_days']);
-/** 데이터를 바꾸지 않는 앱 API: 멈춘 정리 이어 달리기(끝나면 정리 목록이 따로 알린다), 홈 채팅(대화는 저장하지 않는다), 올리기 주소 받기, 신고(화면에 보이는 것이 바뀌지 않는다) */
-const READ_POSTS = [/^\/api\/sources\/[^/]+\/process$/, /^\/api\/chat$/, /^\/api\/uploads$/, /^\/api\/reports$/];
+/** 데이터를 바꾸지 않는 앱 API: 멈춘 정리 이어 달리기(끝나면 정리 목록이 따로 알린다), 홈 채팅(대화는 저장하지 않는다), 올리기 주소 받기, 신고(화면에 보이는 것이 바뀌지 않는다), 공유 파일 주소 받기 */
+const READ_POSTS = [/^\/api\/sources\/[^/]+\/process$/, /^\/api\/chat$/, /^\/api\/uploads$/, /^\/api\/reports$/, /^\/api\/share\/files\/[^/]+$/];
+/** 자료 공유 API 중 내 자료함을 바꾸는 것 (노트 가져오기): 모든 화면의 기억을 옛것으로 */
+const SHARE_GLOBAL = [/^\/api\/share\/posts\/[^/]+\/import$/];
+
+/** 이 요청이 자료 공유만 바꾸는지 (좋아요·댓글·글·갤러리·받기·차단·신고): 자료 공유 화면의 기억만 옛것으로 */
+export function writesShare(method: string | undefined, url: string): boolean {
+  const m = (method || 'GET').toUpperCase();
+  if (m === 'GET' || m === 'HEAD' || m === 'OPTIONS') return false;
+  const path = pathOf(url);
+  return path.startsWith('/api/share/') && !SHARE_GLOBAL.some((re) => re.test(path)) && !READ_POSTS.some((re) => re.test(path));
+}
+
+function pathOf(url: string): string {
+  try {
+    return new URL(url, 'http://kok.invalid').pathname;
+  } catch {
+    return url;
+  }
+}
 
 /**
  * 이 요청이 데이터를 바꿀 수 있는지: Supabase 표 쓰기(POST·PATCH·DELETE)와 읽기 함수가 아닌 함수, 앱 API 의 GET 이 아닌 요청.
@@ -103,6 +129,7 @@ export function writesData(method: string | undefined, url: string): boolean {
   const rpc = /\/rest\/v1\/rpc\/([^/]+)$/.exec(path);
   if (rpc) return !READ_RPCS.has(rpc[1]);
   if (path.includes('/rest/v1/')) return true;
+  if (path.startsWith('/api/share/')) return SHARE_GLOBAL.some((re) => re.test(path));
   if (path.startsWith('/api/')) return !READ_POSTS.some((re) => re.test(path));
   return !path.includes('/auth/v1/') && !path.includes('/storage/v1/');
 }
@@ -120,7 +147,19 @@ function requestUrl(input: RequestInfo | URL): string {
 
 /** fetch 와 같고, 데이터를 바꾸는 요청이면 시작할 때와 끝날 때 센다 (Supabase 브라우저 클라이언트·api() 가 쓴다) */
 export function trackedFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
-  const counts = writesData(requestMethod(input, init), requestUrl(input));
+  const method = requestMethod(input, init);
+  const url = requestUrl(input);
+  if (writesShare(method, url)) {
+    // 자료 공유만 바꾸는 요청: 시작할 때와 끝날 때 자료 공유 화면의 기억만 옛것으로
+    shareWrites += 1;
+    const bump = () => {
+      shareWrites += 1;
+    };
+    const res = fetch(input, init);
+    res.then(bump, bump);
+    return res;
+  }
+  const counts = writesData(method, url);
   if (!counts) return fetch(input, init);
   noteWrite();
   inflight += 1;

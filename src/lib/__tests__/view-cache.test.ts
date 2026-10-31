@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { dropView, noteWrite, readView, trackedFetch, viewStamp, writeView, writesData, writesSettled } from '@/lib/view-cache';
+import { dropView, noteWrite, readView, trackedFetch, viewStamp, writeView, writesData, writesSettled, writesShare } from '@/lib/view-cache';
 
 describe('방금 본 목록 기억 (화면을 오갈 때 바로 보여 주기)', () => {
   afterEach(() => {
@@ -139,5 +139,45 @@ describe('데이터를 바꾸는 요청 세기', () => {
     await b;
     await wait;
     expect(settled).toBe(true);
+  });
+
+  it('자료 공유의 쓰기는 자료 공유 화면의 기억만 옛것으로 (홈·자료함은 그대로), 노트 가져오기는 모두', async () => {
+    expect(writesShare('POST', '/api/share/posts/p1/like')).toBe(true);
+    expect(writesShare('POST', '/api/share/posts')).toBe(true);
+    expect(writesShare('DELETE', '/api/share/comments/c1')).toBe(true);
+    expect(writesShare('GET', '/api/share/hub')).toBe(false);
+    // 파일 주소 받기는 아무것도 바꾸지 않는다
+    expect(writesShare('POST', '/api/share/files/f1')).toBe(false);
+    expect(writesData('POST', '/api/share/files/f1')).toBe(false);
+    // 노트 가져오기는 내 자료함을 바꾼다
+    expect(writesShare('POST', '/api/share/posts/p1/import')).toBe(false);
+    expect(writesData('POST', '/api/share/posts/p1/import')).toBe(true);
+    expect(writesData('POST', '/api/share/posts/p1/like')).toBe(false);
+
+    let finish: (r: Response) => void = () => {};
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(() => new Promise<Response>((r) => (finish = r))),
+    );
+    writeView('home', 'user-a', { n: 1 });
+    writeView('share:hub', 'user-a', { n: 2 });
+    const stamp = viewStamp('share:g:1');
+    const like = trackedFetch('/api/share/posts/p1/like', { method: 'POST', body: '{}' });
+    expect(readView('home', 'user-a')).toEqual({ n: 1 });
+    expect(readView('share:hub', 'user-a')).toBeUndefined();
+    // 읽는 사이에 좋아요가 있었으면 그 목록은 기억하지 않는다
+    writeView('share:g:1', 'user-a', { n: 3 }, { stamp });
+    expect(readView('share:g:1', 'user-a')).toBeUndefined();
+    finish(new Response('{}'));
+    await like;
+    await Promise.resolve();
+    expect(readView('home', 'user-a')).toEqual({ n: 1 });
+
+    // 자료함·복습을 바꾸는 쓰기는 자료 공유 화면의 기억도 옛것으로 (글 목록의 노트 이름 등)
+    writeView('share:hub', 'user-a', { n: 4 });
+    const save = trackedFetch(`${SB}/rest/v1/cards?question_id=eq.q1`, { method: 'PATCH' });
+    expect(readView('share:hub', 'user-a')).toBeUndefined();
+    finish(new Response(null, { status: 204 }));
+    await save;
   });
 });

@@ -193,6 +193,62 @@ do $$ begin
   end;
 end $$;
 
+-- 자료 공유(커뮤니티) 표는 모두 서버만 (학생은 /api/share 를 거친다: 익명 글쓴이를 알아내거나 받기 수를 바꾸지 못하게)
+do $$
+declare t text;
+begin
+  foreach t in array array['community_galleries', 'community_posts', 'community_files', 'community_notes', 'community_comments',
+                           'community_likes', 'community_downloads', 'community_blocks', 'community_favs', 'community_uploads'] loop
+    begin
+      execute format('select 1 from public.%I limit 1', t);
+      raise exception '% should be hidden', t;
+    exception when insufficient_privilege then null;
+    end;
+    begin
+      execute format('delete from public.%I', t);
+      raise exception '% should not be writable', t;
+    exception when insufficient_privilege then null;
+    end;
+  end loop;
+  begin
+    perform public.kok_share_unlock(auth.uid(), gen_random_uuid(), now(), null);
+    raise exception 'unlock function should be denied';
+  exception when insufficient_privilege then null;
+  end;
+  begin
+    perform public.kok_share_like(auth.uid(), 'post', gen_random_uuid(), true);
+    raise exception 'like function should be denied';
+  exception when insufficient_privilege then null;
+  end;
+  begin
+    perform public.kok_share_view(gen_random_uuid());
+    raise exception 'view function should be denied';
+  exception when insufficient_privilege then null;
+  end;
+  begin
+    perform 1 from public.kok_share_posts(null, null, null, 'new', null, null, true, 10, 0);
+    raise exception 'post list function should be denied';
+  exception when insufficient_privilege then null;
+  end;
+  -- 공유 파일은 저장소에서도 직접 올리거나 볼 수 없다
+  begin
+    insert into storage.objects (bucket_id, name) values ('community', auth.uid()::text || '/p/a.pdf');
+    raise exception 'direct community upload should be denied';
+  exception when insufficient_privilege then null;
+  end;
+  -- Max 기간·요금제 칸은 바꿀 수 없다
+  begin
+    update public.profiles set max_until = now() + interval '1 year' where id = auth.uid();
+    raise exception 'max_until update should be denied';
+  exception when insufficient_privilege then null;
+  end;
+  begin
+    perform public.kok_set_paid_plan(auth.uid(), 'max', 365);
+    raise exception 'paid plan function should be denied';
+  exception when insufficient_privilege then null;
+  end;
+end $$;
+
 -- ---------- 사용자 B: A의 것이 안 보여야 한다 ----------
 select set_config('request.jwt.claim.sub', '22222222-2222-2222-2222-222222222222', false);
 do $$ begin
@@ -299,6 +355,105 @@ delete from public.custom_plans where id = '44444444-4444-4444-4444-444444444444
 do $$ begin
   if exists (select 1 from public.coupons where code = 'TESTPLAN') then raise exception 'plan codes should go with the plan'; end if;
   if (select custom_plan_id from public.profiles where id = '22222222-2222-2222-2222-222222222222') is not null then raise exception 'custom plan should be cleared'; end if;
+end $$;
+
+-- Max 코드: Max 동안 남은 Pro 는 멈춘다 (Max 날수만큼 뒤로), 두 번째 Max 는 이어 붙고, Max 동안 받은 Pro 는 Max 가 끝난 뒤에 이어진다
+-- (사용자 1111 은 위에서 Pro 가 약 40일 남았다)
+insert into public.coupons (code, days, max_uses, tier) values ('MAX5', 5, 5, 'max'), ('MAX2', 2, 5, 'max');
+insert into public.coupons (code, days, max_uses) values ('PRO3', 3, 5);
+do $$
+declare
+  p public.profiles%rowtype;
+  r jsonb;
+  pro0 timestamptz;
+begin
+  select pro_until into pro0 from public.profiles where id = '11111111-1111-1111-1111-111111111111';
+  r := public.kok_redeem_coupon('max5', '11111111-1111-1111-1111-111111111111');
+  if r->>'kind' <> 'max' then raise exception 'max coupon kind: %', r; end if;
+  select * into p from public.profiles where id = '11111111-1111-1111-1111-111111111111';
+  if p.max_until not between now() + interval '4 days 23 hours' and now() + interval '5 days 1 hour' then raise exception 'max period wrong: %', p.max_until; end if;
+  if p.pro_until <> pro0 + interval '5 days' then raise exception 'pro should pause during max: % vs %', p.pro_until, pro0; end if;
+  if p.plan <> 'pro' then raise exception 'max must keep the pro plan underneath'; end if;
+  r := public.kok_redeem_coupon('MAX2', '11111111-1111-1111-1111-111111111111');
+  select * into p from public.profiles where id = '11111111-1111-1111-1111-111111111111';
+  if p.max_until not between now() + interval '6 days 23 hours' and now() + interval '7 days 1 hour' then raise exception 'second max should extend: %', p.max_until; end if;
+  if p.pro_until <> pro0 + interval '7 days' then raise exception 'pro should pause for both max codes'; end if;
+  r := public.kok_redeem_coupon('PRO3', '11111111-1111-1111-1111-111111111111');
+  select * into p from public.profiles where id = '11111111-1111-1111-1111-111111111111';
+  if p.pro_until <> pro0 + interval '10 days' then raise exception 'pro code during max goes after the remaining pro: %', p.pro_until; end if;
+  -- 관리자가 Max 를 끄면 미뤘던 Pro 를 당긴다
+  r := public.kok_set_paid_plan('11111111-1111-1111-1111-111111111111', 'max', 0);
+  select * into p from public.profiles where id = '11111111-1111-1111-1111-111111111111';
+  if p.max_until is not null then raise exception 'max should be off'; end if;
+  if p.pro_until not between pro0 + interval '2 days 23 hours' and pro0 + interval '3 days 1 hour' then raise exception 'pro should be pulled back after max ends: % vs %', p.pro_until, pro0; end if;
+  -- 관리자가 Max 를 3일로 정하면 그만큼 다시 민다
+  r := public.kok_set_paid_plan('11111111-1111-1111-1111-111111111111', 'max', 3);
+  select * into p from public.profiles where id = '11111111-1111-1111-1111-111111111111';
+  if p.max_until not between now() + interval '2 days 23 hours' and now() + interval '3 days 1 hour' then raise exception 'admin max period wrong'; end if;
+  if p.pro_until not between pro0 + interval '5 days 23 hours' and pro0 + interval '6 days 1 hour' then raise exception 'pro should be pushed past admin max: %', p.pro_until; end if;
+  begin
+    perform public.kok_set_paid_plan('11111111-1111-1111-1111-111111111111', 'gold', 3);
+    raise exception 'unknown tier should fail';
+  exception when raise_exception then
+    if sqlerrm <> 'bad_plan' then raise; end if;
+  end;
+  -- 관리자 통계에 Max 사용자 수
+  if (public.kok_admin_stats(now() - interval '30 days', now() - interval '1 day')->>'max_users')::int < 1 then raise exception 'admin stats should count max users'; end if;
+end $$;
+
+-- 자료 공유: 좋아요(한 사람 한 번)·받기(하루 한도, 같은 글은 다시 세지 않는다)·찾기·글 수 세기
+do $$
+declare
+  a uuid := '11111111-1111-1111-1111-111111111111';
+  b uuid := '22222222-2222-2222-2222-222222222222';
+  g uuid;
+  p1 uuid := gen_random_uuid();
+  p2 uuid := gen_random_uuid();
+  p3 uuid := gen_random_uuid();
+  r jsonb;
+  n int;
+begin
+  insert into public.community_galleries (name, name_key, description, category, owner_id) values ('시험 갤러리', '시험갤러리', '', 'middle', a) returning id into g;
+  insert into public.community_posts (id, gallery_id, author_id, author_name, anonymous, title, body, has_files) values
+    (p1, g, a, '콕콕', false, '광합성 정리 100%', '엽록체 이야기', true),
+    (p2, g, a, '익명', true, '세포 호흡', '미토콘드리아', true),
+    (p3, g, a, '콕콕', false, '잡담', '안녕', false);
+  if (select post_count from public.community_galleries where id = g) <> 3 then raise exception 'gallery post count'; end if;
+  -- 좋아요는 한 사람 한 번 (두 번 눌러도 1)
+  perform public.kok_share_like(b, 'post', p1, true);
+  perform public.kok_share_like(b, 'post', p1, true);
+  if (select like_count from public.community_posts where id = p1) <> 1 then raise exception 'like twice counts once'; end if;
+  perform public.kok_share_like(b, 'post', p1, false);
+  if (select like_count from public.community_posts where id = p1) <> 0 then raise exception 'unlike'; end if;
+  -- 받기: 하루 2개, 같은 글은 다시 세지 않는다
+  r := public.kok_share_unlock(b, p1, now() - interval '1 hour', 2);
+  if r->>'result' <> 'ok' then raise exception 'unlock 1: %', r; end if;
+  r := public.kok_share_unlock(b, p1, now() - interval '1 hour', 2);
+  if r->>'result' <> 'already' or (r->>'used')::int <> 1 then raise exception 'same post again is free: %', r; end if;
+  r := public.kok_share_unlock(b, p2, now() - interval '1 hour', 2);
+  if (r->>'used')::int <> 2 then raise exception 'unlock 2: %', r; end if;
+  r := public.kok_share_unlock(b, p3, now() - interval '1 hour', 2);
+  if r->>'result' <> 'limit' then raise exception 'third unlock should hit the limit: %', r; end if;
+  if (select download_count from public.community_posts where id = p1) <> 1 then raise exception 'download count'; end if;
+  -- 찾기: 낱말이 모두 든 글, % 는 글자로
+  select count(*) into n from public.kok_share_posts(g, array['광합성'], null, 'new', null, null, false, 20, 0);
+  if n <> 1 then raise exception 'search one word: %', n; end if;
+  select count(*) into n from public.kok_share_posts(g, array['100\%'], null, 'new', null, null, false, 20, 0);
+  if n <> 1 then raise exception 'escaped percent: %', n; end if;
+  select count(*) into n from public.kok_share_posts(g, array['\%', '세포'], null, 'new', null, null, false, 20, 0);
+  if n <> 0 then raise exception 'all words must match: %', n; end if;
+  select count(*) into n from public.kok_share_posts(g, null, 'text', 'new', null, null, false, 20, 0);
+  if n <> 1 then raise exception 'text-only filter: %', n; end if;
+  select count(*) into n from public.kok_share_posts(g, null, null, 'new', null, array[a], false, 20, 0);
+  if n <> 0 then raise exception 'blocked author excluded: %', n; end if;
+  update public.community_posts set hidden = true where id = p3;
+  select count(*) into n from public.kok_share_posts(g, null, null, 'new', null, null, false, 20, 0);
+  if n <> 2 then raise exception 'hidden post excluded: %', n; end if;
+  -- 글을 지우면 갤러리 글 수도 준다
+  delete from public.community_posts where id = p3;
+  if (select post_count from public.community_galleries where id = g) <> 2 then raise exception 'post count after delete'; end if;
+  delete from public.community_galleries where id = g;
+  if exists (select 1 from public.community_posts where id = p1) then raise exception 'posts go with the gallery'; end if;
 end $$;
 
 insert into public.sources (user_id, subject_id, kind, text_content)

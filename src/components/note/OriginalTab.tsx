@@ -1,6 +1,7 @@
 'use client';
 // 원본 탭 (노트 버전을 쓸 수 있을 때): 버전 기록(열기·이 버전 쓰기·지우기), 이 노트에 자료 더하기(Pro),
 // 보고 있는 버전에 들어간 자료들의 원본
+import { perkTierName } from '@/lib/plans';
 import { useRef, useState } from 'react';
 import type { MeResponse } from '@/lib/types';
 import { estimateEnergy, estimateFigures, estimateSmallTask, figuresWanted } from '@/lib/ai/models';
@@ -282,7 +283,7 @@ function AddMaterial({ me, busyHint, onAdd }: { me: MeResponse; busyHint: boolea
           <Icon d={ICONS.plus} size={18} strokeWidth={2.4} />
         </span>
         <h2 className="font-display text-lg">이 노트에 자료 더하기</h2>
-        {!can ? <Chip tone="accent">Pro</Chip> : null}
+        {!can && perkTierName(me.perkTiers, 'append') ? <Chip tone="accent">{perkTierName(me.perkTiers, 'append')}</Chip> : null}
       </div>
       {can ? (
         <>
@@ -343,7 +344,8 @@ function AddMaterial({ me, busyHint, onAdd }: { me: MeResponse; busyHint: boolea
       ) : (
         <>
           <p className="text-sm text-muted">
-            Pro에서는 지금 노트에 PDF·사진·글·한글·워드·PPT를 더할 수 있어요. AI가 지금 노트와 합쳐 새 버전을 만들고, 버전마다 정리·그림·문제가 따로 남아요.
+            {perkTierName(me.perkTiers, 'append') || '다른 요금제'}에서는 지금 노트에 PDF·사진·글·한글·워드·PPT를 더할 수 있어요. AI가 지금 노트와 합쳐 새
+            버전을 만들고, 버전마다 정리·그림·문제가 따로 남아요.
           </p>
           <LinkButton href="/plan" size="sm" variant="secondary" className="justify-self-start">
             요금제 보기

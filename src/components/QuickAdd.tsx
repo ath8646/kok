@@ -7,7 +7,7 @@ import type { MeResponse, SubjectRow } from '@/lib/types';
 import { fetchSources, fetchSubjects, sb } from '@/lib/data';
 import { coverWanted, estimateCover, estimateEnergy, estimateFigures, estimateRedraws, estimateSmallTask, figuresWanted, redrawsWanted } from '@/lib/ai/models';
 import { clientModel } from '@/lib/client-model';
-import { energyWindow, refillText } from '@/lib/plans';
+import { energyWindow, perkTierName, refillText } from '@/lib/plans';
 import { pictureToJpeg, shrinkImage } from '@/lib/image';
 import {
   FILE_ACCEPT,
@@ -28,7 +28,7 @@ import { SUBJECT_COLORS } from '@/lib/settings';
 import { subjectVar } from '@/lib/colors';
 import { matchesSubject, pickerOrder } from '@/lib/subject-order';
 import { UnitOptions, useSubjectUnits } from './UnitPick';
-import { SOURCES_CHANGED, SUBJECTS_CHANGED } from '@/lib/events';
+import { SOURCES_CHANGED, SUBJECTS_CHANGED, takeHandOff } from '@/lib/events';
 import { topFileSink } from '@/lib/file-sink';
 import { ApiError, Button, EnergyEstimate, ICONS, Icon, Sheet, Spinner, api, cx, inputClass, radioKeys, useToast } from './ui';
 
@@ -99,8 +99,8 @@ const toAttachments = (files: File[]): Attachment[] => files.map((file) => ({ id
 type Ctx = {
   /** 입력창 열기 (과목을 정해서 열 수도 있다) */
   openComposer: (subjectId?: string) => void;
-  /** 파일을 바로 정리하기 */
-  addFiles: (files: File[]) => void;
+  /** 파일을 바로 정리하기 (과목을 주면 그 과목에) */
+  addFiles: (files: File[], subjectId?: string) => void;
   /** 지금 보고 있는 과목 (자료함에서 과목을 고르면 그 과목에 넣는다) */
   setContextSubject: (id: string | null) => void;
   /** 노트 화면: 끌어다 놓기·붙여 넣기를 이 노트에 더한다 (null 이면 보통 화면) */
@@ -535,11 +535,11 @@ export function QuickAddProvider({
           const redraws = redrawsWanted({
             kind: prep.kind,
             pictures: prep.blobs.length,
-            canFigures: m.canFigures,
+            canRedraw: m.canRedraw,
             sourceFiguresSetting: m.settings.quiz.sourceFigures,
             featureOn: m.features.sourceFigures,
           });
-          const cover = coverWanted({ canFigures: m.canFigures, autoCover: m.settings.visual.autoCover, featureOn: m.features.covers, append: !!it.parentId });
+          const cover = coverWanted({ canCover: m.canCover, autoCover: m.settings.visual.autoCover, featureOn: m.features.covers, append: !!it.parentId });
           const est =
             estimateEnergy({ kind: prep.kind, pages: prep.pages, images: prep.blobs.length, chars: prep.text.length }, model, m.usdPerEnergy, {
               exam: it.material === 'exam',
@@ -767,13 +767,13 @@ export function QuickAddProvider({
   );
 
   const addFiles = useCallback(
-    async (files: File[]) => {
+    async (files: File[], into?: string) => {
       if (!enabled || !files.length) return;
       if (!meRef.current.aiEnabled) {
         toast('지금은 AI 기능을 잠깐 쉬고 있어요.', 'bad');
         return;
       }
-      const subjectId = await ensureSubject();
+      const subjectId = into || (await ensureSubject());
       if (!subjectId) {
         toast('먼저 과목을 만들어 주세요.', 'bad');
         openComposer();
@@ -784,6 +784,14 @@ export function QuickAddProvider({
     },
     [enabled, ensureSubject, filesToJobs, enqueue, toast, openComposer],
   );
+
+  // 다른 화면이 넘긴 파일 (자료 공유의 'KOK으로 정리'): 자료 넣기가 켜지면 받아 바로 정리한다.
+  // 받은 것은 바로 비우고 넣기는 다음 차례에 (효과가 두 번 돌아도 한 번만 넣는다)
+  useEffect(() => {
+    if (!enabled) return;
+    const h = takeHandOff();
+    if (h) void Promise.resolve().then(() => addFiles(h.files, h.subjectId));
+  }, [enabled, addFiles]);
 
   const submitComposer = useCallback(() => {
     const subjectId = composerSubject;
@@ -1103,7 +1111,9 @@ export function QuickAddProvider({
               onMaterial={setMaterial}
             />
           ) : null}
-          {dragging ? <DropOverlay subjectName={dropSubjectName} intoComposer={open} note={open ? null : noteTarget} /> : null}
+          {dragging ? (
+            <DropOverlay subjectName={dropSubjectName} intoComposer={open} note={open ? null : noteTarget} appendTier={perkTierName(me.perkTiers, 'append')} />
+          ) : null}
           <AppendSheet
             target={noteTarget}
             pending={pendingAppend}
@@ -1786,7 +1796,7 @@ function AttachmentChip({ file, onRemove }: { file: File; onRemove: () => void }
 }
 
 // ------------------------------------------------------------- 끌어다 놓기 안내
-/** 노트에 더하기 전에 한 번 묻는다. Pro 가 아니면 새 노트로 넣을지 묻는다 */
+/** 노트에 더하기 전에 한 번 묻는다. 자료 더하기 혜택이 없으면 새 노트로 넣을지 묻는다 */
 function AppendSheet({
   target,
   pending,
@@ -1810,7 +1820,13 @@ function AppendSheet({
     <Sheet
       open={open}
       onClose={onClose}
-      title={target?.canAppend ? '이 노트에 더할까요?' : '노트에 더하기는 Pro 기능이에요'}
+      title={
+        target?.canAppend
+          ? '이 노트에 더할까요?'
+          : perkTierName(me.perkTiers, 'append')
+            ? `노트에 더하기는 ${perkTierName(me.perkTiers, 'append')} 기능이에요`
+            : '노트에 더하기는 지금 쉬고 있어요'
+      }
       footer={
         target?.canAppend ? (
           <div className="flex gap-2">
@@ -1838,7 +1854,7 @@ function AppendSheet({
           <p className="text-sm text-muted">
             {target.canAppend
               ? `'${target.title}'에 아래 자료를 더해요. AI가 지금 노트와 합쳐 새 버전을 만들고, 지금 버전은 원본 탭에 그대로 남아요.`
-              : 'Pro에서는 지금 노트에 자료를 더해 새 버전을 만들 수 있어요. 지금은 따로 새 노트로 넣을 수 있어요.'}
+              : `${perkTierName(me.perkTiers, 'append') ? `${perkTierName(me.perkTiers, 'append')}에서는 지금 노트에 자료를 더해 새 버전을 만들 수 있어요. ` : ''}지금은 따로 새 노트로 넣을 수 있어요.`}
           </p>
           <ul className="grid gap-1.5">
             {items.map((x, i) => (
@@ -1854,7 +1870,18 @@ function AppendSheet({
   );
 }
 
-function DropOverlay({ subjectName, intoComposer, note }: { subjectName: string; intoComposer: boolean; note: NoteTarget | null }) {
+function DropOverlay({
+  subjectName,
+  intoComposer,
+  note,
+  appendTier,
+}: {
+  subjectName: string;
+  intoComposer: boolean;
+  note: NoteTarget | null;
+  /** 노트에 더하기 혜택이 생기는 요금제 ('Pro') */
+  appendTier: string;
+}) {
   return (
     <div className="kok-drop pointer-events-none fixed inset-0 z-[70] grid place-items-center bg-[color-mix(in_srgb,var(--bg)_72%,transparent)] p-6 backdrop-blur-[6px]">
       <div className="kok-drop-card relative grid w-full max-w-md justify-items-center gap-3 rounded-[32px] bg-surface px-8 py-12 text-center shadow-2xl">
@@ -1873,7 +1900,7 @@ function DropOverlay({ subjectName, intoComposer, note }: { subjectName: string;
             <>
               {' '}
               → <b className="text-ink">{note.title}</b>
-              {note.canAppend ? '' : ' (Pro)'}
+              {note.canAppend || !appendTier ? '' : ` (${appendTier})`}
             </>
           ) : null}
           {!intoComposer && !note && subjectName ? (

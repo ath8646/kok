@@ -247,6 +247,8 @@ export default function WrongPage() {
         }
         compactTitle={selecting ? (pickedCount ? `${pickedCount}개 선택` : '문제 고르기') : undefined}
         subtitle={subtitle}
+        // 오답노트는 복습 탭 안 (아래 메뉴의 '복습'이 켜져 있다)
+        back={selecting ? undefined : { href: '/review', label: '복습으로' }}
         actions={
           selecting ? (
             <>

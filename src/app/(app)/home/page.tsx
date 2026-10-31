@@ -38,8 +38,8 @@ function energyFoot(me: MeResponse): string {
     const until = p.until ? new Date(p.until).toLocaleDateString('ko-KR', { month: 'long', day: 'numeric', timeZone: 'Asia/Seoul' }) : null;
     return until ? `${p.name} · ${until}까지` : p.name;
   }
-  if (p.kind === 'pro') return 'Pro';
-  return `하루 ${me.energy.limit}씩 채워져요`;
+  if (p.kind === 'pro' || p.kind === 'max') return p.name;
+  return me.energy.period === 'day' ? `하루 ${me.energy.limit}씩 채워져요` : '무료';
 }
 
 /** 이번 주(월~일) 공부한 날 */
@@ -461,26 +461,17 @@ export default function HomePage() {
       ) : null}
 
       <SectionTitle>바로 가기</SectionTitle>
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
-        <button type="button" onClick={() => quick.openComposer()} className="kok-card kok-card-hover press grid gap-2 p-4 text-left">
+      <div className="grid grid-cols-2 gap-3">
+        <Link href="/share" className="kok-card kok-card-hover press grid gap-2 p-4">
           <span className="kok-well grid h-10 w-10 place-items-center rounded-2xl bg-accent-soft text-accent">
-            <Icon d={ICONS.plus} size={22} strokeWidth={2.2} />
+            <Icon d={ICONS.share} size={21} />
           </span>
           <span>
-            <span className="block font-bold">자료 넣기</span>
-            <span className="text-sm text-muted">글 · PDF · 사진 · 한글 · PPT</span>
-          </span>
-        </button>
-        <Link href="/wrong" className="kok-card kok-card-hover press grid gap-2 p-4">
-          <span className="kok-well grid h-10 w-10 place-items-center rounded-2xl bg-bad-soft text-bad">
-            <Icon d="M6 3h12a1 1 0 0 1 1 1v17l-7-4-7 4V4a1 1 0 0 1 1-1zM9.5 8.5l5 5M14.5 8.5l-5 5" size={21} />
-          </span>
-          <span>
-            <span className="block font-bold">오답노트</span>
-            <span className="block h-5 text-sm text-muted">{known(wrongCount ? `${wrongCount}문제` : '비어 있어요', 'w-12')}</span>
+            <span className="block font-bold">자료 공유</span>
+            <span className="text-sm text-muted">갤러리 · 자료 찾기</span>
           </span>
         </Link>
-        <Link href="/questions" className="kok-card kok-card-hover press hidden gap-2 p-4 sm:grid">
+        <Link href="/questions" className="kok-card kok-card-hover press grid gap-2 p-4">
           <span className="kok-well grid h-10 w-10 place-items-center rounded-2xl bg-ok-soft text-ok">
             <Icon d={ICONS.grid} size={20} />
           </span>
@@ -490,6 +481,19 @@ export default function HomePage() {
           </span>
         </Link>
       </div>
+      {/* 오답노트: 아래 메뉴에서 빠져 복습 탭 안에 있다. 홈에서는 틀린 문제 수로 바로 간다 */}
+      <Link
+        href="/wrong"
+        className="kok-card kok-card-hover press flex items-center gap-3 px-4 py-3"
+        aria-label={ready ? `오답노트 ${wrongCount ? `${wrongCount}문제` : '비어 있어요'}` : '오답노트'}
+      >
+        <span className="kok-well grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-bad-soft text-bad" aria-hidden="true">
+          <Icon d="M6 3h12a1 1 0 0 1 1 1v17l-7-4-7 4V4a1 1 0 0 1 1-1zM9.5 8.5l5 5M14.5 8.5l-5 5" size={19} />
+        </span>
+        <span className="min-w-0 flex-1 font-bold">오답노트</span>
+        <span className="h-5 text-sm text-muted">{known(wrongCount ? `${wrongCount}문제` : '비어 있어요', 'w-12')}</span>
+        <Icon d={ICONS.chevronRight} size={18} className="shrink-0 text-muted" />
+      </Link>
       {err && plan ? <p className="text-sm text-bad">새 복습 정보를 불러오지 못했어요. 새로 고침해 주세요.</p> : null}
 
       {/* 오늘의 KOK 처음부터: 저장한 진행을 지우고 새로 고른다 (빛나는 카드 밖에 둔다: 카드가 isolation 이라 안에 두면 아래 메뉴 밑에 깔린다) */}

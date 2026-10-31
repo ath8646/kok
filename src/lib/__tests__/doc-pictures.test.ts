@@ -471,8 +471,8 @@ describe('문서 속 그림을 AI 에 보낼 때', () => {
     const without = estimateEnergy({ kind: 'text', chars: 8000 }, 'claude-sonnet-5-5', 0.001);
     const withPics = estimateEnergy({ kind: 'text', chars: 8000, images: 5 }, 'claude-sonnet-5-5', 0.001);
     expect(withPics).toBeGreaterThan(without);
-    expect(redrawsWanted({ kind: 'text', canFigures: true, sourceFiguresSetting: true, featureOn: true })).toBe(false);
-    expect(redrawsWanted({ kind: 'text', pictures: 2, canFigures: true, sourceFiguresSetting: true, featureOn: true })).toBe(true);
+    expect(redrawsWanted({ kind: 'text', canRedraw: true, sourceFiguresSetting: true, featureOn: true })).toBe(false);
+    expect(redrawsWanted({ kind: 'text', pictures: 2, canRedraw: true, sourceFiguresSetting: true, featureOn: true })).toBe(true);
     expect(keyPointRange({ kind: 'text', chars: 3000, images: 6 }).max).toBeGreaterThan(keyPointRange({ kind: 'text', chars: 3000 }).max);
   });
 

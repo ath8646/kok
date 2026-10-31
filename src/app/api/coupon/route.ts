@@ -1,4 +1,4 @@
-// 쿠폰(코드) 쓰기: Pro 또는 관리자가 만든 테스트 플랜을 켠다
+// 쿠폰(코드) 쓰기: Pro·Max 또는 관리자가 만든 테스트 플랜을 켠다
 import type { NextRequest } from 'next/server';
 import { z } from 'zod';
 import { assertSameOrigin, readJson, requireAccount } from '@/lib/server/auth';
@@ -15,7 +15,7 @@ const MESSAGES: Record<string, [string, number]> = {
   plan_active: ['이미 테스트 플랜을 쓰고 있어요. 새 플랜으로 바꿀지 골라 주세요.', 409],
 };
 
-type Redeemed = { kind: 'pro' | 'custom'; until: string; starts?: string | null; pro_until?: string | null };
+type Redeemed = { kind: 'pro' | 'max' | 'custom'; until: string; starts?: string | null; pro_until?: string | null; max_until?: string | null };
 
 export async function POST(req: NextRequest) {
   try {
@@ -38,21 +38,23 @@ export async function POST(req: NextRequest) {
     }
     // 예전 함수는 Pro 끝나는 때(글자)만 돌려준다
     const r: Redeemed = typeof data === 'string' ? { kind: 'pro', until: data } : (data as Redeemed);
-    let plan: { kind: 'pro' | 'custom'; name: string } = { kind: 'pro', name: 'Pro' };
+    let plan: { kind: 'pro' | 'max' | 'custom'; name: string } = r.kind === 'max' ? { kind: 'max', name: 'Max' } : { kind: 'pro', name: 'Pro' };
     if (r.kind === 'custom') {
       const { data: c } = await admin.from('coupons').select('plan_id').eq('code', code).maybeSingle();
       const { data: p } = c?.plan_id ? await admin.from('custom_plans').select('name').eq('id', c.plan_id).maybeSingle() : { data: null };
       plan = { kind: 'custom', name: (p?.name as string | undefined) ?? '테스트 플랜' };
     }
-    const startsLater = r.kind === 'pro' && !!r.starts && Date.parse(r.starts) > Date.now() + 60_000;
+    const startsLater = r.kind !== 'custom' && !!r.starts && Date.parse(r.starts) > Date.now() + 60_000;
     return Response.json({
       ok: true,
       until: r.until,
       plan,
-      // Pro 코드: 켜진 테스트 플랜이 끝난 뒤에 시작하면 그 시각
+      // Pro·Max 코드: 켜진 테스트 플랜(Pro 는 Max 도)이 끝난 뒤에 시작하면 그 시각
       proStarts: startsLater ? r.starts : null,
-      // 테스트 플랜 코드: 남은 Pro 가 플랜이 끝난 뒤 이어지면 그 끝나는 때
-      proAfter: r.kind === 'custom' ? (r.pro_until ?? null) : null,
+      // 테스트 플랜·Max 코드: 남은 Pro 가 그 뒤에 이어지면 그 끝나는 때
+      proAfter: r.kind !== 'pro' ? (r.pro_until ?? null) : null,
+      // 테스트 플랜 코드: 남은 Max 가 플랜 뒤에 이어지면 그 끝나는 때
+      maxAfter: r.kind === 'custom' ? (r.max_until ?? null) : null,
     });
   } catch (e) {
     return errorResponse(e);

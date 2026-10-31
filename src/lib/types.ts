@@ -1,6 +1,6 @@
 // 화면과 서버가 같이 쓰는 모양
 import type { UserSettings } from './settings';
-import type { PlanInfo } from './plans';
+import type { PerkTiers, PlanInfo } from './plans';
 
 export type MeResponse = {
   userId: string;
@@ -10,20 +10,34 @@ export type MeResponse = {
   provider: string | null;
   nickname: string | null;
   isAdmin: boolean;
-  /** 지금 적용되는 플랜이 Pro 인지 (테스트 플랜이 켜져 있으면 false) */
+  /** 지금 적용되는 플랜이 Pro 인지 (테스트 플랜·Max 가 켜져 있으면 false) */
   isPro: boolean;
   proUntil: string | null;
-  /** 지금 적용되는 플랜 (관리자·테스트 플랜·Pro·무료)과 이름, 끝나는 날 */
+  /** 지금 적용되는 플랜 (관리자·테스트 플랜·Max·Pro·무료)과 이름, 끝나는 날 */
   planInfo: PlanInfo;
   /** 꼼꼼 모델을 쓸 수 있는지 */
   canCareful: boolean;
-  /** 노트에 자료 더하기(버전)를 쓸 수 있는지 (Pro 기능) */
+  /** 노트에 자료 더하기(버전)를 쓸 수 있는지 */
   canAppend: boolean;
-  /** 테마를 쓸 수 있는지 (Pro 기능) */
+  /** 테마를 쓸 수 있는지 (기본 테마 색·내 테마·별표 빛·글꼴·종이) */
   canTheme: boolean;
-  /** 그림 풀이: 노트를 만들 때 문제 그림·단계 풀이, 채팅의 그림 풀이 (Pro 기능) */
+  /** 그림 풀이: 노트를 만들 때 문제 그림·단계 풀이, 채팅의 그림 풀이 */
   canFigures: boolean;
-  /** 채팅에 붙인 사진·파일을 노트 채팅 기록에 보관하는지 (Pro 기능, 아니면 이름만 남는다) */
+  /** 단계별 학습(레슨)을 만들 수 있는지 (이미 만든 레슨은 누구나 이어서 한다) */
+  canCourse: boolean;
+  /** AI로 다시 정리 */
+  canReorganize: boolean;
+  /** 표지 그림 */
+  canCover: boolean;
+  /** 자료 그림을 KOK 스타일로 다시 그리기 */
+  canRedraw: boolean;
+  /** 시그니처 테마·터미널 */
+  canSkins: boolean;
+  /** AI 테마 그림 */
+  canAiTheme: boolean;
+  /** 혜택마다 처음 주는 요금제 ('표지 그림은 Max에서 쓸 수 있어요' 같은 안내: lib/plans.ts perkNeed) */
+  perkTiers: PerkTiers;
+  /** 채팅에 붙인 사진·파일을 노트 채팅 기록에 보관하는지 (아니면 이름만 남는다) */
   keepChatFiles: boolean;
   /** DB 에 새 표가 있는지 (schema.sql 을 다시 실행하기 전에는 false) */
   features: {
@@ -50,6 +64,10 @@ export type MeResponse = {
     sessions: boolean;
     /** 자료함 카드의 표지 그림 (sources.cover, Pro) */
     covers: boolean;
+    /** Max 요금제와 테스트 플랜의 모든 혜택 칸 */
+    maxPlan: boolean;
+    /** 자료 공유 (community_* 표) */
+    community: boolean;
   };
   consented: boolean;
   settings: UserSettings;
@@ -57,12 +75,13 @@ export type MeResponse = {
     unlimited: boolean;
     remaining: number | null;
     limit: number | null;
-    /** day: 무료(오늘), month: Pro(이번 달), plan: 테스트 플랜(기간 전체) */
+    /** day: 하루만 세는 요금제(무료), month: 한 달을 세는 요금제(Pro·Max), plan: 테스트 플랜(기간 전체) */
     period: 'day' | 'month' | 'plan';
     /** 오늘 쓴 에너지 (테스트 플랜이면 플랜을 켠 뒤 오늘 쓴 것만) */
     usedToday: number;
     usedMonth: number;
-    proDaily: number | null;
+    /** 한 달을 세는 요금제의 하루 최대 (없으면 null) */
+    dailyMax: number | null;
     /** 테스트 플랜: 켠 뒤 쓴 번개, 하루 최대 */
     usedPlan: number | null;
     planDaily: number | null;
@@ -72,6 +91,8 @@ export type MeResponse = {
   /** 테마 배경 그림을 AI 로 그릴 수 있는지 (Cloudflare 설정) */
   themePictures: boolean;
   plan: { pdfPages: number; images: number; textChars: number; fileMb: number; fileDays: number | null };
+  /** 자료 공유 한도 (null = 제한 없음: 관리자) */
+  share: { downloadsDaily: number | null; galleries: number | null; fileMb: number; files: number };
   usdPerEnergy: number;
   models: { fast: string; careful: string; adminTest: string };
   multipliers: { fast: number; careful: number; adminTest: number };

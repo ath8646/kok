@@ -28,7 +28,7 @@ import { fetchSubjects, sb } from '@/lib/data';
 import { supabaseBrowser } from '@/lib/supabase/client';
 import type { SubjectRow } from '@/lib/types';
 import { THEME_FONTS, type ModelTier, type UserSettings } from '@/lib/settings';
-import { energyPeriodLabel, planLabel } from '@/lib/plans';
+import { energyPeriodLabel, perkNeed, perkTierName, planLabel, type Perk } from '@/lib/plans';
 import { accountLabel } from '@/lib/login';
 import { applyTheme, clearTheme, loadThemeFont } from '@/lib/theme';
 import { ThemeSettings } from '@/components/ThemeSettings';
@@ -166,9 +166,13 @@ export default function SettingsPage() {
   const set = <K extends keyof UserSettings>(k: K, v: Partial<UserSettings[K]>) => setDraft({ ...draft, [k]: { ...draft[k], ...v } });
   const e = me.energy;
   const canTheme = me.canTheme;
+  /** 혜택이 생기는 요금제 이름 ('Max', 없으면 '') */
+  const tierOf = (perk: Perk) => perkTierName(me.perkTiers, perk);
+  /** 칸 이름 뒤에 붙일 요금제 ' (Max)' */
+  const tag = (perk: Perk, space = ' ') => (tierOf(perk) ? `${space}(${tierOf(perk)})` : '');
   /** 테마 고르기: 바로 화면에 보이고, 설정에도 저장한다 */
   const pickTheme = (patch: Partial<UserSettings['theme']>) => {
-    if (!canTheme) return toast('테마는 Pro에서 쓸 수 있어요.');
+    if (!canTheme) return toast(perkNeed(me.perkTiers, 'theme'));
     set('theme', patch);
     applyTheme({ ...draft.theme, ...patch }, { allowMissing: true });
   };
@@ -246,7 +250,7 @@ export default function SettingsPage() {
 
       <SectionTitle>
         <span id="theme" className="scroll-mt-24 inline-flex items-center gap-2">
-          테마 {!canTheme ? <Chip tone="accent">Pro</Chip> : null}
+          테마 {!canTheme && tierOf('theme') ? <Chip tone="accent">{tierOf('theme')}</Chip> : null}
         </span>
       </SectionTitle>
       <Card className="grid gap-6">
@@ -277,7 +281,7 @@ export default function SettingsPage() {
           ) : (
             <>
               오늘 {e.usedToday} 사용 · 이번 달 {e.usedMonth} 사용
-              {e.proDaily ? ` · Pro는 하루 최대 ${e.proDaily}` : ''}.
+              {e.dailyMax ? ` · ${planLabel(me.planInfo, false)}는 하루 최대 ${e.dailyMax}` : ''}.
             </>
           )}{' '}
           1 에너지는 AI 비용 약 1.4원이에요. 복습·오답노트·직접 만든 문제·마인드맵 고치기는 에너지가 들지 않아요.
@@ -316,12 +320,12 @@ export default function SettingsPage() {
               label={`${t.label} 모델`}
               value={draft.models[t.key]}
               onChange={(v: ModelTier) => {
-                if (v === 'careful' && !canCareful) return toast('꼼꼼 모드는 Pro에서 쓸 수 있어요.');
+                if (v === 'careful' && !canCareful) return toast(perkNeed(me.perkTiers, 'careful', '꼼꼼 모드'));
                 set('models', { [t.key]: v } as Partial<UserSettings['models']>);
               }}
               options={[
                 { value: 'fast' as ModelTier, label: `빠름 · ${me.multipliers.fast}배` },
-                { value: 'careful' as ModelTier, label: `꼼꼼${canCareful ? '' : '(Pro)'} · 약 ${Math.round(me.multipliers.careful)}배` },
+                { value: 'careful' as ModelTier, label: `꼼꼼${canCareful ? '' : tag('careful', '')} · 약 ${Math.round(me.multipliers.careful)}배` },
                 ...(me.isAdmin ? [{ value: 'admin' as ModelTier, label: `최고 · 약 ${Math.round(me.multipliers.adminTest)}배` }] : []),
               ]}
             />
@@ -344,12 +348,12 @@ export default function SettingsPage() {
                 label="채팅 모델"
                 value={draft.models.chat}
                 onChange={(v: ModelTier) => {
-                  if (v === 'careful' && !canCareful) return toast('꼼꼼 모드는 Pro에서 쓸 수 있어요.');
+                  if (v === 'careful' && !canCareful) return toast(perkNeed(me.perkTiers, 'careful', '꼼꼼 모드'));
                   set('models', { chat: v });
                 }}
                 options={[
                   { value: 'fast' as ModelTier, label: '빠름' },
-                  { value: 'careful' as ModelTier, label: `꼼꼼${canCareful ? '' : '(Pro)'}` },
+                  { value: 'careful' as ModelTier, label: `꼼꼼${canCareful ? '' : tag('careful', '')}` },
                   ...(me.isAdmin ? [{ value: 'admin' as ModelTier, label: '최고' }] : []),
                 ]}
               />
@@ -510,14 +514,14 @@ export default function SettingsPage() {
             <Toggle
               id="set-original-first"
               label="자료 그림은 원본으로 먼저 보기"
-              checked={!me.canFigures || draft.visual.originalFirst}
-              disabled={!me.canFigures}
+              checked={!me.canRedraw || draft.visual.originalFirst}
+              disabled={!me.canRedraw}
               onChange={(v) => set('visual', { originalFirst: v })}
             />
             <p className="text-xs text-muted">
-              {me.canFigures
+              {me.canRedraw
                 ? '끄면 개념 카드에서 KOK 스타일로 다시 그린 그림부터 보여 줘요. 문제 위에서는 풀 때 빠진 것이 없게 늘 원본이 먼저예요. 그림마다 바꿔 볼 수 있어요.'
-                : '자료 그림은 원본에서 잘라 보여 줘요. Pro는 지도·그래프·표·연표·도식을 KOK 스타일로 다시 그려 줘요.'}
+                : `자료 그림은 원본에서 잘라 보여 줘요.${tierOf('redraw') ? ` ${tierOf('redraw')}는 지도·그래프·표·연표·도식을 KOK 스타일로 다시 그려 줘요.` : ''}`}
             </p>
           </div>
         ) : null}
@@ -525,15 +529,17 @@ export default function SettingsPage() {
           <div className="grid gap-1.5">
             <Toggle
               id="set-auto-cover"
-              label={`자료를 넣으면 표지 그림 그리기${me.canFigures ? '' : ' (Pro)'}`}
-              checked={me.canFigures && draft.visual.autoCover}
-              disabled={!me.canFigures}
+              label={`자료를 넣으면 표지 그림 그리기${me.canCover ? '' : tag('cover')}`}
+              checked={me.canCover && draft.visual.autoCover}
+              disabled={!me.canCover}
               onChange={(v) => set('visual', { autoCover: v })}
             />
             <p className="text-xs text-muted">
-              {me.canFigures
+              {me.canCover
                 ? "자료함 카드에 한 줄 요약 대신, 노트의 핵심을 담은 작은 도표(연표·흐름도·비교표 같은)가 보여요. 에너지가 조금 더 들어요. 카드 메뉴의 '표지 그림'에서 다시 그리거나 뺄 수 있어요."
-                : 'Pro는 자료함 카드에 노트 내용으로 AI가 그린 표지 그림이 보여요.'}
+                : tierOf('cover')
+                  ? `${tierOf('cover')}는 자료함 카드에 노트 내용으로 AI가 그린 표지 그림이 보여요.`
+                  : '표지 그림은 지금 쉬고 있어요.'}
             </p>
           </div>
         ) : null}
@@ -674,7 +680,7 @@ export default function SettingsPage() {
           <div className="grid gap-1.5">
             <Toggle
               id="set-figures"
-              label={`필요한 문제에 그림과 단계 풀이 붙이기${me.canFigures ? '' : ' (Pro)'}`}
+              label={`필요한 문제에 그림과 단계 풀이 붙이기${me.canFigures ? '' : tag('figures')}`}
               checked={me.canFigures && draft.quiz.figures}
               disabled={!me.canFigures}
               onChange={(v) => set('quiz', { figures: v })}

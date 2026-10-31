@@ -1,12 +1,15 @@
 'use client';
-// 노트의 '레슨' 탭: 단계별 학습 (Pro). 없으면 수준을 골라 만들고, 있으면 길(CoursePath)을 보여 레슨을 하나씩 연다(LessonPlayer). 뒤 칸은 한 번 묻고 건너뛸 수 있다.
-// 진도는 note_courses.progress 에 브라우저가 바로 저장한다 (RLS: 내 것, progress 칸만). 무료는 Pro 에서 어떻게 되는지 미리보기만
+// 노트의 '레슨' 탭: 단계별 학습 (레슨 혜택: 처음에는 Max). 없으면 수준을 골라 만들고, 있으면 길(CoursePath)을 보여 레슨을 하나씩 연다(LessonPlayer). 뒤 칸은 한 번 묻고 건너뛸 수 있다.
+// 진도는 note_courses.progress 에 브라우저가 바로 저장한다 (RLS: 내 것, progress 칸만). 혜택이 없으면 어떻게 되는지 미리보기만.
+// 이미 만든 레슨은 혜택이 없어져도(요금제가 바뀌어도) 그대로 이어서 한다 (새로 만들기·다시 만들기만 막는다)
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import type { MeResponse } from '@/lib/types';
 import { estimateSmallTask } from '@/lib/ai/models';
 import { clientModel } from '@/lib/client-model';
 import { sb } from '@/lib/data';
+import { josa } from '@/lib/josa';
+import { perkNeed, perkTierName } from '@/lib/plans';
 import {
   COURSE_LEVELS,
   COURSE_LEVEL_INFO,
@@ -62,7 +65,8 @@ export function CoursePanel({
 }) {
   const toast = useToast();
   const router = useRouter();
-  const pro = me.canAppend;
+  const pro = me.canCourse;
+  const tierName = perkTierName(me.perkTiers, 'course');
   const [course, setCourse] = useState<CourseRow | null | undefined>(undefined);
   const [failed, setFailed] = useState(false);
   const [tick, setTick] = useState(0);
@@ -186,9 +190,9 @@ export function CoursePanel({
     );
   }
 
-  if (!pro) return <LockedPreview onPlan={() => router.push('/plan')} />;
+  if (!pro && !course) return <LockedPreview tier={tierName} onPlan={() => router.push('/plan')} />;
 
-  if (!course || remaking) {
+  if (!course || (pro && remaking)) {
     return (
       <CreateCourse
         me={me}
@@ -206,7 +210,11 @@ export function CoursePanel({
   }
 
   const menu: MenuItem[] = [
-    { label: '수준 바꿔 다시 만들기', icon: ICONS.retry, onSelect: () => setRemaking(true) },
+    {
+      label: '수준 바꿔 다시 만들기',
+      icon: ICONS.retry,
+      onSelect: () => (pro ? setRemaking(true) : toast(perkNeed(me.perkTiers, 'course', '레슨 다시 만들기'))),
+    },
     { label: '지우기', icon: ICONS.trash, onSelect: () => setConfirmDelete(true), danger: true },
   ];
   const seed = `${course.id}:${course.updatedAt}`;
@@ -458,8 +466,8 @@ function CreateCourse({
   );
 }
 
-/** 무료: Pro 에서 어떻게 되는지 보여 준다 (예시 길 + 설명 + Pro 보기) */
-function LockedPreview({ onPlan }: { onPlan: () => void }) {
+/** 레슨 혜택이 없을 때: 혜택이 있는 요금제(tier)에서 어떻게 되는지 보여 준다 (예시 길 + 설명 + 요금제 보기) */
+function LockedPreview({ tier, onPlan }: { tier: string; onPlan: () => void }) {
   return (
     <div className="grid gap-4">
       <section className="kok-card grid gap-3 rounded-[24px] p-5">
@@ -468,8 +476,10 @@ function LockedPreview({ onPlan }: { onPlan: () => void }) {
             <Icon d={ICONS.lock} size={22} />
           </span>
           <div className="min-w-0">
-            <h2 className="font-display text-[21px] leading-snug">단계별 학습은 Pro에서</h2>
-            <p className="mt-1 text-sm leading-relaxed text-muted">Pro로 바꾸면 이 노트가 아래처럼 작은 레슨들의 길이 돼요.</p>
+            <h2 className="font-display text-[21px] leading-snug">{tier ? `단계별 학습은 ${tier}에서` : '단계별 학습은 지금 쉬고 있어요'}</h2>
+            <p className="mt-1 text-sm leading-relaxed text-muted">
+              {tier ? `${josa(tier, '으로')} 바꾸면 이 노트가 아래처럼 작은 레슨들의 길이 돼요.` : '다시 열리면 이 노트가 아래처럼 작은 레슨들의 길이 돼요.'}
+            </p>
           </div>
         </div>
         <ul className="grid gap-2 text-[15px]">
@@ -488,7 +498,7 @@ function LockedPreview({ onPlan }: { onPlan: () => void }) {
           ))}
         </ul>
         <Button size="lg" className="w-full" onClick={onPlan}>
-          Pro 알아보기
+          {tier ? `${tier} 알아보기` : '요금제 보기'}
         </Button>
       </section>
       <SamplePath muted />

@@ -1,12 +1,27 @@
 'use client';
 // 관리자 화면의 "테스트 플랜"과 "쿠폰(코드)" 칸.
-// 테스트 플랜: 번개(에너지) 총량과 한도를 정해 만든다. 코드를 쓴 사람은 코드에 정한 날수 동안 이 플랜을 쓰고, 끝나면 원래 요금제로 돌아간다.
+// 테스트 플랜: 번개(에너지) 총량과 한도, 혜택 스위치 전부, 자료 공유 숫자를 정해 만든다 (칸은 요금제 혜택과 같다: lib/plans.ts).
+// 코드를 쓴 사람은 코드에 정한 날수 동안 이 플랜을 쓰고, 끝나면 원래 요금제로 돌아간다.
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Select } from '@/components/Select';
 import { useConfirm } from '@/components/Confirm';
 import { josa } from '@/lib/josa';
 import { ApiError, Button, Card, Chip, Energy, Field, SectionTitle, Sheet, Toggle, api, cx, inputClass, useToast, DONE } from '@/components/ui';
-import { MAX_FILE_MB, type Limits } from '@/lib/settings';
+import { MAX_FILE_MB } from '@/lib/settings';
+import {
+  PERKS,
+  PERK_INFO,
+  PLAN_NUMBERS,
+  SHARE_MAX_FILES,
+  SHARE_MAX_FILE_MB,
+  TIER_NAME,
+  TIERS,
+  toCustomPlan,
+  type Perk,
+  type Perks,
+  type PlansConfig,
+  type Tier,
+} from '@/lib/plans';
 
 export type PlanRow = {
   id: string;
@@ -22,6 +37,8 @@ export type PlanRow = {
   can_append?: boolean;
   can_theme?: boolean;
   can_figures?: boolean;
+  /** 혜택 스위치 전부·자료 공유 숫자 (없으면 예전 칸으로 읽는다) */
+  extra?: unknown;
   note: string | null;
   created_at: string;
   active_users: number;
@@ -39,93 +56,93 @@ type Coupon = {
   created_at: string;
   plan_id: string | null;
   plan_name: string | null;
+  /** 테스트 플랜이 아닐 때 켜는 요금제 (schema.sql 을 다시 실행하기 전에는 없다: Pro) */
+  tier?: string | null;
 };
+
+type NumKey = 'energyTotal' | 'energyDaily' | 'pdfPages' | 'images' | 'textChars' | 'fileMb' | 'downloadsDaily' | 'galleries' | 'shareFileMb' | 'shareFiles';
 
 type PlanForm = {
   id: string | null;
   name: string;
-  energyTotal: string;
-  /** 빈칸 = 하루 제한 없음 */
-  energyDaily: string;
-  pdfPages: string;
-  images: string;
-  textChars: string;
-  fileMb: string;
-  careful: boolean;
-  canAppend: boolean;
-  canTheme: boolean;
-  canFigures: boolean;
+  nums: Record<NumKey, string>;
+  perks: Perks;
   note: string;
 };
 
-const NUM_FIELDS: Array<{
-  key: 'energyTotal' | 'energyDaily' | 'pdfPages' | 'images' | 'textChars' | 'fileMb';
-  label: string;
-  hint?: string;
-  optional?: boolean;
-}> = [
+const NUM_FIELDS: Array<{ key: NumKey; label: string; hint?: string; optional?: boolean }> = [
   { key: 'energyTotal', label: '에너지 총량', hint: '플랜 기간 전체에 쓸 수 있어요' },
   { key: 'energyDaily', label: '하루 최대 에너지', hint: '비우면 하루 제한 없음', optional: true },
-  { key: 'pdfPages', label: 'PDF 쪽수 (한 번에)' },
-  { key: 'images', label: '사진 장수 (한 번에)' },
-  { key: 'textChars', label: '글자 수 (한 번에)' },
-  { key: 'fileMb', label: '파일 MB (한 개)', hint: `${MAX_FILE_MB}까지` },
+  ...PLAN_NUMBERS.map((f) => ({
+    key: f.key,
+    label: `${f.label} (${f.unit})`,
+    hint:
+      f.key === 'fileMb'
+        ? `${MAX_FILE_MB}까지`
+        : f.key === 'shareFileMb'
+          ? `${SHARE_MAX_FILE_MB}까지`
+          : f.key === 'shareFiles'
+            ? `${SHARE_MAX_FILES}까지`
+            : undefined,
+  })),
 ];
 
 const num = (v: number | string | null | undefined) => (v === null || v === undefined ? null : Number(v));
 const fmt = (n: number) => n.toLocaleString('ko-KR', { maximumFractionDigits: 1 });
 const day = (iso: string) => new Date(iso).toLocaleDateString('ko-KR', { timeZone: 'Asia/Seoul' });
 
-function blankForm(L: Limits): PlanForm {
+/** 요금제 하나의 값으로 채운 폼 (에너지 총량은 한 달 값, 하루만 세는 요금제면 하루 × 30) */
+function formFromTier(t: Tier, tiers: PlansConfig, keep?: Pick<PlanForm, 'id' | 'name' | 'note'>): PlanForm {
+  const s = tiers[t];
+  const total = s.energyMonthly ?? (s.energyDaily ?? 0) * 30;
   return {
-    id: null,
-    name: '',
-    energyTotal: String(L.proMonthly),
-    energyDaily: '',
-    pdfPages: String(L.pdfPagesPro),
-    images: String(L.imagesPro),
-    textChars: String(L.textCharsPro),
-    fileMb: String(Math.min(L.fileMbPro, MAX_FILE_MB)),
-    careful: true,
-    canAppend: true,
-    canTheme: true,
-    canFigures: true,
-    note: '',
+    id: keep?.id ?? null,
+    name: keep?.name ?? '',
+    note: keep?.note ?? '',
+    nums: {
+      energyTotal: String(total),
+      energyDaily: s.energyDaily === null ? '' : String(s.energyDaily),
+      pdfPages: String(s.pdfPages),
+      images: String(s.images),
+      textChars: String(s.textChars),
+      fileMb: String(Math.min(s.fileMb, MAX_FILE_MB)),
+      downloadsDaily: String(s.downloadsDaily),
+      galleries: String(s.galleries),
+      shareFileMb: String(s.shareFileMb),
+      shareFiles: String(s.shareFiles),
+    },
+    perks: { ...s.perks },
   };
 }
 
 function formFrom(p: PlanRow): PlanForm {
-  const daily = num(p.energy_daily);
+  const c = toCustomPlan(p);
   return {
     id: p.id,
     name: p.name,
-    energyTotal: String(num(p.energy_total) ?? 0),
-    energyDaily: daily === null ? '' : String(daily),
-    pdfPages: String(p.pdf_pages),
-    images: String(p.images),
-    textChars: String(p.text_chars),
-    fileMb: String(p.file_mb),
-    careful: p.careful,
-    canAppend: p.can_append === true,
-    canTheme: p.can_theme === true,
-    canFigures: p.can_figures === true,
     note: p.note ?? '',
+    nums: {
+      energyTotal: String(c.energyTotal),
+      energyDaily: c.energyDaily === null ? '' : String(c.energyDaily),
+      pdfPages: String(c.pdfPages),
+      images: String(c.images),
+      textChars: String(c.textChars),
+      fileMb: String(c.fileMb),
+      downloadsDaily: String(c.downloadsDaily),
+      galleries: String(c.galleries),
+      shareFileMb: String(c.shareFileMb),
+      shareFiles: String(c.shareFiles),
+    },
+    perks: { ...c.perks },
   };
 }
 
 /** 폼 → 서버로 보낼 값. 빈칸이면 무엇이 빠졌는지 알려 준다 */
 function toBody(f: PlanForm): { body: Record<string, unknown> } | { error: string } {
   if (!f.name.trim()) return { error: '플랜 이름을 적어 주세요.' };
-  const out: Record<string, unknown> = {
-    name: f.name.trim(),
-    careful: f.careful,
-    canAppend: f.canAppend,
-    canTheme: f.canTheme,
-    canFigures: f.canFigures,
-    note: f.note.trim(),
-  };
+  const out: Record<string, unknown> = { name: f.name.trim(), perks: f.perks, note: f.note.trim() };
   for (const field of NUM_FIELDS) {
-    const raw = f[field.key].trim();
+    const raw = f.nums[field.key].trim();
     if (!raw) {
       if (field.optional) {
         out[field.key] = null;
@@ -140,23 +157,27 @@ function toBody(f: PlanForm): { body: Record<string, unknown> } | { error: strin
   return { body: out };
 }
 
+/** 플랜 목록에 보일 켠 혜택 이름 */
+function perkNames(p: PlanRow): string[] {
+  const c = toCustomPlan(p);
+  return PERKS.filter((k) => c.perks[k]).map((k) => PERK_INFO[k].label);
+}
+
 /**
+ * tiers: 무료·Pro·Max 혜택 (새 플랜을 그 값으로 채운다)
  * refreshKey: 바뀌면 플랜 목록(쓰는 사람 수)을 다시 읽는다 (사용자 목록에서 테스트 플랜을 끝냈을 때)
- * planFlags: DB 에 자료 더하기·테마 칸이 있는지 (없으면 그 두 스위치를 끈다)
- * figuresOn: DB 에 그림 풀이 칸이 있는지 (없으면 그 스위치를 끈다)
+ * maxOn: DB 에 Max 와 혜택 전부(extra) 칸이 있는지 (없으면 예전 네 스위치만 저장되고, Max 코드는 만들 수 없다)
  */
 export function AdminPlans({
-  limits,
+  tiers,
   onChanged,
   refreshKey = 0,
-  planFlags = true,
-  figuresOn = true,
+  maxOn = true,
 }: {
-  limits: Limits;
+  tiers: PlansConfig;
   onChanged?: () => void;
   refreshKey?: number;
-  planFlags?: boolean;
-  figuresOn?: boolean;
+  maxOn?: boolean;
 }) {
   const toast = useToast();
   const ask = useConfirm();
@@ -165,12 +186,13 @@ export function AdminPlans({
   const [coupons, setCoupons] = useState<Coupon[]>([]);
   const [form, setForm] = useState<PlanForm | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
-  const [newCoupon, setNewCoupon] = useState<{ days: number; maxUses: number; count: number; note: string; planId: string | null }>({
+  const [newCoupon, setNewCoupon] = useState<{ days: number; maxUses: number; count: number; note: string; planId: string | null; tier: 'pro' | 'max' }>({
     days: 30,
     maxUses: 1,
     count: 1,
     note: '',
     planId: null,
+    tier: 'pro',
   });
   const [made, setMade] = useState<{ codes: string[]; planName: string; days: number } | null>(null);
   const codeCard = useRef<HTMLDivElement>(null);
@@ -217,7 +239,7 @@ export function AdminPlans({
     loadPlans();
   }, [refreshKey, loadPlans]);
 
-  const planName = (id: string | null) => (id ? (plans?.find((p) => p.id === id)?.name ?? '테스트 플랜') : 'Pro');
+  const planName = (id: string | null, tier: 'pro' | 'max' = 'pro') => (id ? (plans?.find((p) => p.id === id)?.name ?? '테스트 플랜') : TIER_NAME[tier]);
 
   const savePlan = async () => {
     if (!form) return;
@@ -275,7 +297,7 @@ export function AdminPlans({
     setBusy('coupon');
     try {
       const r = await api<{ codes: string[] }>('/api/admin/coupons', { method: 'POST', body: JSON.stringify(newCoupon) });
-      setMade({ codes: r.codes, planName: planName(newCoupon.planId), days: newCoupon.days });
+      setMade({ codes: r.codes, planName: planName(newCoupon.planId, newCoupon.tier), days: newCoupon.days });
       await Promise.all([loadCoupons(), newCoupon.planId ? loadPlans() : Promise.resolve()]);
     } catch (e) {
       toast((e as Error).message, 'bad');
@@ -295,7 +317,7 @@ export function AdminPlans({
       <SectionTitle
         action={
           plans ? (
-            <Button size="sm" variant="secondary" onClick={() => setForm(blankForm(limits))}>
+            <Button size="sm" variant="secondary" onClick={() => setForm(formFromTier('pro', tiers))}>
               + 새 플랜
             </Button>
           ) : null
@@ -305,8 +327,8 @@ export function AdminPlans({
       </SectionTitle>
       <Card className="grid gap-3">
         <p className="text-sm text-muted">
-          에너지 총량과 한도를 정해 플랜을 만들고, 아래에서 그 플랜의 코드를 만들어 나눠 주세요. 코드를 쓴 사람은 정한 날수 동안 이 플랜을 쓰고, 끝나면 원래
-          요금제(무료·Pro)로 돌아가요.
+          에너지 총량과 한도, 혜택을 하나하나 정해 플랜을 만들고, 아래에서 그 플랜의 코드를 만들어 나눠 주세요. 코드를 쓴 사람은 정한 날수 동안 이 플랜을 쓰고,
+          끝나면 원래 요금제(무료·Pro·Max)로 돌아가요.
         </p>
         {schemaHint ? (
           <p className="rounded-xl bg-warn-soft p-3 text-sm font-semibold text-warn" role="status">
@@ -330,15 +352,20 @@ export function AdminPlans({
                         하루 <Energy n={fmt(daily)} />
                       </Chip>
                     ) : null}
-                    {p.careful ? <Chip tone="accent">꼼꼼 모델</Chip> : null}
-                    {p.can_append ? <Chip tone="accent">자료 더하기</Chip> : null}
-                    {p.can_theme ? <Chip tone="accent">테마</Chip> : null}
-                    {p.can_figures ? <Chip tone="accent">그림 풀이</Chip> : null}
                     <Chip tone={p.active_users ? 'ok' : 'plain'}>쓰는 사람 {p.active_users}명</Chip>
                   </div>
+                  {perkNames(p).length ? (
+                    <div className="flex flex-wrap gap-1.5">
+                      {perkNames(p).map((x) => (
+                        <Chip key={x} tone="accent">
+                          {x}
+                        </Chip>
+                      ))}
+                    </div>
+                  ) : null}
                   <p className="text-xs text-muted">
-                    PDF {p.pdf_pages}쪽 · 사진 {p.images}장 · 글자 {fmt(p.text_chars)}자 · 파일 {p.file_mb}MB · 코드 {p.codes}개 (쓴 횟수 {p.redeemed})
-                    {p.note ? ` · ${p.note}` : ''}
+                    PDF {p.pdf_pages}쪽 · 사진 {p.images}장 · 글자 {fmt(p.text_chars)}자 · 파일 {p.file_mb}MB · 자료 받기 하루 {toCustomPlan(p).downloadsDaily}
+                    개 · 코드 {p.codes}개 (쓴 횟수 {p.redeemed}){p.note ? ` · ${p.note}` : ''}
                   </p>
                   <div className="flex flex-wrap gap-2">
                     <Button size="sm" onClick={() => codeFor(p)}>
@@ -364,10 +391,17 @@ export function AdminPlans({
           <label className="grid gap-1 text-sm font-semibold">
             켜 줄 플랜
             <Select
-              value={newCoupon.planId ?? ''}
-              onChange={(v) => setNewCoupon({ ...newCoupon, planId: v || null })}
+              value={newCoupon.planId ?? `tier:${newCoupon.tier}`}
+              onChange={(v) =>
+                setNewCoupon(
+                  v.startsWith('tier:')
+                    ? { ...newCoupon, planId: null, tier: v === 'tier:max' ? 'max' : 'pro' }
+                    : { ...newCoupon, planId: v || null, tier: 'pro' },
+                )
+              }
               options={[
-                { value: '', label: 'Pro' },
+                { value: 'tier:pro', label: 'Pro' },
+                ...(maxOn ? [{ value: 'tier:max', label: 'Max' }] : []),
                 ...(plans ?? []).map((p) => ({ value: p.id, label: `테스트 플랜 · ${p.name} (에너지 ${fmt(num(p.energy_total) ?? 0)})` })),
               ]}
             />
@@ -420,7 +454,7 @@ export function AdminPlans({
             넣어요.
           </p>
           <Button size="sm" className="justify-self-start" busy={busy === 'coupon'} onClick={makeCodes}>
-            {newCoupon.planId ? `'${planName(newCoupon.planId)}' 코드 만들기` : 'Pro 코드 만들기'}
+            {newCoupon.planId ? `'${planName(newCoupon.planId)}' 코드 만들기` : `${TIER_NAME[newCoupon.tier]} 코드 만들기`}
           </Button>
           {made ? (
             <div className="kok-pop rounded-xl bg-hl/40 p-3">
@@ -451,7 +485,7 @@ export function AdminPlans({
                   <li key={c.code} className="flex flex-wrap items-center justify-between gap-2 border-b border-line py-1">
                     <span className="flex items-center gap-2">
                       <span className="font-mono">{c.code}</span>
-                      <Chip tone={c.plan_id ? 'accent' : 'hl'}>{c.plan_id ? (c.plan_name ?? '테스트 플랜') : 'Pro'}</Chip>
+                      <Chip tone={c.plan_id ? 'accent' : 'hl'}>{c.plan_id ? (c.plan_name ?? '테스트 플랜') : c.tier === 'max' ? 'Max' : 'Pro'}</Chip>
                     </span>
                     <span className={cx('text-muted', c.used >= c.max_uses && 'line-through')}>
                       {c.days}일 · {c.used}/{c.max_uses}명 {c.note ? `· ${c.note}` : ''}
@@ -495,6 +529,17 @@ export function AdminPlans({
                 onChange={(e) => setForm({ ...form, name: e.target.value })}
               />
             </Field>
+            <div className="grid gap-1.5">
+              <span className="text-sm font-semibold">요금제 값으로 채우기</span>
+              <div className="flex flex-wrap gap-2" role="group" aria-label="요금제 값으로 채우기">
+                {TIERS.map((t) => (
+                  <Button key={t} size="sm" variant="secondary" onClick={() => setForm(formFromTier(t, tiers, form))}>
+                    {TIER_NAME[t]}처럼
+                  </Button>
+                ))}
+              </div>
+              <p className="text-xs text-muted">에너지 총량은 그 요금제의 한 달 값이에요. 채운 뒤 칸마다 바꿀 수 있어요.</p>
+            </div>
             <div className="grid grid-cols-2 items-start gap-x-2 gap-y-3">
               {NUM_FIELDS.map((f) => (
                 <Field key={f.key} label={f.label} hint={f.hint} htmlFor={`plan-${f.key}`}>
@@ -505,43 +550,34 @@ export function AdminPlans({
                     step="any"
                     min={0}
                     className={inputClass}
-                    value={form[f.key]}
+                    value={form.nums[f.key]}
                     placeholder={f.optional ? '제한 없음' : undefined}
-                    onChange={(e) => setForm({ ...form, [f.key]: e.target.value })}
+                    onChange={(e) => setForm({ ...form, nums: { ...form.nums, [f.key]: e.target.value } })}
                   />
                 </Field>
               ))}
             </div>
             <p className="text-xs text-muted">
-              참고: 무료는 하루 <Energy n={fmt(limits.freeDaily)} />, Pro는 한 달 <Energy n={fmt(limits.proMonthly)} /> (하루 최대{' '}
-              <Energy n={fmt(limits.proDaily)} />
-              )예요.
+              참고: 무료는 {tiers.free.energyMonthly !== null ? '한 달' : '하루'} <Energy n={fmt(tiers.free.energyMonthly ?? tiers.free.energyDaily ?? 0)} />,
+              Pro는 한 달 <Energy n={fmt(tiers.pro.energyMonthly ?? 0)} />, Max는 한 달 <Energy n={fmt(tiers.max.energyMonthly ?? 0)} />
+              이에요.
             </p>
-            <Toggle id="plan-careful" label="꼼꼼 모델 쓰기" checked={form.careful} onChange={(v) => setForm({ ...form, careful: v })} />
-            <Toggle
-              id="plan-append"
-              label="노트에 자료 더하기 (버전)"
-              checked={planFlags && form.canAppend}
-              disabled={!planFlags}
-              onChange={(v) => setForm({ ...form, canAppend: v })}
-            />
-            <Toggle
-              id="plan-theme"
-              label="테마 쓰기"
-              checked={planFlags && form.canTheme}
-              disabled={!planFlags}
-              onChange={(v) => setForm({ ...form, canTheme: v })}
-            />
-            <Toggle
-              id="plan-figures"
-              label="그림 풀이 (문제 그림·단계 풀이)"
-              checked={figuresOn && form.canFigures}
-              disabled={!figuresOn}
-              onChange={(v) => setForm({ ...form, canFigures: v })}
-            />
-            {!planFlags || !figuresOn ? (
-              <p className="text-xs text-muted">
-                {!planFlags ? '자료 더하기·테마·그림 풀이' : '그림 풀이'}는 Supabase 에서 schema.sql 을 다시 실행하면 켤 수 있어요.
+            <fieldset className="grid gap-2.5">
+              <legend className="mb-1 text-sm font-semibold">혜택</legend>
+              {PERKS.map((k: Perk) => (
+                <Toggle
+                  key={k}
+                  id={`plan-perk-${k}`}
+                  label={PERK_INFO[k].label}
+                  hint={PERK_INFO[k].hint}
+                  checked={form.perks[k]}
+                  onChange={(v) => setForm({ ...form, perks: { ...form.perks, [k]: v } })}
+                />
+              ))}
+            </fieldset>
+            {!maxOn ? (
+              <p className="rounded-xl bg-warn-soft p-3 text-xs font-semibold text-warn">
+                Supabase 에서 schema.sql 을 다시 실행하기 전에는 꼼꼼 모델·자료 더하기·테마·그림 풀이만 저장돼요.
               </p>
             ) : null}
             <input

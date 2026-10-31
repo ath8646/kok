@@ -4,6 +4,7 @@
 // 노트에 자료를 더하면(Pro) 버전이 쌓인다. 원본 탭의 버전 기록에서 지난 버전을 열어(?v=번호) 보고 고치거나,
 // 그 버전을 지금 버전으로 쓰거나 지울 수 있다. 지난 버전에서 고친 것은 그 버전에 저장된다.
 // DB 에 버전·채팅 표가 아직 없으면(me.features) 예전처럼 동작한다.
+import Link from 'next/link';
 import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useMe } from '@/components/AppShell';
@@ -66,6 +67,8 @@ import {
 import { previewText } from '@/lib/richtext';
 import { officeFileName, officeLabel } from '@/lib/office/names';
 import { MATERIAL_LABEL, readNoteMaterial } from '@/lib/material-type';
+import { readSharedMark } from '@/lib/share';
+import { perkTierName } from '@/lib/plans';
 import { starredFirst } from '@/lib/note-order';
 import { practiceHref, rememberPracticeFrom } from '@/lib/review-mode';
 import { prefersReducedMotion } from '@/components/useReducedMotion';
@@ -968,6 +971,8 @@ export default function NotePage() {
   const docFile = source.kind === 'text' ? officeFileName(source.text_content) : null;
   // 어떤 종류로 정리했는지 (개념 정리는 예전과 같으니 보이지 않는다)
   const material = readNoteMaterial(raw);
+  // 자료 공유에서 받아 넣은 노트 (머리에 '공유받은 노트', 누르면 그 글로)
+  const shared = readSharedMark(raw);
   // 직접 만든 노트는 AI 가 만든 것이 없으면 신고할 것도 없다 (자료를 더해 AI 가 합쳤으면 신고할 수 있다)
   const reportable = !manual || versions.length > 0;
   const title = old?.title || note?.title || source.title || (ready ? '새 자료' : '정리하는 중…');
@@ -1014,15 +1019,25 @@ export default function NotePage() {
       ) : null}
       <span>
         ·{' '}
-        {manual
-          ? '직접 만든 노트'
-          : source.kind === 'pdf'
-            ? `PDF ${source.page_count ?? ''}쪽`
-            : source.kind === 'image'
-              ? `사진 ${source.page_count ?? ''}장`
-              : docFile
-                ? `${officeLabel(docFile)} 문서${source.file_paths?.length ? ` · 그림 ${source.file_paths.length}장` : ''}`
-                : '직접 쓴 글'}
+        {shared ? (
+          <Link
+            href={`/share/p/${shared.post}`}
+            className="underline decoration-line underline-offset-2 hover:text-ink"
+            title={shared.by ? `${shared.by}님이 공유한 노트예요` : undefined}
+          >
+            공유받은 노트
+          </Link>
+        ) : manual ? (
+          '직접 만든 노트'
+        ) : source.kind === 'pdf' ? (
+          `PDF ${source.page_count ?? ''}쪽`
+        ) : source.kind === 'image' ? (
+          `사진 ${source.page_count ?? ''}장`
+        ) : docFile ? (
+          `${officeLabel(docFile)} 문서${source.file_paths?.length ? ` · 그림 ${source.file_paths.length}장` : ''}`
+        ) : (
+          '직접 쓴 글'
+        )}
       </span>
       {versions.length ? <span>· 버전 {old ? old.number : cur}</span> : null}
       {manual && !versions.length ? null : <span>· AI 정리</span>}
@@ -1119,11 +1134,15 @@ export default function NotePage() {
                       ]
                     : []),
                   ...(mergedMark
-                    ? [{ label: 'AI로 다시 정리', icon: ICONS.sparkle, onSelect: () => (me.canAppend ? reorganize() : router.push('/plan')) }]
+                    ? [{ label: 'AI로 다시 정리', icon: ICONS.sparkle, onSelect: () => (me.canReorganize ? reorganize() : router.push('/plan')) }]
                     : []),
                   ...(versionsOn ? [{ label: versions.length ? '버전 기록' : '자료 더하기', icon: ICONS.file, onSelect: () => setTab('original') }] : []),
                   ...(sourceFiguresOn && !old && !appendRunning && relocatable.length
                     ? [{ label: '자료 그림 다시 찾기', icon: ICONS.image, onSelect: () => setRelocating(true) }]
+                    : []),
+                  // 자료 공유에 이 노트를 붙여 글쓰기 (공유받은 노트는 다시 나누지 않는다)
+                  ...(me.features.community && ready && !old && !shared
+                    ? [{ label: '자료 공유에 올리기', icon: ICONS.share, onSelect: () => router.push(`/share/write?note=${sourceId}`) }]
                     : []),
                   ...(reportable ? [{ label: '이상해요 (신고)', icon: ICONS.edit, onSelect: () => setReporting(true) }] : []),
                 ]}
@@ -1161,7 +1180,7 @@ export default function NotePage() {
 
       {me.isAdmin && !old ? <FigureLogLine body={note.body} /> : null}
 
-      {/* 여러 노트를 합친 노트: 겹치는 개념을 AI 가 하나로 다듬을 수 있다 (Pro). 닫아도 메뉴에 남는다 */}
+      {/* 여러 노트를 합친 노트: 겹치는 개념을 AI 가 하나로 다듬을 수 있다 (AI로 다시 정리 혜택). 닫아도 메뉴에 남는다 */}
       {mergedMark && (!mergedMark.hide || reorg) ? (
         <section className="kok-card kok-rise grid gap-3 p-4" aria-label="합친 노트">
           <div className="flex items-start gap-3">
@@ -1171,9 +1190,9 @@ export default function NotePage() {
             <div className="min-w-0 flex-1">
               <p className="font-semibold leading-snug">노트 {mergedMark.count}개를 합친 노트예요</p>
               <p className="mt-0.5 text-sm leading-relaxed text-muted">
-                {me.canAppend
+                {me.canReorganize
                   ? '겹치는 개념은 AI가 하나로 묶고 차례를 다듬어 줄 수 있어요. 지금 노트는 버전 기록에 남아요.'
-                  : '겹치는 개념은 정리 탭에서 직접 고칠 수 있어요. Pro에서는 AI가 한 번에 다듬어 줘요.'}
+                  : `겹치는 개념은 정리 탭에서 직접 고칠 수 있어요.${perkTierName(me.perkTiers, 'reorganize') ? ` ${perkTierName(me.perkTiers, 'reorganize')}에서는 AI가 한 번에 다듬어 줘요.` : ''}`}
               </p>
             </div>
             {!reorg ? (
@@ -1190,7 +1209,7 @@ export default function NotePage() {
             ) : null}
           </div>
           <div className="flex flex-wrap items-center gap-2 pl-12">
-            {me.canAppend ? (
+            {me.canReorganize ? (
               <Button size="sm" busy={!!reorg} disabled={!!reorg || appendRunning || !me.aiEnabled} onClick={reorganize}>
                 {!reorg ? <Icon d={ICONS.sparkle} size={16} /> : null}
                 AI로 다시 정리
@@ -1200,11 +1219,11 @@ export default function NotePage() {
                   </span>
                 ) : null}
               </Button>
-            ) : (
+            ) : perkTierName(me.perkTiers, 'reorganize') ? (
               <LinkButton href="/plan" size="sm" variant="secondary">
-                Pro 알아보기
+                {perkTierName(me.perkTiers, 'reorganize')} 알아보기
               </LinkButton>
-            )}
+            ) : null}
           </div>
           {reorg ? (
             <p className="flex items-center gap-2 pl-12 text-sm text-muted" role="status">

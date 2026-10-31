@@ -36,7 +36,7 @@ export async function POST(req: NextRequest, ctx: RouteContext<'/api/sources/[id
       p_id: id,
       p_user: acc.userId,
       p_max_parallel: acc.isAdmin ? null : MAX_PARALLEL_SOURCES,
-      ...energyWindows(acc, app.limits),
+      ...energyWindows(acc),
     });
     if (error) throw error;
     const v = verdict as ReserveResult;

@@ -200,8 +200,15 @@ export function presetLookFx(color: ThemeColor, mode: Mode): ModeLook {
 /** 시그니처 테마 한 벌: 어느 테마·두 색·아래 메뉴 띄우기 (내가 만든 테마면 그 테마가 고른 것) */
 export type SkinPick = { id: SkinId; colors: SkinColors; floatTab: boolean | null };
 
-/** 이 테마가 시그니처 테마인지 ('skin:neon' 이나 시그니처 테마로 만든 내 테마). 아니면 null */
+/** 시그니처 테마를 쓸 수 있는지 (요금제 혜택, AppShell 이 정한다). 없으면 시그니처 테마는 비슷한 기본 테마 색으로, 시그니처 스타일 내 테마는 그 테마의 색으로 그린다 */
+let skinsAllowed = true;
+export function setSkinsAllowed(on: boolean): void {
+  skinsAllowed = on;
+}
+
+/** 이 테마가 시그니처 테마인지 ('skin:neon' 이나 시그니처 테마로 만든 내 테마). 아니면 null (시그니처 테마 혜택이 없어도 null) */
 export function skinOf(ref: string): SkinPick | null {
+  if (!skinsAllowed) return null;
   if (ref.startsWith('skin:')) {
     const id = ref.slice('skin:'.length);
     return isSkinId(id) ? { id, colors: skinDefaults(id), floatTab: null } : null;
@@ -401,4 +408,4 @@ export function currentMode(): Mode {
  * 시그니처 테마(data-skin)는 그 색 CSS 가 있을 때만 붙인다 (모양만 바뀌고 색이 기본으로 보이지 않게).
  * 제목 글꼴은 화면 글(applyTheme)이 불러온다: 그동안은 기본 글꼴로 보인다.
  */
-export const THEME_BOOT = `try{if(/^\\/(home|library|notes|review|wrong|questions|settings|plan|admin|terminal)(\\/|$)/.test(location.pathname)){var t=JSON.parse(localStorage.getItem('${THEME_KEY}')||'null');if(t&&typeof t==='object'){var d=document.documentElement,w=/^[a-z]{1,12}$/;if(t.mode==='light'||t.mode==='dark')d.setAttribute('data-mode',t.mode);if(typeof t.font==='string'&&w.test(t.font)&&t.font!=='default')d.setAttribute('data-font',t.font);if(typeof t.paper==='string'&&w.test(t.paper)&&t.paper!=='none')d.setAttribute('data-paper',t.paper);if(t.motion===false)d.setAttribute('data-motion','off');if(t.v===2&&typeof t.css==='string'&&t.css&&t.css.length<60000){var s=document.createElement('style');s.id='${STYLE_ID}';s.textContent=t.css;document.head.appendChild(s);if(t.bg===true)d.setAttribute('data-bg','1');if(typeof t.skin==='string'&&w.test(t.skin))d.setAttribute('data-skin',t.skin)}}}}catch(e){}`;
+export const THEME_BOOT = `try{if(/^\\/(home|library|notes|review|wrong|questions|share|settings|plan|admin|terminal)(\\/|$)/.test(location.pathname)){var t=JSON.parse(localStorage.getItem('${THEME_KEY}')||'null');if(t&&typeof t==='object'){var d=document.documentElement,w=/^[a-z]{1,12}$/;if(t.mode==='light'||t.mode==='dark')d.setAttribute('data-mode',t.mode);if(typeof t.font==='string'&&w.test(t.font)&&t.font!=='default')d.setAttribute('data-font',t.font);if(typeof t.paper==='string'&&w.test(t.paper)&&t.paper!=='none')d.setAttribute('data-paper',t.paper);if(t.motion===false)d.setAttribute('data-motion','off');if(t.v===2&&typeof t.css==='string'&&t.css&&t.css.length<60000){var s=document.createElement('style');s.id='${STYLE_ID}';s.textContent=t.css;document.head.appendChild(s);if(t.bg===true)d.setAttribute('data-bg','1');if(typeof t.skin==='string'&&w.test(t.skin))d.setAttribute('data-skin',t.skin)}}}}catch(e){}`;

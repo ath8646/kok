@@ -23,6 +23,9 @@ export const REPORT_LABEL: Record<string, string> = {
   cover: '표지 그림',
   theme: '테마 그림',
   course: '레슨',
+  share_post: '공유 글',
+  share_comment: '공유 댓글',
+  share_gallery: '갤러리',
   other: '기타',
 };
 

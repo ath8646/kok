@@ -53,7 +53,7 @@ export async function POST(req: NextRequest) {
     const { tier } = parsed.data;
     if (!parsed.data.message && !parsed.data.attachments.length) throw new UserFacingError('bad_body', '물어볼 내용을 적어 주세요.', 400);
     const app = await getAppSettings(admin);
-    const files = await readChatFiles(parsed.data.attachments, limitsFor(acc, app.limits).pdfPages);
+    const files = await readChatFiles(parsed.data.attachments, limitsFor(acc).pdfPages);
     const message = parsed.data.message || FILE_ONLY_MESSAGE;
     // 그림으로 보는 단계 풀이는 Pro (무료는 글 단계)
     const figures = acc.canFigures;

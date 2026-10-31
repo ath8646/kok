@@ -6,7 +6,22 @@ export default function robots(): MetadataRoute.Robots {
       {
         userAgent: '*',
         allow: ['/$', '/terms', '/privacy', '/ai-guide', '/delete-account'],
-        disallow: ['/api/', '/home', '/library', '/notes', '/review', '/wrong', '/settings', '/admin', '/add', '/questions', '/plan', '/welcome'],
+        disallow: [
+          '/api/',
+          '/home',
+          '/library',
+          '/notes',
+          '/review',
+          '/wrong',
+          '/settings',
+          '/admin',
+          '/add',
+          '/questions',
+          '/share',
+          '/plan',
+          '/welcome',
+          '/terminal',
+        ],
       },
     ],
   };

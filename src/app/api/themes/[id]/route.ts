@@ -1,6 +1,7 @@
 // 내가 만든 테마 고치기·지우기 (Pro). 지운 테마의 그림은 매일 청소가 지운다
 import type { NextRequest } from 'next/server';
 import { z } from 'zod';
+import { assertPerk } from '@/lib/server/account';
 import { assertSameOrigin, assertUuid, readJson, requireAccount } from '@/lib/server/auth';
 import { UserFacingError, errorResponse } from '@/lib/server/errors';
 import { assertOwnImage, hitThemeWrites, loadOwnTheme, requireThemes } from '@/lib/server/themes';
@@ -30,6 +31,8 @@ export async function PATCH(req: NextRequest, ctx: RouteContext<'/api/themes/[id
     if (parsed.data.spec) {
       // 시그니처 테마를 모르는 예전 화면이 글꼴·종이만 바꿔 보낸 spec 에는 skin 칸이 없다: 지우지 않고 그대로 둔다 (null 은 '보통 테마로')
       const next = parsed.data.spec.skin === undefined && cur.spec.skin ? { ...parsed.data.spec, skin: cur.spec.skin } : parsed.data.spec;
+      // 시그니처 스타일로 새로 바꾸거나 다른 시그니처 테마로 바꾸는 것만 막는다 (예전에 만든 테마의 이름·색 고치기는 그대로 된다)
+      if (next.skin && next.skin.id !== cur.spec.skin?.id) assertPerk(acc, 'skins', '시그니처 스타일 테마');
       patch.spec = withSkinPalettes(next);
     }
     let q = admin.from('user_themes').update(patch).eq('id', id).eq('user_id', acc.userId);

@@ -1,9 +1,14 @@
 import type { Metadata } from 'next';
 import { LegalPage, Sec } from '@/components/LegalPage';
+import { energyText } from '@/lib/plans';
+import { getPublicPlans } from '@/lib/server/site';
 
 export const metadata: Metadata = { title: 'AI 사용 안내' };
+export const revalidate = 300;
 
-export default function AiGuidePage() {
+export default async function AiGuidePage() {
+  // 요금제마다의 에너지는 관리자가 바꿀 수 있어서 그때의 값을 읽는다
+  const plans = await getPublicPlans();
   return (
     <LegalPage title="AI 사용 안내" updated="2026년 10월 31일">
       <p>
@@ -35,6 +40,10 @@ export default function AiGuidePage() {
             것을 알 수 있게 해요.
           </li>
           <li>내려받는 요약 PDF에는 쪽마다 &lsquo;AI 정리&rsquo;가 적히고, 파일 정보에도 AI가 만든 내용이라고 남겨요.</li>
+          <li>
+            자료 공유에서 다른 사람이 나눈 KOK 노트에도 &lsquo;AI 정리&rsquo;가 붙고, 내 자료함에 넣으면 노트 위에 &lsquo;공유받은 노트&rsquo;로 보여요. 사람이
+            올린 파일과 글은 AI가 만든 것이 아니에요.
+          </li>
           <li>직접 만든 빈 노트처럼 내가 쓴 것에는 AI 표시를 붙이지 않아요.</li>
         </ul>
       </Sec>
@@ -63,7 +72,10 @@ export default function AiGuidePage() {
         <ul className="list-disc pl-5">
           <li>AI를 쓰면 실제 비용만큼 에너지가 빠져요. 1 에너지는 약 0.001달러(약 1.4원)예요.</li>
           <li>작업 전에 예상 에너지를 보여 주고, 끝난 뒤 실제로 쓴 만큼만 빼요. 처리에 실패하면 돌려줘요.</li>
-          <li>무료는 하루 20 에너지, Pro는 한 달 2,000 에너지(하루 최대 300)예요. 운영 상황에 따라 바뀔 수 있어요.</li>
+          <li>
+            무료는 {energyText(plans.free)}, Pro는 {energyText(plans.pro)}, Max는 {energyText(plans.max)} 에너지예요. 운영 상황에 따라 바뀔 수 있고, 지금 값은
+            요금제 화면에서 볼 수 있어요.
+          </li>
         </ul>
       </Sec>
       <Sec title="학생을 지키는 장치">

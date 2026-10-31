@@ -5,6 +5,7 @@ import { useEffect, useSyncExternalStore } from 'react';
 import { useMe } from '@/components/AppShell';
 import { Terminal } from '@/components/terminal/Terminal';
 import { EmptyState, ICONS, Icon, LinkButton } from '@/components/ui';
+import { perkNeed } from '@/lib/plans';
 
 /** <html data-skin> (테마가 바뀌면 다시 읽는다) */
 function subscribeSkin(fn: () => void): () => void {
@@ -33,11 +34,21 @@ export default function TerminalPage() {
         <EmptyState
           icon={<Icon d={ICONS.terminal} size={34} />}
           title="터미널 테마에서 열려요"
-          body="설정 > 테마에서 시그니처 테마 '터미널'을 고르면 홈 위에 터미널 아이콘이 생겨요."
+          body={
+            me.canSkins
+              ? "설정 > 테마에서 시그니처 테마 '터미널'을 고르면 홈 위에 터미널 아이콘이 생겨요."
+              : `${perkNeed(me.perkTiers, 'skins', '시그니처 테마')} '터미널'을 고르면 홈 위에 터미널 아이콘이 생겨요.`
+          }
           action={
-            <LinkButton href="/settings#skins" variant="secondary">
-              테마 고르러 가기
-            </LinkButton>
+            me.canSkins ? (
+              <LinkButton href="/settings#skins" variant="secondary">
+                테마 고르러 가기
+              </LinkButton>
+            ) : (
+              <LinkButton href="/plan" variant="secondary">
+                요금제 보기
+              </LinkButton>
+            )
           }
         />
       </div>

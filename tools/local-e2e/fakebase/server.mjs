@@ -442,6 +442,26 @@ function filePath(bucket, name) {
   return p;
 }
 
+/** 받을 때의 Content-Type (확장자로) */
+function contentTypeOf(name) {
+  const ext = (name.split('.').pop() || '').toLowerCase();
+  return (
+    {
+      pdf: 'application/pdf',
+      jpg: 'image/jpeg',
+      jpeg: 'image/jpeg',
+      png: 'image/png',
+      webp: 'image/webp',
+      txt: 'text/plain; charset=utf-8',
+      hwp: 'application/x-hwp',
+      hwpx: 'application/hwp+zip',
+      docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+      pptx: 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+      xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    }[ext] || 'image/jpeg'
+  );
+}
+
 async function storageAllowed(auth, op, bucket, name) {
   if (auth.role === 'service_role') return true;
   if (auth.role !== 'authenticated') return false;
@@ -495,7 +515,7 @@ async function handleStorage(req, res, url, auth) {
     fs.writeFileSync(fp, bytes);
     return send(res, 200, { Key: `${bucket}/${name}` });
   }
-  // 서명 URL 로 받기
+  // 서명 URL 로 받기 (download=이름 이면 그 이름으로 내려받기)
   if (req.method === 'GET' && p.startsWith('object/sign/')) {
     const [, , bucket, ...rest] = p.split('/');
     const name = rest.join('/');
@@ -503,9 +523,33 @@ async function handleStorage(req, res, url, auth) {
     const expect = crypto.createHmac('sha256', SECRET).update(`${bucket}/${name}`).digest('hex');
     if (token !== expect) return send(res, 400, { message: 'bad token' });
     try {
-      return send(res, 200, fs.readFileSync(filePath(bucket, name)), { 'content-type': name.endsWith('.pdf') ? 'application/pdf' : 'image/jpeg' });
+      const headers = { 'content-type': contentTypeOf(name) };
+      if (url.searchParams.has('download')) {
+        const as = url.searchParams.get('download') || name.split('/').pop();
+        headers['content-disposition'] = `attachment; filename*=UTF-8''${encodeURIComponent(as)}`;
+      }
+      return send(res, 200, fs.readFileSync(filePath(bucket, name)), headers);
     } catch {
       return send(res, 404, { message: 'not found' });
+    }
+  }
+  // 복사 (서버만: 공유 노트의 그림 파일)
+  if (req.method === 'POST' && p === 'object/copy') {
+    if (auth.role !== 'service_role') return send(res, 403, { statusCode: '403', error: 'Unauthorized', message: 'new row violates row-level security policy' });
+    const body = JSON.parse((await readBody(req)).toString() || '{}');
+    const bucket = body.bucketId;
+    const to = body.destinationBucket || bucket;
+    try {
+      const from = filePath(bucket, body.sourceKey);
+      const dest = filePath(to, body.destinationKey);
+      if (!fs.existsSync(from)) return send(res, 400, { statusCode: '404', error: 'not_found', message: 'Object not found' });
+      if (fs.existsSync(dest)) return send(res, 400, { statusCode: '409', error: 'Duplicate', message: 'The resource already exists' });
+      fs.mkdirSync(path.dirname(dest), { recursive: true });
+      fs.copyFileSync(from, dest);
+      await pool.query('insert into storage.objects (bucket_id, name) values ($1, $2)', [to, body.destinationKey]).catch(() => {});
+      return send(res, 200, { Key: `${to}/${body.destinationKey}` });
+    } catch {
+      return send(res, 400, { statusCode: '400', error: 'bad_path', message: 'bad path' });
     }
   }
   if (req.method === 'POST' && p.startsWith('object/sign/')) {

@@ -36,8 +36,7 @@ export async function POST(req: NextRequest) {
     if (acc.banned) throw new UserFacingError('banned', '이 계정은 AI 기능을 쓸 수 없어요. 관리자에게 문의해 주세요.', 403);
     if (!app.aiEnabled && !acc.isAdmin) throw new UserFacingError('ai_paused', '지금은 AI 기능을 잠깐 쉬고 있어요. 복습은 그대로 할 수 있어요.', 503);
 
-    const L = app.limits;
-    const lim = limitsFor(acc, L);
+    const lim = limitsFor(acc);
     // 하루 올리기 수·대기 파일 수는 무료가 아니면(Pro·테스트 플랜) 넉넉하게
     const pro = acc.plan.kind !== 'free';
     const maxMb = lim.fileMb;

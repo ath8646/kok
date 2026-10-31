@@ -1,4 +1,4 @@
-// 관리자: 쿠폰(코드) 목록과 만들기. 코드는 Pro 또는 테스트 플랜을 정해진 날수만큼 켠다
+// 관리자: 쿠폰(코드) 목록과 만들기. 코드는 Pro·Max 또는 테스트 플랜을 정해진 날수만큼 켠다
 import type { NextRequest } from 'next/server';
 import { randomInt } from 'node:crypto';
 import { z } from 'zod';
@@ -43,8 +43,10 @@ const Body = z.object({
   count: z.number().int().min(1).max(50),
   note: z.string().max(100).catch(''),
   expiresAt: z.string().datetime().nullable().optional(),
-  /** 테스트 플랜 id (없으면 Pro 코드) */
+  /** 테스트 플랜 id (없으면 Pro·Max 코드) */
   planId: z.string().uuid().nullable().optional(),
+  /** 테스트 플랜이 아닐 때 켜는 요금제 (없으면 Pro) */
+  tier: z.enum(['pro', 'max']).optional(),
 });
 
 export async function POST(req: NextRequest) {
@@ -60,17 +62,24 @@ export async function POST(req: NextRequest) {
       if (planErr) throw schemaMissing(planErr) ?? planErr;
       if (!plan) throw new UserFacingError('plan_not_found', '고른 테스트 플랜이 없어요. 목록을 새로 고쳐 주세요.', 400);
     }
+    const max = !planId && b.tier === 'max';
     const rows = Array.from({ length: b.count }, () => ({
       code: makeCode(),
       days: b.days,
       max_uses: b.maxUses,
       note: b.note || null,
       expires_at: b.expiresAt ?? null,
-      // Pro 코드는 plan_id 칸을 아예 보내지 않는다 (schema.sql 을 다시 실행하기 전에도 Pro 코드는 만들 수 있게)
+      // Pro 코드는 plan_id·tier 칸을 아예 보내지 않는다 (schema.sql 을 다시 실행하기 전에도 Pro 코드는 만들 수 있게)
       ...(planId ? { plan_id: planId } : {}),
+      ...(max ? { tier: 'max' } : {}),
     }));
     const { error } = await admin.from('coupons').insert(rows);
-    if (error) throw (planId ? schemaMissing(error) : null) ?? error;
+    if (error) {
+      if (max && /tier/.test(error.message ?? '')) {
+        throw new UserFacingError('schema_outdated', 'Max 쿠폰 칸이 아직 없어요. Supabase SQL Editor 에서 supabase/schema.sql 을 다시 실행해 주세요.', 503);
+      }
+      throw (planId ? schemaMissing(error) : null) ?? error;
+    }
     return Response.json({ ok: true, codes: rows.map((r) => r.code) });
   } catch (e) {
     return errorResponse(e);

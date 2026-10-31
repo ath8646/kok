@@ -17,10 +17,3 @@ export function kstMonthStart(now: Date = new Date()): Date {
 export function kstDateString(now: Date = new Date()): string {
   return new Date(now.getTime() + KST_OFFSET_MS).toISOString().slice(0, 10);
 }
-
-/** 시험까지 남은 날 (오늘이면 0, 지났으면 음수) */
-export function daysUntil(dateStr: string, now: Date = new Date()): number {
-  const today = Date.parse(kstDateString(now));
-  const target = Date.parse(dateStr);
-  return Math.round((target - today) / DAY_MS);
-}

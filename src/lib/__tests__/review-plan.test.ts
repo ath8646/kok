@@ -30,10 +30,6 @@ const base: PlanCard = {
   type: 'mcq',
   created_at: '2026-10-01T00:00:00Z',
 };
-const subjects = [
-  { id: 's1', exam_date: null },
-  { id: 's2', exam_date: null },
-];
 const opts = { now, dailyMax: 50, doneToday: 0, interleave: false };
 const card = (id: string, o: Partial<PlanCard & { note_id: string; key_point_id: string }> = {}) => ({
   ...base,
@@ -63,17 +59,17 @@ describe('복습 기간', () => {
       card('old', { created_at: '2026-08-01T00:00:00Z', due: '2026-10-17T00:00:00Z' }),
       card('nodate', { created_at: undefined }),
     ];
-    const ids = (p: Parameters<typeof periodPool>[2]) => periodPool(cards, subjects, p, opts).map((c) => c.question_id);
+    const ids = (p: Parameters<typeof periodPool>[1]) => periodPool(cards, p, opts).map((c) => c.question_id);
     expect(ids('today')).toEqual(['today']);
     expect(ids('3d')).toEqual(['today', 'lastnight', 'd3']);
     expect(ids('7d')).toEqual(['today', 'lastnight', 'd3']);
     expect(ids('30d')).toEqual(['today', 'lastnight', 'd3', 'd10']);
     expect(ids('all')).toHaveLength(6);
-    expect(ids('due')).toEqual(pickToday(cards, subjects, opts).map((c) => c.question_id));
+    expect(ids('due')).toEqual(pickToday(cards, opts).map((c) => c.question_id));
     expect(ids('due')).toEqual(['old']);
-    expect(periodCounts(cards, subjects, opts)).toEqual({ due: 1, today: 1, '3d': 3, '7d': 3, '30d': 4, all: 6 });
+    expect(periodCounts(cards, opts)).toEqual({ due: 1, today: 1, '3d': 3, '7d': 3, '30d': 4, all: 6 });
     // 하루 최대 수를 다 풀었으면 복습할 차례는 없다
-    expect(periodPool(cards, subjects, 'due', { ...opts, doneToday: 50 })).toHaveLength(0);
+    expect(periodPool(cards, 'due', { ...opts, doneToday: 50 })).toHaveLength(0);
   });
 });
 
@@ -110,7 +106,7 @@ describe('시간마다 풀 문제', () => {
   const pool = [...low, recent, ...h, star, wrong];
 
   it('짧을수록 적게, 짧은 시간의 문제는 늘 긴 시간 문제 안에', () => {
-    const [p5, p15, p30] = plansForTimes(pool, subjects, [5, 15, 30], { now, interleave: false });
+    const [p5, p15, p30] = plansForTimes(pool, [5, 15, 30], { now, interleave: false });
     expect(p5.cards.length).toBeGreaterThanOrEqual(6);
     expect(p5.cards.length).toBeLessThan(p15.cards.length);
     expect(p15.cards.length).toBeLessThan(p30.cards.length);
@@ -125,7 +121,7 @@ describe('시간마다 풀 문제', () => {
   });
 
   it('5분에는 핵심 문제만: 틀렸던 문제·별표·중요 개념, 같은 개념은 몰리지 않게, 방금 푼 문제는 빼고', () => {
-    const [p5] = plansForTimes(pool, subjects, [5], { now, interleave: false });
+    const [p5] = plansForTimes(pool, [5], { now, interleave: false });
     const ids = p5.cards.map((c) => c.question_id);
     expect(ids).toEqual(expect.arrayContaining(['w', 's', 'h1', 'h2']));
     expect(ids).not.toContain('r');
@@ -135,20 +131,18 @@ describe('시간마다 풀 문제', () => {
 
   it('기간의 문제가 다 들어가면 전부', () => {
     const small = [wrong, star, ...h];
-    const plans = plansForTimes(small, subjects, [5, 15, 30], { now, interleave: true });
+    const plans = plansForTimes(small, [5, 15, 30], { now, interleave: true });
     expect(plans.every((p) => p.all && p.cards.length === 5)).toBe(true);
-    expect(plansForTimes([], subjects, [5], { now, interleave: true })[0]).toEqual({ cards: [], seconds: 0, all: true });
+    expect(plansForTimes([], [5], { now, interleave: true })[0]).toEqual({ cards: [], seconds: 0, all: true });
   });
 
   it('핵심 점수와 고른 문제 나누기', () => {
-    expect(coreScore(wrong, undefined, now)).toBeGreaterThan(coreScore(star, undefined, now));
-    expect(coreScore(star, undefined, now)).toBeGreaterThan(coreScore(low[0], undefined, now));
-    expect(coreScore(recent, undefined, now)).toBeLessThan(coreScore(low[0], undefined, now));
-    // 시험이 가까운 과목은 먼저
-    expect(coreScore(low[0], { id: 's2', exam_date: '2026-10-20' }, now)).toBeGreaterThan(coreScore(low[0], undefined, now));
+    expect(coreScore(wrong, now)).toBeGreaterThan(coreScore(star, now));
+    expect(coreScore(star, now)).toBeGreaterThan(coreScore(low[0], now));
+    expect(coreScore(recent, now)).toBeLessThan(coreScore(low[0], now));
     const due = card('due', { due: '2026-10-17T00:00:00Z' });
     const fresh = card('new', { reps: 0, state: 0 });
-    expect(pickKinds([wrong, star, h[0], due, fresh, low[0]], subjects, now)).toEqual({ wrong: 1, key: 2, due: 1, new: 1, again: 1 });
+    expect(pickKinds([wrong, star, h[0], due, fresh, low[0]], now)).toEqual({ wrong: 1, key: 2, due: 1, new: 1, again: 1 });
   });
 });
 

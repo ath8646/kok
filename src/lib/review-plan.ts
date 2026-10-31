@@ -1,5 +1,5 @@
-// 오늘 풀 문제 고르기, 기간·시간으로 고르기, 시험 모드, 연속 기록, 약점 개념 (AI 없이, 화면에서 계산)
-import { daysUntil, kstDateString, kstDayStart } from './time';
+// 오늘 풀 문제 고르기, 기간·시간으로 고르기, 연속 기록, 약점 개념 (AI 없이, 화면에서 계산)
+import { kstDateString, kstDayStart } from './time';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
@@ -24,8 +24,6 @@ export type PlanCard = {
   created_at?: string;
 };
 
-export type PlanSubject = { id: string; exam_date: string | null };
-
 export type PlanOptions = {
   now?: Date;
   dailyMax: number;
@@ -34,56 +32,24 @@ export type PlanOptions = {
   interleave: boolean;
 };
 
-/** 시험 모드: 시험까지 남은 날 (0~14일이면 시험 모드, 아니면 null) */
-export function examDaysLeft(subject: PlanSubject | undefined, now: Date = new Date()): number | null {
-  if (!subject?.exam_date) return null;
-  const d = daysUntil(subject.exam_date, now);
-  return d >= 0 && d <= 14 ? d : null;
-}
+/** 방금(12시간 안에) 푼 문제는 짧은 시간 복습에서 맨 뒤로 (같은 날 같은 문제가 계속 나오지 않게) */
+const RECENT_MS = 12 * 60 * 60 * 1000;
 
-/** 시험 모드에서 당겨도 마지막 복습 뒤 적어도 이만큼은 둔다 (같은 날 같은 문제가 계속 나오지 않게) */
-export const EXAM_MIN_GAP_MS = 12 * 60 * 60 * 1000;
-
-/** 시험 모드에서 당겨진 복습 날짜. 시험 전까지 적어도 2번 보게 한다 */
-export function effectiveDue(card: PlanCard, subject: PlanSubject | undefined, now: Date = new Date()): number {
-  const due = Date.parse(card.due);
-  const left = examDaysLeft(subject, now);
-  if (left === null || !subject?.exam_date) return due;
-  const last = card.last_review ? Date.parse(card.last_review) : null;
-  // 방금(12시간 안에) 본 문제는 FSRS 일정 그대로 (틀린 문제의 짧은 다시 보기는 FSRS 가 정한다)
-  if (last !== null && now.getTime() - last < EXAM_MIN_GAP_MS) return due;
-  if (card.reps < 2) return Math.min(due, now.getTime());
-  // 시험 날 시작(KST 자정) 전에 다시 볼 차례면 그대로
-  const examStart = Date.parse(`${subject.exam_date}T00:00:00+09:00`);
-  if (due < examStart) return due;
-  // 다음 복습이 시험 뒤라면, 마지막 복습과 시험 사이 가운데로 당긴다 (마지막 복습 뒤 12시간보다 가깝게는 당기지 않는다)
-  const base = last ?? now.getTime();
-  const pulled = base + Math.max(0, examStart - base) / 2;
-  return Math.min(due, Math.max(pulled, base + EXAM_MIN_GAP_MS));
-}
-
-function priority(card: PlanCard, subject: PlanSubject | undefined, now: Date): number {
+function priority(card: PlanCard, now: Date): number {
   const imp = card.importance === 'high' ? 3 : card.importance === 'medium' ? 2 : 1;
-  const overdueDays = Math.max(0, (now.getTime() - effectiveDue(card, subject, now)) / DAY_MS);
+  const overdueDays = Math.max(0, (now.getTime() - Date.parse(card.due)) / DAY_MS);
   let p = imp * 10 + Math.min(overdueDays, 30);
-  const left = examDaysLeft(subject, now);
-  if (left !== null && left <= 3) {
-    // 시험 3일 전부터: 틀렸던 문제와 중요도 '상'을 먼저
-    if (card.in_wrong_note || card.lapses > 0 || (card.wrong_count ?? 0) > 0) p += 100;
-    if (card.importance === 'high') p += 60;
-  }
   if (card.state === 0) p -= 5; // 처음 보는 문제는 복습할 문제 뒤로
   return p;
 }
 
 /** 오늘 풀 문제 목록 (순서대로) */
-export function pickToday<T extends PlanCard>(cards: T[], subjects: PlanSubject[], opts: PlanOptions): T[] {
+export function pickToday<T extends PlanCard>(cards: T[], opts: PlanOptions): T[] {
   const now = opts.now ?? new Date();
-  const subj = new Map(subjects.map((s) => [s.id, s]));
-  const due = cards.filter((c) => effectiveDue(c, subj.get(c.subject_id), now) <= now.getTime());
+  const due = cards.filter((c) => Date.parse(c.due) <= now.getTime());
   const room = Math.max(0, opts.dailyMax - opts.doneToday);
   const ranked = due
-    .map((c) => ({ c, p: priority(c, subj.get(c.subject_id), now) }))
+    .map((c) => ({ c, p: priority(c, now) }))
     .sort((a, b) => b.p - a.p || Date.parse(a.c.due) - Date.parse(b.c.due))
     .slice(0, room)
     .map((x) => x.c);
@@ -137,17 +103,17 @@ export function periodStart(period: ReviewPeriod, now: Date = new Date()): numbe
 }
 
 /** 고른 기간의 문제 (아직 시간으로 자르기 전) */
-export function periodPool<T extends PlanCard>(cards: T[], subjects: PlanSubject[], period: ReviewPeriod, opts: PlanOptions): T[] {
-  if (period === 'due') return pickToday(cards, subjects, opts);
+export function periodPool<T extends PlanCard>(cards: T[], period: ReviewPeriod, opts: PlanOptions): T[] {
+  if (period === 'due') return pickToday(cards, opts);
   const start = periodStart(period, opts.now);
   if (start === null) return cards;
   return cards.filter((c) => !!c.created_at && Date.parse(c.created_at) >= start);
 }
 
 /** 기간마다 문제 수 (기간 칩의 숫자) */
-export function periodCounts(cards: PlanCard[], subjects: PlanSubject[], opts: PlanOptions): Record<ReviewPeriod, number> {
+export function periodCounts(cards: PlanCard[], opts: PlanOptions): Record<ReviewPeriod, number> {
   const out = {} as Record<ReviewPeriod, number>;
-  for (const p of REVIEW_PERIODS) out[p] = periodPool(cards, subjects, p, opts).length;
+  for (const p of REVIEW_PERIODS) out[p] = periodPool(cards, p, opts).length;
   return out;
 }
 
@@ -188,21 +154,19 @@ export function paceFrom(logs: Array<{ ms: number | null; type?: string | null }
 
 /**
  * 핵심 점수: 짧은 시간에는 이 점수가 높은 문제만 푼다.
- * 복습할 차례가 된 문제, 틀렸던 문제, 중요도 '상'·별표한 개념, 시험이 가까운 과목이 먼저. 방금(12시간 안에) 푼 문제는 맨 뒤로.
+ * 복습할 차례가 된 문제, 틀렸던 문제, 중요도 '상'·별표한 개념이 먼저. 방금(12시간 안에) 푼 문제는 맨 뒤로.
  */
-export function coreScore(c: PlanCard, subject: PlanSubject | undefined, now: Date = new Date()): number {
+export function coreScore(c: PlanCard, now: Date = new Date()): number {
   const t = now.getTime();
   let s = 0;
-  const due = effectiveDue(c, subject, now);
+  const due = Date.parse(c.due);
   if (due <= t) s += 30 + Math.min(10, (t - due) / DAY_MS);
   if (c.in_wrong_note) s += 40;
   else if (c.lapses > 0 || (c.wrong_count ?? 0) > 0) s += 25;
   s += c.importance === 'high' ? 25 : c.importance === 'medium' ? 10 : 0;
   if (c.starred) s += 20;
-  const left = examDaysLeft(subject, now);
-  if (left !== null) s += left <= 3 ? 30 : 15;
   if (c.reps === 0) s += 8;
-  if (c.last_review && t - Date.parse(c.last_review) < EXAM_MIN_GAP_MS) s -= 60;
+  if (c.last_review && t - Date.parse(c.last_review) < RECENT_MS) s -= 60;
   return s;
 }
 
@@ -233,16 +197,10 @@ export type Seed = { key: string | null; sec: number };
  * 핵심 점수 순서(같은 개념이 몰리지 않게)로 한 줄을 세운다. 예산(초)을 넘기 직전까지 — 마지막 문제는 절반 넘게 들어가면 넣는다.
  * seed 가 있으면 그 문제들이 이미 줄 앞에 있는 셈이다 (이어서 풀 때·새 문제를 나눠 넣을 때).
  */
-function buildLine<T extends ConceptCard>(
-  pool: T[],
-  subjects: PlanSubject[],
-  budgetSec: number,
-  o: { now: Date; pace?: number; seeds?: Seed[] },
-): Array<{ c: T; sec: number }> {
-  const subj = new Map(subjects.map((s) => [s.id, s]));
+function buildLine<T extends ConceptCard>(pool: T[], budgetSec: number, o: { now: Date; pace?: number; seeds?: Seed[] }): Array<{ c: T; sec: number }> {
   const rest = pool.map((c) => ({
     c,
-    score: coreScore(c, subj.get(c.subject_id), o.now),
+    score: coreScore(c, o.now),
     sec: secondsFor(c, o.pace ?? 1),
     key: conceptKey(c) ?? `q:${c.question_id}`,
     due: Date.parse(c.due),
@@ -283,12 +241,11 @@ function buildLine<T extends ConceptCard>(
  */
 export function plansForTimes<T extends ConceptCard>(
   pool: T[],
-  subjects: PlanSubject[],
   minutes: readonly number[],
   o: { now?: Date; pace?: number; interleave: boolean },
 ): TimedPlan<T>[] {
   const now = o.now ?? new Date();
-  const line = buildLine(pool, subjects, Math.max(0, ...minutes) * 60, { now, pace: o.pace });
+  const line = buildLine(pool, Math.max(0, ...minutes) * 60, { now, pace: o.pace });
   return minutes.map((m) => {
     const picked: typeof line = [];
     let t = 0;
@@ -314,12 +271,11 @@ export function plansForTimes<T extends ConceptCard>(
  */
 export function continuePlan<T extends ConceptCard>(
   pool: T[],
-  subjects: PlanSubject[],
   minutes: number,
   o: { now?: Date; pace?: number; interleave: boolean; seeds?: Seed[] },
 ): TimedPlan<T> {
   const now = o.now ?? new Date();
-  const line = buildLine(pool, subjects, minutes * 60, { now, pace: o.pace, seeds: o.seeds });
+  const line = buildLine(pool, minutes * 60, { now, pace: o.pace, seeds: o.seeds });
   return {
     cards: arrange(
       line.map((p) => p.c),
@@ -340,13 +296,12 @@ export const PICK_KIND_LABEL: Record<PickKind, string> = {
   again: '다시 보기',
 };
 
-export function pickKinds(cards: PlanCard[], subjects: PlanSubject[], now: Date = new Date()): Record<PickKind, number> {
-  const subj = new Map(subjects.map((s) => [s.id, s]));
+export function pickKinds(cards: PlanCard[], now: Date = new Date()): Record<PickKind, number> {
   const out: Record<PickKind, number> = { wrong: 0, key: 0, due: 0, new: 0, again: 0 };
   for (const c of cards) {
     if (c.in_wrong_note || c.lapses > 0 || (c.wrong_count ?? 0) > 0) out.wrong++;
     else if (c.starred || c.importance === 'high') out.key++;
-    else if (effectiveDue(c, subj.get(c.subject_id), now) <= now.getTime()) out.due++;
+    else if (Date.parse(c.due) <= now.getTime()) out.due++;
     else if (c.reps === 0) out.new++;
     else out.again++;
   }

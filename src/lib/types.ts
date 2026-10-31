@@ -102,7 +102,6 @@ export type SubjectRow = {
   id: string;
   name: string;
   color: string;
-  exam_date: string | null;
   position: number;
   created_at: string;
   /** 과목 서랍 (features.subjectDrawer, 칸이 없는 예전 DB 면 없다): 위에 고정 */

@@ -133,7 +133,7 @@ function firstChoice(m: ReviewMode, p: PlanData, r: ReviewSettings): StartChoice
   const subjectId = m.kind === 'subject' && live.some((c) => c.subject_id === m.id) ? m.id : null;
   if (!choosesPeriod(m)) return { period: 'all', subjectId: null, minutes: r.minutes };
   const cards = subjectId ? live.filter((c) => c.subject_id === subjectId) : live;
-  const counts = periodCounts(cards, p.planSubjects, { dailyMax: r.dailyMax, doneToday: p.doneToday, interleave: r.interleave });
+  const counts = periodCounts(cards, { dailyMax: r.dailyMax, doneToday: p.doneToday, interleave: r.interleave });
   let period: ReviewPeriod = 'due';
   if (!counts.due) {
     if (r.period !== 'due' && counts[r.period]) period = r.period;
@@ -152,8 +152,8 @@ function quickPick(m: ReviewMode, p: PlanData, c: StartChoice, pace: number, r: 
   if (!pool.length) return null;
   const o = { now, pace, interleave: r.interleave };
   // 다 들어가는 문제가 5분보다 적으면 시간을 고를 것이 없다 (고르는 화면과 같은 기준)
-  const timed = !continuePlan(pool, p.planSubjects, REVIEW_MINUTES[0], o).all;
-  const chosen = continuePlan(pool, p.planSubjects, c.minutes, o);
+  const timed = !continuePlan(pool, REVIEW_MINUTES[0], o).all;
+  const chosen = continuePlan(pool, c.minutes, o);
   return chosen.cards.length ? { ...chosen, timed } : null;
 }
 
@@ -162,7 +162,7 @@ function poolOf(m: ReviewMode, p: PlanData, period: ReviewPeriod, subjectId: str
   const live = modeCards(m, p);
   const inSubject = subjectId ? live.filter((x) => x.subject_id === subjectId) : live;
   if (!choosesPeriod(m)) return inSubject;
-  return periodPool(inSubject, p.planSubjects, period, { dailyMax: r.dailyMax, doneToday: p.doneToday, interleave: r.interleave, now });
+  return periodPool(inSubject, period, { dailyMax: r.dailyMax, doneToday: p.doneToday, interleave: r.interleave, now });
 }
 
 /** 저장한 세션의 열쇠: 홈의 N분 KOK(home)는 바로 시작할 때만, 복습 탭(review), 오답 다시 풀기(wrong). 노트 문제 풀기·약점 개념은 저장하지 않는다 */
@@ -177,7 +177,6 @@ function resolveSaved(key: SessionKey, row: SessionRow, m: ReviewMode, p: PlanDa
   const pool = poolOf(m, p, row.period, row.subject_id, r, now);
   const byId = new Map(p.cards.map((c) => [c.question_id, c]));
   const res = resumePlan(row, pool, {
-    subjects: p.planSubjects,
     interleave: r.interleave,
     now,
     cardOf: (id) => byId.get(id),
@@ -249,7 +248,7 @@ async function fetchPracticeNote(m: Extract<ReviewMode, { kind: 'practice' }>): 
 /** 노트 문제 풀기: 복습할 차례인 문제 먼저, 그다음 날짜가 가까운 문제 (200개까지) */
 function practiceIds(p: PlanData, note: PracticeNote | null, interleave: boolean): string[] {
   const cards = note ? p.cards.filter((c) => c.note_id === note.id) : [];
-  const due = pickToday(cards, p.planSubjects, { dailyMax: 10_000, doneToday: 0, interleave });
+  const due = pickToday(cards, { dailyMax: 10_000, doneToday: 0, interleave });
   const picked = new Set(due.map((c) => c.question_id));
   const rest = cards.filter((c) => !picked.has(c.question_id)).sort((a, b) => Date.parse(a.due) - Date.parse(b.due));
   return [...due, ...rest].slice(0, 200).map((c) => c.question_id);
@@ -520,7 +519,7 @@ export function ReviewSession({
         let pool = modeCards(mode, after);
         if (choosesPeriod(mode)) {
           if (choice.subjectId) pool = pool.filter((c) => c.subject_id === choice.subjectId);
-          pool = periodPool(pool, after.planSubjects, choice.period, {
+          pool = periodPool(pool, choice.period, {
             dailyMax: reviewSettings.dailyMax,
             doneToday: after.doneToday + answered.current,
             interleave: false,
@@ -873,7 +872,7 @@ export function ReviewSession({
     const cards = plan ? modeCards(mode, plan) : [];
     const periods = choosesPeriod(mode);
     const dueCount =
-      plan && periods ? periodPool(cards, plan.planSubjects, 'due', { dailyMax: settings.dailyMax, doneToday: plan.doneToday, interleave: false }).length : 0;
+      plan && periods ? periodPool(cards, 'due', { dailyMax: settings.dailyMax, doneToday: plan.doneToday, interleave: false }).length : 0;
     const kpTitle = mode.kind === 'kp' ? plan?.concepts.get(mode.note)?.get(mode.kp)?.title : undefined;
     const subtitleText = failed
       ? '불러오지 못했어요'
@@ -903,8 +902,6 @@ export function ReviewSession({
     return (
       <div key={round} className={cx('grid gap-3', round > 0 && 'kok-page')}>
         <LargeHeader title={MODE_TITLE[mode.kind]} subtitle={subtitle} />
-        {/* 오답노트는 복습 탭 안에 있다 (아래 메뉴에서 빠졌다): 오늘·과목 복습 시작 화면 맨 위에서 들어간다 */}
-        {periods && ready && plan ? <WrongNoteLink count={plan.cards.filter((c) => c.in_review && c.in_wrong_note).length} /> : null}
         {phase === 'start' && failed ? (
           <div className="kok-fill">
             <EmptyState
@@ -1170,26 +1167,5 @@ function QuestionSkeleton() {
         </div>
       </div>
     </div>
-  );
-}
-
-/** 복습 시작 화면 위의 오답노트 줄 (틀린 문제 수) */
-function WrongNoteLink({ count }: { count: number }) {
-  return (
-    <Link
-      href="/wrong"
-      className="kok-card kok-card-hover press kok-fill flex items-center gap-3 px-4 py-3"
-      aria-label={`오답노트 ${count ? `${count}문제` : '비어 있어요'}`}
-    >
-      <span className="kok-well grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-bad-soft text-bad" aria-hidden="true">
-        <Icon d="M6 3h12a1 1 0 0 1 1 1v17l-7-4-7 4V4a1 1 0 0 1 1-1zM9.5 8.5l5 5M14.5 8.5l-5 5" size={19} />
-      </span>
-      <span className="min-w-0 flex-1">
-        <span className="block font-bold">오답노트</span>
-        <span className="block text-xs text-muted">틀린 문제를 모아 보고 다시 풀어요</span>
-      </span>
-      <span className="text-sm text-muted tabular-nums">{count ? `${count}문제` : '비어 있어요'}</span>
-      <Icon d={ICONS.chevronRight} size={18} className="shrink-0 text-muted" />
-    </Link>
   );
 }

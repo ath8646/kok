@@ -24,12 +24,12 @@ export function useMe() {
   return useContext(Ctx);
 }
 
-const TABS: Array<{ href: string; label: string; icon: string; also?: string[] }> = [
+// 아래 메뉴: 홈·자료함·복습·오답·설정 (자료 공유는 아직 메인 기능이 아니라 홈 바로 가기에서 들어간다)
+const TABS: Array<{ href: string; label: string; icon: string }> = [
   { href: '/home', label: '홈', icon: 'M3 10.5 12 3l9 7.5V20a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z' },
   { href: '/library', label: '자료함', icon: 'M3 6.5A1.5 1.5 0 0 1 4.5 5h4.6l2 2h8.4A1.5 1.5 0 0 1 21 8.5v9a1.5 1.5 0 0 1-1.5 1.5h-15A1.5 1.5 0 0 1 3 17.5z' },
-  // 오답노트(/wrong)는 복습 탭 안 (복습 시작 화면 위·홈의 오답 수에서 들어간다)
-  { href: '/review', label: '복습', icon: 'M12 3a9 9 0 1 0 9 9M12 7v5l3 2M21 3v6h-6', also: ['/wrong'] },
-  { href: '/share', label: '공유', icon: ICONS.share },
+  { href: '/review', label: '복습', icon: 'M12 3a9 9 0 1 0 9 9M12 7v5l3 2M21 3v6h-6' },
+  { href: '/wrong', label: '오답', icon: 'M6 3h12a1 1 0 0 1 1 1v17l-7-4-7 4V4a1 1 0 0 1 1-1zM9.5 8.5l5 5M14.5 8.5l-5 5' },
   {
     href: '/settings',
     label: '설정',
@@ -228,7 +228,7 @@ export function AppShell({ children }: { children: ReactNode }) {
                 <Wordmark mark={30} className="text-[26px]" />
               </Link>
               {TABS.map((t) => {
-                const on = under(pathname, t.href) || !!t.also?.some((a) => under(pathname, a));
+                const on = under(pathname, t.href);
                 return (
                   <Link
                     key={t.href}
@@ -282,7 +282,7 @@ export function AppShell({ children }: { children: ReactNode }) {
           {!bare ? (
             <nav className="kok-tabbar fixed z-40 grid grid-cols-5 px-1 pt-1 md:hidden" aria-label="주 메뉴">
               {TABS.map((t) => {
-                const on = under(pathname, t.href) || !!t.also?.some((a) => under(pathname, a));
+                const on = under(pathname, t.href);
                 return (
                   <Link
                     key={t.href}

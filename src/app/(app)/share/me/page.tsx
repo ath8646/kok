@@ -180,11 +180,11 @@ function ShareMe() {
               empty={
                 <EmptyHint
                   title="아직 쓴 글이 없어요"
-                  body="갤러리에 내 자료나 KOK 노트를 나눠 보세요."
+                  body="갤러리에 들어가서 내 자료나 KOK 노트를 나눠 보세요."
                   action={
-                    <Button size="sm" onClick={() => router.push('/share/write')}>
-                      <Icon d={ICONS.pen} size={16} />
-                      글쓰기
+                    <Button size="sm" onClick={() => router.push('/share')}>
+                      <Icon d={ICONS.users} size={16} />
+                      갤러리 둘러보기
                     </Button>
                   }
                 />

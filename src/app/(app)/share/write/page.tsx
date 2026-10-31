@@ -95,7 +95,14 @@ function Write({ editId, galleryParam, noteParam }: { editId: string | null; gal
   const [notReady, setNotReady] = useState(false);
   const [busy, setBusy] = useState(false);
   const [step, setStep] = useState<string | null>(null);
-  const [picking, setPicking] = useState(false);
+  // 글은 갤러리 안에서 쓴다: 갤러리에서 들어오면(?g=) 그 갤러리 그대로, 갤러리 없이 열리면 먼저 고른다 (고르지 않고 닫으면 나간다)
+  const [picking, setPicking] = useState(() => !editId && !galleryParam && !draft?.galleryId);
+  /** 처음에 갤러리를 고르는 중 (닫으면 글쓰기를 나간다) */
+  const [mustPick, setMustPick] = useState(() => !editId && !galleryParam && !draft?.galleryId);
+  /** 고르는 창에서 갤러리를 골랐거나 '새 갤러리 만들기'로 가는 중 (창이 닫혀도 나가지 않는다: 닫기는 고르기 바로 뒤에 불려서 상태가 아직 옛것이다) */
+  const pickDone = useRef(false);
+  /** 새 갤러리를 만들었다 (만들기 창이 닫혀도 다시 고르기로 가지 않는다) */
+  const madeRef = useRef(false);
   const [making, setMaking] = useState(false);
   const [notePicking, setNotePicking] = useState(false);
   const [dragging, setDragging] = useState(false);
@@ -360,7 +367,8 @@ function Write({ editId, galleryParam, noteParam }: { editId: string | null; gal
               <p className="truncate font-semibold">{gallery ? gallery.name : '갤러리를 골라 주세요'}</p>
               {gallery ? <p className="text-xs text-muted">{CATEGORY_LABEL[gallery.category]}</p> : null}
             </div>
-            {!editId ? (
+            {/* 갤러리 안에서 쓰는 글은 갤러리를 바꾸지 않는다 */}
+            {!editId && !galleryParam ? (
               <Button size="sm" variant={gallery ? 'secondary' : 'primary'} onClick={() => setPicking(true)}>
                 {gallery ? '바꾸기' : '고르기'}
               </Button>
@@ -561,8 +569,48 @@ function Write({ editId, galleryParam, noteParam }: { editId: string | null; gal
         </form>
       )}
 
-      <GalleryPickSheet open={picking} onClose={() => setPicking(false)} onPick={setGallery} onMake={() => setMaking(true)} />
-      <GallerySheet open={making} onClose={() => setMaking(false)} onSaved={(g) => setGallery(g)} />
+      <GalleryPickSheet
+        open={picking}
+        onClose={() => {
+          setPicking(false);
+          // 갤러리 없이 연 글쓰기에서 고르지 않고 닫으면 나간다 (새 갤러리 만들기로 가는 중이면 그대로)
+          if (pickDone.current) {
+            pickDone.current = false;
+            return;
+          }
+          if (mustPick && !gallery) {
+            doneRef.current = true;
+            if (window.history.length > 1) router.back();
+            else router.replace('/share');
+          }
+        }}
+        onPick={(g) => {
+          pickDone.current = true;
+          setMustPick(false);
+          setGallery(g);
+        }}
+        onMake={() => {
+          pickDone.current = true;
+          setMaking(true);
+        }}
+      />
+      <GallerySheet
+        open={making}
+        onClose={() => {
+          setMaking(false);
+          if (madeRef.current) {
+            madeRef.current = false;
+            return;
+          }
+          // 만들지 않고 닫았으면 다시 고르기로
+          if (mustPick && !gallery) setPicking(true);
+        }}
+        onSaved={(g) => {
+          madeRef.current = true;
+          setMustPick(false);
+          setGallery(g);
+        }}
+      />
       <NotePickerSheet
         open={notePicking}
         onClose={() => setNotePicking(false)}

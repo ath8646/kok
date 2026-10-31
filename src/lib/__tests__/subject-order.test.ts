@@ -29,7 +29,7 @@ describe('과목 서랍 차례 (subject-order)', () => {
     expect(drawerGroups([old, fresh]).recent.map((s) => s.name)).toEqual(['새 과목', '옛 과목']);
   });
 
-  it('칩 줄: 고정 모두 + 최근 쓴 것으로 다섯 개까지, 보이는 차례는 고정 → 내 차례 (자료를 넣어도 칩이 자리를 바꾸지 않는다)', () => {
+  it('칩 줄: 고정 모두 + 최근 쓴 것으로 다섯 개까지, 보이는 차례는 내 차례 (자료를 넣어도 칩이 자리를 바꾸지 않는다)', () => {
     const list = ['국어', '수학', '영어', '과학', '사회', '역사', '음악', '체육'].map((n, i) => sub(n, { used_at: day(i) }));
     // 최근 다섯: 체육(7) 음악(6) 역사(5) 사회(4) 과학(3) → 내 차례로
     expect(quickSubjects(list).map((s) => s.name)).toEqual(['과학', '사회', '역사', '음악', '체육']);
@@ -41,6 +41,9 @@ describe('과목 서랍 차례 (subject-order)', () => {
     expect(quickSubjects(archived, 5, eng.id).map((s) => s.name)).toEqual(['국어', '사회', '역사', '음악', '체육', '영어']);
     // 보관한 과목은 고정해도 줄에 안 나온다
     expect(quickSubjects(archived.map((s) => (s.name === '영어' ? { ...s, pinned: true } : s))).map((s) => s.name)).not.toContain('영어');
+    // 고정한 과목도 끌어 놓은 자리 그대로 (고정은 줄에 늘 보이는 것만 정한다)
+    const pinnedLast = list.map((s) => (s.name === '체육' ? { ...s, pinned: true } : s));
+    expect(quickSubjects(pinnedLast).map((s) => s.name)).toEqual(['과학', '사회', '역사', '음악', '체육']);
     // 고정이 다섯 개보다 많으면 고정한 것은 모두
     const many = list.map((s) => ({ ...s, pinned: true }));
     expect(quickSubjects(many)).toHaveLength(8);

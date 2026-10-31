@@ -9,6 +9,7 @@ import { useMe, EnergyPill } from './AppShell';
 import { SOURCES_CHANGED, SUBJECTS_CHANGED, useQuickAdd } from './QuickAdd';
 import { stepLabel, useActiveSources } from './ProcessingList';
 import { SubjectForm } from './SubjectForm';
+import { ChipSort, type ChipSortProps } from './ChipSort';
 import { StarButton, StarGlyph, useStarRefocus } from './note/StarButton';
 import { SortList } from './note/SortList';
 import { BarAction, PICKED_RING, PickBadge, SelectionBar, useMultiSelect } from './SelectionBar';
@@ -25,6 +26,7 @@ import {
   ProgressRing,
   Sheet,
   Swap,
+  Toggle,
   api,
   cx,
   inputClass,
@@ -48,7 +50,6 @@ import { BULK_MAX, bulkLabels, flattenOrder, libraryOrder, withPositions } from 
 import type { SubjectRow } from '@/lib/types';
 import { subjectVar } from '@/lib/colors';
 import { previewText } from '@/lib/richtext';
-import { daysUntil } from '@/lib/time';
 import { dropView, readView, viewStamp, writeView } from '@/lib/view-cache';
 import { QUICK_MAX, byPosition, quickSubjects } from '@/lib/subject-order';
 import { SubjectDrawer, type DrawerManage } from './SubjectDrawer';
@@ -171,6 +172,8 @@ export function LibraryView() {
   const { selecting, picked, setPicked, startSelect, endSelect, togglePick } = useMultiSelect();
   const [bulkBusy, setBulkBusy] = useState<'star' | 'review' | 'delete' | null>(null);
   const [ordering, setOrdering] = useState(false);
+  /** 칩을 키보드로 옮긴 뒤 화면 읽기 프로그램이 읽을 말 */
+  const [chipNote, setChipNote] = useState('');
 
   // 화면에서 바로 고친 것(별표·복습·순서)이 읽는 사이에 생겼으면, 읽은 목록은 옛것이라 버리고 저장이 끝난 뒤 다시 읽는다
   const edits = useRef({ seq: 0, saving: 0, stale: false });
@@ -470,15 +473,16 @@ export function LibraryView() {
     return true;
   };
 
-  /** 고정한 과목의 차례 (서랍에서 끌거나 앞으로·뒤로): 화면은 바로, 저장은 한 줄로 세워 마지막 차례만 (모든 과목의 position 을 0, 1, 2 …) */
+  /**
+   * 과목 차례 저장: 화면은 바로, 저장은 한 줄로 세워 마지막 차례만 (모든 과목의 position 을 0, 1, 2 …).
+   * kok_reorder_subjects 가 없는 예전 DB 면 바뀐 과목만 하나씩 고친다
+   */
   const subjectOrderQueue = useRef<{ running: boolean; next: string[] | null }>({ running: false, next: null });
-  const reorderPinned = (pinnedIds: string[]) => {
+  const saveSubjectOrder = (order: string[]) => {
     if (!data) return;
-    const pinnedSet = new Set(pinnedIds);
-    const rest = data.subjects.filter((s) => !pinnedSet.has(s.id)).sort(byPosition);
-    const order = [...pinnedIds, ...rest.map((s) => s.id)];
     const pos = new Map(order.map((id, i) => [id, i]));
-    const next = { ...data, subjects: data.subjects.map((s) => ({ ...s, position: pos.get(s.id) ?? s.position })) };
+    const before = new Map(data.subjects.map((x) => [x.id, x.position]));
+    const next = { ...data, subjects: data.subjects.map((x) => ({ ...x, position: pos.get(x.id) ?? x.position })) };
     setData(next);
     writeView(LIBRARY_VIEW, owner, next);
     const q = subjectOrderQueue.current;
@@ -489,8 +493,20 @@ export function LibraryView() {
       while (q.next) {
         const o = q.next;
         q.next = null;
-        const { error } = await sb().rpc('kok_reorder_subjects', { p_ids: o });
-        if (error) {
+        let failed = false;
+        if (mergeOn) {
+          failed = !!(await sb().rpc('kok_reorder_subjects', { p_ids: o })).error;
+        } else {
+          for (const [i, id] of o.entries()) {
+            if (before.get(id) === i) continue;
+            if ((await sb().from('subjects').update({ position: i }).eq('id', id)).error) {
+              failed = true;
+              break;
+            }
+            before.set(id, i);
+          }
+        }
+        if (failed) {
           q.next = null;
           toast('과목 순서를 저장하지 못했어요. 다시 해 주세요.', 'bad');
           edits.current.stale = true;
@@ -501,6 +517,15 @@ export function LibraryView() {
     }).finally(() => {
       q.running = false;
     });
+  };
+
+  /** 칩 줄에서 끌어 바꾼 차례: 칩 줄에 보이는 과목의 자리끼리만 바꾸고, 안 보이는 과목은 제자리에 둔다 */
+  const reorderChips = (chipIds: string[]) => {
+    if (!data) return;
+    const all = [...data.subjects].sort(byPosition).map((x) => x.id);
+    const onRow = new Set(chipIds);
+    let k = 0;
+    saveSubjectOrder(all.map((id) => (onRow.has(id) ? chipIds[k++] : id)));
   };
 
   /**
@@ -620,21 +645,22 @@ export function LibraryView() {
       reload();
     }
     if (error !== null) {
-      toast(gone.size ? `과목 ${gone.size}개는 지웠지만 나머지는 지우지 못했어요. ${error}` : error, 'bad');
+      toast(gone.size ? `과목 ${gone.size}개는 삭제했지만 나머지는 삭제하지 못했어요. ${error}` : error, 'bad');
       return false;
     }
-    toast(list.length === 1 ? `'${list[0].name}' 과목을 지웠어요.` : `과목 ${list.length}개를 지웠어요.`, 'plain', DONE);
+    toast(list.length === 1 ? `'${list[0].name}' 과목을 삭제했어요.` : `과목 ${list.length}개를 삭제했어요.`, 'plain', DONE);
     return true;
   };
 
-  /** 과목 고치기 시트의 지우기 (한 번 묻는다) */
+  /** 과목 메뉴의 과목 삭제 (한 번 묻는다: 지워지는 자료 수와 보관하기 안내) */
   const deleteSubject = async (s: SubjectRow) => {
+    const n = counts.get(s.id) ?? 0;
     if (
       !(await ask({
-        title: '과목 지우기',
-        body: `${josa(`'${s.name}' 과목`, '과')} 그 안의 자료·노트·문제·복습 기록을 모두 지울까요?`,
-        note: '되돌릴 수 없어요. 목록에서만 빼고 싶으면 과목을 보관하세요.',
-        ok: '모두 지우기',
+        title: '과목 삭제',
+        body: `${josa(`'${s.name}' 과목`, '과')} 그 안의 ${n ? `자료 ${n}개와 ` : ''}노트·문제·복습 기록을 모두 지울까요?`,
+        note: '되돌릴 수 없어요. 목록에서만 빼고 싶으면 과목 고치기에서 보관하세요.',
+        ok: '삭제하기',
         danger: true,
       }))
     )
@@ -785,19 +811,14 @@ export function LibraryView() {
     );
   }
 
-  const exam = subject?.exam_date ? daysUntil(subject.exam_date) : null;
   const total = selected ? (counts.get(selected) ?? 0) : (allCount ?? 0);
+  /** 고치는 과목의 지금 모습 (고정·보관을 바꾸면 바로 바뀐다) */
+  const editingLive = editingSubject && editingSubject !== 'new' ? (subjects.find((x) => x.id === editingSubject.id) ?? editingSubject) : null;
   // 읽는 동안에도 줄 높이를 지켜서, 다 읽었을 때 제목이 위로 튀지 않게 한다
   // 기억해 둔 목록으로 처음 그린 부제는 번지지 않는다 (새로 읽어 바뀌면 번진다)
   const subtitle = data ? (
-    <Swap key={`${total}:${exam ?? ''}`} still={!painted} className="flex flex-wrap items-center gap-x-2">
+    <Swap key={String(total)} still={!painted} className="flex flex-wrap items-center gap-x-2">
       <span>자료 {total}개</span>
-      {exam !== null && exam >= 0 ? (
-        // 큰 제목 아래(화면 위 빛 위)라 색 글자는 연한 알약 안에
-        <span className={cx('rounded-full px-2 text-sm font-semibold', exam <= 3 ? 'bg-bad-soft text-bad' : 'bg-accent-soft text-accent')}>
-          시험 {exam === 0 ? 'D-DAY' : `D-${exam}`}
-        </span>
-      ) : null}
       {subject?.archived ? <span>· 보관한 과목</span> : null}
     </Swap>
   ) : (
@@ -808,58 +829,45 @@ export function LibraryView() {
   // 기억해 둔 목록으로 처음 그린 카드는 그대로, 새로 읽은 뒤에 생기는 카드는 자리에서 글이 번진다
   const enter: Enter = painted ? 'fill' : 'none';
 
-  // 여러 개 고르기·순서 바꾸기 (자료가 있을 때만. 순서는 과목 안에서만 정한다)
-  // 순서는 과목 안에서 정한다: 자료가 둘 이상인 과목. 전체 보기에서 고르면 그 과목으로 가서 연다
-  // 순서 바꾸기 과목: 자료가 둘 이상인 과목 (보관한 과목은 빼고, 보고 있는 과목은 남긴다)
+  // 자료 순서는 과목 안에서 정한다: 자료가 둘 이상인 과목 (보관한 과목은 빼고, 보고 있는 과목은 남긴다).
+  // 전체 보기의 '순서 바꾸기'는 그런 과목의 첫 과목으로 가서 열고, 시트의 과목 칩으로 바꾼다
   const orderable = subjects.filter((x) => (counts.get(x.id) ?? 0) > 1 && (!archivedIds.has(x.id) || x.id === selected));
-  const canOrder = organize && !query && (subject ? shown.length > 1 : orderable.length > 0);
-  const organizeMenu: MenuItem[] = [
-    ...(total ? [{ label: '여러 개 고르기', icon: ICONS.select, onSelect: () => startSelect() }] : []),
-    ...(canOrder
-      ? [
-          {
-            label: '순서 바꾸기',
-            icon: ICONS.reorder,
-            onSelect: () => {
-              if (!subject) select(orderable[0].id);
-              setOrdering(true);
-            },
-          },
-        ]
-      : []),
-  ];
+  const canOrder = organize && !query && !subject && orderable.length > 0;
+  // 과목 메뉴는 다섯 가지만: 복습·문제 모아 보기·자료 고르기·과목 고치기(이름·색·고정·보관·합치기)·과목 삭제
   const headerMenu: MenuItem[] = subject
     ? [
-        ...organizeMenu,
-        { label: '이 과목만 복습', icon: ICONS.retry, onSelect: () => router.push(`/review?subject=${subject.id}`) },
+        { label: '이 과목 복습하기', icon: ICONS.retry, onSelect: () => router.push(`/review?subject=${subject.id}`) },
         { label: '문제 모아 보기', icon: ICONS.grid, onSelect: () => router.push(`/questions?subject=${subject.id}`) },
+        ...(total ? [{ label: '자료 여러 개 고르기', icon: ICONS.select, onSelect: () => startSelect() }] : []),
         { label: '과목 고치기', icon: ICONS.edit, onSelect: () => setEditingSubject(subject) },
-        ...(mergeOn && subjects.length > 1 ? [{ label: '다른 과목과 합치기', icon: ICONS.merge, onSelect: () => setMergingSubject(subject) }] : []),
-        ...(drawerOn
-          ? subject.archived
-            ? [{ label: '보관 풀기', icon: ICONS.archive, onSelect: () => setSubjectFlag(subject, { archived: false }) }]
-            : [
-                { label: subject.pinned ? '고정 풀기' : '위에 고정', icon: ICONS.pin, onSelect: () => setSubjectFlag(subject, { pinned: !subject.pinned }) },
-                { label: '보관하기', icon: ICONS.archive, onSelect: () => setSubjectFlag(subject, { archived: true }) },
-              ]
-          : []),
+        { label: '과목 삭제', icon: ICONS.trash, danger: true, onSelect: () => void deleteSubject(subject) },
       ]
     : [
-        ...organizeMenu,
+        ...(total ? [{ label: '자료 여러 개 고르기', icon: ICONS.select, onSelect: () => startSelect() }] : []),
+        ...(canOrder
+          ? [
+              {
+                label: '자료 순서 바꾸기',
+                icon: ICONS.reorder,
+                onSelect: () => {
+                  select(orderable[0].id);
+                  setOrdering(true);
+                },
+              },
+            ]
+          : []),
         { label: '새 과목', icon: ICONS.folder, onSelect: () => setEditingSubject('new') },
         { label: '문제 모아 보기', icon: ICONS.grid, onSelect: () => router.push('/questions') },
       ];
   const allPicked = shown.length > 0 && shown.every((s) => picked.has(s.id));
-  // 서랍의 과목 관리 (고정·보관은 과목 서랍 칸이 있으면, 순서·합치기는 새 함수가 있으면)
+  // 서랍의 과목 관리: 과목마다 ⋯ 의 과목 고치기·과목 삭제, 꾹 눌러 여러 과목 고정·보관·삭제
   const drawerManage: DrawerManage = {
     onPin: pinSubjects,
     onArchive: archiveSubjects,
-    onReorder: mergeOn ? reorderPinned : undefined,
     onEdit: (x) => {
       setDrawer(false);
       setEditingSubject(x);
     },
-    onMerge: mergeOn ? mergeSubject : undefined,
     // 서랍의 확인 화면을 거친 뒤 (서랍은 열린 채로 목록으로 돌아간다)
     onDelete: deleteSubjects,
   };
@@ -948,9 +956,9 @@ export function LibraryView() {
         <FolderChip id="all" on={!selected} onClick={() => select(null)} label="전체" count={allCount} loading={!data} still={!painted} />
         {/* 과목을 읽는 동안: 과목 칩 자리 */}
         {!data ? [0, 1].map((i) => <span key={i} className="kok-skel kok-bone h-10 w-20 shrink-0" aria-hidden="true" />) : null}
-        {chipSubjects.map((s) => {
-          const d = s.exam_date ? daysUntil(s.exam_date) : null;
-          return (
+        {/* 과목 칩: 꾹 눌러 옆으로 끌면 차례가 바뀐다 (키보드는 Alt + ←/→) */}
+        <ChipSort items={chipSubjects} enabled={!!data && !selecting && chipSubjects.length > 1} onReorder={reorderChips} onMoved={setChipNote}>
+          {(s, sort) => (
             <FolderChip
               key={s.id}
               id={s.id}
@@ -959,11 +967,11 @@ export function LibraryView() {
               label={s.name}
               count={counts.get(s.id) ?? 0}
               color={subjectVar(s.color)}
-              badge={d !== null && d >= 0 && d <= 14 ? (d === 0 ? 'D-DAY' : `D-${d}`) : undefined}
               enter={enter}
+              sort={sort}
             />
-          );
-        })}
+          )}
+        </ChipSort>
         {/* 칩 줄에 안 보이는 과목(최근에 안 쓴 것·보관한 것)은 서랍에서 */}
         {moreSubjects ? (
           <button
@@ -984,6 +992,12 @@ export function LibraryView() {
           <Icon d={ICONS.plus} size={16} strokeWidth={2.4} />새 과목
         </button>
       </div>
+      <span id="chip-sort-hint" className="sr-only">
+        꾹 누른 채 옆으로 끌면 과목 차례가 바뀌어요. 키보드는 Alt와 왼쪽·오른쪽 화살표로 옮겨요.
+      </span>
+      <span className="sr-only" role="status" aria-live="polite">
+        {chipNote}
+      </span>
       {drawerOn ? (
         <SubjectDrawer
           open={drawer}
@@ -1214,7 +1228,7 @@ export function LibraryView() {
                 if (editingSubject === 'new') {
                   const { data: row, error } = await sb()
                     .from('subjects')
-                    .insert({ name: d.name, color: d.color, exam_date: d.exam_date, position: subjects.length })
+                    .insert({ name: d.name, color: d.color, position: subjects.length })
                     .select('id')
                     .single();
                   setSaving(false);
@@ -1223,7 +1237,6 @@ export function LibraryView() {
                     id: row.id as string,
                     name: d.name,
                     color: d.color,
-                    exam_date: d.exam_date,
                     position: subjects.length,
                     created_at: new Date().toISOString(),
                   };
@@ -1233,7 +1246,7 @@ export function LibraryView() {
                   window.dispatchEvent(new Event(SUBJECTS_CHANGED));
                   select(made.id);
                 } else {
-                  const { error } = await sb().from('subjects').update({ name: d.name, color: d.color, exam_date: d.exam_date }).eq('id', editingSubject.id);
+                  const { error } = await sb().from('subjects').update({ name: d.name, color: d.color }).eq('id', editingSubject.id);
                   setSaving(false);
                   if (error) return toast('저장하지 못했어요.', 'bad');
                   setEditingSubject(null);
@@ -1241,12 +1254,47 @@ export function LibraryView() {
                 }
               }}
             />
-            {editingSubject !== 'new' ? (
-              <div className="border-t border-line pt-4">
-                <Button variant="ghost" className="text-bad" onClick={() => deleteSubject(editingSubject)}>
-                  과목 지우기
-                </Button>
-              </div>
+            {/* 과목 정리: 위에 고정·보관하기는 바로 바뀌고, 합치기는 고르는 창으로 (과목 삭제는 과목 메뉴에) */}
+            {editingLive && (drawerOn || (mergeOn && subjects.length > 1)) ? (
+              <section className="grid gap-1 border-t border-line pt-4" aria-labelledby="subject-manage">
+                <h3 id="subject-manage" className="text-xs font-bold text-muted">
+                  과목 정리
+                </h3>
+                {drawerOn ? (
+                  <>
+                    <Toggle
+                      id="subject-pin"
+                      label="위에 고정"
+                      hint="자료함 과목 줄에 늘 보여요"
+                      checked={!!editingLive.pinned && !editingLive.archived}
+                      onChange={(on) => void pinSubjects([editingLive], on)}
+                    />
+                    <Toggle
+                      id="subject-archive"
+                      label="보관하기"
+                      hint="다 끝난 과목을 목록에서 빼요. 복습은 그대로 나와요"
+                      checked={!!editingLive.archived}
+                      onChange={(on) => void setSubjectFlag(editingLive, { archived: on })}
+                    />
+                  </>
+                ) : null}
+                {mergeOn && subjects.length > 1 ? (
+                  <button
+                    type="button"
+                    className="press -mx-2 flex items-center gap-3 rounded-2xl px-2 py-2.5 text-left hover:bg-surface-2"
+                    onClick={() => {
+                      setEditingSubject(null);
+                      setMergingSubject(editingLive);
+                    }}
+                  >
+                    <span className="min-w-0 flex-1">
+                      <span className="block text-[15px]">다른 과목과 합치기</span>
+                      <span className="block text-xs text-muted">자료·노트·문제·복습 기록을 한 과목으로 모아요</span>
+                    </span>
+                    <Icon d={ICONS.chevronRight} size={18} strokeWidth={2.2} className="shrink-0 text-muted" />
+                  </button>
+                ) : null}
+              </section>
             ) : null}
           </div>
         ) : null}
@@ -1294,8 +1342,8 @@ function FolderChip({
   loading,
   still = false,
   color,
-  badge,
   enter = 'none',
+  sort,
 }: {
   id: string;
   on: boolean;
@@ -1307,8 +1355,9 @@ function FolderChip({
   /** 기억해 둔 목록으로 처음 그린 칩: 수가 번지지 않는다 */
   still?: boolean;
   color?: string;
-  badge?: string;
   enter?: Enter;
+  /** 꾹 눌러 끌어 차례 바꾸기 (과목 칩) */
+  sort?: ChipSortProps;
 }) {
   // 나타나는 방법은 처음 그릴 때 정한 그대로 (다시 그려도 움직임이 다시 돌지 않게)
   const [mode] = useState(enter);
@@ -1318,12 +1367,23 @@ function FolderChip({
       data-chip={id}
       role="tab"
       aria-selected={on}
-      onClick={onClick}
+      ref={sort?.ref}
+      {...(sort?.listeners ?? {})}
+      style={sort?.style}
+      aria-describedby={sort ? 'chip-sort-hint' : undefined}
+      onKeyDown={sort?.onKeyDown}
+      onClick={() => {
+        // 끌어서 차례를 바꾼 뒤의 누르기는 과목 고르기가 아니다
+        if (sort?.blockClick()) return;
+        onClick();
+      }}
       className={cx(
         'press inline-flex h-10 shrink-0 items-center gap-2 rounded-full px-4 text-sm font-semibold transition-colors duration-200',
         // 고른 칩은 테마의 두 색 (화면 꾸미기 C, globals.css .kok-chip-on)
         on ? 'kok-chip-on' : 'kok-chip-off bg-surface text-ink shadow-[0_1px_2px_var(--shadow)] hover:bg-surface-2',
         mode === 'fill' && 'kok-fill',
+        sort && 'kok-chip-sort',
+        sort?.dragging && 'is-dragging',
       )}
     >
       {color ? <span className="h-2.5 w-2.5 rounded-full" style={{ background: color }} aria-hidden="true" /> : null}
@@ -1334,9 +1394,6 @@ function FolderChip({
         </Swap>
       ) : loading ? (
         <span className="inline-block h-2 w-3 rounded-full bg-current opacity-20" aria-hidden="true" />
-      ) : null}
-      {badge ? (
-        <span className={cx('rounded-full px-1.5 text-[11px] font-bold', on ? 'ring-1 ring-inset ring-current' : 'bg-bad-soft text-bad')}>{badge}</span>
       ) : null}
     </button>
   );

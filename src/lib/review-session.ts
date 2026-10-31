@@ -2,7 +2,7 @@
 // 저장하는 것은 고른 문제(plan)와 푼 것(answered)뿐이고, 지금 풀 문제는 열 때마다 여기서 다시 계산한다 (AI 없음):
 // 푼 문제는 빼고, 사라진 문제(지움·쉬게 함·복습 끔) 자리는 채우고, 세션을 만든 뒤 새로 생긴 문제는 남은 시간에 맞춰 나눠 넣는다.
 import { z } from 'zod';
-import { REVIEW_PERIODS, arrange, conceptKey, continuePlan, secondsFor, type ConceptCard, type PlanSubject, type ReviewPeriod, type Seed } from './review-plan';
+import { REVIEW_PERIODS, arrange, conceptKey, continuePlan, secondsFor, type ConceptCard, type ReviewPeriod, type Seed } from './review-plan';
 
 /** 세션 열쇠: 홈의 오늘 KOK, 복습 탭(오늘·과목 복습), 오답 다시 풀기. 한 사람에 열쇠마다 하나 */
 export type SessionKey = 'home' | 'review' | 'wrong';
@@ -74,7 +74,7 @@ export type ResumeResult<T> = {
 export function resumePlan<T extends ConceptCard>(
   s: Pick<SessionRow, 'plan' | 'answered' | 'minutes' | 'pace' | 'seen_at'>,
   pool: T[],
-  o: { subjects: PlanSubject[]; interleave: boolean; now?: Date; cardOf: (qid: string) => ConceptCard | undefined; reviewedSince: Set<string> },
+  o: { interleave: boolean; now?: Date; cardOf: (qid: string) => ConceptCard | undefined; reviewedSince: Set<string> },
 ): ResumeResult<T> {
   const now = o.now ?? new Date();
   const planSet = new Set(s.plan);
@@ -106,12 +106,12 @@ export function resumePlan<T extends ConceptCard>(
   let remaining: T[];
   if (newcomers.length) {
     // 새 문제는 남은 문제와 같이 점수로 겨룬다 (남은 시간 예산 안에서)
-    remaining = continuePlan([...keep, ...newcomers], o.subjects, s.minutes, { ...opts, seeds }).cards;
+    remaining = continuePlan([...keep, ...newcomers], s.minutes, { ...opts, seeds }).cards;
   } else {
     // 계획에서 사라진 문제가 있어 시간이 남으면 다른 문제로 채운다 (가득 차 있으면 아무것도 더하지 않는다)
     const rest = pool.filter((c) => !planSet.has(c.question_id) && !doneIds.has(c.question_id));
     const keepSeeds: Seed[] = keep.map((c) => ({ key: conceptKey(c), sec: secondsFor(c, s.pace) }));
-    const extra = rest.length ? continuePlan(rest, o.subjects, s.minutes, { ...opts, seeds: [...seeds, ...keepSeeds] }).cards : [];
+    const extra = rest.length ? continuePlan(rest, s.minutes, { ...opts, seeds: [...seeds, ...keepSeeds] }).cards : [];
     remaining = extra.length ? arrange([...keep, ...extra], o.interleave) : keep;
   }
   // 새 계획: 저장된 차례는 그대로 두고(끝낸 것·남은 것만 남기고), 새로 들어온 문제는 뒤에 붙인다

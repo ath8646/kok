@@ -4,6 +4,7 @@
 // 노트에 자료를 더하면(Pro) 버전이 쌓인다. 원본 탭의 버전 기록에서 지난 버전을 열어(?v=번호) 보고 고치거나,
 // 그 버전을 지금 버전으로 쓰거나 지울 수 있다. 지난 버전에서 고친 것은 그 버전에 저장된다.
 // DB 에 버전·채팅 표가 아직 없으면(me.features) 예전처럼 동작한다.
+import dynamic from 'next/dynamic';
 import Link from 'next/link';
 import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
@@ -173,7 +174,7 @@ async function fetchBundle(
       .eq('note_id', note.id)
       .order('created_at')
       .order('id'),
-    sb().from('subjects').select('id, name, color, exam_date, position, created_at').eq('id', note.subject_id).maybeSingle(),
+    sb().from('subjects').select('id, name, color, position, created_at').eq('id', note.subject_id).maybeSingle(),
     versionsOn
       ? sb()
           .from('note_versions')
@@ -246,6 +247,10 @@ function setViewParam(v: number | null) {
   setQueryParam('v', v === null ? null : String(v));
 }
 
+// 자료 공유에 올리기: 글은 갤러리 안에서 쓰니 먼저 갤러리를 고른다 (공유 화면 조각은 누를 때만 받는다)
+const GalleryPickSheet = dynamic(() => import('@/components/share/ShareSheets').then((m) => m.GalleryPickSheet), { ssr: false });
+const GallerySheet = dynamic(() => import('@/components/share/ShareSheets').then((m) => m.GallerySheet), { ssr: false });
+
 export default function NotePage() {
   const { sourceId } = useParams<{ sourceId: string }>();
   const { me } = useMe();
@@ -283,6 +288,8 @@ export default function NotePage() {
   const [page, setPage] = useState<number | null>(null);
   const [glance, setGlance] = useState(true);
   const [reporting, setReporting] = useState(false);
+  /** 자료 공유에 올릴 갤러리 고르기 · 새 갤러리 만들기 */
+  const [sharePick, setSharePick] = useState<'pick' | 'make' | null>(null);
   // 자료 그림 다시 찾기 (원본에서 그림 자리를 새 방법으로)
   const [relocating, setRelocating] = useState(false);
   // 고치기 모드 (정리 탭): 새로 만든 빈 노트는 ?edit=1 로 바로 고치기 모드로 연다
@@ -1142,7 +1149,7 @@ export default function NotePage() {
                     : []),
                   // 자료 공유에 이 노트를 붙여 글쓰기 (공유받은 노트는 다시 나누지 않는다)
                   ...(me.features.community && ready && !old && !shared
-                    ? [{ label: '자료 공유에 올리기', icon: ICONS.share, onSelect: () => router.push(`/share/write?note=${sourceId}`) }]
+                    ? [{ label: '자료 공유에 올리기', icon: ICONS.share, onSelect: () => setSharePick('pick') }]
                     : []),
                   ...(reportable ? [{ label: '이상해요 (신고)', icon: ICONS.edit, onSelect: () => setReporting(true) }] : []),
                 ]}
@@ -1493,6 +1500,23 @@ export default function NotePage() {
       ) : null}
 
       <ReportSheet what={reporting ? { kind: 'note', target: note.id } : null} onClose={() => setReporting(false)} />
+
+      {/* 자료 공유에 올리기: 갤러리를 고르면 그 갤러리의 글쓰기로 (이 노트를 붙인 채) */}
+      {sharePick ? (
+        <>
+          <GalleryPickSheet
+            open={sharePick === 'pick'}
+            onClose={() => setSharePick((cur) => (cur === 'pick' ? null : cur))}
+            onPick={(g) => router.push(`/share/write?g=${g.id}&note=${sourceId}`)}
+            onMake={() => setSharePick('make')}
+          />
+          <GallerySheet
+            open={sharePick === 'make'}
+            onClose={() => setSharePick((cur) => (cur === 'make' ? null : cur))}
+            onSaved={(g) => router.push(`/share/write?g=${g.id}&note=${sourceId}`)}
+          />
+        </>
+      ) : null}
     </div>
   );
 }

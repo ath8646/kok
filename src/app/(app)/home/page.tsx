@@ -18,8 +18,7 @@ import { deleteSession, reviewedAfter } from '@/lib/data';
 import { homeViewKey, loadHome, type HomeData, type Recent } from '@/lib/home-data';
 import { continuePlan, pickToday, streakInfo } from '@/lib/review-plan';
 import { resumePlan } from '@/lib/review-session';
-import { daysUntil, kstDateString } from '@/lib/time';
-import { subjectVar } from '@/lib/colors';
+import { kstDateString } from '@/lib/time';
 import { dueLabel } from '@/lib/srs';
 import { energyPeriodLabel } from '@/lib/plans';
 import { readView, viewStamp, writeView } from '@/lib/view-cache';
@@ -127,15 +126,12 @@ export default function HomePage() {
   const still = !!first && !fresh;
   // 자료함에서 복습을 끈 노트의 문제는 오늘 복습·오답 수에 넣지 않는다
   const live = plan ? plan.cards.filter((c) => c.in_review) : [];
-  const today = plan ? pickToday(live, plan.planSubjects, { dailyMax: settings.dailyMax, doneToday: plan.doneToday, interleave: settings.interleave }) : [];
+  const today = plan ? pickToday(live, { dailyMax: settings.dailyMax, doneToday: plan.doneToday, interleave: settings.interleave }) : [];
   const streak = streakInfo(days);
   const week = weekDots(days);
   const nextDue = live.length ? live.map((c) => c.due).sort()[0] : null;
-  // 보관한 과목(과목 서랍)은 목록에서만 뺀다: 시험 날·최근 노트에 안 보인다 (복습은 그대로)
+  // 보관한 과목(과목 서랍)은 목록에서만 뺀다: 최근 노트에 안 보인다 (복습은 그대로)
   const archived = new Set((plan?.subjects ?? []).filter((s) => s.archived).map((s) => s.id));
-  const exams = (plan?.subjects ?? [])
-    .filter((s) => !s.archived && s.exam_date && daysUntil(s.exam_date) >= 0)
-    .sort((a, b) => (a.exam_date! < b.exam_date! ? -1 : 1));
   const recentShown = (data?.recent ?? []).filter((s) => !archived.has(s.subject_id));
   const wrongCount = live.filter((c) => c.in_wrong_note).length;
   const hasCards = !!plan?.cards.length;
@@ -148,7 +144,6 @@ export default function HomePage() {
     if (home.row) {
       const byId = new Map(plan.cards.map((c) => [c.question_id, c]));
       const res = resumePlan(home.row, today, {
-        subjects: plan.planSubjects,
         interleave: settings.interleave,
         now,
         cardOf: (id) => byId.get(id),
@@ -163,7 +158,7 @@ export default function HomePage() {
         more: today.some((c) => !inPlan.has(c.question_id)),
       };
     } else {
-      const c = continuePlan(today, plan.planSubjects, settings.minutes, { now, pace: home.pace, interleave: settings.interleave });
+      const c = continuePlan(today, settings.minutes, { now, pace: home.pace, interleave: settings.interleave });
       view = { total: c.cards.length, done: 0, remaining: c.cards.length, started: false, more: !c.all };
     }
   } else {
@@ -402,26 +397,6 @@ export default function HomePage() {
         </Link>
       </div>
 
-      {ready && exams.length ? (
-        <div className="no-scrollbar -mx-4 flex gap-2 overflow-x-auto px-4 md:-mx-6 md:px-6">
-          {exams.map((s) => {
-            const d = daysUntil(s.exam_date!);
-            return (
-              <Link
-                key={s.id}
-                href={`/library/${s.id}`}
-                className="press inline-flex h-10 shrink-0 items-center gap-2 rounded-full bg-surface px-4 text-sm font-semibold shadow-[0_1px_2px_var(--shadow)]"
-              >
-                <span className="h-2.5 w-2.5 rounded-full" style={{ background: subjectVar(s.color) }} aria-hidden="true" />
-                {s.name}
-                <span className={cx('font-bold', d <= 3 ? 'text-bad' : 'text-accent')}>{d === 0 ? 'D-DAY' : `D-${d}`}</span>
-                {d <= 3 ? <span className="text-xs text-muted">틀린 문제 먼저</span> : null}
-              </Link>
-            );
-          })}
-        </div>
-      ) : null}
-
       {/* 정리 중인 자료는 복습 정보와 함께 나타난다 (따로 먼저 나타나 아래 자리 표시를 밀어내지 않게) */}
       {ready ? <ProcessingList {...active} /> : null}
 
@@ -481,19 +456,6 @@ export default function HomePage() {
           </span>
         </Link>
       </div>
-      {/* 오답노트: 아래 메뉴에서 빠져 복습 탭 안에 있다. 홈에서는 틀린 문제 수로 바로 간다 */}
-      <Link
-        href="/wrong"
-        className="kok-card kok-card-hover press flex items-center gap-3 px-4 py-3"
-        aria-label={ready ? `오답노트 ${wrongCount ? `${wrongCount}문제` : '비어 있어요'}` : '오답노트'}
-      >
-        <span className="kok-well grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-bad-soft text-bad" aria-hidden="true">
-          <Icon d="M6 3h12a1 1 0 0 1 1 1v17l-7-4-7 4V4a1 1 0 0 1 1-1zM9.5 8.5l5 5M14.5 8.5l-5 5" size={19} />
-        </span>
-        <span className="min-w-0 flex-1 font-bold">오답노트</span>
-        <span className="h-5 text-sm text-muted">{known(wrongCount ? `${wrongCount}문제` : '비어 있어요', 'w-12')}</span>
-        <Icon d={ICONS.chevronRight} size={18} className="shrink-0 text-muted" />
-      </Link>
       {err && plan ? <p className="text-sm text-bad">새 복습 정보를 불러오지 못했어요. 새로 고침해 주세요.</p> : null}
 
       {/* 오늘의 KOK 처음부터: 저장한 진행을 지우고 새로 고른다 (빛나는 카드 밖에 둔다: 카드가 isolation 이라 안에 두면 아래 메뉴 밑에 깔린다) */}

@@ -18,10 +18,6 @@ const base: PlanCard = {
   type: 'mcq',
   created_at: '2026-10-01T00:00:00Z',
 };
-const subjects = [
-  { id: 's1', exam_date: null },
-  { id: 's2', exam_date: null },
-];
 type C = PlanCard & { note_id: string; key_point_id: string };
 const card = (id: string, o: Partial<C> = {}): C => ({ ...base, question_id: id, note_id: 'n', key_point_id: `k-${id}`, ...o });
 // 틀렸던 문제 1, 별표 1, 중요 2, 그 밖 40 (모두 복습할 차례)
@@ -31,7 +27,7 @@ const high = ['h1', 'h2'].map((id) => card(id, { importance: 'high' }));
 const low = Array.from({ length: 40 }, (_, i) => card(`l${String(i).padStart(2, '0')}`, { importance: 'low', subject_id: i % 2 ? 's1' : 's2' }));
 const pool: C[] = [...low, ...high, star, wrong];
 const cardOf = (id: string) => pool.find((c) => c.question_id === id);
-const opts = { subjects, interleave: false, now, cardOf, reviewedSince: new Set<string>() };
+const opts = { interleave: false, now, cardOf, reviewedSince: new Set<string>() };
 
 const session = (plan: string[], answered: SessionRow['answered'] = {}, seen = '2026-10-18T00:00:00Z') => ({
   plan,
@@ -43,25 +39,24 @@ const session = (plan: string[], answered: SessionRow['answered'] = {}, seen = '
 
 describe('이어서 풀 문제 (continuePlan)', () => {
   it('푼 것이 없으면 그 시간의 계획과 같다', () => {
-    const [p5] = plansForTimes(pool, subjects, [5], { now, interleave: false });
-    const c = continuePlan(pool, subjects, 5, { now, interleave: false });
+    const [p5] = plansForTimes(pool, [5], { now, interleave: false });
+    const c = continuePlan(pool, 5, { now, interleave: false });
     expect(c.cards.map((x) => x.question_id)).toEqual(p5.cards.map((x) => x.question_id));
     expect(c.seconds).toBe(p5.seconds);
     expect(c.all).toBe(false);
   });
 
   it('이미 푼 문제의 시간만큼 적게 고르고, 예산이 다 찼으면 하나도 고르지 않는다', () => {
-    const p5 = continuePlan(pool, subjects, 5, { now, interleave: false });
+    const p5 = continuePlan(pool, 5, { now, interleave: false });
     const first = p5.cards.slice(0, 3);
     const seeds = first.map((c) => ({ key: `${c.note_id}:${c.key_point_id}`, sec: secondsFor(c, 1) }));
     const rest = pool.filter((c) => !first.includes(c));
-    const more = continuePlan(rest, subjects, 5, { now, interleave: false, seeds });
+    const more = continuePlan(rest, 5, { now, interleave: false, seeds });
     expect(more.cards.map((c) => c.question_id)).toEqual(p5.cards.slice(3).map((c) => c.question_id));
     const full = p5.cards.map((c) => ({ key: `${c.note_id}:${c.key_point_id}`, sec: secondsFor(c, 1) }));
     expect(
       continuePlan(
         pool.filter((c) => !p5.cards.includes(c)),
-        subjects,
         5,
         { now, interleave: false, seeds: full },
       ).cards,
@@ -70,7 +65,7 @@ describe('이어서 풀 문제 (continuePlan)', () => {
 });
 
 describe('저장한 세션 이어서 하기 (resumePlan)', () => {
-  const p5 = continuePlan(pool, subjects, 5, { now, interleave: false });
+  const p5 = continuePlan(pool, 5, { now, interleave: false });
   const ids = p5.cards.map((c) => c.question_id);
   const sec = (id: string) => secondsFor(cardOf(id)!, 1);
 

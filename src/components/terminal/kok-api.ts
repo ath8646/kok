@@ -300,7 +300,7 @@ export function makeKokApi(me: MeResponse, refreshMe: () => Promise<void>): KokA
       // 홈의 '오늘 복습'과 같은 계산 (복습을 끈 노트의 문제는 빼고)
       const live = plan.cards.filter((c) => c.in_review);
       const r = settings.review;
-      const today = pickToday(live, plan.planSubjects, { dailyMax: r.dailyMax, doneToday: plan.doneToday, interleave: r.interleave });
+      const today = pickToday(live, { dailyMax: r.dailyMax, doneToday: plan.doneToday, interleave: r.interleave });
       const byState: [number, number, number, number] = [0, 0, 0, 0];
       for (const c of live) byState[Math.max(0, Math.min(3, c.state))]++;
       const { count: resting } = await sb().from('questions').select('id', { count: 'exact', head: true }).eq('status', 'suspended');

@@ -396,14 +396,16 @@ async def poll_db(q, want, timeout=8):
     raise AssertionError(f"{q}: {got!r} != {want!r}")
 
 
-async def mouse_drag(page, src, dst):
-    """마우스로 끌어서 옮기기 (조금씩 움직여 끌기를 시작하게 한다)"""
+async def mouse_drag(page, src, dst, hold_ms=0):
+    """마우스로 끌어서 옮기기 (조금씩 움직여 끌기를 시작하게 한다). hold_ms: 꾹 누른 뒤 끌기 (자료함 과목 칩)"""
     a = await src.bounding_box()
     b = await dst.bounding_box()
     x0, y0 = a["x"] + a["width"] / 2, a["y"] + a["height"] / 2
     x1, y1 = b["x"] + b["width"] / 2, b["y"] + b["height"] / 2
     await page.mouse.move(x0, y0)
     await page.mouse.down()
+    if hold_ms:
+        await page.wait_for_timeout(hold_ms)
     for i in range(1, 13):
         await page.mouse.move(x0 + (x1 - x0) * i / 12, y0 + (y1 - y0) * i / 12)
         await page.wait_for_timeout(30)
@@ -1356,7 +1358,7 @@ async def tab_steps(browser):
     데이터를 바꾼 뒤에는 기억해 둔 옛 화면을 보이지 않는다. 복습을 끝낸 뒤 '홈으로'는 미리 읽어 둔 홈이 바로 보인다"""
     student = USERS["student"][0]
     step("switching tabs: a screen comes back as it was at once, and no placeholder words show and change a moment later")
-    # 오답노트에 두 문제, 복습할 차례인 문제 셋 (홈의 바로 가기 '오답노트 N문제'·오늘의 KOK 이 바뀌는 것을 본다)
+    # 오답노트에 두 문제, 복습할 차례인 문제 셋 (오늘의 KOK·오답노트가 바뀌는 것을 본다)
     live_q = (
         f"select c.question_id from public.cards c join public.questions q on q.id = c.question_id join public.notes n on n.id = q.note_id "
         f"join public.sources s on s.id = n.source_id where c.user_id = '{student}' and q.status = 'active' and s.in_review"
@@ -1396,15 +1398,15 @@ async def tab_steps(browser):
     await page.goto(BASE + "/home")
     await settle(today_ring)
     rows = await rows_since(0)
-    home_h1, home_sub, home_wrong = seq(rows, "h1"), seq(rows, "sub"), seq(rows, "wrong")
+    home_h1, home_sub = seq(rows, "h1"), seq(rows, "sub")
     assert len(home_h1) == 1 and home_h1[0] != "오늘", f"home title changed while loading: {home_h1}"
     assert len(home_sub) == 1, f"home subtitle changed while loading: {home_sub}"
-    m = re.fullmatch(r"오답노트(\d+)문제", home_wrong[-1])
-    assert m and set(home_wrong) <= {"오답노트", home_wrong[-1]}, f"wrong-note shortcut showed other words while loading: {home_wrong}"
-    n_wrong = int(m.group(1))
+    # 홈 바로 가기는 자료 공유·문제 모아 보기 (오답노트는 아래 메뉴의 '오답')
+    assert not seq(rows, "wrong"), f"home should not have a wrong-note shortcut: {seq(rows, 'wrong')}"
+    n_wrong = int(db(f"select count(*) from public.cards c join public.questions q on q.id = c.question_id join public.notes n on n.id = q.note_id join public.sources s on s.id = n.source_id where c.user_id = '{student}' and c.in_wrong_note and q.status = 'active' and s.in_review"))
     assert n_wrong >= 2, n_wrong
-    home_h1, home_sub, home_wrong = home_h1[0], home_sub[0], home_wrong[-1]
-    print("   home:", home_h1, "/", home_sub, "/", home_wrong)
+    home_h1, home_sub = home_h1[0], home_sub[0]
+    print("   home:", home_h1, "/", home_sub, "/ 오답", n_wrong)
 
     # 2) 홈 → 자료함 → 홈: 다시 들어온 홈은 처음 그린 모습부터 다 읽은 글 그대로 ('불러오는 중' 자리 없이)
     await nav.get_by_role("link", name="자료함").first.click()
@@ -1416,8 +1418,8 @@ async def tab_steps(browser):
     await page.wait_for_url(re.compile(r"/home$"))
     await settle(today_ring)
     rows = await rows_since(i, leave=("자료함",))
-    assert rows and (rows[0]["h1"], rows[0]["sub"], rows[0]["wrong"]) == (home_h1, home_sub, home_wrong), f"home did not come back as it was: {rows[:3]}"
-    assert seq(rows, "h1") == [home_h1] and seq(rows, "sub") == [home_sub] and seq(rows, "wrong") == [home_wrong], rows
+    assert rows and (rows[0]["h1"], rows[0]["sub"]) == (home_h1, home_sub), f"home did not come back as it was: {rows[:3]}"
+    assert seq(rows, "h1") == [home_h1] and seq(rows, "sub") == [home_sub], rows
     assert not any(r["busy"] for r in rows), "home showed a loading placeholder when coming back"
     await shot(page, "120-home-back", full=False)
 
@@ -1430,52 +1432,44 @@ async def tab_steps(browser):
     assert rows and rows[0]["h1"] == "자료함" and rows[0]["sub"] == lib_sub[-1], f"library did not come back as it was: {rows[:3]}, {lib_sub}"
     assert seq(rows, "sub") == [lib_sub[-1]] and not any(r["busy"] for r in rows), rows
 
-    # 4) 복습 탭·오답노트: 처음 열 때도 부제는 다 읽은 글 하나만, 다시 들어오면 처음부터 그대로.
-    #    오답노트는 아래 메뉴에서 빠져 복습 탭 안에 있다 (복습 시작 화면 위·홈의 '오답노트 N문제' 줄로 들어간다)
-    wrong_link = page.locator("main a[href='/wrong']")
+    # 4) 복습 탭·오답 탭: 처음 열 때도 부제는 다 읽은 글 하나만, 다시 들어오면 처음부터 그대로
     tabs = (
-        ("복습", nav.get_by_role("link", name="복습").first, r"/review$", "복습", page.get_by_role("radiogroup", name="언제 공부한 문제를 풀까요?")),
-        ("오답노트", wrong_link.first, r"/wrong$", "오답노트", page.get_by_text(f"틀린 문제 {n_wrong}개 · 3번 연속 맞히면 졸업해요")),
+        ("복습", r"/review$", "복습", page.get_by_role("radiogroup", name="언제 공부한 문제를 풀까요?")),
+        ("오답", r"/wrong$", "오답노트", page.get_by_text(f"틀린 문제 {n_wrong}개 · 3번 연속 맞히면 졸업해요")),
     )
-    for tab, opener, url, title, ready in tabs:
+    for tab, url, title, ready in tabs:
         here = (await page.evaluate("document.querySelector('main h1')?.textContent || ''")).strip()
         i = await mark()
-        await opener.click()
+        await nav.get_by_role("link", name=tab).first.click()
         await page.wait_for_url(re.compile(url))
         await settle(ready)
         first_sub = seq(await rows_since(i, leave=(here,)), "sub")
         assert len(first_sub) == 1, f"{tab}: subtitle changed while loading: {first_sub}"
-        if tab == "복습":
-            # 복습 탭이 켜진 채 오답노트로 (아래 메뉴의 복습 칸이 고른 칸)
-            await expect(page.locator("main a[href='/wrong']")).to_contain_text(f"{n_wrong}문제")
-        else:
-            await expect(nav.get_by_role("link", name="복습").first).to_have_attribute("aria-current", "page")
+        await expect(nav.get_by_role("link", name=tab).first).to_have_attribute("aria-current", "page")
         await nav.get_by_role("link", name="홈").first.click()
         await page.wait_for_url(re.compile(r"/home$"))
         await settle(today_ring)
         i = await mark()
-        await opener.click()
+        await nav.get_by_role("link", name=tab).first.click()
         await page.wait_for_url(re.compile(url))
         await settle(ready)
         rows = await rows_since(i, leave=(home_h1,))
         assert rows and (rows[0]["h1"], rows[0]["sub"]) == (title, first_sub[0]), f"{tab} did not come back as it was: {rows[:3]}"
         assert seq(rows, "sub") == first_sub and not any(r["busy"] for r in rows), (tab, rows)
 
-    # 5) 오답노트에서 한 문제를 빼면(저장) 기억해 둔 홈은 쓰지 않는다: 빼기 전 수가 잠깐 보였다가 바뀌지 않고, 바뀐 수만 나타난다
+    # 5) 오답노트에서 한 문제를 빼면(저장) 기억해 둔 화면은 쓰지 않는다: 홈은 제목·부제가 한 번만 나타나고,
+    #    돌아간 오답노트는 뺀 뒤의 목록 그대로 (화면에서 바로 고친 목록을 저장한 뒤 다시 기억해 둔다)
     await page.get_by_role("button", name="다 외웠어요 · 빼기").first.click()
     await expect(page.get_by_text("다 외운 문제로 뺐어요.")).to_be_visible()
     await expect(page.get_by_text(f"틀린 문제 {n_wrong - 1}개 · 3번 연속 맞히면 졸업해요")).to_be_visible()
     i = await mark()
     await nav.get_by_role("link", name="홈").first.click()
     await page.wait_for_url(re.compile(r"/home$"))
-    await expect(page.locator("main a[href='/wrong']")).to_contain_text(f"{n_wrong - 1}문제")
-    await page.wait_for_timeout(800)
+    await settle(today_ring)
     rows = await rows_since(i, leave=("오답노트",))
-    assert seq(rows, "wrong") in ([f"오답노트{n_wrong - 1}문제"], ["오답노트", f"오답노트{n_wrong - 1}문제"]), f"stale count shown after a change: {seq(rows, 'wrong')}"
     assert len(seq(rows, "h1")) == 1 and len(seq(rows, "sub")) == 1, rows
-    # 돌아간 오답노트는 뺀 뒤의 목록 그대로 (화면에서 바로 고친 목록을 저장한 뒤 다시 기억해 둔다)
     i = await mark()
-    await page.locator("main a[href='/wrong']").first.click()
+    await nav.get_by_role("link", name="오답").first.click()
     await page.wait_for_url(re.compile(r"/wrong$"))
     await settle(page.get_by_text(f"틀린 문제 {n_wrong - 1}개 · 3번 연속 맞히면 졸업해요"))
     rows = await rows_since(i, leave=(seq(rows, "h1")[0],))
@@ -1506,7 +1500,7 @@ async def tab_steps(browser):
 
 
 async def share_steps(browser):
-    """자료 공유(커뮤니티): 아래 메뉴 '공유' → 갤러리 만들기 → 파일·노트를 붙인 글 → 다른 학생이 받기(무료 하루 2개)·열기·내 자료함에 넣기·KOK으로 정리
+    """자료 공유(커뮤니티): 홈 바로 가기 '자료 공유' → 갤러리 만들기 → 갤러리 안에서 파일·노트를 붙인 글 → 다른 학생이 받기(무료 하루 2개)·열기·내 자료함에 넣기·KOK으로 정리
     → 댓글(익명·답글)·좋아요 → 갤러리 만든 사람의 지우기 → 신고가 쌓이면 가림 → 차단 → 찾기·고치기 → 운영자(실제 글쓴이·다시 보이기·지우기) → 갤러리 지우기"""
     student, admin, other = (USERS[k][0] for k in ("student", "admin", "other"))
     db(f"delete from public.rate_hits where user_id in ('{student}', '{other}', '{admin}')")
@@ -1517,19 +1511,20 @@ async def share_steps(browser):
     assert s_nick and o_subject, (s_nick, o_subject)
     files_root = pathlib.Path(__file__).parent / "fakebase" / "files"
 
-    step("share: home shortcuts are 자료 공유 · 문제 모아 보기 and the bottom tab '공유' opens the hub")
+    step("share: the bottom tabs stay 홈·자료함·복습·오답·설정; the home shortcut '자료 공유' opens the hub (writing is inside a gallery)")
     ctx, page = await new_ctx(browser, "student")
     await page.goto(BASE + "/home")
-    await expect(page.get_by_role("link", name=re.compile("^자료 공유"))).to_be_visible()
-    await expect(page.get_by_role("link", name=re.compile("^문제 모아 보기"))).to_be_visible()
-    await expect(page.locator("main a[href='/wrong']")).to_be_visible()
     nav = page.get_by_role("navigation", name="주 메뉴")
-    await expect(nav.get_by_role("link", name="오답", exact=True)).to_have_count(0)
-    await nav.get_by_role("link", name="공유", exact=True).first.click()
+    await expect(nav.get_by_role("link")).to_have_text(["홈", "자료함", "복습", "오답", "설정"])
+    # 홈 바로 가기: 자료 공유·문제 모아 보기 (오답노트는 아래 메뉴의 '오답')
+    await expect(page.get_by_role("link", name=re.compile("^문제 모아 보기"))).to_be_visible()
+    await expect(page.locator("main a[href='/wrong']")).to_have_count(0)
+    await page.get_by_role("link", name=re.compile("^자료 공유")).click()
     await page.wait_for_url(re.compile(r"/share$"))
     await expect(page.get_by_role("heading", name="자료 공유")).to_be_visible()
     await expect(page.get_by_role("link", name=re.compile("^중학교 갤러리, 글"))).to_be_visible()
-    await expect(nav.get_by_role("link", name="공유", exact=True).first).to_have_attribute("aria-current", "page")
+    # 첫 화면에는 글쓰기 단추가 없다 (글은 갤러리에 들어가서 쓴다)
+    await expect(page.get_by_role("link", name="글쓰기")).to_have_count(0)
     await shot(page, "140-share-hub")
     await no_hscroll(page, "share hub")
 
@@ -1555,6 +1550,8 @@ async def share_steps(browser):
     await page.get_by_role("link", name="글쓰기", exact=True).click()
     await page.wait_for_url(re.compile(r"/share/write\?g="))
     await expect(page.get_by_text("동성중 2학년", exact=True)).to_be_visible()
+    # 갤러리 안에서 쓰는 글은 갤러리를 바꾸지 않는다
+    await expect(page.get_by_role("button", name="바꾸기", exact=True)).to_have_count(0)
     await page.get_by_label("제목", exact=True).fill("광합성 정리 PDF와 노트")
     await page.get_by_label("내용", exact=True).fill("2학년 과학 1단원 정리예요.\n시험 전에 보세요!")
     await page.locator("input[type=file]").set_input_files([{"name": "광합성 정리.pdf", "mimeType": "application/pdf", "buffer": make_pdf(2)}])
@@ -1586,17 +1583,28 @@ async def share_steps(browser):
     assert db(f"select count(*) from public.community_files where path like '%{student}%' or preview_path like '%{student}%'") == "0"
     await shot(page, "142-share-post-mine")
 
-    step("share: the note menu's '자료 공유에 올리기' opens the writer with that note attached")
+    step("share: the note menu's '자료 공유에 올리기' asks for a gallery first, then opens its writer with that note attached")
     sid0 = db(f"select source_id from public.community_notes c join public.notes n on n.title = c.title where c.post_id = '{pa}' and n.user_id = '{student}' limit 1") or db(f"select id from public.sources where user_id = '{student}' and status = 'ready' order by created_at limit 1")
     await page.goto(BASE + f"/notes/{sid0}")
     assert await wait_ready(page)
     await page.get_by_role("button", name="노트 메뉴").click()
     await page.get_by_role("menuitem", name="자료 공유에 올리기").click()
-    await page.wait_for_url(re.compile(r"/share/write\?note="))
+    gpick = page.get_by_role("dialog", name="갤러리 고르기")
+    await gpick.get_by_role("button", name=re.compile("^동성중 2학년")).click()
+    await page.wait_for_url(re.compile(rf"/share/write\?g={gid}&note="))
+    await expect(page.get_by_text("동성중 2학년", exact=True)).to_be_visible()
     await expect(page.get_by_text("정리·마인드맵·문제가 담겨요")).to_be_visible()
     await page.get_by_role("button", name="그만두기").first.click()
     await app_confirm(page)
-    await page.wait_for_url(re.compile(r"/share$"))
+    await page.wait_for_url(re.compile(rf"/share/g/{gid}$"))
+    # 갤러리 없이 연 글쓰기는 먼저 갤러리를 고르게 하고, 고르지 않고 닫으면 나간다 (쓰던 글이 없는 기기)
+    wctx, wpage = await new_ctx(browser, "student")
+    await wpage.goto(BASE + "/share")
+    await wpage.goto(BASE + "/share/write")
+    await expect(wpage.get_by_role("dialog", name="갤러리 고르기")).to_be_visible()
+    await wpage.keyboard.press("Escape")
+    await wpage.wait_for_url(re.compile(r"/share$"))
+    await wctx.close()
 
     step("share: a post with a text file (old Korean encoding) and a photo, and a short question post")
     await page.goto(BASE + f"/share/write?g={gid}")
@@ -5225,8 +5233,8 @@ async def main():
         more = chips.get_by_role("button", name=re.compile("^모든 과목"))
         await expect(more).to_contain_text(str(n_subjects))
         await more.click()
-        # 서랍은 목록 → 과목 관리 → 과목 합치기로 이름이 바뀐다
-        DRAWER = re.compile("^(모든 과목|과목 관리|과목 합치기|과목 고르기|과목 지우기)$")
+        # 서랍은 목록 · 과목 고르기(꾹 누르기) · 과목 삭제(확인)로 이름이 바뀐다
+        DRAWER = re.compile("^(모든 과목|과목 고르기|과목 삭제)$")
         drawer = page.get_by_role("dialog", name=DRAWER)
         await expect(drawer).to_have_attribute("aria-label", "모든 과목")
         # 첫 자음으로 찾기 (ㅁㅅ → 미술)
@@ -5235,32 +5243,41 @@ async def main():
         await expect(drawer.get_by_role("button", name=re.compile("^음악"))).to_have_count(0)
         await shot(page, "96-subject-drawer-search", full=False)
         await drawer.get_by_label("과목 찾기").fill("")
-        # 과목 관리(⋯): 설명이 붙은 줄을 눌러 위에 고정 → '고정한 과목' 묶음, 칩 줄 맨 앞
-        await drawer.get_by_role("button", name="'미술' 과목 관리").click()
-        await expect(drawer).to_have_attribute("aria-label", "과목 관리")
-        await expect(drawer.get_by_role("heading", name="미술")).to_be_visible()
-        await expect(drawer.get_by_text("과목 칩 줄 맨 앞에 늘 보여요")).to_be_visible()
-        await drawer.get_by_role("button", name=re.compile("^위에 고정")).click()
+        # 과목의 ⋯ 는 두 가지: 과목 고치기 · 과목 삭제. 과목 고치기에서 위에 고정 → '고정한 과목' 묶음, 칩 줄에 늘 보인다
+        await drawer.get_by_role("button", name="'미술' 과목 메뉴").click()
+        await expect(page.get_by_role("menuitem")).to_have_text(["과목 고치기", "과목 삭제"])
+        await page.get_by_role("menuitem", name="과목 고치기").click()
+        await expect(drawer).to_be_hidden()
+        edit = page.get_by_role("dialog", name="과목 고치기")
+        await expect(edit.get_by_label("과목 이름")).to_have_value("미술")
+        await edit.get_by_text("위에 고정", exact=True).click()
         await poll_db(f"select pinned from public.subjects where user_id = '{me_id}' and name = '미술'", "t")
-        await expect(drawer.get_by_role("button", name=re.compile("^고정 풀기"))).to_be_visible()
-        await drawer.get_by_role("button", name="모든 과목", exact=True).click()
+        await page.keyboard.press("Escape")
+        await expect(edit).to_be_hidden()
+        await expect(chips.get_by_role("tab", name=re.compile("^미술"))).to_have_count(1)
+        await expect(chips.get_by_role("tab")).to_have_count(6)
+        await more.click()
         await expect(drawer.get_by_role("heading", name="고정한 과목")).to_be_visible()
+        # 서랍에서는 순서를 바꾸지 않는다 (과목 칩을 꾹 눌러 끌어 바꾼다)
+        await expect(drawer.get_by_role("switch", name="순서 바꾸기")).to_have_count(0)
         await shot(page, "96-subject-drawer", full=False)
         await drawer.get_by_role("button", name=re.compile("^미술")).click()
         await expect(drawer).to_be_hidden()
         await page.wait_for_url(LIBRARY_SUBJECT)
         await expect(page.get_by_role("heading", name="미술", exact=True)).to_be_visible()
-        await expect(chips.get_by_role("tab").nth(1)).to_contain_text("미술")
-        await expect(chips.get_by_role("tab")).to_have_count(6)
 
         # 보관하기: 자료함 '전체'·과목 칩·자료 넣기·복습 고르기에서 빠지고, 복습 문제 수는 그대로
         sci = db(f"select id from public.subjects where user_id = '{me_id}' and name = '과학'")
         before = await review_total()
         await page.goto(BASE + f"/library/{sci}")
         await page.get_by_role("button", name="과목 메뉴").click()
-        await page.get_by_role("menuitem", name="보관하기").click()
-        await expect(page.get_by_text("보관한 과목이에요.", exact=False)).to_be_visible()
+        await page.get_by_role("menuitem", name="과목 고치기").click()
+        edit = page.get_by_role("dialog", name="과목 고치기")
+        await edit.get_by_text("보관하기", exact=True).click()
         await poll_db(f"select archived from public.subjects where id = '{sci}'", "t")
+        await page.keyboard.press("Escape")
+        await expect(edit).to_be_hidden()
+        await expect(page.get_by_text("보관한 과목이에요.", exact=False)).to_be_visible()
         await page.get_by_role("tab", name=re.compile("^전체")).click()
         await page.wait_for_url(re.compile(r"/library$"))
         left = int(db(f"select count(*) from public.sources where user_id = '{me_id}' and parent_id is null and subject_id <> '{sci}'"))
@@ -5283,112 +5300,72 @@ async def main():
         await expect(composer).to_be_visible()
         await page.keyboard.press("Escape")
         await expect(composer).to_be_hidden()
-        # 서랍의 '보관한 과목'에서 다시 꺼낸다
+        # 서랍의 '보관한 과목'에서 과목 고치기로 다시 꺼낸다
         await chips.get_by_role("button", name=re.compile("^모든 과목")).click()
         await drawer.get_by_role("button", name=re.compile("^보관한 과목 1개")).click()
-        await drawer.get_by_role("button", name="'과학' 과목 관리").click()
-        await drawer.get_by_role("button", name=re.compile("^보관 풀기")).click()
+        await drawer.get_by_role("button", name="'과학' 과목 메뉴").click()
+        await page.get_by_role("menuitem", name="과목 고치기").click()
+        edit = page.get_by_role("dialog", name="과목 고치기")
+        await expect(edit.get_by_label("보관하기")).to_be_checked()
+        await edit.get_by_text("보관하기", exact=True).click()
         await poll_db(f"select archived from public.subjects where id = '{sci}'", "f")
-        # Esc 는 한 단계씩: 과목 관리 → 목록 → 닫기
         await page.keyboard.press("Escape")
-        await expect(drawer).to_have_attribute("aria-label", "모든 과목")
-        await page.keyboard.press("Escape")
-        await expect(drawer).to_be_hidden()
+        await expect(edit).to_be_hidden()
         await ctx.close()
 
         # ---------- 자료함 정리 2: 고정한 과목 순서, 과목 합치기, 노트 옮기기, 노트 합치기, AI로 다시 정리 ----------
-        pinned_sql = f"select string_agg(name, ',' order by position, created_at) from public.subjects where user_id = '{me_id}' and pinned and not archived"
         other_id = USERS["other"][0]
         other_subject = db(f"select id from public.subjects where user_id = '{other_id}' limit 1") or db(
             f"insert into public.subjects (user_id, name) values ('{other_id}', '남의 과목') returning id"
         ).splitlines()[0]
 
-        step("library: pinned subjects — with '순서 바꾸기' on, long-press drag (finger), mouse drag or the keyboard reorders them; off, a long press picks subjects. 과목 관리 has 앞으로·뒤로")
+        step("library: long-press a subject chip and drag it sideways to change the order (finger, mouse), Alt+←/→ with the keyboard; a quick tap still opens the subject")
         db(f"update public.subjects set pinned = false where user_id = '{me_id}'")
         for i, name in enumerate(["체육", "국어", "미술"]):
             db(f"update public.subjects set pinned = true, position = {300 + i} where user_id = '{me_id}' and name = '{name}'")
         ctx, phone = await new_ctx(browser, "student")
         await phone.goto(BASE + "/library")
-        await phone.get_by_role("tablist", name="과목").get_by_role("button", name=re.compile("^모든 과목")).click()
-        drawer = phone.get_by_role("dialog", name=DRAWER)
-        tiles = drawer.locator('section[aria-labelledby="drawer-pinned"] [data-tile]')
-        await expect(tiles).to_have_count(3)
-        switch = drawer.get_by_role("switch", name="순서 바꾸기")
-        await expect(switch).to_have_attribute("aria-checked", "false")
-        await expect(drawer.get_by_text("꾹 눌러 끌면 순서가 바뀌어요")).to_have_count(0)
-        # 스위치를 켜기 전에는 꾹 누르면 여러 과목 고르기 (끌어도 순서는 그대로)
-        await touch_drag(phone, tiles.nth(0), tiles.nth(2))
-        await expect(drawer).to_have_attribute("aria-label", "과목 고르기")
-        await expect(drawer.get_by_text("과목 1개를 골랐어요")).to_be_visible()
-        assert db(pinned_sql) == "체육,국어,미술", db(pinned_sql)
-        await drawer.get_by_role("button", name="끝내기").click()
-        await expect(drawer).to_have_attribute("aria-label", "모든 과목")
-        # 스위치를 켜면 꾹 눌러 끌어 순서를 바꾼다 (다른 과목은 흐리게, 놓은 뒤 따라오는 누르기로 과목이 열리지 않는다)
-        await switch.click()
-        await expect(switch).to_have_attribute("aria-checked", "true")
-        await expect(drawer.get_by_text("꾹 눌러 끌면 순서가 바뀌어요")).to_be_visible()
-        await expect(drawer.locator('section[aria-labelledby="drawer-pinned"]').get_by_role("button", name=re.compile("과목 관리$"))).to_have_count(0)
-        await shot(phone, "97-subject-reorder", full=False)
-        await touch_drag(phone, tiles.nth(0), tiles.nth(2))
-        await poll_db(pinned_sql, "국어,미술,체육")
-        await expect(drawer).to_have_attribute("aria-label", "모든 과목")
-        # 키보드: 스페이스로 들고 화살표로 옮긴 뒤 스페이스로 놓는다 (폰은 두 칸씩: 셋째 칸 위가 첫째 칸)
-        await tiles.nth(2).focus()
-        await phone.keyboard.press("Space")
-        await phone.wait_for_timeout(200)
-        await phone.keyboard.press("ArrowUp")
-        await phone.wait_for_timeout(200)
-        await phone.keyboard.press("Space")
-        await poll_db(pinned_sql, "체육,국어,미술")
-        # 키보드로 든 채 Esc: 옮기기만 그만둔다 (시트·스위치는 그대로), 한 번 더 Esc 면 순서 바꾸기를 끈다
-        await tiles.nth(0).focus()
-        await phone.keyboard.press("Space")
-        await phone.wait_for_timeout(200)
-        await phone.keyboard.press("ArrowRight")
-        await phone.wait_for_timeout(200)
-        await phone.keyboard.press("Escape")
-        await phone.wait_for_timeout(300)
-        await expect(drawer).to_be_visible()
-        await expect(switch).to_have_attribute("aria-checked", "true")
-        assert db(pinned_sql) == "체육,국어,미술", db(pinned_sql)
-        await phone.keyboard.press("Escape")
-        await expect(switch).to_have_attribute("aria-checked", "false")
-        await expect(switch).to_be_focused()
-        # 과목 관리의 앞으로·뒤로 (끌기 없이): 끝에 닿아도 누른 단추에 초점이 남는다
-        await drawer.get_by_role("button", name="'미술' 과목 관리").click()
-        await expect(drawer.get_by_text("고정한 과목 3개 중 3번째")).to_be_visible()
-        await expect(drawer.get_by_role("button", name="뒤로 옮기기")).to_be_disabled()
-        forward = drawer.get_by_role("button", name="앞으로 옮기기")
-        await forward.click()
-        await expect(drawer.get_by_text("고정한 과목 3개 중 2번째")).to_be_visible()
-        await poll_db(pinned_sql, "체육,미술,국어")
-        await forward.click()
-        await expect(drawer.get_by_text("고정한 과목 3개 중 1번째")).to_be_visible()
-        await expect(forward).to_be_disabled()
-        await expect(forward).to_be_focused()
-        await poll_db(pinned_sql, "미술,체육,국어")
-        await shot(phone, "97-subject-panel", full=False)
-        await phone.keyboard.press("Escape")
-        await expect(drawer).to_have_attribute("aria-label", "모든 과목")
-        await expect(drawer.get_by_role("button", name="'미술' 과목 관리")).to_be_focused()
-        await phone.keyboard.press("Escape")
-        await expect(drawer).to_be_hidden()
         chips = phone.get_by_role("tablist", name="과목")
-        await expect(chips.get_by_role("tab").nth(1)).to_contain_text("미술")
-        await expect(chips.get_by_role("tab").nth(2)).to_contain_text("체육")
-        # 다시 열면 처음 모습 (스위치는 꺼져 있다)
-        await phone.get_by_role("tablist", name="과목").get_by_role("button", name=re.compile("^모든 과목")).click()
-        await expect(drawer.get_by_role("switch", name="순서 바꾸기")).to_have_attribute("aria-checked", "false")
+        await expect(chips.get_by_role("tab").nth(1)).to_be_visible()
+        await phone.wait_for_timeout(600)
+
+        async def chip_ids(pg):
+            ids = await pg.get_by_role("tablist", name="과목").locator("[data-chip]").evaluate_all("els => els.map((e) => e.dataset.chip)")
+            return [x for x in ids if x != "all"]
+
+        def order_sql(ids):
+            return f"select string_agg(id::text, ',' order by position, created_at) from public.subjects where id in ({', '.join(repr(x) for x in ids)})"
+
+        chip = lambda pg, sid: pg.get_by_role("tablist", name="과목").locator(f'[data-chip="{sid}"]')  # noqa: E731
+        row = await chip_ids(phone)
+        assert len(row) >= 3, row
+        # 손가락: 첫 칩을 꾹 눌러 셋째 칩 자리로 끌면 그 자리로, 놓은 뒤 따라오는 누르기로 과목이 열리지 않는다
+        await touch_drag(phone, chip(phone, row[0]), chip(phone, row[2]))
+        want = [row[1], row[2], row[0], *row[3:]]
+        await poll_db(order_sql(row), ",".join(want))
+        assert await chip_ids(phone) == want, await chip_ids(phone)
+        assert phone.url.endswith("/library"), phone.url
+        await shot(phone, "97-subject-chip-reorder", full=False)
+        # 키보드: Alt + → 로 한 칸 뒤로 (알림으로 읽어 준다)
+        await chip(phone, want[0]).focus()
+        await phone.keyboard.press("Alt+ArrowRight")
+        want = [want[1], want[0], *want[2:]]
+        await poll_db(order_sql(row), ",".join(want))
+        await expect(phone.get_by_role("status").filter(has_text="2번째로 옮겼어요")).to_have_count(1)
+        # 짧게 누르면 그대로 과목 열기
+        await chip(phone, want[1]).click()
+        await phone.wait_for_url(re.compile(rf"/library/{want[1]}$"))
         await ctx.close()
+        # 마우스: 꾹 누른 채 끌기
         ctx, page = await new_ctx(browser, "student", width=1280)
         await page.goto(BASE + "/library")
-        await page.get_by_role("tablist", name="과목").get_by_role("button", name=re.compile("^모든 과목")).click()
-        drawer = page.get_by_role("dialog", name=DRAWER)
-        tiles = drawer.locator('section[aria-labelledby="drawer-pinned"] [data-tile]')
-        await drawer.get_by_role("switch", name="순서 바꾸기").click()
-        await mouse_drag(page, tiles.nth(2), tiles.nth(0))
-        await poll_db(pinned_sql, "국어,미술,체육")
-        await expect(drawer).to_have_attribute("aria-label", "모든 과목")
+        await expect(page.get_by_role("tablist", name="과목").get_by_role("tab").nth(1)).to_be_visible()
+        await page.wait_for_timeout(600)
+        row = await chip_ids(page)
+        await mouse_drag(page, chip(page, row[2]), chip(page, row[0]), hold_ms=550)
+        want = [row[2], row[0], row[1], *row[3:]]
+        await poll_db(order_sql(row), ",".join(want))
+        assert page.url.endswith("/library"), page.url
         await ctx.close()
 
         step("library: pick several subjects in '모든 과목' (long press) — pin, keep aside or delete them together; deleting always asks first and offers keeping aside instead")
@@ -5429,12 +5406,12 @@ async def main():
         await expect(drawer).to_have_attribute("aria-label", "과목 고르기")
         await page.keyboard.press("Escape")
         await expect(drawer).to_have_attribute("aria-label", "모든 과목")
-        # 과목 관리의 지우기도 늘 확인 화면을 거친다: 대신 보관하기
-        await drawer.get_by_role("button", name="'지울과목3' 과목 관리").click()
-        await drawer.get_by_role("button", name=re.compile("^과목 지우기")).click()
-        await expect(drawer).to_have_attribute("aria-label", "과목 지우기")
-        await expect(drawer.get_by_text("‘지울과목3’ 과목을 지울까요?")).to_be_visible()
-        await expect(drawer.get_by_role("list", name="지울 과목").get_by_role("listitem")).to_have_count(1)
+        # ⋯ 의 과목 삭제도 늘 확인 화면을 거친다: 대신 보관하기
+        await drawer.get_by_role("button", name="'지울과목3' 과목 메뉴").click()
+        await page.get_by_role("menuitem", name="과목 삭제").click()
+        await expect(drawer).to_have_attribute("aria-label", "과목 삭제")
+        await expect(drawer.get_by_text("‘지울과목3’ 과목을 삭제할까요?")).to_be_visible()
+        await expect(drawer.get_by_role("list", name="삭제할 과목").get_by_role("listitem")).to_have_count(1)
         await drawer.get_by_role("button", name="대신 보관하기").click()
         await expect(drawer).to_have_attribute("aria-label", "모든 과목")
         await poll_db(f"select archived from public.subjects where id = '{made_subjects['지울과목3']}'", "t")
@@ -5443,25 +5420,25 @@ async def main():
         await tile("지울과목2").click()
         await tile("지울과목3").click()
         await expect(drawer.get_by_text("과목 3개를 골랐어요")).to_be_visible()
-        await bar.get_by_role("button", name="지우기").click()
-        await expect(drawer).to_have_attribute("aria-label", "과목 지우기")
-        await expect(drawer.get_by_text("과목 3개를 지울까요?")).to_be_visible()
+        await bar.get_by_role("button", name="삭제").click()
+        await expect(drawer).to_have_attribute("aria-label", "과목 삭제")
+        await expect(drawer.get_by_text("과목 3개를 삭제할까요?")).to_be_visible()
         await expect(drawer.get_by_role("button", name="대신 보관하기")).to_be_visible()
         await shot(page, "97-subject-delete-confirm", full=False)
         await drawer.get_by_role("button", name="과목 고르기").click()
         await expect(drawer.get_by_text("과목 3개를 골랐어요")).to_be_visible()
-        await expect(bar.get_by_role("button", name="지우기")).to_be_focused()
+        await expect(bar.get_by_role("button", name="삭제")).to_be_focused()
         assert db(f"select count(*) from public.subjects where name in ({', '.join(repr(x) for x in throwaway)})") == "3"
-        await bar.get_by_role("button", name="지우기").click()
-        await drawer.get_by_role("button", name="과목 3개 지우기").click()
+        await bar.get_by_role("button", name="삭제").click()
+        await drawer.get_by_role("button", name="과목 3개 삭제").click()
         await expect(drawer).to_have_attribute("aria-label", "모든 과목")
-        await expect(page.get_by_text("과목 3개를 지웠어요.")).to_be_visible()
+        await expect(page.get_by_text("과목 3개를 삭제했어요.")).to_be_visible()
         await poll_db(f"select count(*) from public.subjects where name in ({', '.join(repr(x) for x in throwaway)})", "0")
         assert db(f"select count(*) from public.sources where title like '지울과목%'") == "0"
         await expect(drawer.get_by_text("‘지울과목’에 맞는 과목이 없어요.")).to_be_visible()
         await ctx.close()
 
-        step("library: merge one subject into another (drawer, subject menu) — notes, questions, cards and review records move, the subject is gone")
+        step("library: merge one subject into another (과목 고치기 from the drawer or the subject menu) — notes, questions, cards and review records move, the subject is gone")
         music = db(f"select id from public.subjects where user_id = '{me_id}' and name = '음악'")
         social = db(f"select id from public.subjects where user_id = '{me_id}' and name = '사회'")
         art = db(f"select id from public.subjects where user_id = '{me_id}' and name = '미술'")
@@ -5479,16 +5456,15 @@ async def main():
         await page.goto(BASE + "/library")
         await page.get_by_role("tablist", name="과목").get_by_role("button", name=re.compile("^모든 과목")).click()
         drawer = page.get_by_role("dialog", name=DRAWER)
-        await drawer.get_by_role("button", name="'음악' 과목 관리").click()
-        await drawer.get_by_role("button", name=re.compile("^다른 과목과 합치기")).click()
-        await expect(drawer).to_have_attribute("aria-label", "과목 합치기")
-        await expect(drawer.get_by_text("‘음악’ 과목을 어느 과목으로 합칠까요?")).to_be_visible()
-        await expect(drawer.get_by_role("button", name="합칠 과목을 골라 주세요")).to_be_disabled()
-        await expect(drawer.get_by_role("radio", name=re.compile("^음악"))).to_have_count(0)
-        await drawer.get_by_role("radio", name=re.compile("^미술")).click()
+        await drawer.get_by_role("button", name="'음악' 과목 메뉴").click()
+        await page.get_by_role("menuitem", name="과목 고치기").click()
+        await page.get_by_role("dialog", name="과목 고치기").get_by_role("button", name=re.compile("^다른 과목과 합치기")).click()
+        msheet = page.get_by_role("dialog", name="다른 과목과 합치기")
+        await expect(msheet.get_by_role("radio", name=re.compile("^음악"))).to_have_count(0)
+        await msheet.get_by_role("radio", name=re.compile("^미술")).click()
         await shot(page, "97-subject-merge", full=False)
-        await drawer.get_by_role("button", name="'미술' 과목으로 합치기").click()
-        await expect(drawer).to_be_hidden()
+        await msheet.get_by_role("button", name="'미술' 과목으로 합치기").click()
+        await expect(msheet).to_be_hidden()
         await page.wait_for_url(re.compile(rf"/library/{art}$"))
         await poll_db(f"select count(*) from public.subjects where id = '{music}'", "0")
         assert db(f"select subject_id from public.sources where id = '{music_src}'") == art
@@ -5497,10 +5473,11 @@ async def main():
         assert db(f"select subject_id from public.cards where question_id = '{mq}'") == art
         assert db(f"select subject_id from public.review_logs where question_id = '{mq}'") == art
         await expect(page.locator("main [data-flip]")).to_have_count(1)
-        # 과목 메뉴에서도 (사회 → 미술)
+        # 과목 메뉴의 과목 고치기에서도 (사회 → 미술)
         await page.goto(BASE + f"/library/{social}")
         await page.get_by_role("button", name="과목 메뉴").click()
-        await page.get_by_role("menuitem", name="다른 과목과 합치기").click()
+        await page.get_by_role("menuitem", name="과목 고치기").click()
+        await page.get_by_role("dialog", name="과목 고치기").get_by_role("button", name=re.compile("^다른 과목과 합치기")).click()
         sheet = page.get_by_role("dialog", name="다른 과목과 합치기")
         await sheet.get_by_role("radio", name=re.compile("^미술")).click()
         await sheet.get_by_role("button", name="'미술' 과목으로 합치기").click()
@@ -5867,42 +5844,39 @@ async def main():
         await ctx.close()
         db(f"delete from public.subjects where user_id = '{me_id}' and name in ({', '.join(repr(x) for x in extra)})")
 
-        step("subject: the exam date is picked in the app's calendar (not the browser's date box)")
+        step("subject menu: five plain choices — review, questions, pick notes, 과목 고치기 (name·colour·pin·keep aside·merge, no exam date), 과목 삭제")
         sctx, spage = await new_ctx(browser, "student")
-        exam_sid = db(f"select id from public.subjects where user_id = '{me_id}' and not archived order by created_at limit 1")
-        db(f"update public.subjects set exam_date = null where id = '{exam_sid}'")
-        await spage.goto(BASE + f"/library/{exam_sid}")
+        menu_sid = db(f"select s.id from public.subjects s where s.user_id = '{me_id}' and not s.archived and exists (select 1 from public.sources x where x.subject_id = s.id and x.parent_id is null) order by s.created_at limit 1")
+        await spage.goto(BASE + f"/library/{menu_sid}")
         await spage.get_by_role("button", name="과목 메뉴").click()
+        await expect(spage.get_by_role("menuitem")).to_have_text(["이 과목 복습하기", "문제 모아 보기", "자료 여러 개 고르기", "과목 고치기", "과목 삭제"])
+        await shot(spage, "111-subject-menu", full=False)
         await spage.get_by_role("menuitem", name="과목 고치기").click()
         sform = spage.get_by_role("dialog", name="과목 고치기")
-        assert await sform.locator("input[type=date]").count() == 0, "no native date box"
-        trigger = sform.get_by_role("button", name=re.compile("^시험 날짜: "))
-        await trigger.click()
-        await expect(trigger).to_have_attribute("aria-expanded", "true")
-        # 열면 오늘 칸에 초점, 다음 달로 넘겨 15일을 고른다
-        await expect(sform.get_by_role("button", name=re.compile(", 오늘$"))).to_be_focused()
-        await sform.get_by_role("button", name="다음 달").click()
-        # main 안에서는 datetime 이 클래스 이름이다 (위의 from datetime import datetime)
-        import datetime as dtm
-
-        kst = dtm.datetime.now(dtm.timezone(dtm.timedelta(hours=9))).date()
-        ny, nm = (kst.year + 1, 1) if kst.month == 12 else (kst.year, kst.month + 1)
-        await sform.get_by_role("button", name=re.compile(f"^{nm}월 15일 ")).click()
-        await expect(trigger).to_have_attribute("aria-expanded", "false")
-        # 단추 글은 짧게 (올해면 해 없이), 읽어 주는 이름은 해까지
-        await expect(trigger).to_contain_text(f"{nm}월 15일 (")
-        await expect(trigger).to_have_attribute("aria-label", re.compile(f"^시험 날짜: {ny}년 {nm}월 15일 "))
-        await expect(trigger).to_contain_text("D-")
-        await shot(spage, "111-exam-date", full=False)
-        # Esc 는 달력만 접고 창은 그대로
-        await trigger.click()
+        await expect(sform.get_by_label("과목 이름")).to_be_visible()
+        # 시험 날짜는 없다 (시험 모드도 없다)
+        await expect(sform.get_by_text("시험 날짜")).to_have_count(0)
+        assert await sform.locator("input[type=date]").count() == 0
+        # 위에 고정은 바로 바뀐다 (저장을 누르지 않아도)
+        pinned_before = db(f"select coalesce(pinned, false)::text from public.subjects where id = '{menu_sid}'")
+        flipped = "false" if pinned_before == "true" else "true"
+        await sform.get_by_text("위에 고정", exact=True).click()
+        await poll_db(f"select coalesce(pinned, false)::text from public.subjects where id = '{menu_sid}'", flipped)
+        await sform.get_by_text("위에 고정", exact=True).click()
+        await poll_db(f"select coalesce(pinned, false)::text from public.subjects where id = '{menu_sid}'", pinned_before)
+        await expect(sform.get_by_text("보관하기", exact=True)).to_be_visible()
+        await expect(sform.get_by_role("button", name=re.compile("^다른 과목과 합치기"))).to_be_visible()
+        await shot(spage, "111-subject-edit", full=False)
         await spage.keyboard.press("Escape")
-        await expect(trigger).to_have_attribute("aria-expanded", "false")
-        await expect(sform).to_be_visible()
-        await sform.get_by_role("button", name="저장", exact=True).click()
         await expect(sform).to_be_hidden()
-        await poll_db(f"select exam_date::text from public.subjects where id = '{exam_sid}'", f"{ny:04d}-{nm:02d}-15")
-        db(f"update public.subjects set exam_date = null where id = '{exam_sid}'")
+        # 과목 삭제: 메뉴에서 바로 (한 번 묻는다)
+        gone_sid = db(f"insert into public.subjects (user_id, name, color) values ('{me_id}', '지울 과목', 'blue') returning id")
+        await spage.goto(BASE + f"/library/{gone_sid}")
+        await spage.get_by_role("button", name="과목 메뉴").click()
+        await spage.get_by_role("menuitem", name="과목 삭제").click()
+        msg = await app_confirm(spage)
+        assert "지울 과목" in msg, msg
+        await poll_db(f"select count(*) from public.subjects where id = '{gone_sid}'", "0")
         # 계정 삭제 안내: 로그인하고 오면 설정의 탈퇴 칸이 펼쳐진다 (지우지는 않는다)
         await spage.goto(BASE + "/delete-account")
         await spage.get_by_role("link", name="로그인하고 계정 지우기").click()

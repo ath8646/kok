@@ -72,18 +72,18 @@ export function ReviewStart({
     const subjects = periods ? plan.subjects.filter((s) => cards.some((c) => c.subject_id === s.id)) : [];
     const subjectId = choice.subjectId && subjects.some((s) => s.id === choice.subjectId) ? choice.subjectId : null;
     const inSubject = subjectId ? cards.filter((c) => c.subject_id === subjectId) : cards;
-    const counts = periods ? periodCounts(inSubject, plan.planSubjects, o) : null;
-    const poolOf = (list: PlanCardRow[]) => (periods ? periodPool(list, plan.planSubjects, choice.period, o) : list);
+    const counts = periods ? periodCounts(inSubject, o) : null;
+    const poolOf = (list: PlanCardRow[]) => (periods ? periodPool(list, choice.period, o) : list);
     const pool = poolOf(inSubject);
     const subjectCounts = new Map(subjects.map((s) => [s.id, poolOf(cards.filter((c) => c.subject_id === s.id)).length]));
     const allCount = periods ? poolOf(cards).length : cards.length;
-    const plans = plansForTimes(pool, plan.planSubjects, REVIEW_MINUTES, { now, pace, interleave: review.interleave });
+    const plans = plansForTimes(pool, REVIEW_MINUTES, { now, pace, interleave: review.interleave });
     // 다 들어가는 문제가 5분보다 적으면 시간을 고를 것이 없다
     const timed = pool.length > 0 && !plans[0].all;
     const chosen = timed ? plans[REVIEW_MINUTES.indexOf(choice.minutes)] : plans[0];
     // 복습할 차례가 비었을 때: 하루 최대 수를 채워서인지
     const dueWaiting =
-      periods && choice.period === 'due' && !pool.length ? pickToday(inSubject, plan.planSubjects, { ...o, dailyMax: 100_000, doneToday: 0 }).length : 0;
+      periods && choice.period === 'due' && !pool.length ? pickToday(inSubject, { ...o, dailyMax: 100_000, doneToday: 0 }).length : 0;
     return {
       subjects,
       subjectId,
@@ -94,7 +94,7 @@ export function ReviewStart({
       plans,
       timed,
       chosen,
-      kinds: pickKinds(chosen.cards, plan.planSubjects, now),
+      kinds: pickKinds(chosen.cards, now),
       dueWaiting,
     };
     // opts 는 아래 값으로 정해진다

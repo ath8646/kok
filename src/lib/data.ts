@@ -2,7 +2,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { supabaseBrowser } from './supabase/client';
 import type { CardRow, QuestionRow, SourceListRow, SubjectRow } from './types';
-import type { PlanCard, PlanSubject } from './review-plan';
+import type { PlanCard } from './review-plan';
 import { readSession, type Answered, type SessionKey, type SessionRow } from './review-session';
 import { kstDayStart } from './time';
 import { previewText } from './richtext';
@@ -24,7 +24,7 @@ export async function fetchAll<T>(make: (from: number, to: number) => PromiseLik
   return out;
 }
 
-const SUBJECT_COLS = 'id, name, color, exam_date, position, created_at';
+const SUBJECT_COLS = 'id, name, color, position, created_at';
 /** 과목 서랍 칸 (고정·보관·최근 쓴 때). schema.sql 을 다시 실행하기 전에는 없어서, 처음 읽을 때 알아낸다 */
 const DRAWER_COLS = 'pinned, archived, used_at';
 /** 칸이 없다고 알아낸 때 (1분 동안만 믿는다: 그 사이 schema.sql 을 다시 실행했으면 다시 읽어 본다) */
@@ -174,7 +174,6 @@ export type PlanData = {
   /** 카드 전체 칸 (복습 저장에 쓴다) */
   rawCards: Map<string, CardRow>;
   subjects: SubjectRow[];
-  planSubjects: PlanSubject[];
   doneToday: number;
   /** 노트마다 개념 (중요도·이름·별표) */
   concepts: Map<string, Map<string, ConceptInfo>>;
@@ -236,7 +235,6 @@ export async function fetchPlanData(): Promise<PlanData> {
     cards: planCards,
     rawCards: new Map(cards.map((c) => [c.question_id, c])),
     subjects,
-    planSubjects: subjects.map((s) => ({ id: s.id, exam_date: s.exam_date })),
     doneToday: done.count ?? 0,
     concepts,
   };

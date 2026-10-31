@@ -248,8 +248,9 @@ export function GalleryPickSheet({
         <Button
           variant="secondary"
           onClick={() => {
-            onClose();
+            // 만들기를 먼저 알린 뒤 닫는다 (닫힐 때 '고르지 않고 닫음'으로 보지 않게)
             onMake();
+            onClose();
           }}
         >
           <Icon d={ICONS.plus} size={16} strokeWidth={2.4} />새 갤러리 만들기

@@ -17,7 +17,6 @@ import {
   PostSkeleton,
   SearchBox,
   ShareSection,
-  WriteFab,
 } from '@/components/share/ShareUi';
 import { josa } from '@/lib/josa';
 import { readView, viewStamp, writeView } from '@/lib/view-cache';
@@ -104,7 +103,8 @@ function ShareHub() {
     <div className="grid gap-3 pb-6">
       <LargeHeader
         title="자료 공유"
-        subtitle="갤러리에서 자료를 나누고 찾아요"
+        // 글은 갤러리 안에서 쓴다 (첫 화면에는 글쓰기 단추가 없다)
+        subtitle="갤러리에 들어가서 자료를 나누고 찾아요"
         actions={
           <>
             {hub ? <DownloadsPill left={hub.downloads.left} daily={hub.downloads.daily} /> : null}
@@ -211,7 +211,6 @@ function ShareHub() {
               </ShareSection>
             </>
           )}
-          <WriteFab href="/share/write" />
         </>
       )}
       <GallerySheet open={making} onClose={() => setMaking(false)} onSaved={(g) => router.push(`/share/g/${g.id}`)} />

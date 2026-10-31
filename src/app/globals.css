@@ -1761,43 +1761,18 @@ body.kok-editing .kok-fab {
 .kok-sort-row.is-dragging .kok-sort-card::after {
   opacity: 1;
 }
-/* 과목 서랍의 고정한 과목: 꾹 눌러 끌면 순서가 바뀐다 (들린 칸은 살짝 커지고 그림자가 진다) */
-.kok-drag-tile {
+/* 자료함 과목 칩: 꾹 눌러 옆으로 끌면 차례가 바뀐다 (들린 칩은 그림자가 진다. 칩의 자리는 dnd-kit 이 transform 으로) */
+.kok-chip-sort {
   touch-action: manipulation;
   -webkit-user-select: none;
   user-select: none;
   -webkit-touch-callout: none;
-  border-radius: 1rem;
 }
-.kok-drag-tile.is-dragging {
-  z-index: 20;
+.kok-chip-sort.is-dragging {
   cursor: grabbing;
-}
-.kok-drag-tile > [data-tile]::after {
-  content: '';
-  position: absolute;
-  inset: 0;
-  border-radius: inherit;
   box-shadow:
-    0 14px 30px var(--shadow-strong),
-    0 2px 6px var(--shadow-strong);
-  opacity: 0;
-  transition: opacity 160ms ease;
-  pointer-events: none;
-}
-.kok-drag-tile.is-dragging > [data-tile] {
-  transform: scale(1.04);
-}
-.kok-drag-tile.is-dragging > [data-tile]::after {
-  opacity: 1;
-}
-@media (prefers-reduced-motion: reduce) {
-  .kok-drag-tile > [data-tile]::after {
-    transition: none;
-  }
-  .kok-drag-tile.is-dragging > [data-tile] {
-    transform: none;
-  }
+    0 10px 24px var(--shadow-strong),
+    0 2px 6px var(--shadow-strong) !important;
 }
 /* 순서 바꾸기 화면으로 들어올 때 줄이 차례로 (늦게 나오는 줄도 300ms 안에 끝나게) */
 .kok-sort-in {

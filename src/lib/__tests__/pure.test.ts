@@ -3,7 +3,7 @@ import { autoGrade, autoRating, normalizeAnswer } from '@/lib/grading';
 import { costUsd, estimateEnergy, usdToEnergy, costMultiplier } from '@/lib/ai/models';
 import { toQuestionRow, zNote, zQuizItem, zVisualResult, noteJsonSchema, visualJsonSchema, quizJsonSchema } from '@/lib/ai/schemas';
 import { planChunks, splitText } from '@/lib/pdf';
-import { kstDayStart, kstMonthStart, daysUntil } from '@/lib/time';
+import { kstDayStart, kstMonthStart } from '@/lib/time';
 import { buildTree, layoutMindmap, addChild, deleteNode, moveNode, renameNode, reorderNode, ROOT_ID } from '@/lib/mindmap-layout';
 import { DEFAULT_SETTINGS, readUserSettings, readLimits, modelForTier, DEFAULT_MODELS } from '@/lib/settings';
 import { wrap } from '@/lib/ai/prompts';
@@ -174,7 +174,6 @@ describe('time (KST)', () => {
     const now = new Date('2026-10-18T16:30:00Z'); // KST 10/19 01:30
     expect(kstDayStart(now).toISOString()).toBe('2026-10-18T15:00:00.000Z');
     expect(kstMonthStart(now).toISOString()).toBe('2026-09-30T15:00:00.000Z');
-    expect(daysUntil('2026-10-25', now)).toBe(6);
   });
 });
 
@@ -263,7 +262,7 @@ describe('prompt wrapping', () => {
 });
 
 import { reviewCard, toCard, dueLabel } from '@/lib/srs';
-import { pickToday, streakInfo, weakConcepts, effectiveDue } from '@/lib/review-plan';
+import { pickToday, streakInfo, weakConcepts } from '@/lib/review-plan';
 import { splitMath } from '@/lib/richtext';
 
 describe('srs', () => {
@@ -298,39 +297,8 @@ describe('review plan', () => {
       { ...base, question_id: 'b', subject_id: 's1', due: '2026-10-17T00:00:00Z', importance: 'high' as const },
       { ...base, question_id: 'c', subject_id: 's2', due: '2026-10-25T00:00:00Z' },
     ];
-    const out = pickToday(
-      cards,
-      [
-        { id: 's1', exam_date: null },
-        { id: 's2', exam_date: null },
-      ],
-      { now, dailyMax: 1, doneToday: 0, interleave: true },
-    );
+    const out = pickToday(cards, { now, dailyMax: 1, doneToday: 0, interleave: true });
     expect(out.map((c) => c.question_id)).toEqual(['b']);
-  });
-  it('pulls cards before an exam', () => {
-    const card = { ...base, question_id: 'c', subject_id: 's2', due: '2026-10-30T00:00:00Z' };
-    const subj = { id: 's2', exam_date: '2026-10-22' };
-    expect(effectiveDue(card, subj, now)).toBeLessThan(Date.parse('2026-10-22T00:00:00+09:00'));
-  });
-  it('does not repeat a card the same day in exam mode', () => {
-    // 시험 날(KST 10/18) 아침에 본 문제: 다음 복습은 FSRS 대로 (오늘 다시 나오지 않는다)
-    const examDay = { id: 's3', exam_date: '2026-10-18' };
-    const seen = { ...base, question_id: 'd', subject_id: 's3', last_review: '2026-10-18T00:30:00Z', due: '2026-10-25T00:00:00Z' };
-    expect(effectiveDue(seen, examDay, now)).toBe(Date.parse(seen.due));
-    // 처음 보는 문제를 한 번 봤어도(reps 1) 12시간 안에는 다시 당기지 않는다
-    const once = { ...seen, question_id: 'e', reps: 1, state: 1 };
-    expect(effectiveDue(once, examDay, now)).toBe(Date.parse(once.due));
-    // 어제 본 문제는 시험 날에 한 번 나온다
-    const yesterday = { ...seen, question_id: 'f', last_review: '2026-10-16T12:00:00Z' };
-    expect(effectiveDue(yesterday, examDay, now)).toBeLessThanOrEqual(now.getTime());
-    // 시험 전날 밤에 본 문제는 다음 날 아침 전으로 당기지 않는다 (12시간 간격)
-    const lateNight = { ...seen, question_id: 'g', last_review: '2026-10-21T13:00:00Z' };
-    const examLater = { id: 's4', exam_date: '2026-10-22' };
-    const at = new Date('2026-10-21T14:00:00Z');
-    expect(effectiveDue(lateNight, examLater, at)).toBeGreaterThanOrEqual(Date.parse(lateNight.last_review) + 12 * 3600_000);
-    // pickToday 도 같은 문제를 다시 고르지 않는다
-    expect(pickToday([seen, once], [examDay], { now, dailyMax: 50, doneToday: 2, interleave: false })).toHaveLength(0);
   });
   it('counts streaks with up to two rest days a week', () => {
     // 2026-10-18 은 일요일

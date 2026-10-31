@@ -1,7 +1,20 @@
-// 워드(.docx) → 글: 문단·제목·목록·표·글상자·수식(OMML → LaTeX)·코드(고정폭 글꼴·코드 스타일 문단)
+// 워드(.docx) → 글: 문단·제목·목록·표·글상자·수식(OMML → LaTeX)·코드(고정폭 글꼴·코드 스타일 문단)·그림 자리·차트(값 표)
+import { chartTable } from './chart';
 import { OfficeError } from './errors';
 import { CODE_STYLE, MONO_FONT, TextOut } from './out';
+import { cropOf, type Crop, type PictureSink } from './pictures';
+import { readRels } from './rels';
 import { attr, findAll, first, kids, local, parseXml, type XmlNode } from './xml';
+
+/** 문단 안에서 만난 그림·차트 (관계 번호) */
+type Found = { kind: 'pic'; rid: string; crop?: Crop } | { kind: 'chart'; rid: string };
+
+/** a:srcRect (1/1000 %: 10000 = 10%) → 자르기 */
+export function srcRectCrop(n: XmlNode | undefined): Crop | undefined {
+  if (!n) return undefined;
+  const v = (k: string) => Number(attr(n, k) ?? 0) / 100000;
+  return cropOf(v('l'), v('t'), v('r'), v('b'));
+}
 
 type Styles = Map<string, string>;
 
@@ -80,8 +93,8 @@ export function ommlToTex(n: XmlNode): string {
   }
 }
 
-/** 문단 하나의 글 (글상자 안 문단은 따로 boxes 에 모은다) */
-function paraText(p: XmlNode, boxes: XmlNode[][]): { text: string; mono: boolean } {
+/** 문단 하나의 글 (글상자 안 문단은 따로 boxes 에, 그림·차트는 found 에 모은다) */
+function paraText(p: XmlNode, boxes: XmlNode[][], found: Found[] = []): { text: string; mono: boolean } {
   let text = '';
   let chars = 0;
   let monoChars = 0;
@@ -89,7 +102,25 @@ function paraText(p: XmlNode, boxes: XmlNode[][]): { text: string; mono: boolean
     for (const c of n.children) {
       if (typeof c === 'string') continue;
       const l = local(c.name);
-      if (l === 'pPr' || l === 'rPr' || l === 'del' || l === 'delText' || l === 'instrText' || l === 'fldChar') continue;
+      // mc:Fallback 은 mc:Choice 와 같은 내용의 예전 모양이다 (두 번 읽지 않게)
+      if (l === 'pPr' || l === 'rPr' || l === 'del' || l === 'delText' || l === 'instrText' || l === 'fldChar' || l === 'Fallback') continue;
+      if (l === 'blipFill') {
+        const blip = kids(c, 'blip')[0];
+        const rid = blip ? attr(blip, 'embed') : undefined;
+        if (rid) found.push({ kind: 'pic', rid, crop: srcRectCrop(kids(c, 'srcRect')[0]) });
+        continue;
+      }
+      if (l === 'imagedata') {
+        // 예전 모양(VML) 그림
+        const rid = attr(c, 'id');
+        if (rid) found.push({ kind: 'pic', rid });
+        continue;
+      }
+      if (l === 'chart') {
+        const rid = attr(c, 'id');
+        if (rid) found.push({ kind: 'chart', rid });
+        continue;
+      }
       if (l === 'txbxContent') {
         boxes.push(kids(c, 'p'));
         continue;
@@ -123,23 +154,35 @@ function paraText(p: XmlNode, boxes: XmlNode[][]): { text: string; mono: boolean
   return { text, mono: chars > 0 && monoChars === chars };
 }
 
-/** 워드 문서의 글 */
-export function docxText(files: Record<string, Uint8Array>): string {
+/** 워드 문서의 글. sink 가 있으면 그림 자리에 표시 줄을 넣는다 (그림 파일은 꾸러미 안의 경로로 sink 에) */
+export function docxText(files: Record<string, Uint8Array>, sink?: PictureSink): string {
   const dec = new TextDecoder();
   const read = (name: string) => (files[name] ? dec.decode(files[name]) : null);
   const doc = read('word/document.xml');
   if (!doc) throw new OfficeError('워드 문서 내용을 찾지 못했어요.');
   const styles = readStyles(read('word/styles.xml'));
+  const rels = readRels(files, 'word/_rels/document.xml.rels', 'word');
   const out = new TextOut();
   const body = first(parseXml(doc), 'body');
   if (!body) return '';
+
+  /** 문단·표 다음에 그 안의 그림 자리와 차트 */
+  const after = (found: Found[]) => {
+    for (const f of found) {
+      const path = rels.get(f.rid);
+      if (!path) continue;
+      if (f.kind === 'pic') out.picture(sink?.add(path, f.crop));
+      else if (files[path]) out.chart(chartTable(dec.decode(files[path])));
+    }
+  };
 
   const para = (p: XmlNode) => {
     const pPr = kids(p, 'pPr')[0];
     const styleId = pPr && kids(pPr, 'pStyle')[0] ? (attr(kids(pPr, 'pStyle')[0], 'val') ?? '') : '';
     const style = styles.get(styleId) ?? styleId;
     const boxes: XmlNode[][] = [];
-    const { text, mono } = paraText(p, boxes);
+    const found: Found[] = [];
+    const { text, mono } = paraText(p, boxes, found);
     if (CODE_STYLE.test(style) || (mono && text.trim()) || (out.inCode && !text.trim())) {
       for (const line of text.split('\n')) out.codeLine(line);
     } else {
@@ -152,6 +195,7 @@ export function docxText(files: Record<string, Uint8Array>): string {
       else if (numPr) out.para(`${'  '.repeat(Math.max(0, Math.min(5, lvl)))}- ${t}`);
       else out.para(t);
     }
+    after(found);
     for (const box of boxes) for (const bp of box) para(bp);
   };
 
@@ -161,15 +205,18 @@ export function docxText(files: Record<string, Uint8Array>): string {
       const l = local(c.name);
       if (l === 'p') para(c);
       else if (l === 'tbl') {
+        // 칸 안의 그림은 표 다음에 (표 줄 안에 그림 줄을 넣지 않는다)
+        const found: Found[] = [];
         const rows = kids(c, 'tr').map((tr) =>
           kids(tr, 'tc').map((tc) =>
             kids(tc, 'p')
-              .map((p) => paraText(p, []).text.trim())
+              .map((p) => paraText(p, [], found).text.trim())
               .filter(Boolean)
               .join('\n'),
           ),
         );
         out.table(rows);
+        after(found);
       } else if (l === 'sdt') {
         const content = kids(c, 'sdtContent')[0];
         if (content) block(content);

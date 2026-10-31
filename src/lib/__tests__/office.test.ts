@@ -1,7 +1,7 @@
 import CFB from 'cfb';
 import { deflateSync, strToU8, zipSync } from 'fflate';
 import { describe, expect, it } from 'vitest';
-import { extractOfficeText, officeNameProblem, officeText } from '@/lib/office';
+import { extractOffice, officeNameProblem, officeText } from '@/lib/office';
 import { hwpEqToTex } from '@/lib/office/hwp-eq';
 import { isOfficeText, officeTextHeader } from '@/lib/office/names';
 
@@ -207,7 +207,7 @@ describe('못 읽는 파일 안내', () => {
     expect(() => officeText(strToU8('HWP Document File V3.00 \x1a\x01\x02\x03'))).toThrow(/예전 한글/);
     expect(() => officeText(strToU8('그냥 글'))).toThrow(/읽을 수 없는/);
     const empty = zip({ 'word/document.xml': `<w:document ${W}><w:body><w:p><w:r><w:t>그림</w:t></w:r></w:p></w:body></w:document>` });
-    await expect(extractOfficeText(file(empty, '그림.docx'))).rejects.toThrow(/글이 거의 없어요/);
+    await expect(extractOffice(file(empty, '그림.docx'))).rejects.toThrow(/글이 거의 없어요/);
   });
 });
 

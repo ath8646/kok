@@ -21,6 +21,8 @@ import { zNote } from '@/lib/ai/schemas';
 import { estimateTokens, mergeFits, noteForMerge, MERGE_GROWTH_MAX, NOTE_TOO_LONG } from '@/lib/append-merge';
 import { modelForTier } from '@/lib/settings';
 import { pdfPageCount } from '@/lib/pdf';
+import { keepPictureMarks } from '@/lib/doc-pictures';
+import { isOfficeText } from '@/lib/office/names';
 import { adminClient } from '@/lib/supabase/admin';
 
 export const maxDuration = 300;
@@ -31,6 +33,7 @@ const Body = z.object({
   kind: z.enum(['text', 'pdf', 'image']),
   title: z.string().max(120).catch(''),
   text: z.string().max(200_000).optional(),
+  /** PDF·사진 파일. 글 자료면 한글·워드·PPT 에서 꺼낸 그림 (글의 [[picture N]] 이 N 번째 파일) */
   files: z.array(z.string().max(200)).max(60).catch([]),
   /** 이 자료를 더할 노트의 자료 (Pro). 정리가 끝나면 그 노트의 새 버전이 된다 */
   parentId: z.string().uuid().nullable().optional(),
@@ -83,7 +86,7 @@ export async function POST(req: NextRequest) {
     const { data: exists } = await admin.from('sources').select('id').eq('id', b.id).maybeSingle();
     if (exists) throw new UserFacingError('duplicate', '이미 넣은 자료예요.', 409);
 
-    uploaded = b.kind === 'text' ? [] : b.files.filter((p) => p.startsWith(`${acc.userId}/${b.id}/`));
+    uploaded = b.files.filter((p) => p.startsWith(`${acc.userId}/${b.id}/`));
     cleanup = true;
     let pages = 0;
     let images = 0;
@@ -94,6 +97,24 @@ export async function POST(req: NextRequest) {
       const max = lim.textChars;
       if (text.length < 20) throw new UserFacingError('too_short', '글이 너무 짧아요. 20자 이상 적어 주세요.', 400);
       if (text.length > max) throw new UserFacingError('too_long', `글이 너무 길어요. 한 번에 ${max.toLocaleString()}자까지 넣을 수 있어요.`, 400);
+      if (b.files.length) {
+        // 한글·워드·PPT 에서 꺼낸 그림: 사진처럼 검사한다 (브라우저가 JPEG 로 바꿔 올린다)
+        if (!isOfficeText(text)) throw new UserFacingError('bad_body', '사진은 사진 자료로 넣어 주세요.', 400);
+        if (b.files.length > lim.images) throw new UserFacingError('too_many_images', `문서 속 그림은 자료 하나에 ${lim.images}장까지 넣을 수 있어요.`, 400);
+        for (const p of b.files) {
+          assertOwnPath(p, acc.userId, b.id);
+          if (!extOk(p, 'image')) throw new UserFacingError('bad_type', '지원하지 않는 파일 형식이에요.', 400);
+          const bytes = await downloadOwn(admin, p);
+          if (bytes.byteLength > Math.min(lim.fileMb, 10) * 1024 * 1024) throw new UserFacingError('too_big', '문서 속 그림 파일이 너무 커요.', 400);
+          if (sniff(bytes) !== 'jpeg') throw new UserFacingError('bad_type', '문서 속 그림 파일이 올바르지 않아요.', 400);
+        }
+        images = b.files.length;
+      }
+      // 문서 글: 올린 그림보다 큰 번호·겹친 번호의 그림 자리는 지운다 (그림이 없으면 모두). 학생이 쓴 글은 그대로 둔다
+      if (isOfficeText(text)) {
+        text = keepPictureMarks(text, b.files.length);
+        if (text.length < 20) throw new UserFacingError('too_short', '글이 너무 짧아요. 20자 이상 적어 주세요.', 400);
+      }
     } else {
       if (!b.files.length) throw new UserFacingError('no_files', '파일을 올려 주세요.', 400);
       const maxMb = lim.fileMb;
@@ -130,6 +151,7 @@ export async function POST(req: NextRequest) {
     const figures = figuresWanted({ canFigures: acc.canFigures, figuresSetting: acc.settings.quiz.figures, featureOn: feats.figures });
     const redraws = redrawsWanted({
       kind: b.kind,
+      pictures: b.kind === 'text' ? images : 0,
       canFigures: acc.canFigures,
       sourceFiguresSetting: acc.settings.quiz.sourceFigures,
       featureOn: feats.sourceFigures,
@@ -156,7 +178,7 @@ export async function POST(req: NextRequest) {
         kind: b.kind,
         title: b.title.trim().slice(0, 120),
         text_content: text,
-        file_paths: b.kind === 'text' ? [] : b.files,
+        file_paths: b.files,
         page_count: b.kind === 'pdf' ? pages : b.kind === 'image' ? images : null,
         chunk_total: chunkTotal,
         model,

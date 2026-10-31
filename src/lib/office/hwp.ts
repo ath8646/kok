@@ -1,20 +1,50 @@
-// 한글(.hwp, HWP 5.0 문서) → 글: 문단·표·수식(수식 편집기 글 → LaTeX)·글상자. 머리말·꼬리말·각주는 뺀다.
-// HWP 5.0 은 복합 문서(CFB) 안에 FileHeader·DocInfo·BodyText/Section0… 이 있고, 구역마다 레코드(꼬리표·깊이·크기)가 이어진다.
-// 압축된 문서는 구역이 raw deflate. 배포용·암호 문서는 내용이 암호화돼 있어 읽지 않는다.
+// 한글(.hwp, HWP 5.0 문서) → 글: 문단·표·수식(수식 편집기 글 → LaTeX)·글상자·그림 자리. 머리말·꼬리말·각주는 뺀다.
+// HWP 5.0 은 복합 문서(CFB) 안에 FileHeader·DocInfo·BodyText/Section0·BinData/BIN0001.jpg … 이 있고, 구역마다 레코드(꼬리표·깊이·크기)가 이어진다.
+// 압축된 문서는 구역·DocInfo·그림이 raw deflate. 배포용·암호 문서는 내용이 암호화돼 있어 읽지 않는다.
+// 그림: 그리기 개체('gso ') 아래의 그림 레코드(SHAPE_COMPONENT_PICTURE)가 DocInfo 의 그림 목록(BIN_DATA, 1부터) 번호를 가리키고,
+// 그 목록에 저장 번호·확장자가 있다 (파일 이름 BIN{저장 번호 16진 4자리}.{확장자}).
 import CFB from 'cfb';
 import { inflateSync } from 'fflate';
 import { hwpEqToTex } from './hwp-eq';
 import { TextOut } from './out';
 import { OfficeError } from './errors';
+import { cropOf, type CropFor, type PictureSink } from './pictures';
 
 const TAG = {
+  BIN_DATA: 18,
   PARA_HEADER: 66,
   PARA_TEXT: 67,
   CTRL_HEADER: 71,
   LIST_HEADER: 72,
   TABLE: 77,
+  SHAPE_PICTURE: 85,
   EQEDIT: 88,
 } as const;
+
+/** 그림 레코드 안의 그림 목록 번호 자리 (테두리 12 + 사각형 32 + 자르기 16 + 여백 8 + 밝기·명암·효과 3) */
+const PICTURE_BIN_AT = 71;
+
+/**
+ * 그림 레코드의 자르기: 자른 뒤 남은 사각형(44~59바이트: 왼쪽·위·오른쪽·아래, 원래 그림 크기의 HWPUNIT)을 원래 크기에 대한 비율로.
+ * 원래 크기는 새 문서면 레코드 끝 8바이트(가로·세로, 그림의 가로세로 비와 맞을 때만), 아니면 픽셀 수 × 사각형에서 잰 HWPUNIT/픽셀
+ * (안 자른 쪽이 그대로 원래 크기라서 오른쪽·아래 중 큰 비를 쓴다. 두 쪽 다 자른 예전 문서는 덜 자를 수 있다: 원본 그대로보다는 낫다)
+ */
+function pictureCrop(d: Uint8Array): CropFor | undefined {
+  if (d.length < 60) return undefined;
+  const dv = new DataView(d.buffer, d.byteOffset, d.byteLength);
+  const [left, top, right, bottom] = [44, 48, 52, 56].map((o) => dv.getInt32(o, true));
+  if (right <= left || bottom <= top || right <= 0 || bottom <= 0) return undefined;
+  const tail = d.length >= 86 ? [dv.getInt32(d.length - 8, true), dv.getInt32(d.length - 4, true)] : null;
+  return (w, h) => {
+    let [W, H] = [0, 0];
+    if (tail && tail[0] > 0 && tail[1] > 0 && Math.abs(tail[0] / w - tail[1] / h) <= 0.05 * (tail[0] / w)) [W, H] = tail;
+    else {
+      const s = Math.max(right / w, bottom / h);
+      [W, H] = [w * s, h * s];
+    }
+    return cropOf(left / W, top / H, 1 - right / W, 1 - bottom / H);
+  };
+}
 
 type Rec = { tag: number; level: number; data: Uint8Array };
 
@@ -84,6 +114,7 @@ class Reader {
   constructor(
     private recs: Rec[],
     private out: TextOut,
+    private sink?: PictureSink,
   ) {}
 
   /** recs[i] 아래(깊이가 더 깊은 것)가 끝나는 자리 */
@@ -143,7 +174,7 @@ class Reader {
         // 표는 문단 글 다음에
         after.push(() => this.table(k));
       } else if (p.ctrl === 'gso ') {
-        after.push(() => this.boxes(k));
+        after.push(() => this.shape(k));
       }
       // 머리말·꼬리말(head·foot)·각주(fn·en)·쪽 번호·책갈피 등은 뺀다
     }
@@ -197,9 +228,21 @@ class Reader {
     this.out.table(rows);
   }
 
-  /** 그리기 개체 안의 글상자 문단 */
-  private boxes(k: number) {
+  /** 그리기 개체: 그림이면 그림 자리, 글상자·그림 설명은 문단으로 */
+  private shape(k: number) {
     const e = this.end(k);
+    // 이 개체의 그림 (안에 든 다른 개체(글상자 속 그림)는 그 개체를 읽을 때: 두 번 넣지 않게)
+    for (let j = k + 1; j < e; j++) {
+      const r = this.recs[j];
+      if (r.tag === TAG.CTRL_HEADER) {
+        j = this.end(j) - 1;
+        continue;
+      }
+      if (r.tag === TAG.SHAPE_PICTURE && r.data.length >= PICTURE_BIN_AT + 2) {
+        const id = r.data[PICTURE_BIN_AT] | (r.data[PICTURE_BIN_AT + 1] << 8);
+        if (id > 0) this.out.picture(this.sink?.add(`bin:${id}`, pictureCrop(r.data)));
+      }
+    }
     for (let j = k + 1; j < e; j++) {
       const r = this.recs[j];
       if (r.tag !== TAG.LIST_HEADER) continue;
@@ -217,8 +260,47 @@ function content(entry: { content?: unknown } | null): Uint8Array | null {
   return c instanceof Uint8Array ? c : new Uint8Array(c as ArrayLike<number>);
 }
 
-/** HWP 5.0 문서의 글 */
-export function hwpText(data: Uint8Array): string {
+/** DocInfo 의 그림 목록 (1부터): 파일에 든 그림(EMBEDDING)만 저장 번호·확장자·압축 */
+type BinItem = { storage: number; ext: string; compress: 0 | 1 | 2 } | null;
+
+function binItems(docInfo: Uint8Array | null): BinItem[] {
+  if (!docInfo) return [];
+  const out: BinItem[] = [];
+  for (const r of records(docInfo)) {
+    if (r.tag !== TAG.BIN_DATA) continue;
+    const d = r.data;
+    const dv = new DataView(d.buffer, d.byteOffset, d.byteLength);
+    if (d.length < 6) {
+      out.push(null);
+      continue;
+    }
+    const props = dv.getUint16(0, true);
+    // 0 = 밖의 파일에 이어 둠(LINK), 1 = 문서 안 그림(EMBEDDING), 2 = OLE 저장소(STORAGE)
+    if ((props & 0x0f) !== 1) {
+      out.push(null);
+      continue;
+    }
+    const storage = dv.getUint16(2, true);
+    const len = dv.getUint16(4, true);
+    let ext = '';
+    for (let c = 0; c < len && 6 + c * 2 + 1 < d.length; c++) ext += String.fromCharCode(dv.getUint16(6 + c * 2, true));
+    out.push({
+      storage,
+      ext: ext
+        .replace(/[^a-z0-9]/gi, '')
+        .toLowerCase()
+        .slice(0, 8),
+      compress: ((props >> 4) & 3) as 0 | 1 | 2,
+    });
+  }
+  return out;
+}
+
+/**
+ * HWP 5.0 문서의 글과 그림 꺼내기. sink 가 있으면 그림 자리에 표시 줄을 넣고('bin:목록 번호'),
+ * load 가 그 그림 파일을 꺼낸다 (못 꺼내면 null)
+ */
+export function hwpContent(data: Uint8Array, sink?: PictureSink): { text: string; load: (key: string) => Uint8Array | null } {
   let doc: CFB.CFB$Container;
   try {
     doc = CFB.read(data, { type: 'array' });
@@ -251,13 +333,41 @@ export function hwpText(data: Uint8Array): string {
       throw new OfficeError('한글 파일을 열지 못했어요. 파일이 깨지지 않았는지 확인해 주세요.');
     }
     const recs = records(buf);
-    const r = new Reader(recs, out);
+    const r = new Reader(recs, out, sink);
     r.paragraphs(0, recs.length, 0, (t) => {
       if (t.trim()) out.para(t.replace(/\s+$/, ''));
       else out.blank();
     });
   }
-  return out.toString();
+  const text = out.toString();
+  if (!sink?.refs.length) return { text, load: () => null };
+
+  // 그림 목록은 그림이 있을 때만 읽는다 (DocInfo 가 깨졌어도 글은 그대로)
+  let bins: BinItem[] = [];
+  try {
+    const raw = content(CFB.find(doc, '/DocInfo'));
+    bins = binItems(raw ? (compressed ? inflateSync(raw) : raw) : null);
+  } catch {
+    bins = [];
+  }
+  const load = (key: string): Uint8Array | null => {
+    const m = /^bin:(\d+)$/.exec(key);
+    const item = m ? bins[Number(m[1]) - 1] : null;
+    if (!item) return null;
+    const hex = item.storage.toString(16).toUpperCase().padStart(4, '0');
+    const raw = content(CFB.find(doc, `/BinData/BIN${hex}.${item.ext}`)) ?? content(CFB.find(doc, `/BinData/BIN${hex.toLowerCase()}.${item.ext}`));
+    if (!raw) return null;
+    // 압축: 0 = 문서를 따른다, 1 = 압축, 2 = 압축 안 함. 풀리지 않으면 그대로 (압축하지 않은 그림)
+    if (item.compress === 1 || (item.compress === 0 && compressed)) {
+      try {
+        return inflateSync(raw);
+      } catch {
+        return raw;
+      }
+    }
+    return raw;
+  };
+  return { text, load };
 }
 
 /** HWP 3 이하 (복합 문서가 아닌 예전 한글) */

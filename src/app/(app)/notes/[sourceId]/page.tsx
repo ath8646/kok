@@ -64,6 +64,7 @@ import {
   type VersionRow,
 } from '@/lib/versions';
 import { previewText } from '@/lib/richtext';
+import { officeFileName, officeLabel } from '@/lib/office/names';
 import { starredFirst } from '@/lib/note-order';
 import { practiceHref, rememberPracticeFrom } from '@/lib/review-mode';
 import { prefersReducedMotion } from '@/components/useReducedMotion';
@@ -476,6 +477,11 @@ export default function NotePage() {
   const docVisuals = useMemo<Visuals>(() => (old ? old.visuals : (visuals ?? {})), [old, visuals]);
   // 자료 그림 (PDF·사진 속 그림을 잘라 둔 것, Pro 는 다시 그린 그림도): 개념 카드 안에 보인다
   const docFigures = useMemo(() => readFigures(raw), [raw]);
+  // 다시 찾을 수 있는 그림: PDF·사진에서 자른 것 (한글·워드·PPT 속 그림은 그림 전체를 그대로 써서 찾을 자리가 없다)
+  const relocatable = useMemo(() => {
+    const textSources = new Set([...(source?.kind === 'text' ? [source.id] : []), ...kids.filter((k) => k.kind === 'text').map((k) => k.id)]);
+    return docFigures.filter((f) => !textSources.has(f.crop.split('/')[2]));
+  }, [docFigures, source, kids]);
   // 인쇄된 쪽 번호 (책의 쪽): 쪽 표시만 바뀌고 원본 열기는 PDF 쪽 그대로
   const pageLabels = useMemo(() => readPageLabels(raw), [raw]);
   const liveQuestions = useMemo(() => (questions ?? []).filter((q) => q.status !== 'hidden'), [questions]);
@@ -957,6 +963,8 @@ export default function NotePage() {
 
   const ready = source.status === 'ready' && !!note && !!body;
   const manual = !!body?.manual;
+  // 한글·워드·PPT 에서 꺼낸 글이면 그 파일 이름 (머리의 자료 종류: '워드 문서 · 그림 2장')
+  const docFile = source.kind === 'text' ? officeFileName(source.text_content) : null;
   // 직접 만든 노트는 AI 가 만든 것이 없으면 신고할 것도 없다 (자료를 더해 AI 가 합쳤으면 신고할 수 있다)
   const reportable = !manual || versions.length > 0;
   const title = old?.title || note?.title || source.title || (ready ? '새 자료' : '정리하는 중…');
@@ -1009,7 +1017,9 @@ export default function NotePage() {
             ? `PDF ${source.page_count ?? ''}쪽`
             : source.kind === 'image'
               ? `사진 ${source.page_count ?? ''}장`
-              : '직접 쓴 글'}
+              : docFile
+                ? `${officeLabel(docFile)} 문서${source.file_paths?.length ? ` · 그림 ${source.file_paths.length}장` : ''}`
+                : '직접 쓴 글'}
       </span>
       {versions.length ? <span>· 버전 {old ? old.number : cur}</span> : null}
       {manual && !versions.length ? null : <span>· AI 정리</span>}
@@ -1106,7 +1116,7 @@ export default function NotePage() {
                     ? [{ label: 'AI로 다시 정리', icon: ICONS.sparkle, onSelect: () => (me.canAppend ? reorganize() : router.push('/plan')) }]
                     : []),
                   ...(versionsOn ? [{ label: versions.length ? '버전 기록' : '자료 더하기', icon: ICONS.file, onSelect: () => setTab('original') }] : []),
-                  ...(sourceFiguresOn && !old && !appendRunning && source.kind !== 'text' && docFigures.length
+                  ...(sourceFiguresOn && !old && !appendRunning && relocatable.length
                     ? [{ label: '자료 그림 다시 찾기', icon: ICONS.image, onSelect: () => setRelocating(true) }]
                     : []),
                   ...(reportable ? [{ label: '이상해요 (신고)', icon: ICONS.edit, onSelect: () => setReporting(true) }] : []),
@@ -1452,7 +1462,7 @@ export default function NotePage() {
           open={relocating}
           onClose={() => setRelocating(false)}
           noteId={note.id}
-          figures={docFigures.map((f) => ({ id: f.id, title: f.title }))}
+          figures={relocatable.map((f) => ({ id: f.id, title: f.title }))}
           onDone={reload}
         />
       ) : null}

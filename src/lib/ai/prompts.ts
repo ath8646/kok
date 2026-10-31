@@ -29,6 +29,8 @@ export type MaterialMeta = {
   /** 사진 묶음의 원래 사진 번호 */
   imageStart?: number;
   imageEnd?: number;
+  /** 글 자료(한글·워드·PPT 에서 꺼낸 글)에 붙여 보낸 문서 속 그림 번호 ('Picture N:', 글의 [[picture N]] 자리) */
+  pictures?: number[];
   /** 학생이 직접 쓴 글인지 */
   ownWriting?: boolean;
   part?: number;
@@ -42,16 +44,17 @@ export type MaterialMeta = {
 };
 
 /**
- * 자료 그림 찾기 (PDF·사진): 노트의 개념 다음에 쓴다. 어느 쪽에 무엇이 있는지만 받는다
- * (자리는 쪽을 그림으로 그려 한 장씩 보여 주고 픽셀로 받는다: locatePrompt)
+ * 자료 그림 찾기 (PDF·사진·문서 속 그림): 노트의 개념 다음에 쓴다. 어느 쪽에 무엇이 있는지만 받는다
+ * (PDF·사진의 자리는 쪽을 그림으로 그려 한 장씩 보여 주고 픽셀로 받는다: locatePrompt. 문서 속 그림은 그림 하나가 곧 자료 그림이다)
  */
-function figureRules(max: number, kind: 'pdf' | 'image', firstPage: number): string {
-  const where = kind === 'pdf' ? 'page' : 'photo';
+function figureRules(max: number, kind: 'pdf' | 'image' | 'doc', firstPage: number): string {
   return [
     `- figures: the pictures in this part that a student must study for exams: maps, charts or graphs, tables printed as pictures, timelines, diagrams, photos of artifacts, places or people, artworks, historical documents, cartoons. At most ${max}, the most important first. Skip decorations, icons, logos, page headers, plain text boxes and pictures that only repeat the text. Each has:`,
     kind === 'pdf'
       ? `  - page: the original page number where it appears. Count the pages of the attached PDF in order: its first page is page ${firstPage}, the next is ${firstPage + 1}, and so on. printed_page: the page number printed on that page; 0 if none is printed.`
-      : `  - page: the original ${where} number where it appears.`,
+      : kind === 'doc'
+        ? '  - page: the number N of the attached picture ("Picture N:") it is. List each picture at most once.'
+        : '  - page: the original photo number where it appears.',
     '  - kind: "map" | "chart" | "table" | "timeline" | "diagram" | "photo" | "artwork" | "document" | "cartoon" | "other". Use "map" only for a map drawn for the material that shows regions, routes, places or distributions on real geography. An old map made in the past (like 대동여지도 or 천하도) is "document", a painting of a landscape or a town is "artwork", and a plan of a city, a palace or a site is "other".',
     '  - title: a short name, at most 20 characters, as the material names it (like "5세기 고구려의 영토").',
     '  - caption: what the picture shows, in 1 to 3 short sentences: the labels, names, numbers, places, periods and arrow directions a test could use. Copy markers like (가), (나), A, B exactly, and say what a marker stands for only if the material says so.',
@@ -66,12 +69,15 @@ const PAGE_NUMBERS_RULE =
   '- page_numbers: for each page of the attached PDF in order, the page number printed on that page (in a corner, the header or the footer); 0 if none is printed. Copy what is printed; do not guess.';
 
 export function organizePrompt(meta: MaterialMeta): string {
+  const doc = meta.kind === 'text' && !!meta.pictures?.length;
   const where =
     meta.kind === 'pdf'
       ? `The attached PDF holds pages ${meta.pageStart} to ${meta.pageEnd} of the original material. Use these original page numbers in "pages".`
       : meta.kind === 'image'
         ? `The attached photos are photos ${meta.imageStart} to ${meta.imageEnd} of the original material. Use these photo numbers in "pages".`
-        : 'The material is text, so leave "pages" empty.';
+        : doc
+          ? 'The material is text taken from a document file (Word, PowerPoint or Hangul). A line "[[picture N]]" marks where picture N of the document appears; the pictures are attached after the text, each labelled "Picture N:". Read them as part of the material. Leave "pages" empty.'
+          : 'The material is text, so leave "pages" empty.';
   const part = meta.parts && meta.parts > 1 ? `This is part ${meta.part} of ${meta.parts}; cover only this part.` : '';
   const kp = meta.keyPoints ?? { min: 3, max: 7 };
   const own = meta.ownWriting
@@ -96,7 +102,7 @@ export function organizePrompt(meta: MaterialMeta): string {
     '- examples: short examples taken from the material, each with its key_point_id. If the material has program code, put the snippets a test could ask about here as code blocks copied exactly (at most about 15 lines each), and quote short code in explanations between backticks.',
     own,
     meta.pageNumbers && meta.kind === 'pdf' ? PAGE_NUMBERS_RULE : '',
-    meta.figures && meta.kind !== 'text' ? figureRules(meta.figures, meta.kind, meta.pageStart ?? 1) : '',
+    meta.figures && (meta.kind !== 'text' || doc) ? figureRules(meta.figures, meta.kind === 'text' ? 'doc' : meta.kind, meta.pageStart ?? 1) : '',
   ]
     .filter(Boolean)
     .join('\n');

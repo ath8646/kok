@@ -93,18 +93,5 @@ export function planChunks(total: number, size: number = PAGES_PER_CHUNK): Array
   return chunks.length ? chunks : [{ start: 1, end: 1 }];
 }
 
-/** 글을 약 maxChars 단위로 문단 경계에서 나눈다 */
-export function splitText(text: string, maxChars = 40000): string[] {
-  if (text.length <= maxChars) return [text];
-  const parts: string[] = [];
-  let rest = text;
-  while (rest.length > maxChars) {
-    let cut = rest.lastIndexOf('\n\n', maxChars);
-    if (cut < maxChars * 0.5) cut = rest.lastIndexOf('\n', maxChars);
-    if (cut < maxChars * 0.5) cut = maxChars;
-    parts.push(rest.slice(0, cut));
-    rest = rest.slice(cut);
-  }
-  if (rest.trim()) parts.push(rest);
-  return parts;
-}
+/** 글 나누기는 화면도 쓰니 pdf-lib 없는 파일에 있다 */
+export { splitText } from './text-split';

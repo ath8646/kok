@@ -756,6 +756,175 @@ def make_office_files():
     return docx, pptx, hwpx
 
 
+def make_office_picture_files():
+    """그림이 든 한글(.hwpx)·워드(.docx)·PPT(.pptx) 시험 파일.
+    워드: 지도(가운데 빨강, 둘레는 투명한 PNG) · 작은 아이콘 · 세 번 나오는 로고 · 사진(파랑 JPEG) → 지도와 사진만 올린다.
+    PPT: 잎 그림(초록) + 막대 차트(값 표로). 한글: 세포 그림(보라) + 그림 설명"""
+    import zipfile
+    from docx import Document
+    from docx.shared import Inches
+    from PIL import Image, ImageDraw
+    from pptx import Presentation
+    from pptx.chart.data import CategoryChartData
+    from pptx.enum.chart import XL_CHART_TYPE
+    from pptx.util import Inches as PInches
+
+    def img(size, color, fmt="PNG", alpha=False):
+        im = Image.new("RGBA" if alpha else "RGB", size, (0, 0, 0, 0) if alpha else (255, 255, 255))
+        d = ImageDraw.Draw(im)
+        w, h = size
+        d.rectangle([w // 6, h // 6, w - w // 6, h - h // 6], fill=color)
+        b = io.BytesIO()
+        im.save(b, fmt)
+        b.seek(0)
+        return b
+
+    d = Document()
+    d.add_heading("삼국의 영토 변화", level=1)
+    d.add_paragraph("5세기에 고구려는 한강 유역까지 영토를 넓혔다. 아래 지도에서 (가) 나라를 찾아보자.")
+    d.add_picture(img((1200, 800), (220, 30, 30), alpha=True), width=Inches(5))
+    p = d.add_paragraph("아이콘이 붙은 문단: ")
+    p.add_run().add_picture(img((40, 40), (0, 0, 0)), width=Inches(0.3))
+    for _ in range(3):
+        d.add_picture(img((300, 300), (120, 120, 120)), width=Inches(1))
+    d.add_paragraph("광개토대왕릉비 사진")
+    d.add_picture(img((900, 600), (30, 60, 220), fmt="JPEG"), width=Inches(4))
+    b = io.BytesIO()
+    d.save(b)
+    docx = b.getvalue()
+
+    prs = Presentation()
+    sl = prs.slides.add_slide(prs.slide_layouts[5])
+    sl.shapes.title.text = "광합성 실험"
+    sl.shapes.add_picture(img((1000, 700), (30, 160, 60)), PInches(0.5), PInches(1.5), width=PInches(4))
+    data = CategoryChartData()
+    data.categories = ["빛 약함", "보통", "빛 강함"]
+    data.add_series("기포 수", (3, 8, 12))
+    sl.shapes.add_chart(XL_CHART_TYPE.COLUMN_CLUSTERED, PInches(5), PInches(1.5), PInches(4), PInches(3), data)
+    b = io.BytesIO()
+    prs.save(b)
+    pptx = b.getvalue()
+
+    hpf = (
+        '<?xml version="1.0"?><opf:package xmlns:opf="http://www.idpf.org/2007/opf/"><opf:manifest>'
+        '<opf:item id="section0" href="Contents/section0.xml" media-type="application/xml"/>'
+        '<opf:item id="image1" href="BinData/image1.png" media-type="image/png" isEmbeded="1"/>'
+        '</opf:manifest><opf:spine><opf:itemref idref="section0"/></opf:spine></opf:package>'
+    )
+    sec = (
+        '<?xml version="1.0"?><hs:sec xmlns:hs="http://www.hancom.co.kr/hwpml/2011/section" xmlns:hp="http://www.hancom.co.kr/hwpml/2011/paragraph" '
+        'xmlns:hc="http://www.hancom.co.kr/hwpml/2011/core">'
+        '<hp:p><hp:run><hp:t>체세포 분열은 핵분열과 세포질 분열로 이루어진다.</hp:t></hp:run></hp:p>'
+        '<hp:p><hp:run><hp:pic id="1"><hp:orgSz width="20000" height="15000"/><hc:img binaryItemIDRef="image1" bright="0" contrast="0"/>'
+        '<hp:caption side="BOTTOM"><hp:subList><hp:p><hp:run><hp:t>[그림 1] 체세포 분열 과정</hp:t></hp:run></hp:p></hp:subList></hp:caption></hp:pic></hp:run></hp:p>'
+        "</hs:sec>"
+    )
+    b = io.BytesIO()
+    with zipfile.ZipFile(b, "w") as z:
+        z.writestr("mimetype", "application/hwp+zip")
+        z.writestr("Contents/content.hpf", hpf)
+        z.writestr("Contents/section0.xml", sec)
+        z.writestr("BinData/image1.png", img((800, 600), (140, 60, 200)).getvalue())
+    hwpx = b.getvalue()
+    return docx, pptx, hwpx
+
+
+async def office_picture_steps(browser):
+    """한글·워드·PPT 속 그림: 브라우저가 그림을 꺼내 JPEG 로 올리고, AI 가 글과 함께 보고 고른 그림이 자료 그림·그림 문제가 된다 (따로: python3 e2e_office.py)"""
+    step("office pictures: pictures in hwpx/docx/pptx are read like a PDF — uploaded as JPEG, shown to the AI, kept as note figures and figure questions")
+    me_id = USERS["student"][0]
+    files_root = pathlib.Path(__file__).parent / "fakebase" / "files" / "sources"
+    docx, pptx, hwpx = make_office_picture_files()
+    ctx, page = await new_ctx(browser, "student")
+    since = db(f"select coalesce(max(created_at), now() - interval '1 day')::text from public.sources where user_id = '{me_id}'")
+    await page.goto(BASE + "/library")
+    await expect(page.get_by_role("button", name="자료 넣기", exact=True)).to_be_visible()
+    await page.get_by_role("button", name="자료 넣기", exact=True).click()
+    composer = page.get_by_role("dialog", name="자료 넣기")
+    await composer.locator("input[type=file][multiple]").set_input_files(
+        files=[
+            {"name": "삼국 지도 학습지.docx", "mimeType": "application/vnd.openxmlformats-officedocument.wordprocessingml.document", "buffer": docx},
+            {"name": "광합성 발표.pptx", "mimeType": "application/vnd.openxmlformats-officedocument.presentationml.presentation", "buffer": pptx},
+            {"name": "세포 분열.hwpx", "mimeType": "application/hwp+zip", "buffer": hwpx},
+        ]
+    )
+    await expect(composer.get_by_role("list", name="붙인 파일").locator("li")).to_have_count(3)
+    await composer.get_by_role("button", name="AI 정리 시작").click()
+    await expect(composer).to_be_hidden()
+    q = f"from public.sources where user_id = '{me_id}' and kind = 'text' and parent_id is null and created_at > '{since}'"
+    await poll_db(f"select count(*) {q}", "3", timeout=40)
+    rows = {}
+    for r in db(f"select title || E'\\t' || id || E'\\t' || array_to_json(file_paths)::text || E'\\t' || replace(text_content, E'\\n', '⏎') {q}").splitlines():
+        title, sid_, paths, text = r.split("\t", 3)
+        rows[title] = (sid_, json.loads(paths), text)
+    assert set(rows) == {"삼국 지도 학습지", "광합성 발표", "세포 분열"}, rows.keys()
+    # 워드: 지도와 사진만 (작은 아이콘·세 번 나온 로고는 뺀다), 그림 자리는 1·2
+    dsid, dpaths, dtext = rows["삼국 지도 학습지"]
+    assert dpaths == [f"{me_id}/{dsid}/p01.jpg", f"{me_id}/{dsid}/p02.jpg"], dpaths
+    assert "⏎[[picture 1]]⏎" in dtext and "⏎[[picture 2]]" in dtext and "[[picture 3]]" not in dtext, dtext
+    assert dtext.startswith("(파일: 삼국 지도 학습지.docx)⏎⏎# 삼국의 영토 변화"), dtext
+    # 올린 그림은 JPEG: 지도는 가운데가 빨갛고 투명했던 둘레는 흰 바탕, 사진은 파랑
+    w, h, mid, _ = jpeg_look(files_root / dpaths[0])
+    assert (w, h) == (1200, 800) and mid[0] > 180 and mid[1] < 90, (w, h, mid)
+    from PIL import Image
+    corner = Image.open(files_root / dpaths[0]).convert("RGB").getpixel((5, 5))
+    assert min(corner) > 240, corner
+    w, h, mid, _ = jpeg_look(files_root / dpaths[1])
+    assert (w, h) == (900, 600) and mid[2] > 180 and mid[0] < 90, (w, h, mid)
+    # PPT: 그림 하나와 차트의 값 표
+    psid, ppaths, ptext = rows["광합성 발표"]
+    assert len(ppaths) == 1, ppaths
+    assert "## 1. 광합성 실험⏎[[picture 1]]⏎(차트" in ptext and "| 항목 | 기포 수 |⏎| 빛 약함 | 3 |⏎| 보통 | 8 |⏎| 빛 강함 | 12 |" in ptext, ptext
+    # 한글: 그림과 그림 설명
+    hsid, hpaths, htext = rows["세포 분열"]
+    assert len(hpaths) == 1 and "⏎[[picture 1]]⏎[그림 1] 체세포 분열 과정" in htext, (hpaths, htext)
+    for sid_ in (dsid, psid, hsid):
+        await poll_db(f"select status from public.sources where id = '{sid_}'", "ready", timeout=120)
+    # AI 는 글과 함께 그림을 'Picture N:' 으로 받았다 (워드: 두 장)
+    fake = json.loads(urllib.request.urlopen("http://localhost:54321/__stats").read())
+    assert any(c["labels"] == 2 and c["images"] == 2 for c in fake.get("docPictures", [])), fake.get("docPictures")
+
+    # 노트: AI 가 고른 첫 그림(지도)이 자료 그림이 되고(이 조각에 없는 번호는 뺀다) 그림 문제가 생긴다
+    figs = json.loads(db(f"select coalesce(body->'figures', '[]'::jsonb)::text from public.notes where source_id = '{dsid}'"))
+    assert len(figs) == 1 and figs[0]["title"] == "문서 속 지도" and figs[0]["page"] == 1, figs
+    assert figs[0]["crop"] == f"{me_id}/figs/{dsid}/f1.jpg" and (files_root / figs[0]["crop"]).exists(), figs[0]
+    assert (figs[0]["w"], figs[0]["h"]) == (1200, 800), figs[0]
+    flog = json.loads(db(f"select body->'figure_log' from public.notes where source_id = '{dsid}'"))
+    assert flog["looked"] == 1 and flog["found"] == 1 and flog["cut"] == 1 and flog["questions"] == 1 and not flog["errors"], flog
+    fq = f"from public.questions q join public.notes n on n.id = q.note_id where n.source_id = '{dsid}' and q.source_figure->>'id' = 'f1'"
+    assert db(f"select count(*) {fq}") == "1"
+    # 무료는 문서 속 그림도 보관 기간이 지나면 지운다 (Pro 는 계속)
+    plan_pro = db(f"select files_expire_at is null from public.sources where id = '{dsid}'") == "t"
+    print("   doc pictures kept forever (Pro):", plan_pro)
+
+    await page.goto(BASE + f"/notes/{dsid}")
+    assert await wait_ready(page)
+    fig_el = page.locator("figure", has_text="문서 속 지도").first
+    await expect(fig_el).to_be_visible()
+    await fig_el.scroll_into_view_if_needed()
+    await shot(page, "153-doc-figure-note", full=False)
+    # 원본 탭: 꺼낸 글 사이 제자리에 그림, 누르면 크게
+    await page.goto(BASE + f"/notes/{dsid}?tab=original")
+    assert await wait_ready(page)
+    await expect(page.get_by_text("‘삼국 지도 학습지.docx’에서 꺼낸 글과 그림 (AI가 바꾸지 않아요)")).to_be_visible()
+    pic1 = page.get_by_role("img", name="문서 그림 1", exact=True)
+    await expect(pic1).to_be_visible()
+    await page.wait_for_function("(el) => el.complete && el.naturalWidth > 0", arg=await pic1.element_handle(), timeout=10000)
+    await expect(page.get_by_role("img", name="문서 그림 2", exact=True)).to_have_count(1)
+    await no_hscroll(page, "original tab with document pictures")
+    await shot(page, "154-doc-picture-original", full=False)
+    await page.get_by_role("button", name="문서 그림 1 크게 보기").click()
+    zoom = page.get_by_role("dialog", name="문서 그림 1 크게 보기")
+    await expect(zoom).to_be_visible()
+    await page.keyboard.press("Escape")
+    await expect(zoom).to_have_count(0)
+    # 문서 속 그림은 그림 전체라 '자료 그림 다시 찾기'가 없다
+    await page.get_by_role("button", name="노트 메뉴").click()
+    await expect(page.get_by_role("menuitem", name="자료 그림 다시 찾기")).to_have_count(0)
+    await page.keyboard.press("Escape")
+    await ctx.close()
+
+
 async def office_code_steps(browser):
     """한글·워드·PPT 파일 넣기와 코드(`코드`·``` 블록) 보기·고치기·PDF (따로 돌리기: python3 e2e_office.py)"""
     step("office files: hwpx/docx/pptx are read in the browser and become text notes with code, tables and formulas kept")
@@ -5083,6 +5252,7 @@ async def main():
         await figure_steps(browser)
         await tab_steps(browser)
         await office_code_steps(browser)
+        await office_picture_steps(browser)
         await browser.close()
 
     # 실제 Claude 처럼 가짜 서버도 속성이 42개를 넘는 답 모양은 거절한다: 시험 내내 한 번도 없어야 하고, 채팅 풀이 그림은 두 번째 호출로 받았다

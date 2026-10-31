@@ -1,5 +1,6 @@
-// 문서에서 꺼낸 글을 이어 붙이는 도우미: 문단·목록·표·코드 블록.
-// 꺼낸 글은 AI 에 그대로 가는 자료라서 마크다운 비슷하게 쓴다 (제목은 #, 목록은 -, 표는 | 칸 |, 코드는 ``` 블록)
+// 문서에서 꺼낸 글을 이어 붙이는 도우미: 문단·목록·표·코드 블록·그림 자리·차트.
+// 꺼낸 글은 AI 에 그대로 가는 자료라서 마크다운 비슷하게 쓴다 (제목은 #, 목록은 -, 표는 | 칸 |, 코드는 ``` 블록, 그림은 [[picture N]] 줄)
+import { pictureMark } from '../doc-pictures';
 
 /** 코드에 쓰는 고정폭 글꼴 이름 (워드·PPT 의 글꼴로 코드 줄을 알아본다) */
 export const MONO_FONT =
@@ -45,6 +46,20 @@ export class TextOut {
   blank() {
     this.flushCode();
     this.lines.push('');
+  }
+
+  /** 그림 자리 한 줄 ('[[picture N]]'). n 이 없으면(또 나온 그림) 넣지 않는다 */
+  picture(n: number | null | undefined) {
+    if (!n) return;
+    this.flushCode();
+    this.lines.push(pictureMark(n));
+  }
+
+  /** 차트: 제목 한 줄과 값 표 */
+  chart(c: { title: string; rows: string[][] } | null) {
+    if (!c) return;
+    this.para(c.title ? `(차트: ${c.title})` : '(차트)');
+    this.table(c.rows);
   }
 
   /** 코드 블록을 쓰는 중인지 (코드 사이의 빈 문단은 블록 안의 빈 줄로) */

@@ -684,6 +684,14 @@ function fakeFigures(text, props) {
   const title = (text.match(/study material titled "([^"]*)"/) || [])[1] || '';
   const printed = props?.figures?.items?.properties?.printed_page ? { printed_page: 114 } : {};
   const base = { kind: 'map', asks: '(가) 나라가 차지한 지역을 묻는다.', key_point_title: '광합성 장소: 엽록체', ...printed };
+  // 한글·워드·PPT 속 그림 ('Picture N:'): 첫 그림은 지도, 나머지는 장식이라 고르지 않는다. 없는 번호(99)도 하나 섞는다 (서버가 뺀다)
+  const pictures = [...text.matchAll(/^Picture (\d+):$/gm)].map((m) => Number(m[1]));
+  if (pictures.length) {
+    return [
+      { ...base, page: pictures[0], title: '문서 속 지도', caption: '(가) 나라가 한강 유역까지 내려온 모습을 보여 주는 지도.' },
+      { ...base, page: 99, title: '없는 그림', caption: '이 조각에 없는 번호' },
+    ];
+  }
   if (/고구려 지도/.test(title)) {
     return [
       { ...base, page: 1, title: '5세기 고구려 영토', caption: '(가) 나라가 한강 유역까지 내려온 모습을 보여 주는 지도. 화살표는 남쪽을 가리킨다.' },
@@ -1267,6 +1275,9 @@ async function handleClaude(req, res) {
   } else if (props.key_points) {
     task = 'organize';
     out = fakeNote(textOf);
+    // 한글·워드·PPT 속 그림을 몇 장 받았는지 (글 뒤의 'Picture N:' 과 그림)
+    const labels = (textOf.match(/^Picture \d+:$/gm) || []).length;
+    if (labels) stats.docPictures = [...(stats.docPictures || []), { labels, images }].slice(-20);
     // 그림도 찾으라고 했으면 (PDF·사진, 자료 그림이 켜져 있을 때)
     if (props.figures) out.figures = fakeFigures(textOf, props);
     // PDF 쪽마다 인쇄된 쪽 번호: 시험 PDF 는 글자에서 읽는다 (가짜 AI 는 모른다고)

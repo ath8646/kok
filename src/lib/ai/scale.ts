@@ -16,11 +16,11 @@ export const QUESTIONS_MAX = 80;
 
 const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v));
 
-/** 조각의 양을 쪽 수로 */
+/** 조각의 양을 쪽 수로 (글 자료에 문서 속 그림이 있으면 그림 하나를 반 쪽으로 더한다) */
 export function pageWeight(p: PartSize): number {
   if (p.kind === 'pdf') return Math.max(1, p.pages ?? 1);
   if (p.kind === 'image') return Math.max(1, p.images ?? 1);
-  return Math.max(0.5, (p.chars ?? 0) / CHARS_PER_PAGE);
+  return Math.max(0.5, (p.chars ?? 0) / CHARS_PER_PAGE + (p.images ?? 0) * 0.5);
 }
 
 /**

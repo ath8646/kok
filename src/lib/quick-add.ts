@@ -45,20 +45,40 @@ export type FileGroups<F extends FileLike = FileLike> = {
   pdfs: F[];
   imageGroups: F[][];
   textFiles: F[];
-  /** 한글·워드·PPT: 브라우저에서 글을 꺼내 글 자료로 */
+  /** 한글·워드·PPT: 브라우저에서 글과 그림을 꺼내 글 자료로 */
   officeFiles: F[];
   rejected: Rejected[];
 };
 
-/** 한글·워드·PPT 파일의 가장 큰 크기 (브라우저에서 읽고 글만 보낸다) */
+/** 한글·워드·PPT 파일의 가장 큰 크기 (브라우저에서 읽고 글과 그림만 보낸다) */
 export const OFFICE_MAX_MB = 80;
+
+/** 파일 고르기 창에 보일 파일 (한글 파일은 기기마다 MIME 이 달라서 확장자와 MIME 을 같이) */
+export const FILE_ACCEPT = [
+  'application/pdf',
+  '.pdf',
+  'image/*',
+  '.txt',
+  '.md',
+  '.hwp',
+  '.hwpx',
+  '.docx',
+  '.pptx',
+  'application/x-hwp',
+  'application/haansofthwp',
+  'application/vnd.hancom.hwp',
+  'application/vnd.hancom.hwpx',
+  'application/hwp+zip',
+  'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+].join(',');
 
 /**
  * 파일을 자료 단위로 나눈다.
  * - PDF 는 하나씩 자료가 된다
  * - 사진은 한 번에 넣은 것끼리 한 자료(학습지 여러 장)로 묶는다. 요금제 한도를 넘으면 나눠 묶는다
  * - 글 파일(.txt, .md)은 글 자료가 된다
- * - 한글(.hwp·.hwpx)·워드(.docx)·PPT(.pptx)는 글을 꺼내 글 자료가 된다. 예전 형식(.doc·.ppt)·엑셀·애플 문서는 PDF로 저장해 넣도록 안내
+ * - 한글(.hwp·.hwpx)·워드(.docx)·PPT(.pptx)는 글과 그림을 꺼내 글 자료(+ 그림 파일)가 된다. 예전 형식(.doc·.ppt)·엑셀·애플 문서는 PDF로 저장해 넣도록 안내
  */
 export function groupFiles<F extends FileLike>(files: F[], plan: PlanLimits): FileGroups<F> {
   const out: FileGroups<F> = { pdfs: [], imageGroups: [], textFiles: [], officeFiles: [], rejected: [] };

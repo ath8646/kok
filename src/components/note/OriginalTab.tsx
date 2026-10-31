@@ -5,7 +5,8 @@ import { useRef, useState } from 'react';
 import type { MeResponse } from '@/lib/types';
 import { estimateEnergy, estimateFigures, estimateSmallTask, figuresWanted } from '@/lib/ai/models';
 import { clientModel } from '@/lib/client-model';
-import { MIN_TEXT_CHARS } from '@/lib/quick-add';
+import { FILE_ACCEPT, MIN_TEXT_CHARS } from '@/lib/quick-add';
+import { isOfficeText } from '@/lib/office/names';
 import { materialLabel, versionItems, type ChildSource, type Material, type VersionRow } from '@/lib/versions';
 import { OriginalPanel } from './OriginalPanel';
 import type { PageLabels } from '@/lib/page-labels';
@@ -216,6 +217,8 @@ function MaterialCard({
   const [open, setOpen] = useState(isParent);
   const src = isParent ? parent : kid;
   const id = `material-${m.source_id}`;
+  // 한글·워드·PPT 에서 꺼낸 글은 '문서'
+  const doc = m.kind === 'text' && isOfficeText(src?.text_content);
   return (
     <div className="grid gap-2">
       <button
@@ -226,12 +229,12 @@ function MaterialCard({
         onClick={() => setOpen((o) => !o)}
       >
         <span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-surface-2 text-muted" aria-hidden="true">
-          <Icon d={KIND_ICON[m.kind]} size={19} />
+          <Icon d={doc ? ICONS.file : KIND_ICON[m.kind]} size={19} />
         </span>
         <span className="min-w-0 flex-1">
           <span className="block truncate font-semibold">{materialLabel(m)}</span>
           <span className="block text-xs text-muted">
-            {index + 1}. {isParent ? '처음 자료' : '더한 자료'} · {KIND_LABEL[m.kind]}
+            {index + 1}. {isParent ? '처음 자료' : '더한 자료'} · {doc ? '문서' : KIND_LABEL[m.kind]}
             {m.page_count ? ` ${m.page_count}${m.kind === 'image' ? '장' : '쪽'}` : ''}
           </span>
         </span>
@@ -299,7 +302,7 @@ function AddMaterial({ me, busyHint, onAdd }: { me: MeResponse; busyHint: boolea
               ref={input}
               type="file"
               multiple
-              accept="application/pdf,.pdf,image/*,.txt,.md"
+              accept={FILE_ACCEPT}
               className="sr-only"
               tabIndex={-1}
               onChange={(e) => {

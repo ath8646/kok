@@ -30,3 +30,8 @@ export function officeTextHeader(name: string): string {
 export function isOfficeText(text: string | null | undefined): boolean {
   return /^\(파일: [^\n]+\)\n/.test(text ?? '');
 }
+
+/** 문서에서 꺼낸 글의 파일 이름 (첫 줄의 표시, 아니면 null) */
+export function officeFileName(text: string | null | undefined): string | null {
+  return /^\(파일: ([^\n]+)\)\n/.exec(text ?? '')?.[1] ?? null;
+}

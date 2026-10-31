@@ -8,9 +8,21 @@ import { fetchSources, fetchSubjects, sb } from '@/lib/data';
 import { coverWanted, estimateCover, estimateEnergy, estimateFigures, estimateRedraws, estimateSmallTask, figuresWanted, redrawsWanted } from '@/lib/ai/models';
 import { clientModel } from '@/lib/client-model';
 import { energyWindow, refillText } from '@/lib/plans';
-import { shrinkImage } from '@/lib/image';
-import { MAX_TEXT_PARTS, MIN_TEXT_CHARS, checkText, fileKind, groupFiles, isSubmitKey, splitComposer, splitForLimit, titleFromName } from '@/lib/quick-add';
+import { pictureToJpeg, shrinkImage } from '@/lib/image';
+import {
+  FILE_ACCEPT,
+  MAX_TEXT_PARTS,
+  MIN_TEXT_CHARS,
+  checkText,
+  fileKind,
+  groupFiles,
+  isSubmitKey,
+  splitComposer,
+  splitForLimit,
+  titleFromName,
+} from '@/lib/quick-add';
 import { officeLabel, officeTextHeader } from '@/lib/office/names';
+import { stripPictureMarks } from '@/lib/doc-pictures';
 import { SUBJECT_COLORS } from '@/lib/settings';
 import { subjectVar } from '@/lib/colors';
 import { matchesSubject, pickerOrder } from '@/lib/subject-order';
@@ -24,32 +36,14 @@ const MAX_PARALLEL = 3;
 /** 이보다 큰 PDF 는 브라우저에서 쪽수를 세지 않는다 (폰 메모리를 아끼고, 쪽수는 서버가 센다) */
 const BIG_PDF_BYTES = 30 * 1024 * 1024;
 const MB = 1024 * 1024;
-/** 파일 고르기 창에 보일 파일 (한글 파일은 기기마다 MIME 이 달라서 확장자와 MIME 을 같이) */
-const FILE_ACCEPT = [
-  'application/pdf',
-  '.pdf',
-  'image/*',
-  '.txt',
-  '.md',
-  '.hwp',
-  '.hwpx',
-  '.docx',
-  '.pptx',
-  'application/x-hwp',
-  'application/haansofthwp',
-  'application/vnd.hancom.hwp',
-  'application/vnd.hancom.hwpx',
-  'application/hwp+zip',
-  'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-  'application/vnd.openxmlformats-officedocument.presentationml.presentation',
-].join(',');
 /** 자료 목록·과목이 바뀌었다고 화면들에 알리는 이벤트 */
 export { SOURCES_CHANGED, SUBJECTS_CHANGED };
 
 type Job =
-  | { kind: 'text'; text: string; title: string }
+  /** pictures: 한글·워드·PPT 의 뒤 조각에 든 그림 (JPEG, 글의 [[picture N]] 차례) */
+  | { kind: 'text'; text: string; title: string; pictures?: Blob[] }
   | { kind: 'textfile'; file: File; title: string }
-  /** 한글·워드·PPT: 브라우저에서 글을 꺼내 글 자료로 (길면 여러 자료로 나눈다) */
+  /** 한글·워드·PPT: 브라우저에서 글과 그림을 꺼내 글 자료(+ 그림 파일)로 (길면 여러 자료로 나눈다) */
   | { kind: 'office'; file: File; title: string }
   | { kind: 'pdf'; file: File; title: string }
   | { kind: 'image'; files: File[]; title: string };
@@ -92,7 +86,7 @@ type Item = {
   unit?: string;
 };
 
-/** 올리기 전에 한 번 준비한 것 (다시 하기에서 사진을 또 줄이지 않게) */
+/** 올리기 전에 한 번 준비한 것 (다시 하기에서 사진을 또 줄이지 않게). 글 자료의 blobs 는 문서 속 그림 */
 type Prepared = { kind: 'text' | 'pdf' | 'image'; text: string; pages: number; blobs: Blob[] };
 
 /** 입력창에 붙인 파일 (같은 이름의 사진이 여러 장이어도 구별되게 번호를 붙인다) */
@@ -172,6 +166,8 @@ function jobLabel(job: Job): string {
 }
 
 function jobIcon(job: Job): string {
+  // 그림을 들고 가는 글 조각은 한글·워드·PPT 문서의 뒤 조각
+  if (job.kind === 'text' && job.pictures?.length) return ICONS.file;
   return job.kind === 'pdf' || job.kind === 'office' ? ICONS.file : job.kind === 'image' ? ICONS.image : ICONS.pen;
 }
 
@@ -185,7 +181,7 @@ function statusText(it: Item): string {
         : it.job.kind === 'pdf'
           ? 'PDF 확인하는 중'
           : it.job.kind === 'office'
-            ? `${officeLabel(it.job.file.name)} 문서 읽는 중`
+            ? `${officeLabel(it.job.file.name)} 문서 읽는 중${it.total > 1 ? ` · 그림 ${it.done}/${it.total}` : ''}`
             : '준비하는 중';
     case 'slot':
       return '정리 중인 자료가 끝나면 시작해요';
@@ -342,7 +338,7 @@ export function QuickAddProvider({
     async (key: string, job: Job): Promise<Prepared> => {
       const m = meRef.current;
       update(key, { status: 'preparing', done: 0, total: job.kind === 'image' ? job.files.length : 1 });
-      if (job.kind === 'text') return { kind: 'text', text: job.text, pages: 0, blobs: [] };
+      if (job.kind === 'text') return { kind: 'text', text: job.text, pages: 0, blobs: job.pictures ?? [] };
       if (job.kind === 'textfile') {
         const c = checkText(await job.file.text(), m.plan);
         if (!c.ok) throw new Error(`'${job.file.name}': ${c.reason}`);
@@ -350,31 +346,43 @@ export function QuickAddProvider({
       }
       if (job.kind === 'office') {
         // 문서 읽기 코드는 이때만 불러온다
-        const { extractOfficeText } = await import('@/lib/office');
-        let text: string;
+        const { extractOffice } = await import('@/lib/office');
+        const { picturesForParts } = await import('@/lib/office/pictures');
+        let doc: Awaited<ReturnType<typeof extractOffice>>;
         try {
-          text = (await extractOfficeText(job.file)).text;
+          doc = await extractOffice(job.file);
         } catch (e) {
           throw new Error(`'${job.file.name}': ${(e as Error).message || '문서를 읽지 못했어요.'}`);
         }
         // 한 자료의 글 한도보다 길면 여러 자료로 나눈다 (뒤 조각은 같은 과목·단원·복습 설정의 새 글 자료).
         // 조각마다 첫 줄에 어느 파일인지 적는다 (원본 탭에 보이고, 정리는 학생이 직접 쓴 글이 아닌 자료로 다룬다)
         const header = officeTextHeader(job.file.name);
-        const parts = splitForLimit(text.replace(/\r\n/g, '\n').trim(), m.plan.textChars - header.length).map((t) => header + t);
+        const parts = splitForLimit(doc.text.replace(/\r\n/g, '\n').trim(), m.plan.textChars - header.length);
         if (parts.length > MAX_TEXT_PARTS)
           throw new Error(
-            `'${job.file.name}': 글이 ${text.length.toLocaleString()}자라 한 번에 넣기엔 너무 길어요. 문서를 ${MAX_TEXT_PARTS}개 이하로 나눠서 넣어 주세요.`,
+            `'${job.file.name}': 글이 ${doc.text.length.toLocaleString()}자라 한 번에 넣기엔 너무 길어요. 문서를 ${MAX_TEXT_PARTS}개 이하로 나눠서 넣어 주세요.`,
           );
-        if (parts.length > 1) {
+        // 조각마다 그림: 큰 그림부터 자료 하나의 그림 한도(사진 한도와 같다)까지 JPEG 로 바꾼다 (못 바꾼 그림은 건너뛴다)
+        const max = Math.max(0, m.plan.images);
+        const { parts: done, left } = await picturesForParts(
+          parts,
+          doc.pictures,
+          max,
+          (p) => pictureToJpeg(p),
+          (n, total) => update(key, { done: n, total }),
+        );
+        const ready = done.map((d) => ({ text: header + d.text, blobs: d.files }));
+        if (left) toast(`'${job.file.name}'은 그림이 많아서 큰 그림부터 자료 하나에 ${max}장까지 넣어요.`);
+        if (ready.length > 1) {
           const it = itemsRef.current.find((i) => i.key === key);
           const base = job.title || titleFromName(job.file.name) || '문서';
-          const name = (i: number) => `${base} (${i + 1}/${parts.length})`.slice(0, 120);
+          const name = (i: number) => `${base} (${i + 1}/${ready.length})`.slice(0, 120);
           if (it) {
             update(key, { job: { ...job, title: name(0) } });
-            const rest: Item[] = parts.slice(1).map((t, i) => ({
+            const rest: Item[] = ready.slice(1).map((r, i) => ({
               key: newId(),
               sourceId: newId(),
-              job: { kind: 'text', text: t, title: name(i + 1) },
+              job: { kind: 'text', text: r.text, title: name(i + 1), ...(r.blobs.length ? { pictures: r.blobs } : {}) },
               subjectId: it.subjectId,
               status: 'waiting',
               done: 0,
@@ -386,12 +394,15 @@ export function QuickAddProvider({
             // 이 자료 바로 뒤에 차례대로
             const at = itemsRef.current.findIndex((i) => i.key === key);
             commit([...itemsRef.current.slice(0, at + 1), ...rest, ...itemsRef.current.slice(at + 1)]);
-            toast(`'${job.file.name}'은 글이 길어서 ${parts.length}개 자료로 나눠 넣어요.`);
+            toast(`'${job.file.name}'은 글이 길어서 ${ready.length}개 자료로 나눠 넣어요.`);
           }
         }
-        const c = checkText(parts[0], m.plan);
+        // 그림만 있는 문서인데 이 기기가 그림을 하나도 읽지 못했다
+        if (!ready[0].blobs.length && ready[0].text.slice(header.length).trim().length < MIN_TEXT_CHARS)
+          throw new Error(`'${job.file.name}': 문서 속 그림을 읽지 못했어요. PDF로 저장해서 넣어 주세요.`);
+        const c = checkText(ready[0].text, m.plan);
         if (!c.ok) throw new Error(`'${job.file.name}': ${c.reason}`);
-        return { kind: 'text', text: c.text, pages: 0, blobs: [] };
+        return { kind: 'text', text: c.text, pages: 0, blobs: ready[0].blobs };
       }
       if (job.kind === 'pdf') {
         // 아주 큰 PDF 는 여기서 열지 않는다 (쪽수 검사는 서버가 한다)
@@ -413,10 +424,22 @@ export function QuickAddProvider({
   const upload = useCallback(
     async (key: string, sourceId: string, prep: Prepared): Promise<string[]> => {
       update(key, { status: 'uploading', done: 0, total: prep.blobs.length, bytes: prep.blobs.reduce((n, b) => n + b.size, 0) });
-      const { uploads } = await api<{ uploads: Array<{ path: string; token: string }> }>('/api/uploads', {
-        method: 'POST',
-        body: JSON.stringify({ sourceId, kind: prep.kind, files: prep.blobs.map((b) => ({ size: b.size })) }),
-      });
+      // 글 자료의 파일은 문서 속 그림 (사진처럼 JPEG 로 올린다). 요청이 빠르면 조금 기다렸다 다시 (올리기 자리는 아직 만들지 않았다)
+      let uploads: Array<{ path: string; token: string }> = [];
+      for (let wait = 0; ; wait++) {
+        try {
+          ({ uploads } = await api<{ uploads: Array<{ path: string; token: string }> }>('/api/uploads', {
+            method: 'POST',
+            body: JSON.stringify({ sourceId, kind: prep.kind === 'pdf' ? 'pdf' : 'image', files: prep.blobs.map((b) => ({ size: b.size })) }),
+          }));
+          break;
+        } catch (e) {
+          if (!(e instanceof ApiError) || e.code !== 'rate_limited' || wait >= 6) throw e;
+          update(key, { status: 'busy' });
+          await sleep(20_000);
+          update(key, { status: 'uploading' });
+        }
+      }
       const bucket = sb().storage.from('sources');
       for (let i = 0; i < uploads.length; i++) {
         const { error } = await bucket.uploadToSignedUrl(uploads[i].path, uploads[i].token, prep.blobs[i], {
@@ -506,6 +529,7 @@ export function QuickAddProvider({
           const figures = figuresWanted({ canFigures: m.canFigures, figuresSetting: m.settings.quiz.figures, featureOn: m.features.figures });
           const redraws = redrawsWanted({
             kind: prep.kind,
+            pictures: prep.blobs.length,
             canFigures: m.canFigures,
             sourceFiguresSetting: m.settings.quiz.sourceFigures,
             featureOn: m.features.sourceFigures,
@@ -526,7 +550,18 @@ export function QuickAddProvider({
           if (!files) {
             if (it.parentId) await waitForAppend(it.key, it.parentId);
             await waitForSlot(it.key);
-            files = prep.blobs.length ? await upload(it.key, sourceId, prep) : [];
+            try {
+              files = prep.blobs.length ? await upload(it.key, sourceId, prep) : [];
+            } catch (e) {
+              // 문서 속 그림을 오늘 더 올릴 수 없다 (하루 올리기 수·아직 정리하지 않은 파일 수): 그림은 빼고 글만 넣는다
+              // (이 거절은 올리기 자리를 만들기 전이라 같은 번호로 그대로 만든다)
+              const full = e instanceof ApiError && (e.code === 'upload_limit' || e.code === 'upload_pending');
+              if (!(full && prep.kind === 'text' && prep.blobs.length)) throw e;
+              prep = { ...prep, text: stripPictureMarks(prep.text), blobs: [] };
+              prepared.current.set(it.key, prep);
+              files = [];
+              toast(`${e.message} 문서 속 그림은 빼고 글만 넣어요.`);
+            }
             update(it.key, { files });
           }
           const r = await create(it, sourceId, prep, files);
@@ -547,7 +582,7 @@ export function QuickAddProvider({
         update(it.key, { status: 'error', error: (e as Error).message || '넣지 못했어요.' });
       }
     },
-    [update, remove, waitForSlot, waitForAppend, prepare, upload, create, refreshMe, touchSubject],
+    [update, remove, waitForSlot, waitForAppend, prepare, upload, create, refreshMe, touchSubject, toast],
   );
 
   /**
@@ -616,9 +651,11 @@ export function QuickAddProvider({
     (key: string) => {
       const it = itemsRef.current.find((i) => i.key === key);
       if (!it) return;
-      // 파일을 다 올렸거나 글이면 같은 번호로 다시 (이미 만들어졌으면 서버가 duplicate 로 알려 준다),
-      // 올리다 멈췄으면 그 번호의 올리기 표가 남아 있으니 새 번호로 처음부터
-      const sameId = !!it.files || it.job.kind === 'text' || it.job.kind === 'textfile' || it.job.kind === 'office';
+      // 파일을 다 올렸거나 (그림 없는) 글이면 같은 번호로 다시 (이미 만들어졌으면 서버가 duplicate 로 알려 준다),
+      // 올리다 멈췄으면 그 번호의 올리기 표가 남아 있으니 새 번호로 처음부터 (문서 속 그림을 올리는 글도)
+      const pictures = prepared.current.get(key)?.blobs.length ?? (it.job.kind === 'text' ? (it.job.pictures?.length ?? 0) : 0);
+      const textish = it.job.kind === 'text' || it.job.kind === 'textfile' || it.job.kind === 'office';
+      const sameId = !!it.files || (textish && !pictures);
       update(key, { status: 'waiting', error: undefined, done: 0, ...(sameId ? {} : { sourceId: newId(), files: undefined }) });
       pump();
     },

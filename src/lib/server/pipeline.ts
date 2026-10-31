@@ -57,6 +57,8 @@ import { growthOfParts, keepFromCurrent, mergeFits, noteForMerge, remergeState, 
 import { modelForTier, type AiTask, type UserSettings } from '@/lib/settings';
 import { planChunks, slicePdf, splitPdfBySize, splitText, PdfError } from '@/lib/pdf';
 import { isOfficeText } from '@/lib/office/names';
+import { DOC_PICTURES_PER_CHUNK, pictureNumbers, splitDocText } from '@/lib/doc-pictures';
+import { imageInfo } from '@/lib/image-size';
 import { questionsForSolve, readSolution, stepsReachAnswer } from '@/lib/figure/solution';
 import { getAccount, getAppSettings, getFeatures, charge, refundSource, type Account, type AppSettings } from './account';
 import { AiCallError, callJson, imageBlock, pdfBlock, textBlock, usageOf, type ContentPart } from './claude';
@@ -121,7 +123,17 @@ export type SourceRow = {
 export function chunkCount(kind: SourceRow['kind'], pages: number, images: number, text: string): number {
   if (kind === 'pdf') return planChunks(Math.max(1, pages)).length;
   if (kind === 'image') return Math.max(1, Math.ceil(images / IMAGES_PER_CHUNK));
-  return Math.max(1, splitText(text, TEXT_CHARS_PER_CHUNK).length);
+  return Math.max(1, textChunks(text, images > 0).length);
+}
+
+/** 글 자료의 조각: 글자 수로, 문서 속 그림이 있는 자료는 그림 수로도 나눈다 (그림 없는 글은 예전과 똑같이) */
+function textChunks(text: string, pictures: boolean): string[] {
+  return pictures ? splitDocText(text, TEXT_CHARS_PER_CHUNK, DOC_PICTURES_PER_CHUNK) : splitText(text, TEXT_CHARS_PER_CHUNK);
+}
+
+/** 글 자료에 딸린 문서(한글·워드·PPT) 속 그림 수 (글의 [[picture N]] 이 file_paths 의 N 번째) */
+function docPictureCount(src: Pick<SourceRow, 'kind' | 'file_paths'>): number {
+  return src.kind === 'text' ? (src.file_paths ?? []).length : 0;
 }
 
 function mediaTypeOf(path: string): 'image/jpeg' | 'image/png' | 'image/webp' {
@@ -223,9 +235,9 @@ export { cleanMindmap, maxNodesFor };
 const REDRAW_OUT_TOKENS = 8000;
 /** 정리할 때 찾은 그림 하나가 늘리는 답 길이 (종류·이름·설명·시험 포인트·네 모서리) */
 
-/** 자료 그림을 찾지 않는 까닭 (찾으면 null): 글 자료·설정에서 끔·DB 에 칸이 없음 (schema.sql 을 다시 실행하기 전에는 예전처럼) */
+/** 자료 그림을 찾지 않는 까닭 (찾으면 null): 그림 없는 글 자료·설정에서 끔·DB 에 칸이 없음 (schema.sql 을 다시 실행하기 전에는 예전처럼) */
 async function sourceFiguresOff(ctx: Ctx): Promise<FigureLog['skipped'] | null> {
-  if (ctx.src.kind === 'text') return 'text';
+  if (ctx.src.kind === 'text' && !docPictureCount(ctx.src)) return 'text';
   if (!ctx.settings.quiz.sourceFigures) return 'setting_off';
   return (await getFeatures(ctx.admin)).sourceFigures ? null : 'db_outdated';
 }
@@ -591,12 +603,15 @@ async function stepOrganize(ctx: Ctx): Promise<Partial<SourceRow>> {
   const prevCuts = i === 0 ? [] : cutsOf(src.draft);
   const lastTry = Number(src.draft.attempts ?? 0) >= MAX_ATTEMPTS - 1;
   const off = await sourceFiguresOff(ctx);
-  const room = !lastTry && !off ? Math.min(MAX_FIGURES_PER_PART, MAX_FIGURES - prevCuts.length) : 0;
+  // 문서 속 그림은 그림 하나가 곧 자료 그림이라 자리를 찾지 않는다 (AI 를 더 부르지 않으니 한 조각에서 자료 하나의 끝까지)
+  const perPart = src.kind === 'text' ? MAX_FIGURES : MAX_FIGURES_PER_PART;
+  const room = !lastTry && !off ? Math.min(perPart, MAX_FIGURES - prevCuts.length) : 0;
   const figLog = i === 0 ? figLogOf({}) : figLogOf(src.draft);
-  if (room > 0) figLog.looked++;
-  else figLog.skipped = off ?? (lastTry ? 'last_try' : 'full');
+  if (room <= 0) figLog.skipped = off ?? (lastTry ? 'last_try' : 'full');
   let holder: FigureHolder | null = null;
-  // 이 조각의 양 (개념 수를 정한다): PDF 는 쪽 수, 사진은 장 수, 글은 글자 수
+  /** 문서 속 그림 (그림 번호 → JPEG): 이 조각에 자리가 있는 것 */
+  let docPics: Map<number, Uint8Array> | null = null;
+  // 이 조각의 양 (개념 수를 정한다): PDF 는 쪽 수, 사진은 장 수, 글은 글자 수(+ 문서 속 그림)
   let size: PartSize = { kind: src.kind };
   // PDF 글자에서 읽은 인쇄된 쪽 번호 (노트의 쪽 표시: 글자가 없는 스캔 PDF 는 AI 가 읽은 번호를 쓴다)
   let textNums: number[] | null = null;
@@ -662,14 +677,30 @@ async function stepOrganize(ctx: Ctx): Promise<Partial<SourceRow>> {
     holder = { kind: 'image', photos };
     size = { kind: 'image', images: paths.length };
   } else {
-    const parts = splitText(src.text_content ?? '', TEXT_CHARS_PER_CHUNK);
+    const parts = textChunks(src.text_content ?? '', docPictureCount(src) > 0);
     // 학생이 적거나 붙여 넣은 글은 표현을 지키고, 한글·워드·PPT 에서 꺼낸 글(첫 줄 '(파일: …)')은 보통 자료처럼 정리한다
     meta.ownWriting = !isOfficeText(src.text_content);
     const text = parts[Math.min(i, parts.length - 1)] ?? '';
-    size = { kind: 'text', chars: text.length };
     content.push(textBlock(wrap('material', text)));
+    // 문서 속 그림: 이 조각에 자리가 있는 그림을 글 뒤에 'Picture N:' 과 함께 보여 준다
+    const nums = pictureNumbers(text).filter((n) => n <= docPictureCount(src));
+    if (nums.length) {
+      docPics = new Map();
+      for (const n of nums) {
+        const bytes = await download(admin, src.file_paths[n - 1]);
+        docPics.set(n, bytes);
+        content.push(textBlock(`Picture ${n}:`));
+        content.push(imageBlock(bytes, mediaTypeOf(src.file_paths[n - 1])));
+      }
+      meta.pictures = nums;
+    }
+    size = { kind: 'text', chars: text.length, images: nums.length };
   }
-  if (room > 0 && holder) meta.figures = room;
+  // 그림을 찾을 곳이 있는 조각만 (문서 속 그림이 없는 글 조각은 빼고)
+  if (room > 0 && (holder || docPics)) {
+    meta.figures = room;
+    figLog.looked++;
+  }
   // PDF: 쪽마다 인쇄된 쪽 번호도 받는다 (PDF 글자에서 읽었으면 그것을 쓰지만, 스캔 PDF 가 많아서 늘 받는다)
   if (src.kind === 'pdf') meta.pageNumbers = true;
   // 자료 양에 따라 개념 수를 정한다 (조각마다 적어 두고 합칠 때 더한다)
@@ -698,6 +729,11 @@ async function stepOrganize(ctx: Ctx): Promise<Partial<SourceRow>> {
   // 찾은 그림은 다음 번에 그 쪽을 그림으로 그려 자리를 찾고 자른다 (stepCutFigures: AI 를 부른 이 단계와 나눠서, 오래 걸려도 정리를 다시 하지 않게).
   // 개념은 노트가 정해진 뒤 이름으로 붙인다
   let figFound: PendingCut | null = null;
+  // 문서 속 그림: AI 가 고른 그림을 그대로 자료 그림으로 (자리 찾기·자르기 없이 그림 파일을 그림 폴더에 둔다)
+  let docCuts: CutFigure[] = [];
+  if (meta.figures && docPics) {
+    docCuts = await keepDocFigures(ctx, json, docPics, meta.figures, prevCuts.length, figLog);
+  }
   if (meta.figures && holder) {
     const range = holder.kind === 'pdf' ? { from: meta.pageStart ?? 1, to: meta.pageEnd ?? 1 } : { from: meta.imageStart ?? 1, to: meta.imageEnd ?? 1 };
     const found = readFoundFigures((json as { figures?: unknown } | null)?.figures, range, meta.figures).map((f) => {
@@ -712,7 +748,7 @@ async function stepOrganize(ctx: Ctx): Promise<Partial<SourceRow>> {
   const next = i + 1;
   const progress = Math.round(5 + (55 * next) / total);
   const partRanges = [...(i === 0 ? [] : rangesOf(src.draft)), meta.keyPoints];
-  const kept: Record<string, unknown> = { ...src.draft, attempts: 0, figCuts: prevCuts, figLog, partRanges, pageEvidence: evidence };
+  const kept: Record<string, unknown> = { ...src.draft, attempts: 0, figCuts: [...prevCuts, ...docCuts], figLog, partRanges, pageEvidence: evidence };
   if (i === 0) delete kept.pageAnchors;
   if (figFound) kept.figFound = figFound;
   if (next < total) {
@@ -724,9 +760,45 @@ async function stepOrganize(ctx: Ctx): Promise<Partial<SourceRow>> {
   const one: Record<string, unknown> = { ...src.draft, note, attempts: 0, figLog, pageEvidence: evidence };
   delete one.pageAnchors;
   if (figFound) return { partials: [], chunk_index: next, step: 'visual', progress: 62, draft: { ...one, figCuts: [], figFound } };
-  const draft: Record<string, unknown> = { ...one, figures: [] };
+  // 문서 속 그림은 이미 그림 폴더에 있다: 개념에 붙이고 다음 단계를 정한다 (Pro 는 다시 그리기부터)
+  const figures = toSourceFigures(docCuts, note.key_points);
+  const draft: Record<string, unknown> = { ...one, figures };
   delete draft.figCuts;
-  return { partials: [], chunk_index: next, step: 'visual', progress: 62, draft };
+  return { partials: [], chunk_index: next, step: figures.length ? afterNote(ctx, figures) : 'visual', progress: 62, draft };
+}
+
+/**
+ * 문서 속 그림 중 AI 가 자료 그림으로 고른 것(figures 의 page = 그림 번호)을 그림 폴더에 그대로 둔다 (f번호는 앞 조각에 이어서).
+ * 이 조각에 없는 번호는 뺀다 (가까운 번호로 옮기지 않는다: 다른 그림을 붙이지 않게). 못 둔 그림은 기록만 남기고 넘어간다
+ */
+async function keepDocFigures(ctx: Ctx, json: unknown, pics: Map<number, Uint8Array>, max: number, before: number, log: FigureLog): Promise<CutFigure[]> {
+  const raw = (json as { figures?: unknown } | null)?.figures;
+  const listed = Array.isArray(raw) ? raw.filter((x) => pics.has(Math.round(Number((x as { page?: unknown } | null)?.page)))) : [];
+  const nums = [...pics.keys()];
+  const found = readFoundFigures(listed, { from: Math.min(...nums), to: Math.max(...nums) }, max);
+  log.found += found.length;
+  const out: CutFigure[] = [];
+  const used = new Set<number>();
+  for (const f of found) {
+    const bytes = pics.get(f.page);
+    if (!bytes || used.has(f.page)) continue;
+    used.add(f.page);
+    const info = imageInfo(bytes);
+    if (!info || info.format !== 'jpeg') {
+      logError(log, `picture ${f.page}: not a jpeg`);
+      continue;
+    }
+    const path = figurePath(ctx.src.user_id, ctx.src.id, before + out.length + 1);
+    const { error } = await ctx.admin.storage.from(SOURCES_BUCKET).upload(path, bytes, { contentType: 'image/jpeg', upsert: true });
+    if (error) {
+      console.warn('[kok] document picture upload failed', ctx.src.id, error.message);
+      logError(log, `upload: ${error.message}`);
+      continue;
+    }
+    out.push({ ...f, crop: path, w: info.width, h: info.height });
+    log.cut++;
+  }
+  return out;
 }
 
 /** 조각마다의 쪽 번호 증거: PDF 쪽 start~end 에 인쇄된 번호 (PDF 글자 text, AI 가 읽은 ai) */
@@ -1157,9 +1229,10 @@ async function stepCheckAndFinish(ctx: Ctx): Promise<'done' | Partial<SourceRow>
     if (curBody?.view) noteBody = { ...noteBody, view: curBody.view };
     if (curBody?.page_labels) noteBody = { ...noteBody, page_labels: curBody.page_labels };
   }
-  // 원본 파일: Pro·관리자는 계속, 무료는 처리 뒤 freeFileDays 일, 테스트 플랜은 플랜이 끝나고 freeFileDays 일
+  // 원본 파일(문서 속 그림 포함): Pro·관리자는 계속, 무료는 처리 뒤 freeFileDays 일, 테스트 플랜은 플랜이 끝나고 freeFileDays 일. 파일 없는 글은 없음
   const keepFrom = ctx.acc.plan.kind === 'custom' && ctx.acc.plan.until ? Math.max(Date.parse(ctx.acc.plan.until), Date.now()) : Date.now();
-  const expire = ctx.acc.keepFiles || ctx.src.kind === 'text' ? null : new Date(keepFrom + ctx.app.limits.freeFileDays * 86400_000).toISOString();
+  const noFiles = ctx.src.kind === 'text' && !docPictureCount(ctx.src);
+  const expire = ctx.acc.keepFiles || noFiles ? null : new Date(keepFrom + ctx.app.limits.freeFileDays * 86400_000).toISOString();
 
   if (pid && !ctx.src.title) {
     // 이름 없이 더한 자료(글 등)는 그 자료의 정리 제목을 이름으로 (버전 기록에 보인다)

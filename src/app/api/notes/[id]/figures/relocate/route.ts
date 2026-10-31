@@ -71,6 +71,8 @@ export async function POST(req: NextRequest, ctx: RouteContext<'/api/notes/[id]/
     if (srcErr) throw srcErr;
     if (!src || src.user_id !== acc.userId) throw new UserFacingError('not_found', '그림을 자른 원본 자료를 찾을 수 없어요.', 404);
     const paths: string[] = Array.isArray(src.file_paths) ? src.file_paths : [];
+    // 한글·워드·PPT 속 그림은 그림 전체를 그대로 쓴다 (찾을 자리가 없다)
+    if (src.kind === 'text') throw new UserFacingError('doc_picture', '문서에서 꺼낸 그림이라 다시 찾지 않아도 돼요.', 400);
     if ((src.kind !== 'pdf' && src.kind !== 'image') || !paths.length) {
       throw new UserFacingError('original_gone', '원본 파일이 지워져서 이 그림은 다시 찾을 수 없어요.', 410);
     }

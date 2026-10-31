@@ -73,9 +73,13 @@ export function costMultiplier(model: ModelId): number {
 export type MaterialEstimate = {
   kind: 'text' | 'pdf' | 'image';
   pages?: number;
+  /** 사진 수, 글 자료면 문서(한글·워드·PPT) 속 그림 수 */
   images?: number;
   chars?: number;
 };
+
+/** 문서 속 그림 한 장의 입력 토큰 (긴 변 1568 이하 JPEG: Claude 는 넓이/750 토큰, 1.15MP 까지) */
+export const DOC_PICTURE_TOKENS = 1600;
 
 /**
  * 작업 전에 보여 줄 대략적인 에너지 (정리+합치기+그림+문제+검사 전체).
@@ -85,14 +89,14 @@ export function estimateEnergy(m: MaterialEstimate, model: ModelId, usdPerEnergy
   let materialTokens = 0;
   if (m.kind === 'pdf') materialTokens = (m.pages ?? 1) * 3500;
   else if (m.kind === 'image') materialTokens = (m.images ?? 1) * 2600;
-  else materialTokens = Math.ceil((m.chars ?? 0) * 0.9);
+  else materialTokens = Math.ceil((m.chars ?? 0) * 0.9) + (m.images ?? 0) * DOC_PICTURE_TOKENS;
 
   const chunks =
     m.kind === 'pdf'
       ? Math.max(1, Math.ceil((m.pages ?? 1) / 15))
       : m.kind === 'image'
         ? Math.max(1, Math.ceil((m.images ?? 1) / 6))
-        : Math.max(1, Math.ceil((m.chars ?? 0) / 40000));
+        : Math.max(1, Math.ceil((m.chars ?? 0) / 40000), Math.ceil((m.images ?? 0) / 10));
   // 자료가 길수록 개념이 늘어(lib/ai/scale.ts) 정리·합치기·그림·문제 답도 길어진다
   const noteTokens = Math.min(12_000, 1500 + materialTokens * 0.1);
   const perChunk = materialTokens / chunks;
@@ -157,9 +161,18 @@ export function coverWanted(o: { canFigures: boolean; autoCover: boolean; featur
   return o.canFigures && o.autoCover && o.featureOn && !o.append;
 }
 
-/** 자료를 넣을 때 자료 그림을 KOK 스타일로 다시 그리는지 (PDF·사진, Pro 혜택, 설정에서 켜 둠, DB 칸이 있음) */
-export function redrawsWanted(o: { kind: 'text' | 'pdf' | 'image'; canFigures: boolean; sourceFiguresSetting: boolean; featureOn: boolean }): boolean {
-  return o.kind !== 'text' && o.canFigures && o.sourceFiguresSetting && o.featureOn;
+/**
+ * 자료를 넣을 때 자료 그림을 KOK 스타일로 다시 그리는지 (PDF·사진·그림이 든 한글·워드·PPT, Pro 혜택, 설정에서 켜 둠, DB 칸이 있음).
+ * pictures: 글 자료에 딸린 문서 속 그림 수
+ */
+export function redrawsWanted(o: {
+  kind: 'text' | 'pdf' | 'image';
+  pictures?: number;
+  canFigures: boolean;
+  sourceFiguresSetting: boolean;
+  featureOn: boolean;
+}): boolean {
+  return (o.kind !== 'text' || (o.pictures ?? 0) > 0) && o.canFigures && o.sourceFiguresSetting && o.featureOn;
 }
 
 /** 노트를 만들 때 그림 풀이를 만드는지 (Pro 혜택, 설정에서 켜 둠, DB 칸이 있음) */

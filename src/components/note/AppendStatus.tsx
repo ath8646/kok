@@ -2,6 +2,7 @@
 // 노트에 더하는 자료의 진행: 정리 중이면 진행 고리, 멈추면 다시 하기·지우기
 import { useState } from 'react';
 import type { ChildSource } from '@/lib/versions';
+import { officeFileName } from '@/lib/office/names';
 import { stepLabel } from '../ProcessingList';
 import { Button, ICONS, Icon, ProgressRing, api, cx, useToast, DONE } from '../ui';
 import { useConfirm } from '../Confirm';
@@ -19,8 +20,10 @@ export function AppendStatus({ kids, onChanged }: { kids: ChildSource[]; onChang
     <section className="grid gap-2" aria-label="노트에 더하는 자료" aria-live="polite">
       {shown.map((k) => {
         const failed = k.status === 'error';
+        // 한글·워드·PPT 에서 꺼낸 글은 파일 이름으로
+        const file = k.kind === 'text' ? officeFileName(k.text_content) : null;
         const snippet = k.kind === 'text' && k.text_content ? k.text_content.replace(/\s+/g, ' ').trim().slice(0, 24) : '';
-        const name = k.title || (snippet ? `${snippet}…` : `${KIND_LABEL[k.kind]} 자료`);
+        const name = k.title || file || (snippet ? `${snippet}…` : `${KIND_LABEL[k.kind]} 자료`);
         return (
           <div key={k.id} className={cx('kok-card kok-rise grid gap-2 p-3.5', failed && 'ring-2 ring-bad/30')}>
             <div className="flex items-center gap-3">

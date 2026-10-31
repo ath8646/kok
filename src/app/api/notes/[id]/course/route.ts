@@ -17,6 +17,7 @@ import { COURSE_LEVELS, COURSE_MATERIAL, courseOut, settleCourse } from '@/lib/c
 import { coursePlanRange } from '@/lib/ai/scale';
 import { slicePdf } from '@/lib/pdf';
 import { stripMarks } from '@/lib/richtext';
+import { pictureNumbers, renumberPictures } from '@/lib/doc-pictures';
 
 export const maxDuration = 300;
 
@@ -129,11 +130,33 @@ type SourceLite = { kind: string; file_paths: string[] | null; page_count: numbe
 async function materialBlocks(admin: Awaited<ReturnType<typeof requireAccount>>['admin'], src: SourceLite): Promise<{ blocks: ContentPart[]; tokens: number }> {
   if (!src) return { blocks: [], tokens: 0 };
   try {
-    if (src.kind === 'text') {
-      const text = stripMarks(src.text_content ?? '').slice(0, COURSE_MATERIAL.textChars);
-      return text ? { blocks: [textBlock(wrap('material', text))], tokens: 0 } : { blocks: [], tokens: 0 };
-    }
     const paths = (src.file_paths ?? []).filter((p) => typeof p === 'string');
+    if (src.kind === 'text') {
+      let text = stripMarks(src.text_content ?? '').slice(0, COURSE_MATERIAL.textChars);
+      if (!text) return { blocks: [], tokens: 0 };
+      // 그림 없는 글은 예전처럼 그대로
+      if (!paths.length || !pictureNumbers(text).length) return { blocks: [textBlock(wrap('material', text))], tokens: 0 };
+      // 한글·워드·PPT 속 그림: 앞의 몇 장만 같이 보낸다 (받지 못한 그림·나머지 그림 자리는 지우고, 번호는 'Picture N:' 차례로 다시)
+      const got: Array<{ n: number; bytes: Uint8Array; path: string }> = [];
+      for (const n of pictureNumbers(text).filter((x) => x <= paths.length)) {
+        if (got.length >= COURSE_MATERIAL.images) break;
+        try {
+          got.push({ n, bytes: await downloadOwn(admin, paths[n - 1]), path: paths[n - 1] });
+        } catch {
+          // 그림이 없어졌다: 글만
+        }
+      }
+      text = renumberPictures(
+        text,
+        got.map((g) => g.n),
+      );
+      const blocks: ContentPart[] = [textBlock(wrap('material', text))];
+      if (got.length) {
+        blocks.push(textBlock('Pictures from the document: a line "[[picture N]]" in <material> marks where "Picture N" appears.'));
+        got.forEach((g, k) => blocks.push(textBlock(`Picture ${k + 1}:`), imageBlock(g.bytes, mediaTypeOf(g.path))));
+      }
+      return { blocks, tokens: got.length * 1600 };
+    }
     if (!paths.length) return { blocks: [], tokens: 0 };
     if (src.kind === 'pdf') {
       const bytes = await downloadOwn(admin, paths[0]);

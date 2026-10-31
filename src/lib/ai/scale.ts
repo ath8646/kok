@@ -57,6 +57,31 @@ export function noteOutTokens(maxKeyPoints: number, figures = 0): number {
   return Math.min(16_000, 3000 + maxKeyPoints * 400 + figures * 400);
 }
 
+/**
+ * 정리 답에 더하는 길이(토큰): 단어장이면 용어가 자료의 낱말 수만큼 늘어난다 (한 쪽에 약 800토큰, 6000까지).
+ * 학생이 단어장이 아닌 종류를 골랐으면 0. 답 길이는 한도일 뿐이라(쓴 만큼만 낸다) 다른 자료의 요금은 그대로다
+ */
+export function vocabHeadroom(p: PartSize, pick: string): number {
+  if (pick !== 'auto' && pick !== 'vocab') return 0;
+  return Math.min(6000, Math.round(pageWeight(p) * 800));
+}
+
+/**
+ * 원래 문제를 한 번에 꺼내는 양(쪽): 기출 조각을 이만큼씩 나눠 꺼낸다 (지문을 문제마다 옮겨 적어 답이 길어지니,
+ * 한 번에 다 꺼내면 답이 잘리거나 오래 걸린다). 그래도 잘리면 그 부분을 반으로 나눠 다시 (pipeline stepProblems)
+ */
+export const PROBLEM_PAGES_PER_CALL = 5;
+
+/** 조각 하나를 몇 번에 나눠 꺼낼지 (units: 그 조각의 쪽·사진 수. 글은 제한 없음) */
+export function problemPieces(p: PartSize, units = Infinity): number {
+  return clamp(Math.ceil(pageWeight(p) / PROBLEM_PAGES_PER_CALL), 1, Math.max(1, units));
+}
+
+/** 원래 문제 꺼내기 답의 길이(토큰): 한 쪽에 문제 너덧 개 (지문을 옮겨 적은 문제는 길다) */
+export function problemsOutTokens(p: PartSize): number {
+  return clamp(Math.round(2000 + pageWeight(p) * 1500), 3500, 12_000);
+}
+
 /** 문제 답의 길이(토큰): 개념 하나에 문제 두세 개, 문제 하나에 약 160토큰 */
 export function quizOutTokens(keyPoints: number, figures = 0): number {
   return Math.min(16_000, 2500 + keyPoints * 480 + figures * 200);

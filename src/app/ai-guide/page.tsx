@@ -5,7 +5,7 @@ export const metadata: Metadata = { title: 'AI 사용 안내' };
 
 export default function AiGuidePage() {
   return (
-    <LegalPage title="AI 사용 안내" updated="2026년 10월 30일">
+    <LegalPage title="AI 사용 안내" updated="2026년 10월 31일">
       <p>
         KOK에서 정리 노트, 그림, 문제, 단답형 채점, 채팅 답, 레슨, 표지 그림은 사람이 아니라 생성형 AI(Anthropic의 Claude)가 만들어요. AI 테마의 배경 그림은
         Cloudflare의 그림 AI가 그려요. 채팅에서 답하는 것도 사람이 아니라 AI예요. 안심하고 쓰려면 아래를 꼭 기억해 주세요.
@@ -15,6 +15,17 @@ export default function AiGuidePage() {
           <li>중요한 내용은 원본과 비교해 확인해 주세요. 정리와 문제에는 출처 쪽이 붙어요.</li>
           <li>AI는 문제를 만든 뒤 스스로 한 번 더 검사하지만, 그래도 실수가 있을 수 있어요.</li>
           <li>내가 고친 부분은 잠겨서, AI가 다시 만들어도 덮어쓰지 않아요.</li>
+        </ul>
+      </Sec>
+      <Sec title="자료 종류에 맞게 정리해요">
+        <ul className="list-disc pl-5">
+          <li>
+            AI가 자료를 읽고 기출·문제집, 단어장, 수학·과학 풀이, 국어·영어 지문 가운데 알맞은 종류를 골라 그 종류에 맞게 정리해요. 애매하거나 섞인 자료는
+            보통의 개념 정리로 해요.
+          </li>
+          <li>자료를 넣을 때 &lsquo;종류&rsquo;를 직접 고를 수도 있어요. 고른 종류는 노트 위에 보여요.</li>
+          <li>기출·문제집은 자료에 있던 원래 문제를 그대로 문제로 넣어요. 자료에 정답이 없으면 AI가 푼 답이라, 한 번 더 검사한 뒤에 넣어요.</li>
+          <li>단어장은 노트에 적힌 낱말과 뜻으로 AI 없이 카드를 만들어요.</li>
         </ul>
       </Sec>
       <Sec title="AI가 만든 것에는 표시가 붙어요">

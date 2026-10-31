@@ -2,6 +2,7 @@
 // 한국어판은 "KOK PRD" 15장에 있다. 한쪽을 고치면 다른 쪽도 같이 고친다.
 
 import type { ArtKind } from '@/lib/art/spec';
+import type { MaterialType } from '@/lib/material-type';
 
 /** 수식·코드 쓰는 법 (정리·문제·채팅·레슨의 글 칸 모두). 화면은 src/lib/richtext.ts 가 같은 규칙으로 읽는다 */
 const MATH_CODE_RULE = [
@@ -41,7 +42,46 @@ export type MaterialMeta = {
   pageNumbers?: boolean;
   /** 이 조각에서 뽑을 개념 수 (자료 양에 따라, lib/ai/scale.ts keyPointRange). 없으면 3~7 */
   keyPoints?: { min: number; max: number };
+  /** 학생이 자료 넣기 창에서 고른 자료 종류 (없으면 AI 가 이 조각을 읽고 고른다: material_type) */
+  materialPick?: MaterialType;
 };
+
+/**
+ * 자료 종류 고르기 (lib/material-type.ts): 정리 답의 맨 앞 칸이라 AI 가 종류부터 정하고 그 지침대로 정리한다.
+ * 확실히 맞을 때만 전용 종류, 섞였거나 애매하면 general (예전 정리와 같다)
+ */
+const MATERIAL_TYPE_RULE = [
+  '- material_type: decide it first, from this whole part, then follow the extra rules for that type at the end. Choose a type other than "general" only when it clearly fits most of this part:',
+  '  "exam": exam or practice questions (numbered questions with choices, blanks or answers to write), like a past exam paper, a mock test or workbook pages, with or without answers.',
+  '  "vocab": a list of words, idioms or terms, each given with its meaning, like a vocabulary list or a glossary.',
+  '  "math": solving: formulas, derivations and worked calculations, like math, physics or chemistry explanations with worked examples or solutions.',
+  '  "reading": a literary work or a passage to analyze, like a poem, a story, an essay, or a passage in English or another language, with or without notes on it.',
+  '  "general": everything else (textbook explanations, lecture slides, class notes), a part that mixes types, and whenever you are not sure.',
+].join('\n');
+
+/** 종류마다 더하는 정리 지침 (general 은 없다: 예전 정리 그대로) */
+const MATERIAL_NOTE_RULES: Record<Exclude<MaterialType, 'general'>, string> = {
+  exam: '- "exam": key_points are the concepts the questions test, one key point per concept (not one per question), each explained so that a student could answer such questions. pitfalls are the traps the wrong choices use. examples hold at most a few short worked solutions, each written so that it makes sense on its own, without question or choice numbers. Do not copy the questions themselves into the note: they are taken out separately. If figures are asked for, list the pictures, graphs and diagrams the questions need.',
+  vocab:
+    '- "vocab": terms holds every entry of the list, in its order, at most 150, without skipping, merging or rewording any: term is the word or phrase exactly as written (with a short part of speech if the material gives one), and meaning is its meaning exactly as the material gives it. key_points group the entries by the sections of the material (like Day 1 or Unit 2) or, if it has none, by theme; each explanation names the entries of its group. examples hold the example sentences the material gives, copied exactly, at most one for each entry and at most 60 in total, each with the key_point_id of its group.',
+  math: '- "math": key_points are the methods, laws and theorems, each explanation saying what it states and when it applies (its conditions). formulas holds every formula of this part, each label naming it and saying what its symbols mean. examples hold the worked examples as short numbered steps with the numbers exactly as in the material. pitfalls are the typical mistakes (signs, units, conditions, special cases).',
+  reading:
+    '- "reading": key_points cover the work or passage: its topic and main idea, the speaker or narrator and the situation, how it is organized, the key expressions and techniques with the effect of each, and the attitude or tone. examples quote the key lines exactly as written (short), each with its key_point_id. terms hold the literary terms used and the hard words with their meaning in context. For a passage in a foreign language, quote it in that language and explain in Korean.',
+};
+
+function materialRules(pick: MaterialType | undefined): { choose: string; extra: string } {
+  if (pick) {
+    const rule = pick === 'general' ? '' : MATERIAL_NOTE_RULES[pick];
+    return {
+      choose: `- material_type: the student says this material is "${pick}", so set it to "${pick}"${rule ? ' and follow the extra rules for it at the end' : ''}.`,
+      extra: rule ? `Extra rules for this material:\n${rule}` : '',
+    };
+  }
+  return {
+    choose: MATERIAL_TYPE_RULE,
+    extra: ['Extra rules by material_type (follow only the rules for the type you set; "general" has none):', ...Object.values(MATERIAL_NOTE_RULES)].join('\n'),
+  };
+}
 
 /**
  * 자료 그림 찾기 (PDF·사진·문서 속 그림): 노트의 개념 다음에 쓴다. 어느 쪽에 무엇이 있는지만 받는다
@@ -87,11 +127,13 @@ export function organizePrompt(meta: MaterialMeta): string {
         'List every change you made in "changes".',
       ].join(' ')
     : 'Leave "checks" and "changes" empty.';
+  const material = materialRules(meta.materialPick);
 
   return [
     `Turn the study material titled "${meta.title}" into a study note a student can memorize from.`,
     where,
     part,
+    material.choose,
     '- title: a short title for the material, at most 30 characters.',
     '- unit: the unit or chapter the material covers, at most 20 characters. Use the name written in the material if there is one (like "2. 광합성"); otherwise a short topic name.',
     '- summary: one sentence.',
@@ -103,6 +145,39 @@ export function organizePrompt(meta: MaterialMeta): string {
     own,
     meta.pageNumbers && meta.kind === 'pdf' ? PAGE_NUMBERS_RULE : '',
     meta.figures && (meta.kind !== 'text' || doc) ? figureRules(meta.figures, meta.kind === 'text' ? 'doc' : meta.kind, meta.pageStart ?? 1) : '',
+    material.extra,
+  ]
+    .filter(Boolean)
+    .join('\n');
+}
+
+/** 원래 문제 꺼내기 (기출·문제집 조각): 자료의 문제를 그대로 복습 카드로. 정리한 노트는 <note>(개념 번호만), 노트의 자료 그림은 <figures> */
+export function problemsPrompt(
+  meta: Pick<MaterialMeta, 'kind' | 'pageStart' | 'pageEnd' | 'imageStart' | 'imageEnd' | 'pictures'> & { figures: boolean },
+): string {
+  const doc = meta.kind === 'text' && !!meta.pictures?.length;
+  const where =
+    meta.kind === 'pdf'
+      ? `The attached PDF holds pages ${meta.pageStart} to ${meta.pageEnd} of the material. pages: the original page number of the question, counting the attached pages in order from ${meta.pageStart}.`
+      : meta.kind === 'image'
+        ? `The attached photos are photos ${meta.imageStart} to ${meta.imageEnd} of the material. pages: the photo number of the question.`
+        : doc
+          ? 'The material is text taken from a document file; a line "[[picture N]]" marks where picture N appears, and the pictures are attached after the text as "Picture N:". pages: [].'
+          : 'The material is text in <material>. pages: [].';
+  return [
+    'The material is exam or practice questions. Copy its questions so that the student can solve them again as review cards.',
+    where,
+    '- questions: every question in this part that can be answered from what is written, in the order of the material. For each:',
+    '  - type: "mcq" for a question with numbered choices, "ox" for a true-or-false question, "cloze" for a sentence with a blank to fill, "short" for a question whose answer is a word, a name, a number or a short phrase.',
+    '  - prompt: the question exactly as written, without its number and its score. If it needs a passage, a table, a condition box (like <보기>) or given data that is written as text, put that part in the prompt before the question, copied exactly, keeping markers like (가), ㉠, ㄱ, ㄴ, ㄷ. Never shorten, summarize or reword it: if the whole prompt would be longer than 900 characters, skip the question. For cloze, write the blank as "____".',
+    '  - choices (mcq only): every choice exactly as written, in order, without its number or letter (like ①, 1), A.).',
+    '  - answer: for mcq, the correct choice copied exactly; for ox, "O" or "X"; for cloze and short, the answer, with other correct ways to write it in accepted. If the material gives the answer (an answer key, a marked choice or a solution), use it and set answer_from to "material". Otherwise solve the question yourself and set answer_from to "solved", but only if you are sure of the answer; if you are not sure, skip the question.',
+    "  - explanation: the material's solution if it gives one, shortened to at most 3 sentences; otherwise why the answer is right, in at most 3 sentences.",
+    '  - key_point_id: the id of the key point in <note> that the question tests; "" if none fits.',
+    '  - difficulty: "easy", "medium" or "hard", as the material marks it or as you judge it.',
+    meta.figures ? '  - figure_id: the id of the picture in <figures> that the question needs, if it needs one of them; otherwise "".' : '',
+    `- Skip a question that needs a picture, graph or diagram that is not written as text${meta.figures ? ' and is not in <figures>' : ''}, a question with more than one correct choice, a question whose answer is a sentence or longer, and a question you cannot read clearly.`,
+    '- Do not write new questions, and do not change the wording, numbers or choices of a question. Fill unused fields with [] or "".',
   ]
     .filter(Boolean)
     .join('\n');
@@ -129,19 +204,26 @@ export function locatePrompt(o: { kind: 'pdf' | 'image'; images: Array<{ page: n
     .join('\n');
 }
 
-export function mergePrompt(parts: number, keyPoints: { min: number; max: number } = { min: 3, max: 7 }): string {
+/** 단어장의 용어·예문은 합칠 때 AI 에 보내지 않는다 (앱이 그대로 옮긴다: lib/material-questions.ts placeExamples) */
+const LISTS_KEPT_RULE =
+  '- Where terms and examples are empty, that material is a word list whose terms and example sentences the app adds back itself: do not write terms or examples for it.';
+
+export function mergePrompt(parts: number, keyPoints: { min: number; max: number } = { min: 3, max: 7 }, o: { listsKept?: boolean } = {}): string {
   return [
     `The JSON in <partials> holds study notes for ${parts} consecutive parts of one material. Merge them into one study note with the same fields.`,
     `- Keep ${keyPoints.min} to ${keyPoints.max} key points overall: keep every key point of the parts, in order, merging only the ones that say the same thing. Do not drop or squeeze together key points about different topics. Renumber their ids "k1", "k2", ... and update every key_point_id in pitfalls and examples to match.`,
     '- Keep all page numbers that still apply.',
     '- Merge terms, formulas, pitfalls and examples, dropping duplicates.',
+    o.listsKept ? LISTS_KEPT_RULE : '',
     '- title: one short title for the whole material, at most 30 characters. unit: the unit or chapter it covers, at most 20 characters. summary: one sentence for the whole material.',
     '- Keep "checks" and "changes" items as they are.',
-  ].join('\n');
+  ]
+    .filter(Boolean)
+    .join('\n');
 }
 
 /** 노트에 자료를 더할 때: 지금 노트(<note>)에 새 자료의 정리(<new_parts>)를 합친다 */
-export function appendMergePrompt(parts: number, maxKeyPoints = 9): string {
+export function appendMergePrompt(parts: number, maxKeyPoints = 9, o: { listsKept?: boolean } = {}): string {
   return [
     `The study note in <note> is the student's current note. The JSON in <new_parts> holds study notes made from new material the student added to it (${parts} part${parts > 1 ? 's' : ''}).`,
     'Merge the new material into the current note and return one study note with the same fields.',
@@ -150,9 +232,12 @@ export function appendMergePrompt(parts: number, maxKeyPoints = 9): string {
     `- Keep every key point of the current note; merge two only if they say the same thing. Use at most ${maxKeyPoints} key points in total, so put new material inside existing key points when there is no room. Existing key points keep their ids ("k1", "k2", ...); new key points get the next unused ids. Update every key_point_id in pitfalls and examples to match.`,
     '- Keep the page numbers of the current note. Page numbers in <new_parts> belong to the new material, so use [] as pages for anything that comes only from it.',
     '- Merge terms, formulas, pitfalls and examples, dropping duplicates.',
+    o.listsKept ? LISTS_KEPT_RULE : '',
     '- title: keep the current title unless the new material changes the topic. unit: the unit or chapter the note covers, at most 20 characters. summary: one sentence for the whole note.',
     '- Keep the "checks" and "changes" items of both.',
-  ].join('\n');
+  ]
+    .filter(Boolean)
+    .join('\n');
 }
 
 /**
@@ -217,11 +302,57 @@ export type QuizOptions = {
   figures?: number;
 };
 
-export function quizPrompt(o: QuizOptions, scope: { onlyNew?: boolean } = {}): string {
+/**
+ * 노트의 자료 종류마다 더하는 문제 지침 (general 은 없다: 예전 문제 그대로).
+ * originals: 기출에서 꺼낸 원래 문제 수, covered: 그 문제들이 묻는 개념 번호 (둘 다 <existing_questions> 에 있다),
+ * cards: 단어장 낱말 카드 수 (AI 없이 만든다, <existing_questions> 에 있다)
+ */
+function materialQuizRules(
+  m: MaterialType | undefined,
+  n: { originals: number; covered: readonly string[]; cards: number },
+): { count?: string; extra: string } {
+  if (m === 'exam' && n.originals > 0) {
+    // 원래 문제가 묻는 개념만 덜 만든다 (원래 문제를 일부만 꺼냈어도 나머지 개념은 예전만큼)
+    return {
+      extra: n.covered.length
+        ? `- The original questions copied from the material are in <existing_questions>, and they already test key points ${n.covered.join(', ')}. Write at most one new question for each of these, only about something those questions do not ask, in their style and level. Give every other key point its usual number of questions.`
+        : '',
+    };
+  }
+  if (m === 'vocab' && n.cards > 0) {
+    return {
+      count:
+        'This note is a word list, and its entries already have cards in <existing_questions> that ask their meaning or the word itself, so never ask the meaning of a single entry. Write at most one question for each key point: a cloze question made from an example sentence in examples (blank out the entry), or a question that tells similar entries apart. If there is no such question to ask, write none.',
+      extra: '',
+    };
+  }
+  if (m === 'math') {
+    return {
+      extra: [
+        '- This note is about solving, so about half of the questions are calculations or applications of its formulas and worked examples: give every number and condition needed in the prompt, choose numbers that give an exact, short answer, and write the full calculation step by step in the explanation. For mcq, make the wrong choices the results of typical mistakes. For short, answer_text is the final value with its unit if it has one, and accepted holds the same value written other ways (like without the unit, or 0.5 and 1/2).',
+        '- Work out each answer twice before you write it. If the two results differ or you are not sure, do not write that question.',
+      ].join('\n'),
+    };
+  }
+  if (m === 'reading') {
+    return {
+      extra:
+        '- This note is about a work or a passage, so ask about it: what it says (which statement agrees with it), its main idea or theme, the attitude of the speaker or writer, what a key line means, what an expression or technique does, and what a word means in context. Put the line or sentence a question is about in the prompt, quoted exactly as in the note, so it can be answered without the full text.',
+    };
+  }
+  return { extra: '' };
+}
+
+export function quizPrompt(
+  o: QuizOptions,
+  scope: { onlyNew?: boolean; material?: MaterialType; originals?: number; covered?: readonly string[]; cards?: number } = {},
+): string {
+  const typed = materialQuizRules(scope.material, { originals: scope.originals ?? 0, covered: scope.covered ?? [], cards: scope.cards ?? 0 });
   const count =
-    o.perKeyPoint === 'auto'
+    typed.count ??
+    (o.perKeyPoint === 'auto'
       ? 'For each key point: "high" gets 2 or 3 questions, "medium" gets 1 or 2, "low" gets 0 or 1.'
-      : `Write ${o.perKeyPoint} question(s) for each key point.`;
+      : `Write ${o.perKeyPoint} question(s) for each key point.`);
   const lang =
     o.language === 'ko'
       ? 'Write questions, choices and explanations in Korean, keeping terms in their original language.'
@@ -243,6 +374,7 @@ export function quizPrompt(o: QuizOptions, scope: { onlyNew?: boolean } = {}): s
     '- If the note has program code, also ask about the code itself: what a short snippet prints or returns, what fills a "____" blank in it, or which choice fixes a bug. Put the snippet in the prompt as a code block.',
     '- The note alone must make the answer unambiguous. If it does not, do not write that question.',
     '- Do not repeat or closely paraphrase anything in <existing_questions>.',
+    typed.extra,
     scope.onlyNew
       ? '- Write questions only about content that comes from the new material in <new_parts>, and use the key_point_id values of the matching key points in <note>.'
       : '',
@@ -258,7 +390,7 @@ export function quizPrompt(o: QuizOptions, scope: { onlyNew?: boolean } = {}): s
     .join('\n');
 }
 
-export function checkPrompt(o: { figures?: boolean } = {}): string {
+export function checkPrompt(o: { figures?: boolean; originals?: boolean; math?: boolean } = {}): string {
   return [
     'Check each question in <questions> against the study note in <note>.',
     o.figures
@@ -270,6 +402,12 @@ export function checkPrompt(o: { figures?: boolean } = {}): string {
     '3. The explanation agrees with the note.',
     '4. It tests a key point rather than trivia.',
     '5. It is not a near-duplicate of an earlier question in the list.',
+    o.math
+      ? `For a question that asks for a calculation${o.originals ? ' (other than one with origin "material")' : ''}, redo the calculation from the numbers in the prompt, and drop the question if your result differs from the marked answer.`
+      : '',
+    o.originals
+      ? `A question with origin "material" was copied from the study material, so the note may not hold everything it needs, and rules 1 to 4${o.figures ? ' and the picture rule above' : ''} do not apply to it. Keep it unless its marked answer is clearly wrong, it needs a passage, table or picture that is neither written in it nor given as its figure, or it repeats an earlier question. If its answer_from is "solved", solve it yourself first and drop it if your answer differs from the marked one.`
+      : '',
     'Return one verdict for every index, with a short reason.',
   ]
     .filter(Boolean)

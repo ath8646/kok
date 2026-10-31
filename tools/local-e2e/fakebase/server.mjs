@@ -676,6 +676,41 @@ function fakeNote(text) {
 }
 
 /**
+ * 자료 종류 (정리 답의 material_type): 학생이 고른 종류가 있으면 그것, 아니면 자료 글의 표시로 ('(기출)' → exam, '(단어장)' → vocab).
+ * 단어장이면 자료의 'word - 뜻' 줄을 그대로 용어로 (실제 AI 처럼 낱말을 빠짐없이)
+ */
+function fakeMaterialType(text) {
+  const picked = (text.match(/the student says this material is "(\w+)"/) || [])[1];
+  if (picked) return picked;
+  const material = (text.match(/<material>\n([\s\S]*?)\n<\/material>/) || [])[1] || '';
+  if (/\(기출\)/.test(material)) return 'exam';
+  if (/\(단어장\)/.test(material)) return 'vocab';
+  return 'general';
+}
+
+function fakeVocabTerms(text) {
+  const material = (text.match(/<material>\n([\s\S]*?)\n<\/material>/) || [])[1] || '';
+  return [...material.matchAll(/^([A-Za-z][A-Za-z ]*?) - (.+)$/gm)].map((m) => ({ term: m[1].trim(), meaning: m[2].trim() }));
+}
+
+/**
+ * 원래 문제 꺼내기 (기출·문제집): 번호·배점이 붙은 오지선다 하나(정답은 '②'), 보기 글로 정답을 적은 문제 하나, OX 하나,
+ * 없는 그림(f99)이 필요한 문제 하나(서버가 뺀다), 정답을 보기에서 찾을 수 없는 문제 하나(서버가 뺀다)
+ */
+function fakeProblems() {
+  const q = (o) => ({ accepted: [], explanation: '', key_point_id: 'k2', difficulty: 'medium', pages: [], answer_from: 'material', ...o });
+  return {
+    questions: [
+      q({ type: 'mcq', prompt: '1. 광합성이 일어나는 세포 소기관은? [2점]', choices: ['① 미토콘드리아', '② 엽록체', '③ 핵', '④ 리보솜', '⑤ 세포막'], answer: '②', explanation: '광합성은 엽록체에서 일어나요.' }),
+      q({ type: 'mcq', prompt: '2. 광합성의 결과물로 옳은 것은?', choices: ['① 물', '② 이산화탄소', '③ 산소', '④ 질소'], answer: '산소', key_point_id: 'k3', answer_from: 'solved' }),
+      q({ type: 'ox', prompt: '3. 광합성에는 빛이 필요하다.', answer: 'O', key_point_id: 'k1' }),
+      q({ type: 'short', prompt: '4. 다음 그래프에서 A의 이름은?', answer: '산소', figure_id: 'f99' }),
+      q({ type: 'mcq', prompt: '5. 다음 중 옳은 것은?', choices: ['가', '나', '다', '라'], answer: '마' }),
+    ],
+  };
+}
+
+/**
  * 자료 그림 (정리할 때 그림도 찾으라고 했을 때): 시험용 자료의 이름으로 어느 쪽에 무엇이 있는지 알려 준다 (자리는 따로 묻는다: fakeLocate).
  * '고구려 지도' PDF: 1쪽의 빨간 네모 (e2e.py make_figure_pdf), '기울어진 지도' 사진: 비스듬히 찍힌 파란 네모 (make_tilted_jpeg).
  * '작은 장식'은 쪽을 보여 주면 없다고 답한다 (서버가 뺀다)
@@ -779,6 +814,14 @@ function fakeMerged(textOf) {
     base = null;
   }
   const n = base && Array.isArray(base.key_points) ? { ...fakeNote(textOf), ...base } : fakeNote(textOf);
+  // 단어장의 낱말을 합치기에 보냈는지 (앱이 옮기면 0: e2e 가 본다)
+  let partTerms = 0;
+  try {
+    partTerms = JSON.parse(section('new_parts')).reduce((a, p) => a + (Array.isArray(p.terms) ? p.terms.length : 0), 0);
+  } catch {
+    partTerms = 0;
+  }
+  stats.mergeTerms = [...(stats.mergeTerms || []), (Array.isArray(base?.terms) ? base.terms.length : 0) + partTerms].slice(-20);
   const kps = [...n.key_points];
   const nextId = () => `k${Math.max(0, ...kps.map((k) => Number(String(k.id).replace(/\D/g, '')) || 0)) + 1}`;
   const marks = [...new Set([...section('new_parts').matchAll(MARK)].map((m) => m[1]))];
@@ -1275,6 +1318,15 @@ async function handleClaude(req, res) {
   } else if (props.key_points) {
     task = 'organize';
     out = fakeNote(textOf);
+    // 자료 종류 (정리 답의 맨 앞 칸). 단어장이면 자료의 낱말을 용어로
+    if (props.material_type) {
+      out = { material_type: fakeMaterialType(textOf), ...out };
+      if (out.material_type === 'vocab') {
+        const terms = fakeVocabTerms(textOf);
+        if (terms.length) out.terms = terms;
+      }
+      stats.materialTypes = [...(stats.materialTypes || []), out.material_type].slice(-20);
+    }
     // 한글·워드·PPT 속 그림을 몇 장 받았는지 (글 뒤의 'Picture N:' 과 그림)
     const labels = (textOf.match(/^Picture \d+:$/gm) || []).length;
     if (labels) stats.docPictures = [...(stats.docPictures || []), { labels, images }].slice(-20);
@@ -1289,8 +1341,24 @@ async function handleClaude(req, res) {
     task = 'check';
     const n = (textOf.match(/"index":/g) || []).length;
     out = { verdicts: Array.from({ length: n }, (_, i) => ({ index: i, keep: true, reason: 'ok' })) };
+  } else if (props.questions?.items?.properties?.answer_from) {
+    task = 'problems';
+    out = fakeProblems();
   } else if (props.questions) {
     task = /looks wrong/.test(textOf) ? 'fix' : 'quiz';
+    // 문제 지시에 들어간 자료 종류 지침 (e2e 가 맞는 지침을 보냈는지 본다)
+    if (task === 'quiz') {
+      const rule = /original questions copied from the material/.test(textOf)
+        ? 'exam'
+        : /never ask the meaning of a single entry/.test(textOf)
+          ? 'vocab'
+          : /This note is about solving/.test(textOf)
+            ? 'math'
+            : /about a work or a passage/.test(textOf)
+              ? 'reading'
+              : 'general';
+      stats.quizRules = [...(stats.quizRules || []), rule].slice(-20);
+    }
     out = task === 'fix' ? { questions: [fakeQuiz().questions[0]] } : /comes from the new material/.test(textOf) ? fakeNewQuiz() : fakeQuiz();
     // 자료 그림이 있으면 그림마다 그림 문제 하나 (<figures> 의 번호로)
     const figIds = [...((textOf.match(/<figures>\n([\s\S]*?)\n<\/figures>/) || [])[1] || '').matchAll(/"id":"(f\d+)"/g)].map((m) => m[1]);

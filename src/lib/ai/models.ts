@@ -1,5 +1,6 @@
 // Claude 모델 요금표와 비용·에너지 계산.
 // 요금 출처: https://platform.claude.com/docs/en/about-claude/pricing (2026-10 기준, 100만 토큰당 달러)
+import { CHARS_PER_PAGE, PROBLEM_PAGES_PER_CALL } from './scale';
 
 export type ModelId = string;
 
@@ -85,7 +86,7 @@ export const DOC_PICTURE_TOKENS = 1600;
  * 작업 전에 보여 줄 대략적인 에너지 (정리+합치기+그림+문제+검사 전체).
  * 실제로는 부를 때마다 따로 요금이 붙으므로(긴 프롬프트 요금도 한 번 부를 때 기준) 호출별로 더한다.
  */
-export function estimateEnergy(m: MaterialEstimate, model: ModelId, usdPerEnergy: number): number {
+export function estimateEnergy(m: MaterialEstimate, model: ModelId, usdPerEnergy: number, opts: { exam?: boolean } = {}): number {
   let materialTokens = 0;
   if (m.kind === 'pdf') materialTokens = (m.pages ?? 1) * 3500;
   else if (m.kind === 'image') materialTokens = (m.images ?? 1) * 2600;
@@ -105,6 +106,13 @@ export function estimateEnergy(m: MaterialEstimate, model: ModelId, usdPerEnergy
     calls.push({ input_tokens: Math.round(perChunk + 2500), output_tokens: Math.round(Math.min(6000, 800 + perChunk * 0.15)) });
   }
   if (chunks > 1) calls.push({ input_tokens: chunks * 4000 + 1500, output_tokens: Math.min(10_000, 1500 + chunks * 2500) }); // 합치기
+  // 기출·문제집을 골랐으면 조각마다 원래 문제를 몇 쪽씩 나눠 꺼낸다 (자료를 한 번 더 읽는다. 자동으로 고른 기출은 쓴 만큼 낸다)
+  if (opts.exam) {
+    const pages = m.kind === 'pdf' ? (m.pages ?? 1) : m.kind === 'image' ? (m.images ?? 1) : (m.chars ?? 0) / CHARS_PER_PAGE + (m.images ?? 0) * 0.5;
+    const pieces = Math.max(1, Math.ceil(pages / chunks / PROBLEM_PAGES_PER_CALL));
+    for (let i = 0; i < chunks * pieces; i++)
+      calls.push({ input_tokens: Math.round(perChunk / pieces + 3000), output_tokens: Math.round(Math.min(12_000, 1500 + (perChunk / pieces) * 0.15)) });
+  }
   // 자료 그림 자리 찾기 (PDF·사진): 그림이 있는 쪽을 그림으로 보여 준다 (그림 몇 개, 못 찾으면 가까운 쪽까지)
   if (m.kind !== 'text') for (let i = 0; i < 3; i++) calls.push({ input_tokens: 2 * 1540 + 900, output_tokens: 400 });
   calls.push({ input_tokens: Math.round(noteTokens + 1500), output_tokens: Math.round(Math.min(5000, 1200 + noteTokens * 0.3)) }); // 그림

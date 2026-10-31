@@ -8,7 +8,7 @@ export type Effort = 'low' | 'medium' | 'high';
  * locate: 자료 그림의 자리 찾기 (쪽을 그림으로 그려 보여 주고 픽셀 상자를 받는다, 정리 모델).
  * cover: 자료함 카드의 표지 그림 (Pro, 그림 모델)
  */
-export type AiTask = 'organize' | 'merge' | 'visual' | 'quiz' | 'check' | 'grade' | 'chat' | 'theme' | 'solve' | 'redraw' | 'locate' | 'cover';
+export type AiTask = 'organize' | 'merge' | 'visual' | 'quiz' | 'check' | 'grade' | 'chat' | 'theme' | 'solve' | 'redraw' | 'locate' | 'cover' | 'problems';
 
 // ------------------------------------------------------------- 운영 설정 (app_settings)
 /**
@@ -56,6 +56,7 @@ export const zModelsConfig = z.object({
       redraw: zEffort.catch('medium'),
       locate: zEffort.catch('low'),
       cover: zEffort.catch('low'),
+      problems: zEffort.catch('medium'),
     })
     .catch({
       organize: 'medium',
@@ -70,6 +71,7 @@ export const zModelsConfig = z.object({
       redraw: 'medium',
       locate: 'low',
       cover: 'low',
+      problems: 'medium',
     }),
 });
 export type ModelsConfig = z.infer<typeof zModelsConfig>;

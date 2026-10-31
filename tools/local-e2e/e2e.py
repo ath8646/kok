@@ -1156,6 +1156,18 @@ async def composer_touch_steps(browser):
     await composer.get_by_role("radiogroup", name="단원").get_by_role("radio").first.tap()
     await expect(composer.get_by_role("radiogroup", name="단원")).to_be_hidden()
     await expect(unit).to_be_focused()
+    # 자료 종류: 폰에서도 펼친 목록이 화면 안에, 고르면 칩으로 돌아가고 키보드는 올라오지 않는다
+    kind = composer.get_by_role("button", name="자료 종류: 자동")
+    await kind.tap()
+    kpick = composer.get_by_role("dialog", name="자료 종류 고르기")
+    await page.wait_for_timeout(350)
+    kb = await kpick.bounding_box()
+    assert kb and kb["x"] >= 0 and kb["x"] + kb["width"] <= 390 and kb["y"] + kb["height"] <= 760, kb
+    await shot(page, "06-composer-phone-kind", full=False)
+    await kpick.get_by_role("radio", name=re.compile("^단어장")).tap()
+    await expect(kpick).to_be_hidden()
+    await expect(composer.get_by_role("button", name="자료 종류: 단어장")).to_be_focused()
+    await expect(box).not_to_be_focused()
     # 빈 노트 ↔ AI 정리도 마찬가지
     await composer.get_by_role("button", name="빈 노트", exact=True).tap()
     await expect(composer.get_by_label("노트 이름")).to_be_visible()
@@ -1169,10 +1181,169 @@ async def composer_touch_steps(browser):
     await page.keyboard.type("폰에서 적어 보는 글")
     await expect(box).to_have_value("폰에서 적어 보는 글")
     await shot(page, "06-composer-phone", full=False)
+    # 긴 글을 붙여 넣어 입력창이 길어져도, 작은 폰에서도 종류 목록은 화면 안 (넘치면 목록 안에서 스크롤해 끝까지 고를 수 있다)
+    await box.fill("\n".join(f"{i}. 붙여 넣은 긴 글의 {i}번째 줄" for i in range(40)))
+    for height in (760, 568):
+        await page.set_viewport_size({"width": 390 if height == 760 else 320, "height": height})
+        await composer.get_by_role("button", name="자료 종류: 단어장").tap()
+        await page.wait_for_timeout(350)  # 펼치는 움직임(300ms 안)이 끝난 뒤에 잰다
+        kb = await kpick.bounding_box()
+        assert kb and kb["y"] >= 0 and kb["y"] + kb["height"] <= height and kb["x"] + kb["width"] <= (390 if height == 760 else 320), (height, kb)
+        # 입력창 위에 떠 있는 닫기 버튼에 가리지 않는다
+        fb = await page.get_by_role("button", name="입력창 닫기").bounding_box()
+        assert fb is None or kb["y"] + kb["height"] <= fb["y"] + 1, (height, kb, fb)
+        last = kpick.get_by_role("radio", name=re.compile("^국어·영어 지문"))
+        await last.scroll_into_view_if_needed()
+        lb = await last.bounding_box()
+        assert lb and lb["y"] >= kb["y"] - 1 and lb["y"] + lb["height"] <= kb["y"] + kb["height"] + 1, (height, kb, lb)
+        await shot(page, f"06-composer-phone-kind-{height}", full=False)
+        await kpick.get_by_role("radio", name=re.compile("^단어장")).tap()
+        await expect(kpick).to_be_hidden()
     await box.fill("")
     await page.keyboard.press("Escape")
     await expect(composer).to_be_hidden()
     await ctx.close()
+
+
+async def material_steps(browser):
+    """자료 종류 (src/lib/material-type.ts): 입력창에서 고른 기출은 원래 문제를 그대로 문제로, 자동으로 고른 단어장은 낱말마다 카드로,
+    노트 머리에 종류가 보인다 (따로 돌리기: python3 e2e_material.py)"""
+    me_id = USERS["student"][0]
+    fake = lambda: json.loads(urllib.request.urlopen("http://localhost:54321/__stats").read())  # noqa: E731
+    ctx, page = await new_ctx(browser, "student", width=1280)
+
+    step("material type: pick 기출·문제집 in the composer → the original questions become this note's questions, the note says so")
+    since = db(f"select coalesce(max(created_at), now() - interval '1 day')::text from public.sources where user_id = '{me_id}'")
+    await page.goto(BASE + "/library")
+    await page.get_by_role("button", name="자료 넣기", exact=True).click()
+    composer = page.get_by_role("dialog", name="자료 넣기")
+    chip = composer.get_by_role("button", name="자료 종류: 자동")
+    await expect(chip).to_be_visible()
+    box = composer.get_by_label("공부한 내용")
+    exam_text = "(기출) 광합성 단원 평가\n1. 광합성이 일어나는 세포 소기관은? [2점]\n① 미토콘드리아 ② 엽록체 ③ 핵 ④ 리보솜 ⑤ 세포막\n정답: ②"
+    await box.fill(exam_text)
+    await expect(composer.get_by_text(re.compile("약 \\d+"))).to_be_visible()
+    est_auto = int(re.search(r"약 (\d+)", await composer.get_by_text(re.compile("약 \\d+")).inner_text()).group(1))
+    await chip.click()
+    picker = composer.get_by_role("dialog", name="자료 종류 고르기")
+    radios = picker.get_by_role("radiogroup", name="자료 종류").get_by_role("radio")
+    await expect(radios).to_have_count(6)
+    await expect(radios.first).to_have_attribute("aria-checked", "true")
+    # 펼친 목록은 화면 안에 다 보인다 (칩이 줄의 오른쪽 끝에 있어도)
+    pb = await picker.bounding_box()
+    assert pb and pb["x"] >= 0 and pb["x"] + pb["width"] <= 1280 and pb["y"] >= 0, pb
+    await shot(page, "160-material-picker", full=False)
+    # 화살표로 고른다 (라디오: Tab 은 고른 칸 하나만)
+    await expect(radios.first).to_be_focused()
+    await page.keyboard.press("ArrowDown")
+    await expect(radios.nth(1)).to_be_focused()
+    await expect(radios.nth(1)).to_have_attribute("aria-checked", "true")
+    await page.keyboard.press("ArrowUp")
+    await expect(radios.first).to_have_attribute("aria-checked", "true")
+    # 낮은 화면(노트북)에서도 위로 넘치지 않는다 (넘치면 목록 안에서 스크롤)
+    await page.set_viewport_size({"width": 1280, "height": 560})
+    await page.wait_for_timeout(350)
+    pb = await picker.bounding_box()
+    assert pb and pb["y"] >= 0 and pb["y"] + pb["height"] <= 560, pb
+    await page.set_viewport_size({"width": 1280, "height": 860})
+    # Esc 는 고르기만 닫는다 (입력창은 그대로)
+    await page.keyboard.press("Escape")
+    await expect(picker).to_be_hidden()
+    await expect(composer).to_be_visible()
+    await chip.click()
+    await picker.get_by_role("radio", name=re.compile("^기출·문제집")).click()
+    await expect(picker).to_be_hidden()
+    await expect(composer.get_by_role("button", name="자료 종류: 기출·문제집")).to_be_visible()
+    # 원래 문제를 한 번 더 꺼내니 예상 에너지가 는다 (마우스는 고른 뒤 글 칸으로)
+    await expect(box).to_be_focused()
+    est_exam = int(re.search(r"약 (\d+)", await composer.get_by_text(re.compile("약 \\d+")).inner_text()).group(1))
+    assert est_exam > est_auto, (est_auto, est_exam)
+    await box.press("Enter")
+    await expect(composer).to_be_hidden()
+    q = f"from public.sources where user_id = '{me_id}' and parent_id is null and created_at > '{since}'"
+    await poll_db(f"select count(*) {q}", "1", timeout=30)
+    sid = db(f"select id {q}")
+    await poll_db(f"select status from public.sources where id = '{sid}'", "ready", timeout=120)
+    assert db(f"select body->'material'->>'type' || '/' || (body->'material'->>'by') from public.notes where source_id = '{sid}'") == "exam/student"
+    rows = db(f"select prompt || E'\\t' || coalesce(choices::text, '') || E'\\t' || answer::text from public.questions where note_id = (select id from public.notes where source_id = '{sid}')").splitlines()
+    first = [r for r in rows if r.startswith("광합성이 일어나는 세포 소기관은?\t")]
+    # 번호·배점을 떼고, 오지선다 보기 번호를 떼고, 정답 '②' 는 두 번째 보기 (0부터 1)
+    assert first and first[0].split("\t")[1] == '["미토콘드리아", "엽록체", "핵", "리보솜", "세포막"]' and first[0].split("\t")[2] == "1", rows
+    assert any(r.startswith("광합성의 결과물로 옳은 것은?\t") and r.endswith("\t2") for r in rows), rows
+    assert any(r.startswith("광합성에는 빛이 필요하다.\t") for r in rows), rows
+    # 없는 그림이 필요한 문제와 정답을 찾을 수 없는 문제는 빠진다
+    assert not any("그래프에서 A" in r or r.startswith("다음 중 옳은 것은?\t") for r in rows), rows
+    # 원래 문제는 잠겨서 '문제 다시 만들기'가 바꾸지 않고, AI 가 새로 만든 문제는 잠기지 않는다
+    nq = f"public.questions where note_id = (select id from public.notes where source_id = '{sid}')"
+    assert db(f"select count(*) from {nq} and locked") == "3", db(f"select prompt || ' ' || locked from {nq}")
+    assert int(db(f"select count(*) from {nq} and not locked")) >= 1
+    stats = fake()
+    assert stats["tasks"].get("problems", 0) >= 1 and stats.get("quizRules", [])[-1] == "exam", (stats["tasks"], stats.get("quizRules"))
+    await page.goto(BASE + f"/notes/{sid}")
+    assert await wait_ready(page)
+    await expect(page.get_by_text("· 기출·문제집")).to_be_visible()
+    await shot(page, "161-note-exam", full=False)
+
+    step("material type: left on 자동, a vocabulary list is noticed and every word becomes its own card (no AI for the cards)")
+    since = db(f"select max(created_at)::text from public.sources where user_id = '{me_id}'")
+    await page.goto(BASE + "/library")
+    await page.get_by_role("button", name="자료 넣기", exact=True).click()
+    composer = page.get_by_role("dialog", name="자료 넣기")
+    # 창을 다시 열면 늘 자동부터
+    await expect(composer.get_by_role("button", name="자료 종류: 자동")).to_be_visible()
+    vocab = "(단어장) 영어 단어 Day 1\nabandon - 버리다\nbrave - 용감한\ncalm - 차분한\ndelay - 미루다\neager - 열망하는"
+    await composer.get_by_label("공부한 내용").fill(vocab)
+    await composer.get_by_label("공부한 내용").press("Enter")
+    await expect(composer).to_be_hidden()
+    q = f"from public.sources where user_id = '{me_id}' and parent_id is null and created_at > '{since}'"
+    await poll_db(f"select count(*) {q}", "1", timeout=30)
+    vid = db(f"select id {q}")
+    await poll_db(f"select status from public.sources where id = '{vid}'", "ready", timeout=120)
+    assert db(f"select body->'material'->>'type' || '/' || (body->'material'->>'by') from public.notes where source_id = '{vid}'") == "vocab/ai"
+    assert db(f"select jsonb_array_length(body->'terms') from public.notes where source_id = '{vid}'") == "5"
+    prompts = db(f"select prompt from public.questions where note_id = (select id from public.notes where source_id = '{vid}')").splitlines()
+    cards = [p for p in prompts if re.match(r"^‘(abandon|brave|calm|delay|eager)’의 뜻으로 알맞은 것은\?$", p) or p.startswith("다음 뜻을 가진 낱말을 쓰세요.")]
+    assert len(cards) == 5, prompts
+    assert db(f"select count(*) from public.questions where note_id = (select id from public.notes where source_id = '{vid}') and locked") == "5"
+    assert fake().get("quizRules", [])[-1] == "vocab"
+    await page.goto(BASE + f"/notes/{vid}")
+    assert await wait_ready(page)
+    await expect(page.get_by_text("· 단어장")).to_be_visible()
+    await ctx.close()
+
+    step("material type: adding a word list to a word-list note (Pro) keeps every word and meaning as they were, and only the new words get cards")
+    admin_id = USERS["admin"][0]
+    actx, apage = await new_ctx(browser, "admin", width=1280)
+    since = db(f"select coalesce(max(created_at), now() - interval '1 day')::text from public.sources where user_id = '{admin_id}'")
+    await apage.goto(BASE + "/library")
+    await apage.get_by_role("button", name="자료 넣기", exact=True).click()
+    composer = apage.get_by_role("dialog", name="자료 넣기")
+    await composer.get_by_label("공부한 내용").fill(vocab)
+    await composer.get_by_label("공부한 내용").press("Enter")
+    await expect(composer).to_be_hidden()
+    q = f"from public.sources where user_id = '{admin_id}' and parent_id is null and created_at > '{since}'"
+    await poll_db(f"select count(*) {q}", "1", timeout=30)
+    wid = db(f"select id {q}")
+    await poll_db(f"select status from public.sources where id = '{wid}'", "ready", timeout=120)
+    nq = f"public.questions where note_id = (select id from public.notes where source_id = '{wid}') and status <> 'hidden'"
+    assert db(f"select count(*) from {nq} and locked") == "5"
+    # 학생이 고친 뜻은 더한 뒤에도 그대로
+    db(f"""update public.notes set body = jsonb_set(body, '{{terms,1}}', '{{"term": "brave", "meaning": "용감한, 씩씩한", "edited": true}}'::jsonb) where source_id = '{wid}'""")
+    await apage.goto(BASE + f"/notes/{wid}?tab=original")
+    assert await wait_ready(apage)
+    add = apage.get_by_role("region", name="이 노트에 자료 더하기")
+    await add.get_by_label("더할 내용").fill("(단어장) 영어 단어 Day 2\nfragile - 깨지기 쉬운\nhuge - 거대한\nmodest - 겸손한")
+    await add.get_by_role("button", name="글 더하기").click()
+    await expect(apage.get_by_text("자료를 더해 새 버전을 만들었어요.")).to_be_visible(timeout=90000)
+    terms = db(
+        f"select string_agg((t->>'term') || '=' || (t->>'meaning'), '|' order by o) from public.notes n, jsonb_array_elements(n.body->'terms') with ordinality as x(t, o) where n.source_id = '{wid}'"
+    )
+    assert terms == "abandon=버리다|brave=용감한, 씩씩한|calm=차분한|delay=미루다|eager=열망하는|fragile=깨지기 쉬운|huge=거대한|modest=겸손한", terms
+    # AI 합치기에는 낱말을 보내지 않았다 (앱이 옮긴다: 낱말이 많아도 합친 답이 잘리지 않게)
+    assert fake().get("mergeTerms", [])[-1] == 0, fake().get("mergeTerms")
+    # 새 낱말 셋만 카드가 더해진다 (잠김)
+    assert db(f"select count(*) from {nq} and locked") == "8", db(f"select prompt from {nq}")
+    await actx.close()
 
 
 async def tab_steps(browser):
@@ -4593,7 +4764,12 @@ async def main():
         await expect(subject_list.get_by_role("option", name=re.compile("^과학"))).to_have_count(0)
         await composer.get_by_label("과목 찾기").fill("ㅈㅂ")
         await expect(subject_list.get_by_role("option")).to_have_count(1)
+        # Esc 는 한 단계씩: 과목 목록 → 입력창
         await page.keyboard.press("Escape")
+        await expect(subject_list).to_be_hidden()
+        await expect(composer).to_be_visible()
+        await page.keyboard.press("Escape")
+        await expect(composer).to_be_hidden()
         # 서랍의 '보관한 과목'에서 다시 꺼낸다
         await chips.get_by_role("button", name=re.compile("^모든 과목")).click()
         await drawer.get_by_role("button", name=re.compile("^보관한 과목 1개")).click()
@@ -5301,6 +5477,7 @@ async def main():
         await figure_steps(browser)
         await tab_steps(browser)
         await composer_touch_steps(browser)
+        await material_steps(browser)
         await office_code_steps(browser)
         await office_picture_steps(browser)
         await browser.close()

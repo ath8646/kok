@@ -2,7 +2,7 @@
 // 빠른 추가: 어디서나 오른쪽 아래 + 버튼 → 입력창(엔터 = AI가 바로 정리),
 // 파일을 화면에 끌어다 놓거나 붙여 넣으면 검사하고 바로 정리, 올리는 중인 것은 오른쪽 아래 띠에 보여 준다.
 import { useRouter } from 'next/navigation';
-import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { createContext, useCallback, useContext, useEffect, useEffectEvent, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import type { MeResponse, SubjectRow } from '@/lib/types';
 import { fetchSources, fetchSubjects, sb } from '@/lib/data';
 import { coverWanted, estimateCover, estimateEnergy, estimateFigures, estimateRedraws, estimateSmallTask, figuresWanted, redrawsWanted } from '@/lib/ai/models';
@@ -23,13 +23,14 @@ import {
 } from '@/lib/quick-add';
 import { officeLabel, officeTextHeader } from '@/lib/office/names';
 import { stripPictureMarks } from '@/lib/doc-pictures';
+import { MATERIAL_HINT, MATERIAL_LABEL, MATERIAL_PICKS, type MaterialPick, type MaterialType } from '@/lib/material-type';
 import { SUBJECT_COLORS } from '@/lib/settings';
 import { subjectVar } from '@/lib/colors';
 import { matchesSubject, pickerOrder } from '@/lib/subject-order';
 import { UnitOptions, useSubjectUnits } from './UnitPick';
 import { SOURCES_CHANGED, SUBJECTS_CHANGED } from '@/lib/events';
 import { topFileSink } from '@/lib/file-sink';
-import { ApiError, Button, EnergyEstimate, ICONS, Icon, Sheet, Spinner, api, cx, inputClass, useToast } from './ui';
+import { ApiError, Button, EnergyEstimate, ICONS, Icon, Sheet, Spinner, api, cx, inputClass, radioKeys, useToast } from './ui';
 
 /** 동시에 정리할 수 있는 자료 수 (서버와 같다) */
 const MAX_PARALLEL = 3;
@@ -84,6 +85,8 @@ type Item = {
   review?: boolean;
   /** 자료 넣기 창에서 고른 단원 (없으면 단원 없이: AI 가 정하지 않는다) */
   unit?: string;
+  /** 자료 넣기 창에서 고른 자료 종류 (없으면 자동: AI 가 정리하면서 고른다) */
+  material?: MaterialType;
 };
 
 /** 올리기 전에 한 번 준비한 것 (다시 하기에서 사진을 또 줄이지 않게). 글 자료의 blobs 는 문서 속 그림 */
@@ -390,6 +393,7 @@ export function QuickAddProvider({
               ...(it.parentId ? { parentId: it.parentId, noteTitle: it.noteTitle } : {}),
               ...(it.review === false ? { review: false } : {}),
               ...(it.unit ? { unit: it.unit } : {}),
+              ...(it.material ? { material: it.material } : {}),
             }));
             // 이 자료 바로 뒤에 차례대로
             const at = itemsRef.current.findIndex((i) => i.key === key);
@@ -484,6 +488,7 @@ export function QuickAddProvider({
               ...(it.parentId ? { parentId: it.parentId } : {}),
               ...(it.review === false ? { review: false } : {}),
               ...(it.unit ? { unit: it.unit } : {}),
+              ...(it.material ? { material: it.material } : {}),
             }),
           });
           return 'ok';
@@ -536,7 +541,9 @@ export function QuickAddProvider({
           });
           const cover = coverWanted({ canFigures: m.canFigures, autoCover: m.settings.visual.autoCover, featureOn: m.features.covers, append: !!it.parentId });
           const est =
-            estimateEnergy({ kind: prep.kind, pages: prep.pages, images: prep.blobs.length, chars: prep.text.length }, model, m.usdPerEnergy) +
+            estimateEnergy({ kind: prep.kind, pages: prep.pages, images: prep.blobs.length, chars: prep.text.length }, model, m.usdPerEnergy, {
+              exam: it.material === 'exam',
+            }) +
             (it.parentId ? Math.ceil(estimateSmallTask(model, m.usdPerEnergy, 9000, 3000)) : 0) +
             (figures ? estimateFigures(clientModel(m, m.settings.models.quiz), m.usdPerEnergy) : 0) +
             (redraws ? estimateRedraws(clientModel(m, m.settings.models.visual), m.usdPerEnergy) : 0) +
@@ -626,7 +633,12 @@ export function QuickAddProvider({
   }, [runItem, runAppendChain]);
 
   const enqueue = useCallback(
-    (jobs: Job[], subjectId: string, into?: { parentId: string; noteTitle: string }, opts: { review?: boolean; unit?: string } = {}) => {
+    (
+      jobs: Job[],
+      subjectId: string,
+      into?: { parentId: string; noteTitle: string },
+      opts: { review?: boolean; unit?: string; material?: MaterialPick } = {},
+    ) => {
       if (!jobs.length) return;
       const added: Item[] = jobs.map((job) => ({
         key: newId(),
@@ -639,6 +651,7 @@ export function QuickAddProvider({
         ...(into ? { parentId: into.parentId, noteTitle: into.noteTitle } : {}),
         ...(opts.review === false ? { review: false } : {}),
         ...(opts.unit && !into ? { unit: opts.unit } : {}),
+        ...(opts.material && opts.material !== 'auto' && !into ? { material: opts.material } : {}),
       }));
       commit([...itemsRef.current, ...added]);
       if (!into) writeLast(meRef.current.userId, subjectId);
@@ -704,6 +717,8 @@ export function QuickAddProvider({
   const [review, setReview] = useState(true);
   /** 이번에 만드는 노트의 단원 (창을 열 때마다·과목을 바꾸면 '단원 없음'으로 시작한다) */
   const [unit, setUnit] = useState('');
+  /** 이번에 넣는 자료의 종류 (창을 열 때마다 '자동'으로 시작한다) */
+  const [material, setMaterial] = useState<MaterialPick>('auto');
 
   const closeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const fabRef = useRef<HTMLButtonElement>(null);
@@ -716,6 +731,7 @@ export function QuickAddProvider({
       setComposerSubject(subjectId || resolveSubject());
       setReview(true);
       setUnit('');
+      setMaterial('auto');
       setClosing(false);
       setOpen(true);
       // 과목 목록을 아직 못 읽었을 때 열었으면, 읽은 뒤에 과목을 골라 둔다
@@ -788,11 +804,11 @@ export function QuickAddProvider({
     }
     jobs.push(...filesToJobs(attachedFiles, titleForFiles));
     if (!jobs.length) return;
-    enqueue(jobs, subjectId, undefined, { review, unit });
+    enqueue(jobs, subjectId, undefined, { review, unit, material });
     setText('');
     setAttachments([]);
     closeComposer();
-  }, [composerSubject, text, attachments, filesToJobs, enqueue, closeComposer, toast, review, unit]);
+  }, [composerSubject, text, attachments, filesToJobs, enqueue, closeComposer, toast, review, unit, material]);
 
   /** 빈 노트: AI 없이 직접 채우는 노트를 만들고 그 노트로 간다 (에너지를 쓰지 않는다) */
   const createBlank = useCallback(
@@ -1083,6 +1099,8 @@ export function QuickAddProvider({
               onReview={setReview}
               unit={unit}
               onUnit={setUnit}
+              material={material}
+              onMaterial={setMaterial}
             />
           ) : null}
           {dragging ? <DropOverlay subjectName={dropSubjectName} intoComposer={open} note={open ? null : noteTarget} /> : null}
@@ -1134,6 +1152,8 @@ function Composer({
   onReview,
   unit,
   onUnit,
+  material,
+  onMaterial,
 }: {
   me: MeResponse;
   closing: boolean;
@@ -1156,18 +1176,58 @@ function Composer({
   /** 이번에 만드는 노트의 단원 ('' = 단원 없음) */
   unit: string;
   onUnit: (unit: string) => void;
+  /** 이번에 넣는 자료의 종류 ('auto' = AI 가 정리하면서 고른다) */
+  material: MaterialPick;
+  onMaterial: (m: MaterialPick) => void;
 }) {
   const toast = useToast();
   const area = useRef<HTMLTextAreaElement>(null);
   const formRef = useRef<HTMLFormElement>(null);
   const subjectBtn = useRef<HTMLButtonElement>(null);
   const unitBtn = useRef<HTMLButtonElement>(null);
+  const materialBtn = useRef<HTMLButtonElement>(null);
   const blankBtn = useRef<HTMLButtonElement>(null);
   const fileInput = useRef<HTMLInputElement>(null);
   const cameraInput = useRef<HTMLInputElement>(null);
   const [picking, setPicking] = useState(false);
   // 단원 고르기 (단원 없음 · 이 과목에 있는 단원 · 새 단원)
   const [unitPicking, setUnitPicking] = useState(false);
+  // 자료 종류 고르기 (자동 · 개념 정리 · 기출·문제집 · 단어장 · 수학·과학 풀이 · 국어·영어 지문)
+  const [materialPicking, setMaterialPicking] = useState(false);
+  const materialPop = useRef<HTMLDivElement>(null);
+  const chipRow = useRef<HTMLDivElement>(null);
+  // 펼친 목록은 화면에 남은 높이까지 (넘치면 목록 안에서 스크롤): 폰은 칩 줄 아래(글을 붙여 넣어 입력창이 길어도·키보드가 올라와도,
+  // 입력창 위에 떠 있는 닫기 버튼(+)에 가리지 않게 그 위까지), 넓은 화면은 입력창 위 (낮은 화면에서도 위로 넘치지 않게)
+  useLayoutEffect(() => {
+    const pop = materialPop.current;
+    const row = chipRow.current;
+    if (!materialPicking || !pop || !row) return;
+    const fit = () => {
+      const r = row.getBoundingClientRect();
+      const vv = window.visualViewport;
+      const top = vv?.offsetTop ?? 0;
+      const bottom = top + (vv?.height ?? window.innerHeight);
+      const fab = document.querySelector<HTMLElement>('.kok-fab')?.getBoundingClientRect();
+      const end = fab && fab.height > 0 && fab.top > r.bottom ? Math.min(bottom, fab.top) : bottom;
+      const room = window.matchMedia('(min-width: 40rem)').matches ? r.top - top - 36 : end - r.bottom - 20;
+      pop.style.maxHeight = `${Math.max(140, Math.floor(room))}px`;
+    };
+    fit();
+    window.addEventListener('resize', fit);
+    window.visualViewport?.addEventListener('resize', fit);
+    return () => {
+      window.removeEventListener('resize', fit);
+      window.visualViewport?.removeEventListener('resize', fit);
+    };
+  }, [materialPicking]);
+  // 열면 고른 칸에 초점 (키보드로 바로 고를 수 있게, 목록 안에서 보이게. Esc 는 창의 Esc 가 이것만 닫는다)
+  useEffect(() => {
+    const pop = materialPop.current;
+    const on = pop?.querySelector<HTMLElement>('[aria-checked="true"]');
+    if (!materialPicking || !pop || !on) return;
+    on.focus({ preventScroll: true });
+    if (on.offsetTop + on.offsetHeight > pop.scrollTop + pop.clientHeight) pop.scrollTop = on.offsetTop + on.offsetHeight - pop.clientHeight;
+  }, [materialPicking]);
   const units = useSubjectUnits(subjectId, unitPicking);
   // 과목이 많으면 찾기 (이름이나 첫 자음)
   const [pickQuery, setPickQuery] = useState('');
@@ -1182,15 +1242,28 @@ function Composer({
     if (blank) focusTyping(titleInput.current, formRef.current);
   }, [blank]);
 
+  // Esc: 과목·단원·종류 고르기가 열려 있으면 그것만 닫고 연 단추로 (초점이 어디 있든), 아니면 입력창을 닫는다
+  const onEscape = useEffectEvent(() => {
+    const btn = picking ? subjectBtn.current : unitPicking ? unitBtn.current : materialPicking ? materialBtn.current : null;
+    if (!btn) {
+      onClose();
+      return;
+    }
+    setPicking(false);
+    setUnitPicking(false);
+    setMaterialPicking(false);
+    setPickQuery('');
+    btn.focus({ preventScroll: true });
+  });
   useEffect(() => {
     // 폰에서는 창만 열고 키보드는 올리지 않는다 (붙이기·사진·과목을 먼저 볼 수 있게)
     focusTyping(area.current, formRef.current);
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose();
+      if (e.key === 'Escape' && !e.defaultPrevented) onEscape();
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [onClose]);
+  }, []);
 
   // 글 길이에 맞춰 입력칸 높이를 늘린다
   useEffect(() => {
@@ -1207,6 +1280,7 @@ function Composer({
   const togglePicking = () => {
     setPicking((p) => !p);
     setUnitPicking(false);
+    setMaterialPicking(false);
     setPickQuery('');
   };
   const trimmed = text.trim();
@@ -1214,7 +1288,7 @@ function Composer({
   const textReady = textAsSource !== null && trimmed.length >= MIN_TEXT_CHARS;
   const canSend = !!subjectId && me.aiEnabled && (attachments.length > 0 || textReady);
   const model = clientModel(me, me.settings.models.organize);
-  const est = textReady ? estimateEnergy({ kind: 'text', chars: trimmed.length }, model, me.usdPerEnergy) : 0;
+  const est = textReady ? estimateEnergy({ kind: 'text', chars: trimmed.length }, model, me.usdPerEnergy, { exam: material === 'exam' }) : 0;
   const left = me.energy.unlimited ? null : Math.floor(me.energy.remaining ?? 0);
 
   const startBlank = () => {
@@ -1288,7 +1362,7 @@ function Composer({
           else if (canSend) onSubmit();
         }}
       >
-        <div className="flex items-start justify-between gap-2">
+        <div ref={chipRow} className="relative flex items-start justify-between gap-2">
           <div className="flex min-w-0 flex-wrap items-center gap-1.5">
             <div className="relative min-w-0">
               <button
@@ -1397,6 +1471,7 @@ function Composer({
                 onClick={() => {
                   setUnitPicking((p) => !p);
                   setPicking(false);
+                  setMaterialPicking(false);
                 }}
               >
                 <span className="truncate">{unit || '단원 없음'}</span>
@@ -1424,6 +1499,75 @@ function Composer({
                       focusTyping(area.current, unitBtn.current);
                     }}
                   />
+                </div>
+              ) : null}
+            </div>
+            {/* 자료 종류: 자동이면 AI 가 정리하면서 고른다 (lib/material-type.ts).
+                칩이 줄의 오른쪽에 있어서 목록은 칩이 아니라 칩 줄에 붙인다 (폰은 칩 줄 바로 아래 너비 가득, 넓은 화면은 입력창 위 오른쪽):
+                화면 밖으로 나가지 않게. 높이는 화면에 남은 만큼 (위 useLayoutEffect) */}
+            <div className="min-w-0">
+              <button
+                ref={materialBtn}
+                type="button"
+                aria-haspopup="dialog"
+                aria-expanded={materialPicking}
+                aria-label={`자료 종류: ${material === 'auto' ? '자동' : MATERIAL_LABEL[material]}`}
+                className={cx(
+                  'press inline-flex max-w-[170px] items-center gap-1.5 rounded-full py-1.5 pl-3 pr-2.5 text-sm font-semibold',
+                  material === 'auto' ? 'bg-surface-2 text-muted hover:text-ink' : 'bg-accent-soft text-accent',
+                )}
+                onClick={() => {
+                  setMaterialPicking((p) => !p);
+                  setPicking(false);
+                  setUnitPicking(false);
+                }}
+              >
+                <span className="truncate">{material === 'auto' ? '종류 자동' : MATERIAL_LABEL[material]}</span>
+                <span aria-hidden="true">▾</span>
+              </button>
+              {materialPicking ? (
+                <div
+                  role="dialog"
+                  aria-label="자료 종류 고르기"
+                  className="kok-pop absolute inset-x-0 top-full z-10 mt-2 origin-top overflow-y-auto overscroll-contain rounded-2xl bg-surface p-1.5 shadow-[0_12px_32px_var(--shadow-strong)] ring-1 ring-line sm:inset-x-auto sm:bottom-full sm:right-0 sm:top-auto sm:mb-6 sm:mt-0 sm:w-80 sm:origin-bottom-right"
+                  ref={materialPop}
+                >
+                  <div className="grid gap-0.5" role="radiogroup" aria-label="자료 종류">
+                    {MATERIAL_PICKS.map((m, idx) => {
+                      const on = m === material;
+                      return (
+                        <button
+                          key={m}
+                          type="button"
+                          role="radio"
+                          aria-checked={on}
+                          // 화살표로 고르기 (한 번에 한 칸만 Tab 으로 들어간다). 엔터·스페이스·누르기는 고르고 닫는다
+                          tabIndex={on ? 0 : -1}
+                          onKeyDown={(e) => radioKeys(e, idx, MATERIAL_PICKS.length, (n) => onMaterial(MATERIAL_PICKS[n]))}
+                          className={cx('flex w-full items-start gap-2.5 rounded-xl px-3 py-2 text-left hover:bg-surface-2', on && 'font-bold')}
+                          onClick={() => {
+                            onMaterial(m);
+                            setMaterialPicking(false);
+                            focusTyping(area.current, materialBtn.current);
+                          }}
+                        >
+                          <span
+                            className={cx(
+                              'mt-0.5 grid h-5 w-5 shrink-0 place-items-center rounded-full border-2',
+                              on ? 'border-accent bg-accent text-accent-ink' : 'border-line',
+                            )}
+                            aria-hidden="true"
+                          >
+                            {on ? <Icon d={ICONS.check} size={12} strokeWidth={3} /> : null}
+                          </span>
+                          <span className="grid min-w-0 gap-0.5">
+                            <span className="text-[15px]">{m === 'auto' ? '자동' : MATERIAL_LABEL[m]}</span>
+                            <span className="text-xs font-normal text-muted">{MATERIAL_HINT[m]}</span>
+                          </span>
+                        </button>
+                      );
+                    })}
+                  </div>
                 </div>
               ) : null}
             </div>

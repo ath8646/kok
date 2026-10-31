@@ -88,6 +88,7 @@ const EFFORT_TASKS: Array<[keyof ModelsConfig['effort'], string]> = [
   ['redraw', '자료 그림 다시 그리기'],
   ['locate', '자료 그림 자리 찾기'],
   ['cover', '표지 그림'],
+  ['problems', '원래 문제 꺼내기'],
 ];
 
 export default function AdminPage() {

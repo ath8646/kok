@@ -65,6 +65,7 @@ import {
 } from '@/lib/versions';
 import { previewText } from '@/lib/richtext';
 import { officeFileName, officeLabel } from '@/lib/office/names';
+import { MATERIAL_LABEL, readNoteMaterial } from '@/lib/material-type';
 import { starredFirst } from '@/lib/note-order';
 import { practiceHref, rememberPracticeFrom } from '@/lib/review-mode';
 import { prefersReducedMotion } from '@/components/useReducedMotion';
@@ -965,6 +966,8 @@ export default function NotePage() {
   const manual = !!body?.manual;
   // 한글·워드·PPT 에서 꺼낸 글이면 그 파일 이름 (머리의 자료 종류: '워드 문서 · 그림 2장')
   const docFile = source.kind === 'text' ? officeFileName(source.text_content) : null;
+  // 어떤 종류로 정리했는지 (개념 정리는 예전과 같으니 보이지 않는다)
+  const material = readNoteMaterial(raw);
   // 직접 만든 노트는 AI 가 만든 것이 없으면 신고할 것도 없다 (자료를 더해 AI 가 합쳤으면 신고할 수 있다)
   const reportable = !manual || versions.length > 0;
   const title = old?.title || note?.title || source.title || (ready ? '새 자료' : '정리하는 중…');
@@ -1023,6 +1026,9 @@ export default function NotePage() {
       </span>
       {versions.length ? <span>· 버전 {old ? old.number : cur}</span> : null}
       {manual && !versions.length ? null : <span>· AI 정리</span>}
+      {material && material.type !== 'general' ? (
+        <span title={material.by === 'student' ? '자료를 넣을 때 고른 종류예요' : 'AI가 자료를 읽고 고른 종류예요'}>· {MATERIAL_LABEL[material.type]}</span>
+      ) : null}
     </span>
   );
 

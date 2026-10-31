@@ -5,6 +5,7 @@
 import { z } from 'zod';
 import { figureJsonSchema, stepsJsonSchema, textStepsJsonSchema } from '@/lib/figure/spec';
 import { FIG_KINDS } from '@/lib/source-figures';
+import { MATERIAL_TYPES } from '@/lib/material-type';
 
 type JsonSchema = Record<string, unknown>;
 
@@ -60,8 +61,9 @@ export const zReorganize = z.object({
  * 개념을 먼저 정해야 그림을 붙일 개념 이름을 적을 수 있다. printed_page: 그림이 있는 쪽에 인쇄된 번호 (쪽 번호를 잘못 셌을 때 찾을 쪽)
  */
 export function organizeJsonSchema(o: { figures: boolean; pageNumbers: boolean }): JsonSchema {
-  if (!o.figures && !o.pageNumbers) return noteJsonSchema;
   return obj({
+    // 자료 종류가 맨 앞: AI 는 칸 차례대로 쓰니 종류를 먼저 정하고 그 지침대로 정리한다 (lib/material-type.ts)
+    material_type: { type: 'string', enum: [...MATERIAL_TYPES] },
     ...(noteJsonSchema.properties as Record<string, unknown>),
     ...(o.pageNumbers ? { page_numbers: intArr } : {}),
     ...(o.figures
@@ -277,6 +279,24 @@ export const chatQuestionSchema: JsonSchema = obj({
  * figures(Pro): 그림이 도움이 되는지(needs_figure) — true 일 때만 두 번째 호출로 그림을 받는다 (chatFigureJsonSchema).
  * guess: 과목·단원 칸 (홈 채팅: 노트가 없어서 넣을 곳을 짐작한다. 노트 채팅은 이 노트에 넣으니 없다)
  */
+/**
+ * 원래 문제 꺼내기 (기출·문제집): 채팅 문제 모양(answer 는 글 하나: 객관식은 정답 보기의 글 그대로라 번호를 하나 밀려 적는 일이 없다)
+ * + 쪽, 답을 어디서 얻었는지(answer_from: material = 자료의 정답, solved = AI 가 푼 답 → 검사 단계가 다시 푼다), 자료 그림 번호
+ */
+export function problemsJsonSchema(o: { figures: boolean }): JsonSchema {
+  return obj({
+    questions: {
+      type: 'array',
+      items: obj({
+        ...(chatQuestionSchema.properties as Record<string, unknown>),
+        pages: intArr,
+        answer_from: { type: 'string', enum: ['material', 'solved'] },
+        ...(o.figures ? { figure_id: str } : {}),
+      }),
+    },
+  });
+}
+
 export function chatSolutionSchema(o: { figures: boolean; guess: boolean }): JsonSchema {
   return obj({
     include: { type: 'boolean' },

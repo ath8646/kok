@@ -22,6 +22,7 @@ import {
 } from '@/lib/ai/schemas';
 import { figuresForPrompt, questionFigure, readFigures, type SourceFigure } from '@/lib/source-figures';
 import { normalizeAnswer } from '@/lib/grading';
+import { readNoteMaterial } from '@/lib/material-type';
 
 // 문제 만들기(최대 140초) + 검사(최대 60초)
 export const maxDuration = 300;
@@ -74,7 +75,7 @@ export async function POST(req: NextRequest, ctx: RouteContext<'/api/notes/[id]/
     // 지금 버전의 문제만 센다 (다른 버전에만 있는 숨긴 문제는 바뀌지 않는다)
     const { data: existing, error: qErr } = await admin
       .from('questions')
-      .select('id, prompt, created_by, locked, edited')
+      .select('id, prompt, created_by, locked, edited, key_point_id')
       .eq('note_id', note.id)
       .eq('user_id', acc.userId)
       .neq('status', 'hidden');
@@ -83,6 +84,7 @@ export async function POST(req: NextRequest, ctx: RouteContext<'/api/notes/[id]/
     const replaceCount = (existing ?? []).length - kept.length;
 
     const qs = acc.settings.quiz;
+    const material = readNoteMaterial(note.raw)?.type;
     const json = await runTask(admin, acc, app, {
       task: 'quiz',
       effortOf: 'quiz',
@@ -91,7 +93,18 @@ export async function POST(req: NextRequest, ctx: RouteContext<'/api/notes/[id]/
         textBlock(wrap('note', noteForPrompt(note.note))),
         ...(figures.length ? [textBlock(wrap('figures', JSON.stringify(figuresForPrompt(figures))))] : []),
         textBlock(wrap('existing_questions', JSON.stringify(kept.map((q) => q.prompt)))),
-        textBlock(quizPrompt({ types: qs.types, mix: qs.mix, language: qs.language, perKeyPoint: qs.perKeyPoint, figures: figures.length })),
+        textBlock(
+          quizPrompt(
+            { types: qs.types, mix: qs.mix, language: qs.language, perKeyPoint: qs.perKeyPoint, figures: figures.length },
+            // 자료 종류 (lib/material-type.ts): 기출은 남겨 둔 원래 문제(잠겨 있다)가 묻는 개념만 덜 만들고, 단어장은 카드와 겹치지 않게
+            {
+              material,
+              originals: material === 'exam' ? kept.length : 0,
+              covered: material === 'exam' ? [...new Set(kept.map((q) => String(q.key_point_id ?? '')).filter(Boolean))] : [],
+              cards: material === 'vocab' ? kept.length : 0,
+            },
+          ),
+        ),
       ],
       schema: figures.length ? quizFiguresJsonSchema : quizJsonSchema,
       maxTokens: 8000,
@@ -134,7 +147,7 @@ export async function POST(req: NextRequest, ctx: RouteContext<'/api/notes/[id]/
             textBlock(wrap('note', noteForPrompt(note.note))),
             ...(rows.some((x) => 'figure_id' in x) ? [textBlock(wrap('figures', JSON.stringify(figuresForPrompt(figures))))] : []),
             textBlock(wrap('questions', JSON.stringify(rows.map((x, index) => ({ index, ...x }))))),
-            textBlock(checkPrompt({ figures: rows.some((x) => 'figure_id' in x) })),
+            textBlock(checkPrompt({ figures: rows.some((x) => 'figure_id' in x), math: material === 'math' })),
           ],
           schema: checkJsonSchema,
           maxTokens: 2500,

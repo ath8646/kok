@@ -7,6 +7,7 @@ import {
   checkJsonSchema,
   noteJsonSchema,
   organizeJsonSchema,
+  problemsJsonSchema,
   zMindmap,
   quizFiguresJsonSchema,
   quizJsonSchema,
@@ -28,6 +29,7 @@ import {
   checkPrompt,
   mergePrompt,
   organizePrompt,
+  problemsPrompt,
   quizPrompt,
   redrawPrompt,
   solvePrompt,
@@ -42,6 +44,7 @@ import {
   canRedraw,
   figurePath,
   figuresForPrompt,
+  matchKeyPoint,
   questionFigure,
   readFigures,
   readFoundFigures,
@@ -65,6 +68,30 @@ import { AiCallError, callJson, imageBlock, pdfBlock, textBlock, usageOf, type C
 import { UserFacingError } from './errors';
 import { adminDetail } from './tasks';
 import { removePaths } from './files';
+import { normalizeAnswer } from '@/lib/grading';
+import {
+  noteMaterialType,
+  readMaterialPick,
+  readMaterialType,
+  readNoteMaterial,
+  readPartTypes,
+  type MaterialType,
+  type NoteMaterial,
+} from '@/lib/material-type';
+import {
+  addMissingTerms,
+  forSaving,
+  halveJob,
+  mergeTerms,
+  placeExamples,
+  problemJobs,
+  readJobs,
+  readOriginals,
+  vocabCards,
+  ORIGINALS_MAX,
+  type MaterialQuestion,
+  type ProblemsJob,
+} from '@/lib/material-questions';
 import { noteForPrompt } from './notes';
 import { coverContent, settleCover } from './cover';
 import { cutOnPage, openFigurePage, openPdfPages, pdfPrintedNumbers } from './figure-image';
@@ -79,7 +106,11 @@ import {
   keyPointRange,
   mergedKeyPointRange,
   noteOutTokens,
+  pageWeight,
+  problemPieces,
+  problemsOutTokens,
   quizOutTokens,
+  vocabHeadroom,
   type PartSize,
   type Range,
 } from '@/lib/ai/scale';
@@ -578,6 +609,154 @@ async function stepFigures(ctx: Ctx): Promise<Partial<SourceRow>> {
   return { step: left ? 'figures' : 'visual', progress, draft };
 }
 
+// ------------------------------------------------------------- 자료 종류 (lib/material-type.ts)
+/** 학생이 자료 넣기 창에서 고른 종류 ('auto' 면 AI 가 조각마다 고른다) */
+function pickOf(draft: Record<string, unknown>) {
+  return readMaterialPick(draft.materialPick);
+}
+
+/** 이 자료(노트에 더하는 자료면 더한 자료)의 종류: 학생이 고른 것, 아니면 조각들 가운데 양이 반을 넘는 종류 (섞였으면 general) */
+function materialOf(draft: Record<string, unknown>): MaterialType {
+  return noteMaterialType(readPartTypes(draft.partTypes), pickOf(draft));
+}
+
+/** 조각(partials)마다 단어장인지: 합칠 때 단어장 조각의 용어·예문은 앱이 옮긴다. 조각 수가 맞지 않으면 자료 전체의 종류로 */
+function wordListParts(draft: Record<string, unknown>, n: number): boolean[] {
+  const pick = pickOf(draft);
+  const types = readPartTypes(draft.partTypes);
+  if (pick === 'auto' && types.length === n) return types.map((t) => t.type === 'vocab');
+  const all = materialOf(draft) === 'vocab';
+  return Array.from({ length: n }, () => all);
+}
+
+/** 원래 문제를 꺼낼 곳 (정리할 때 기출·문제집으로 고른 조각을 몇 쪽씩: lib/material-questions.ts ProblemsJob) */
+function problemsTodo(draft: Record<string, unknown>): ProblemsJob[] {
+  return readJobs(draft.problemsTodo);
+}
+
+/** 조각 글 (글 자료의 원래 문제 꺼내기: 일의 범위가 이 글의 글자 자리) */
+function chunkText(src: SourceRow, i: number): string {
+  return src.kind === 'text' ? (textChunks(src.text_content ?? '', docPictureCount(src) > 0)[i] ?? '') : '';
+}
+
+/** 꺼낸 원래 문제 */
+function originalsOf(draft: Record<string, unknown>): MaterialQuestion[] {
+  const v = draft.originals;
+  return Array.isArray(v) ? (v as MaterialQuestion[]).filter((x) => !!x && typeof x === 'object' && typeof x.prompt === 'string') : [];
+}
+
+/**
+ * 원래 문제를 꺼낼 차례인지: 노트가 정해졌고(합치기·자료 그림 자르기 뒤) 꺼낼 조각이 남았을 때.
+ * 마인드맵·문제보다 먼저 (문제 단계가 원래 문제와 겹치지 않게 만든다)
+ */
+function problemsDue(src: SourceRow): boolean {
+  return !!src.draft.note && !src.draft.figFound && problemsTodo(src.draft).length > 0 && (src.step === 'figures' || src.step === 'visual');
+}
+
+/** 원래 문제 꺼내기: 정리 때와 같은 조각 안의 한 부분 (PDF 쪽들·사진들·글과 그 글의 문서 속 그림) */
+async function chunkMaterial(ctx: Ctx, job: ProblemsJob): Promise<{ content: ContentPart[]; meta: Parameters<typeof problemsPrompt>[0]; size: PartSize }> {
+  const { src, admin } = ctx;
+  const i = job.chunk;
+  const content: ContentPart[] = [];
+  /** 조각 안의 n 개 가운데 이 일의 범위 [from, to) */
+  const span = (n: number) => {
+    const from = Math.min(Math.max(0, job.from), Math.max(0, n - 1));
+    return { from, to: Math.min(Math.max(job.to, from + 1), n) };
+  };
+  if (src.kind === 'pdf') {
+    const parts = pdfPartsOf(src);
+    // 큰 PDF 는 나눠 둔 조각(쪽 1부터), 아니면 원본에서 조각의 쪽을 자른다
+    const part = parts ? parts[Math.min(i, parts.length - 1)] : null;
+    const chunks = part ? [] : planChunks(src.page_count ?? 1);
+    const c = part ?? chunks[Math.min(i, chunks.length - 1)];
+    const { from, to } = span(c.end - c.start + 1);
+    const bytes = await download(admin, part ? part.path : src.file_paths[0]);
+    content.push(pdfBlock(await slicePdf(bytes, part ? from + 1 : c.start + from, part ? to : c.start + to - 1)));
+    return {
+      content,
+      meta: { kind: 'pdf', pageStart: c.start + from, pageEnd: c.start + to - 1, figures: false },
+      size: { kind: 'pdf', pages: to - from },
+    };
+  }
+  if (src.kind === 'image') {
+    const all = src.file_paths.slice(i * IMAGES_PER_CHUNK, (i + 1) * IMAGES_PER_CHUNK);
+    const { from, to } = span(all.length);
+    const paths = all.slice(from, to);
+    const start = i * IMAGES_PER_CHUNK + from + 1;
+    for (let k = 0; k < paths.length; k++) {
+      content.push(textBlock(`Photo ${start + k}:`));
+      content.push(imageBlock(await download(admin, paths[k]), mediaTypeOf(paths[k])));
+    }
+    return {
+      content,
+      meta: { kind: 'image', imageStart: start, imageEnd: start + paths.length - 1, figures: false },
+      size: { kind: 'image', images: paths.length },
+    };
+  }
+  const parts = textChunks(src.text_content ?? '', docPictureCount(src) > 0);
+  const text = (parts[Math.min(i, parts.length - 1)] ?? '').slice(job.from, job.to);
+  content.push(textBlock(wrap('material', text)));
+  const nums = pictureNumbers(text).filter((n) => n <= docPictureCount(src));
+  for (const n of nums) {
+    content.push(textBlock(`Picture ${n}:`));
+    content.push(imageBlock(await download(admin, src.file_paths[n - 1]), mediaTypeOf(src.file_paths[n - 1])));
+  }
+  return {
+    content,
+    meta: { kind: 'text', ...(nums.length ? { pictures: nums } : {}), figures: false },
+    size: { kind: 'text', chars: text.length, images: nums.length },
+  };
+}
+
+/** 그림이 이 조각의 쪽(사진·문서 속 그림 번호)에 있는지 */
+function figureInChunk(f: SourceFigure, meta: Parameters<typeof problemsPrompt>[0]): boolean {
+  if (meta.kind === 'pdf') return f.page >= (meta.pageStart ?? 0) && f.page <= (meta.pageEnd ?? 0);
+  if (meta.kind === 'image') return f.page >= (meta.imageStart ?? 0) && f.page <= (meta.imageEnd ?? 0);
+  return !!meta.pictures?.includes(f.page);
+}
+
+/**
+ * 원래 문제 꺼내기 (기출·문제집 조각 하나, AI 한 번): 자료의 문제를 그대로 문제로. 이 조각에 자료 그림이 있으면 그 그림이 필요한 문제도.
+ * 못 꺼내도 노트는 그대로 만든다 (UserFacingError 만 던지고, AI 가 잠깐 바쁘면 다시 한다). 꺼낸 문제는 검사 단계가 한 번 더 본다
+ */
+async function stepProblems(ctx: Ctx): Promise<Partial<SourceRow>> {
+  const todo = problemsTodo(ctx.src.draft);
+  const job = todo[0];
+  const note = zNote.parse(ctx.src.draft.note);
+  const prev = originalsOf(ctx.src.draft);
+  let found: MaterialQuestion[] = [];
+  let rest = todo.slice(1);
+  const room = ORIGINALS_MAX - prev.length;
+  if (room > 0) {
+    try {
+      const { content, meta, size } = await chunkMaterial(ctx, job);
+      const figs = draftFigures(ctx.src.draft).filter((f) => figureInChunk(f, meta));
+      content.push(textBlock(wrap('note', JSON.stringify(note.key_points.map((k) => ({ id: k.id, title: k.title }))))));
+      if (figs.length) content.push(textBlock(wrap('figures', JSON.stringify(figuresForPrompt(figs)))));
+      content.push(textBlock(problemsPrompt({ ...meta, figures: figs.length > 0 })));
+      const json = await ai(ctx, 'problems', content, problemsJsonSchema({ figures: figs.length > 0 }), problemsOutTokens(size));
+      // 그림 문제는 그림 파일도 적어 둔다 (노트에 더할 때 다시 합치면 그림 번호가 바뀔 수 있어서 문제 단계가 파일로 다시 찾는다)
+      const crops = new Map(figs.map((f) => [f.id, f.crop]));
+      found = readOriginals(json, { kps: note.key_points, figureIds: new Set(crops.keys()), max: room, before: prev }).map((o) =>
+        o.figure_id ? { ...o, figure_crop: crops.get(o.figure_id) } : o,
+      );
+    } catch (e) {
+      if (e instanceof UserFacingError && e.code !== 'file_missing') throw e;
+      if (e instanceof AiCallError && e.kind === 'retryable' && Number(ctx.src.draft.attempts ?? 0) < MAX_ATTEMPTS - 1) throw e;
+      // 답이 잘렸다 (문제가 많은 쪽): 반으로 나눠 다시 꺼낸다. 쪽 하나·사진 한 장·짧은 글이면 그 부분만 빼고 넘어간다
+      const halves = e instanceof AiCallError && e.truncated ? halveJob(job, ctx.src.kind === 'text' ? chunkText(ctx.src, job.chunk) : undefined) : null;
+      if (halves) rest = [...halves, ...rest];
+      else console.warn('[kok] could not take out the original questions, keeping the note', ctx.src.id, job, e);
+    }
+  } else {
+    rest = []; // 노트의 문제 수 끝만큼 꺼냈다
+  }
+  return {
+    progress: Math.min(72, Math.max(ctx.src.progress, 64) + 1),
+    draft: { ...ctx.src.draft, originals: [...prev, ...found], problemsTodo: rest, attempts: 0 },
+  };
+}
+
 // ------------------------------------------------------------- 단계별 작업
 /** 큰 PDF 를 조각으로 나눠 `내id/자료id/parts/001.pdf …` 에 저장한다 (정리가 끝나면 지운다) */
 async function storePdfParts(ctx: Ctx, original: Uint8Array): Promise<PdfPart[]> {
@@ -705,17 +884,34 @@ async function stepOrganize(ctx: Ctx): Promise<Partial<SourceRow>> {
   if (src.kind === 'pdf') meta.pageNumbers = true;
   // 자료 양에 따라 개념 수를 정한다 (조각마다 적어 두고 합칠 때 더한다)
   meta.keyPoints = keyPointRange(size);
+  // 자료 종류: 학생이 고른 것이 있으면 그 지침으로, 없으면 AI 가 이 조각을 읽고 고른다 (답의 맨 앞 칸)
+  const pick = pickOf(src.draft);
+  if (pick !== 'auto') meta.materialPick = pick;
   content.push(textBlock(organizePrompt(meta)));
 
-  // 답 길이는 개념 수에 따라, 그림을 찾으면 그만큼 더
+  // 답 길이는 개념 수에 따라, 그림을 찾으면 그만큼 더, 단어장일 수 있으면 낱말 수만큼 더 (쓴 만큼만 낸다)
   const json = await ai(
     ctx,
     'organize',
     content,
     organizeJsonSchema({ figures: !!meta.figures, pageNumbers: !!meta.pageNumbers }),
-    noteOutTokens(meta.keyPoints.max, meta.figures ?? 0) + (meta.pageNumbers ? 200 : 0),
+    Math.min(16_000, noteOutTokens(meta.keyPoints.max, meta.figures ?? 0) + (meta.pageNumbers ? 200 : 0) + vocabHeadroom(size, pick)),
   );
   const note = normalizeNote(zNote.parse(json), meta.keyPoints.max);
+  // 이 조각의 종류 (조각의 양과 함께: 노트의 종류는 양이 반을 넘는 종류). 기출 조각은 노트가 정해진 뒤 원래 문제를 몇 쪽씩 꺼낸다
+  const ptype: MaterialType = pick !== 'auto' ? pick : readMaterialType((json as { material_type?: unknown } | null)?.material_type);
+  const w = pageWeight(size);
+  // 앞 조각의 종류를 모르면(이 기능이 생기기 전에 정리한 조각) 개념 정리로 본다 (뒤 조각만으로 노트의 종류가 정해지지 않게)
+  const known = i === 0 ? [] : readPartTypes(src.draft.partTypes).slice(0, i);
+  const partTypes = [...known, ...Array.from({ length: i - known.length }, () => ({ type: 'general' as const, w })), { type: ptype, w }];
+  let jobs: ProblemsJob[] = [];
+  if (ptype === 'exam') {
+    const units =
+      meta.kind === 'pdf' ? (meta.pageEnd ?? 1) - (meta.pageStart ?? 1) + 1 : meta.kind === 'image' ? (meta.imageEnd ?? 1) - (meta.imageStart ?? 1) + 1 : 0;
+    const text = chunkText(src, i);
+    jobs = units ? problemJobs(i, units, problemPieces(size, units)) : problemJobs(i, text.length, problemPieces(size), text);
+  }
+  const todo = [...(i === 0 ? [] : problemsTodo(src.draft)).filter((j) => j.chunk !== i), ...jobs];
   // 쪽 번호: 이 조각의 증거 (PDF 글자·AI 가 읽은 번호). 처음 조각부터 다시 정리하면 예전 것은 버린다
   const evidence = i === 0 ? [] : evidenceOf(src.draft).filter((e) => e.start !== meta.pageStart);
   let partAdd: number | null = null;
@@ -748,8 +944,21 @@ async function stepOrganize(ctx: Ctx): Promise<Partial<SourceRow>> {
   const next = i + 1;
   const progress = Math.round(5 + (55 * next) / total);
   const partRanges = [...(i === 0 ? [] : rangesOf(src.draft)), meta.keyPoints];
-  const kept: Record<string, unknown> = { ...src.draft, attempts: 0, figCuts: [...prevCuts, ...docCuts], figLog, partRanges, pageEvidence: evidence };
-  if (i === 0) delete kept.pageAnchors;
+  const kept: Record<string, unknown> = {
+    ...src.draft,
+    attempts: 0,
+    figCuts: [...prevCuts, ...docCuts],
+    figLog,
+    partRanges,
+    pageEvidence: evidence,
+    partTypes,
+    problemsTodo: todo,
+  };
+  if (i === 0) {
+    delete kept.pageAnchors;
+    // 처음 조각부터 다시 정리하면 예전에 꺼낸 원래 문제는 버린다 (조각마다 다시 꺼낸다)
+    delete kept.originals;
+  }
   if (figFound) kept.figFound = figFound;
   if (next < total) {
     return { partials, chunk_index: next, progress, draft: kept };
@@ -757,8 +966,9 @@ async function stepOrganize(ctx: Ctx): Promise<Partial<SourceRow>> {
   // 여러 조각이거나 노트에 더하는 자료면 합치기 단계로
   if (total > 1 || src.parent_id) return { partials, chunk_index: next, step: 'merge', progress, draft: kept };
   // 한 조각짜리: 그림이 있으면 자리를 찾아 자른 뒤 개념에 붙이고 다음 단계를 정한다 (stepCutFigures)
-  const one: Record<string, unknown> = { ...src.draft, note, attempts: 0, figLog, pageEvidence: evidence };
+  const one: Record<string, unknown> = { ...src.draft, note, attempts: 0, figLog, pageEvidence: evidence, partTypes, problemsTodo: todo };
   delete one.pageAnchors;
+  delete one.originals;
   if (figFound) return { partials: [], chunk_index: next, step: 'visual', progress: 62, draft: { ...one, figCuts: [], figFound } };
   // 문서 속 그림은 이미 그림 폴더에 있다: 개념에 붙이고 다음 단계를 정한다 (Pro 는 다시 그리기부터)
   const figures = toSourceFigures(docCuts, note.key_points);
@@ -859,9 +1069,17 @@ async function stepMerge(ctx: Ctx): Promise<Partial<SourceRow>> {
   const range = mergedKeyPointRange(
     ranges.length === parts.length ? ranges : parts.map((p) => ({ min: Math.max(3, p.key_points.length), max: Math.max(5, p.key_points.length) })),
   );
-  const content = [textBlock(wrap('partials', JSON.stringify(parts))), textBlock(mergePrompt(parts.length, range))];
+  // 단어장 조각의 용어·예문은 AI 에 보내지 않고 조각에서 그대로 옮긴다 (낱말이 많아도 합친 답이 잘리지 않고, 빠지거나 뜻이 바뀌지 않게)
+  const lists = wordListParts(ctx.src.draft, parts.length);
+  const sent = parts.map((p, k) => (lists[k] ? { ...p, terms: [], examples: [] } : p));
+  const content = [textBlock(wrap('partials', JSON.stringify(sent))), textBlock(mergePrompt(parts.length, range, { listsKept: lists.some(Boolean) }))];
   const json = await ai(ctx, 'merge', content, noteJsonSchema, noteOutTokens(range.max));
   const note = normalizeNote(zNote.parse(json), range.max);
+  if (lists.some(Boolean)) {
+    const words = parts.filter((_, k) => lists[k]);
+    note.terms = mergeTerms(...words.map((p) => p.terms), note.terms);
+    note.examples = placeExamples([{ key_points: note.key_points, examples: note.examples, sameIds: true }, ...words], note, note.terms);
+  }
   // 조각마다 자른 그림을 합친 노트의 개념에 붙인다 (개념 이름으로)
   const figures = toSourceFigures(cutsOf(ctx.src.draft), note.key_points);
   const draft: Record<string, unknown> = { ...ctx.src.draft, note, figures, attempts: 0 };
@@ -899,9 +1117,12 @@ async function readMergeBase(ctx: Ctx): Promise<{ id: string; body: unknown; bas
 async function stepAppendMerge(ctx: Ctx, parts: Note[]): Promise<Partial<SourceRow>> {
   const n = await readMergeBase(ctx);
   const current = zNote.parse(n.body ?? {});
+  // 단어장(지금 노트나 새 자료)의 용어·예문은 AI 에 보내지 않고 앱이 옮긴다 (낱말이 많아도 합친 답이 길어져 잘리지 않게)
+  const lists = wordListParts(ctx.src.draft, parts.length);
+  const curList = readNoteMaterial(n.body)?.type === 'vocab';
   // 지금 노트는 자르지 않고 모두 보낸다 (잘라 보내면 긴 설명이 잘린 채 새 버전에 남는다)
-  const full = noteForMerge(current);
-  const partsJson = JSON.stringify(parts);
+  const full = noteForMerge(curList ? { ...current, terms: [], examples: [] } : current);
+  const partsJson = JSON.stringify(parts.map((p, k) => (lists[k] ? { ...p, terms: [], examples: [] } : p)));
   // 합친 노트가 답 길이에 들어가지 않을 노트는 AI 를 부르기 전에 막는다
   if (!full || !mergeFits(full, growthOfParts(partsJson))) throw new UserFacingError('note_too_long', NOTE_TOO_LONG, 400);
   // 지금 개념은 모두 지키고 새 자료의 양만큼 늘어날 수 있다 (노트 끝까지)
@@ -910,7 +1131,11 @@ async function stepAppendMerge(ctx: Ctx, parts: Note[]): Promise<Partial<SourceR
     current.key_points.length,
     ranges.length === parts.length ? ranges : parts.map((p) => ({ min: 3, max: Math.max(5, p.key_points.length) })),
   );
-  const content = [textBlock(wrap('note', full)), textBlock(wrap('new_parts', partsJson)), textBlock(appendMergePrompt(parts.length, maxKeyPoints))];
+  const content = [
+    textBlock(wrap('note', full)),
+    textBlock(wrap('new_parts', partsJson)),
+    textBlock(appendMergePrompt(parts.length, maxKeyPoints, { listsKept: curList || lists.some(Boolean) })),
+  ];
   let json: unknown;
   try {
     json = await ai(ctx, 'merge', content, noteJsonSchema, MERGE_OUT_TOKENS);
@@ -922,6 +1147,25 @@ async function stepAppendMerge(ctx: Ctx, parts: Note[]): Promise<Partial<SourceR
   // 지금 노트의 개념 수보다 줄이지 않는다 (내가 더한 개념이 잘리지 않게)
   const merged = normalizeNote(zNote.parse(json), maxKeyPoints);
   const note = keepFromCurrent(current, merged, parts);
+  if (curList || lists.some(Boolean)) {
+    // 용어: 지금 단어장의 낱말(고친 뜻 그대로) → AI 가 합친 용어 → 새 단어장의 낱말 (이미 있는 낱말은 그대로)
+    const words = parts.filter((_, k) => lists[k]);
+    const terms = addMissingTerms(
+      curList ? addMissingTerms(current.terms, note.terms) : note.terms,
+      words.flatMap((p) => p.terms),
+    );
+    // 예문: 지금 단어장의 예문(개념 번호는 그대로) → AI 가 합친 예문 → 새 단어장의 예문 (개념은 이름·낱말로 다시 붙인다)
+    note.examples = placeExamples(
+      [
+        ...(curList ? [{ key_points: current.key_points, examples: current.examples, sameIds: true }] : []),
+        { key_points: note.key_points, examples: note.examples, sameIds: true },
+        ...words,
+      ],
+      note,
+      terms,
+    );
+    note.terms = terms;
+  }
   // 자료 그림: 지금 노트의 그림은 그대로 두고, 새 자료의 그림을 번호를 이어 합친 노트의 개념에 붙인다.
   // 다시 합칠 때(노트가 바뀌었을 때)는 이미 다시 그린 그림을 그대로 쓴다 (같은 자른 그림이면)
   const baseFigures = readFigures(n.body);
@@ -1031,17 +1275,52 @@ async function stepQuiz(ctx: Ctx): Promise<Partial<SourceRow>> {
     const { data: rows } = await ctx.admin.from('questions').select('prompt').eq('note_id', pid).neq('status', 'hidden').limit(200);
     existing = (rows ?? []).map((r) => String(r.prompt).slice(0, 300));
   }
+  // 자료 종류 (lib/material-type.ts): 기출 조각에서 꺼낸 원래 문제(개념은 이름으로 다시 붙인다: 다시 합쳐 번호가 바뀌었을 수 있다),
+  // 단어장이면 낱말마다 AI 없이 만든 카드 (노트에 더할 때는 새 자료의 낱말만). AI 문제는 이것들과 겹치지 않게 덜 만든다
+  const material = materialOf(ctx.src.draft);
   // 자료 그림: 그림마다 그림 문제 하나 (AI 는 그림 대신 그림 설명을 본다. 노트에 더할 때는 새 자료의 그림만)
   const figures = draftFigures(ctx.src.draft);
-  const content = [
-    textBlock(wrap('note', noteForPrompt(note))),
-    ...(pid ? [textBlock(wrap('new_parts', JSON.stringify(ctx.src.draft.newParts ?? [])))] : []),
-    ...(figures.length ? [textBlock(wrap('figures', JSON.stringify(figuresForPrompt(figures))))] : []),
-    textBlock(wrap('existing_questions', JSON.stringify(existing))),
-    textBlock(quizPrompt({ types: q.types, mix: q.mix, language: q.language, perKeyPoint: q.perKeyPoint, figures: figures.length }, { onlyNew: !!pid })),
-  ];
-  const json = await ai(ctx, 'quiz', content, figures.length ? quizFiguresJsonSchema : quizJsonSchema, quizOutTokens(note.key_points.length, figures.length));
-  const raw = zQuiz.parse(json).questions;
+  // 원래 문제의 그림은 그림 파일로 다시 찾는다 (다시 합쳐 그림 번호가 바뀌었을 수 있다). 그림이 없어졌으면 그 문제는 뺀다
+  const byCrop = new Map(figures.map((f) => [f.crop, f.id]));
+  const originals = originalsOf(ctx.src.draft)
+    .map((o) => {
+      const kp = { ...o, key_point_id: o.kp_title ? matchKeyPoint(o.kp_title, note.key_points) : '' };
+      if (!o.figure_id) return kp;
+      const fid = o.figure_crop ? byCrop.get(o.figure_crop) : figures.some((f) => f.id === o.figure_id) ? o.figure_id : undefined;
+      return fid ? { ...kp, figure_id: fid } : null;
+    })
+    .filter((o): o is MaterialQuestion => !!o);
+  const covered = [...new Set(originals.map((o) => o.key_point_id).filter(Boolean))];
+  const newParts = pid && Array.isArray(ctx.src.draft.newParts) ? ctx.src.draft.newParts.map((p) => zNote.parse(p)) : [];
+  const vocab =
+    material === 'vocab'
+      ? vocabCards(pid ? newParts.flatMap((p) => p.terms) : note.terms, {
+          types: q.types,
+          keyPoints: note.key_points,
+          examples: note.examples,
+          pitfalls: note.pitfalls,
+          seed: ctx.src.id,
+        }).filter((c) => !existing.includes(c.prompt.slice(0, 300)))
+      : [];
+  // AI 문제 자리: 노트의 문제 수 끝에서 원래 문제를 뺀 만큼 (단어장 카드는 AI 없이 만들어서 따로 센다). 자리가 없으면 AI 를 부르지 않는다
+  const room = Math.max(0, QUESTIONS_MAX - originals.length);
+  let raw: unknown[] = [];
+  if (room > 0) {
+    const content = [
+      textBlock(wrap('note', noteForPrompt(note))),
+      ...(pid ? [textBlock(wrap('new_parts', JSON.stringify(ctx.src.draft.newParts ?? [])))] : []),
+      ...(figures.length ? [textBlock(wrap('figures', JSON.stringify(figuresForPrompt(figures))))] : []),
+      textBlock(wrap('existing_questions', JSON.stringify([...existing, ...[...originals, ...vocab].map((o) => o.prompt.slice(0, 300))]))),
+      textBlock(
+        quizPrompt(
+          { types: q.types, mix: q.mix, language: q.language, perKeyPoint: q.perKeyPoint, figures: figures.length },
+          { onlyNew: !!pid, material, originals: originals.length, covered, cards: vocab.length },
+        ),
+      ),
+    ];
+    const json = await ai(ctx, 'quiz', content, figures.length ? quizFiguresJsonSchema : quizJsonSchema, quizOutTokens(note.key_points.length, figures.length));
+    raw = zQuiz.parse(json).questions;
+  }
   const figIds = new Set(figures.map((f) => f.id));
   const rows: QuestionDraftRow[] = raw
     .map((r) => zQuizItem.safeParse(r))
@@ -1054,17 +1333,21 @@ async function stepQuiz(ctx: Ctx): Promise<Partial<SourceRow>> {
       return figIds.has(fid) ? { ...row, figure_id: fid } : null;
     })
     .filter((r): r is NonNullable<typeof r> => !!r)
-    .filter((r) => q.types.includes(r.type))
-    .slice(0, QUESTIONS_MAX);
+    .filter((r) => q.types.includes(r.type));
+  // 원래 문제 → 단어장 카드 → AI 문제 차례로 (원래 문제 + AI 문제는 노트의 문제 수 끝까지). 원래 문제는 문제 종류 설정과 상관없이 넣는다
+  // (학생의 시험 문제라서). 원래 문제·카드와 글이 같은 AI 문제는 뺀다 (같은 문제가 두 번 나오지 않게)
+  const taken = new Set([...originals, ...vocab].map((x) => normalizeAnswer(x.prompt)));
+  const fresh = rows.filter((r) => !taken.has(normalizeAnswer(r.prompt))).slice(0, room);
+  const all: QuestionDraftRow[] = [...originals.slice(0, QUESTIONS_MAX), ...vocab, ...fresh];
   // 새로 만든 문제는 다시 검사하고 그림 풀이도 처음부터
-  const draft: Record<string, unknown> = { ...ctx.src.draft, questions: rows, attempts: 0 };
+  const draft: Record<string, unknown> = { ...ctx.src.draft, questions: all, attempts: 0 };
   delete draft.checked;
   delete draft.solveRound;
   return { step: 'check', progress: 88, draft };
 }
 
 /** figure_id: 그림 문제의 자료 그림 번호 (저장할 때 그림을 그대로 남긴다: source_figure) */
-type QuestionDraftRow = NonNullable<ReturnType<typeof toQuestionRow>> & { figure?: unknown; steps?: unknown; figure_id?: string };
+type QuestionDraftRow = MaterialQuestion & { figure?: unknown; steps?: unknown };
 
 /** 그림 풀이를 만드는지: Pro 혜택이 있고 설정에서 켜 두었고 DB 에 칸이 있을 때 (schema.sql 을 다시 실행하기 전에는 예전처럼) */
 async function figuresOn(ctx: Ctx): Promise<boolean> {
@@ -1078,7 +1361,8 @@ async function figuresOn(ctx: Ctx): Promise<boolean> {
  */
 async function solveRound(ctx: Ctx, note: Note, questions: QuestionDraftRow[]): Promise<{ questions: QuestionDraftRow[]; more: boolean }> {
   // 자료 그림이 붙은 문제는 그 그림을 보고 푸는 문제라 그림 풀이를 만들지 않는다
-  const open = questions.map((q, i) => (q.steps || q.figure_id ? -1 : i)).filter((i) => i >= 0);
+  // 단어장 카드(낱말 뜻)는 그림 풀이가 필요 없다
+  const open = questions.map((q, i) => (q.steps || q.figure_id || q.origin === 'vocab' ? -1 : i)).filter((i) => i >= 0);
   if (!open.length) return { questions, more: false };
   const content = [
     textBlock(wrap('note', noteForPrompt(note))),
@@ -1101,6 +1385,36 @@ async function solveRound(ctx: Ctx, note: Note, questions: QuestionDraftRow[]): 
     added++;
   }
   return { questions: out, more: added >= SOLVE_PER_ROUND && open.length > added };
+}
+
+/**
+ * 원래 문제·단어장 카드를 잠근다 (노트에서 같은 문제 글인 AI 문제). 잠근 문제는 '문제 다시 만들기'가 바꾸지 않는다.
+ * 못 잠가도 노트는 그대로 (예전처럼 잠기지 않을 뿐)
+ */
+async function lockMaterialQuestions(ctx: Ctx, noteId: string, prompts: string[]): Promise<void> {
+  if (!prompts.length) return;
+  try {
+    const want = new Set(prompts);
+    const { data, error } = await ctx.admin
+      .from('questions')
+      .select('id, prompt')
+      .eq('note_id', noteId)
+      .eq('created_by', 'ai')
+      .eq('locked', false)
+      .neq('status', 'hidden')
+      .limit(1000);
+    if (error) throw error;
+    const ids = (data ?? []).filter((r) => want.has(String(r.prompt))).map((r) => String(r.id));
+    for (let i = 0; i < ids.length; i += 100) {
+      const { error: uErr } = await ctx.admin
+        .from('questions')
+        .update({ locked: true })
+        .in('id', ids.slice(i, i + 100));
+      if (uErr) throw uErr;
+    }
+  } catch (e) {
+    console.warn('[kok] could not lock the original questions', ctx.src.id, e);
+  }
 }
 
 /** 더한 자료 마무리. 합칠 때 쓴 노트가 지금 노트가 아니면 'stale' (저장하지 않는다) */
@@ -1148,21 +1462,35 @@ async function stepCheckAndFinish(ctx: Ctx): Promise<'done' | Partial<SourceRow>
 
   let kept = questions;
   if (ctx.src.draft.checked !== true) {
-    if (questions.length) {
-      const listed = questions.map((x, index) => ({ index, ...x }));
+    // 단어장 카드는 노트에 적힌 뜻 그대로라 검사하지 않는다 (AI 가 만든 문제와 자료의 원래 문제만)
+    const checkable = questions.map((x, i) => ({ x, i })).filter(({ x }) => x.origin !== 'vocab');
+    if (checkable.length) {
+      const listed = checkable.map(({ x }, index) => {
+        const row: Record<string, unknown> = { index, ...x };
+        delete row.kp_title;
+        delete row.figure_crop;
+        if (x.origin !== 'material') delete row.origin;
+        return row;
+      });
       const used = new Set(questions.map((x) => x.figure_id).filter(Boolean));
       const figs = draftFigures(ctx.src.draft).filter((f) => used.has(f.id));
       const content = [
         textBlock(wrap('note', noteForPrompt(note))),
         ...(figs.length ? [textBlock(wrap('figures', JSON.stringify(figuresForPrompt(figs))))] : []),
         textBlock(wrap('questions', JSON.stringify(listed))),
-        textBlock(checkPrompt({ figures: figs.length > 0 })),
+        textBlock(
+          checkPrompt({
+            figures: figs.length > 0,
+            originals: checkable.some(({ x }) => x.origin === 'material'),
+            math: materialOf(ctx.src.draft) === 'math',
+          }),
+        ),
       ];
       try {
         // 문제마다 판정 한 줄 (약 30토큰)
         const json = await ai(ctx, 'check', content, checkJsonSchema, Math.min(6000, 1500 + listed.length * 30));
         const verdicts = zCheck.parse(json).verdicts;
-        const drop = new Set(verdicts.filter((v) => !v.keep).map((v) => v.index));
+        const drop = new Set(verdicts.filter((v) => !v.keep).map((v) => checkable[v.index]?.i));
         kept = questions.filter((_, i) => !drop.has(i));
       } catch (e) {
         // 검사가 실패해도 문제는 살린다 (검사는 품질을 높이는 단계일 뿐)
@@ -1214,11 +1542,15 @@ async function stepCheckAndFinish(ctx: Ctx): Promise<'done' | Partial<SourceRow>
   let noteBody: Record<string, unknown> = { ...note, recommended: visual.recommended, ...(allFigures.length ? { figures: allFigures } : {}) };
   // 노트의 쪽 표시는 처음 넣은 자료의 쪽이다 (더한 자료의 쪽 번호는 합칠 때 비운다): 새 노트에만 적는다
   if (!parentNoteId(ctx) && labels.length) noteBody.page_labels = labels;
+  // 어떤 종류로 정리했는지 (노트 머리에 보인다). 노트에 더한 자료는 지금 노트의 것을 그대로 쓴다 (아래)
+  if (!parentNoteId(ctx))
+    noteBody.material = { type: materialOf(ctx.src.draft), by: pickOf(ctx.src.draft) === 'auto' ? 'ai' : 'student' } satisfies NoteMaterial;
   // 그림 문제는 그 그림을 문제에 그대로 남긴다 (그림이 없어졌으면 문제를 뺀다: '다음 지도' 같은 말이 남지 않게)
   const byId = new Map(figures.map((f) => [f.id, f]));
-  const saved = kept
-    .filter((x) => !x.figure_id || byId.has(x.figure_id))
-    .map(({ figure_id, ...row }) => (figure_id ? { ...row, source_figure: questionFigure(byId.get(figure_id)!) } : row));
+  const keptRows = kept.filter((x) => !x.figure_id || byId.has(x.figure_id));
+  const saved = keptRows.map(forSaving).map(({ figure_id, ...row }) => (figure_id ? { ...row, source_figure: questionFigure(byId.get(figure_id)!) } : row));
+  // 자료의 원래 문제와 단어장 카드는 저장한 뒤 잠근다: '문제 다시 만들기'가 AI 문제로 바꾸지 않게 (채팅에서 넣은 문제처럼)
+  const lockPrompts = keptRows.filter((x) => x.origin === 'material' || x.origin === 'vocab').map((x) => x.prompt);
   // 자료 그림이 어디까지 됐는지 (관리자가 노트 화면에서 본다). 노트에 더한 자료는 지금 노트의 기록을 그대로 둔다
   if (!parentNoteId(ctx)) noteBody.figure_log = { ...figLog, questions: saved.filter((x) => 'source_figure' in x).length };
   const pid = parentNoteId(ctx);
@@ -1228,6 +1560,7 @@ async function stepCheckAndFinish(ctx: Ctx): Promise<'done' | Partial<SourceRow>
     const curBody = cur?.body as Record<string, unknown> | undefined;
     if (curBody?.view) noteBody = { ...noteBody, view: curBody.view };
     if (curBody?.page_labels) noteBody = { ...noteBody, page_labels: curBody.page_labels };
+    if (curBody?.material) noteBody = { ...noteBody, material: curBody.material };
   }
   // 원본 파일(문서 속 그림 포함): Pro·관리자는 계속, 무료는 처리 뒤 freeFileDays 일, 테스트 플랜은 플랜이 끝나고 freeFileDays 일. 파일 없는 글은 없음
   const keepFrom = ctx.acc.plan.kind === 'custom' && ctx.acc.plan.until ? Math.max(Date.parse(ctx.acc.plan.until), Date.now()) : Date.now();
@@ -1243,11 +1576,12 @@ async function stepCheckAndFinish(ctx: Ctx): Promise<'done' | Partial<SourceRow>
   if (pid) {
     // 검사하는 동안 버전이 바뀌었으면(일어나지 않아야 한다) 저장하지 않고 지금 버전에 다시 합친다
     if ((await finalizeAppend(ctx, { p_note: noteBody, p_visuals: visuals, p_questions: saved, p_expire: expire })) === 'stale') return remergePatch(ctx.src);
+    await lockMaterialQuestions(ctx, pid, lockPrompts);
   } else {
     // 단원은 학생이 고른 것만 쓴다: 고르지 않았으면(빈 칸) DB 함수가 AI 단원으로 채운 것을 다시 비운다.
     // (AI 가 읽은 단원은 노트 정리(body.unit)에만 남아 노트 고치기의 단원 고르기에 'AI 추천'으로 보인다)
     const { data: before } = await ctx.admin.from('sources').select('unit').eq('id', ctx.src.id).maybeSingle();
-    const { error } = await ctx.admin.rpc('kok_finalize_source', {
+    const { data: noteId, error } = await ctx.admin.rpc('kok_finalize_source', {
       p_source: ctx.src.id,
       p_title: note.title || ctx.src.title,
       p_note: noteBody,
@@ -1256,6 +1590,7 @@ async function stepCheckAndFinish(ctx: Ctx): Promise<'done' | Partial<SourceRow>
       p_expire: expire,
     });
     if (error) throw error;
+    if (typeof noteId === 'string') await lockMaterialQuestions(ctx, noteId, lockPrompts);
     const aiUnit = (typeof note.unit === 'string' ? note.unit : '').replace(/^ +| +$/g, '').slice(0, 40);
     if (before && !String(before.unit ?? '').trim() && aiUnit) {
       const { error: uErr } = await ctx.admin.from('sources').update({ unit: '' }).eq('id', ctx.src.id).eq('unit', aiUnit);
@@ -1332,6 +1667,12 @@ export async function runOneStep(sourceId: string): Promise<StepOutcome> {
     // 정리 단계에서 찾은 그림이 있으면 이번에는 자르기만 한다 (AI 없음)
     if (src.draft.figFound) {
       patch = await stepCutFigures(ctx);
+      await release(admin, src.id, { ...patch, status: 'processing', error: null });
+      return 'continue';
+    }
+    // 기출·문제집 조각의 원래 문제 꺼내기 (노트가 정해진 뒤, 마인드맵·문제보다 먼저: 한 번에 몇 쪽씩)
+    if (problemsDue(src)) {
+      patch = await stepProblems(ctx);
       await release(admin, src.id, { ...patch, status: 'processing', error: null });
       return 'continue';
     }

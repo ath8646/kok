@@ -13,6 +13,7 @@ import {
   noteChatJsonSchema,
   noteJsonSchema,
   organizeJsonSchema,
+  problemsJsonSchema,
   quizFiguresJsonSchema,
   quizJsonSchema,
   reorganizeJsonSchema,
@@ -47,7 +48,8 @@ export function schemaProps(s: unknown): number {
 /** 앱이 AI 에 보내는 모든 답 모양 (이름은 관리자 화면에 보인다) */
 export function aiSchemas(): Array<{ name: string; schema: JsonSchema }> {
   return [
-    { name: '노트 정리', schema: noteJsonSchema },
+    { name: '노트 합치기', schema: noteJsonSchema },
+    { name: '노트 정리 (글)', schema: organizeJsonSchema({ figures: false, pageNumbers: false }) },
     { name: '노트 정리 + 쪽 번호 (PDF)', schema: organizeJsonSchema({ figures: false, pageNumbers: true }) },
     { name: '노트 정리 + 자료 그림 (PDF)', schema: organizeJsonSchema({ figures: true, pageNumbers: true }) },
     { name: '노트 정리 + 자료 그림 (사진)', schema: organizeJsonSchema({ figures: true, pageNumbers: false }) },
@@ -55,6 +57,8 @@ export function aiSchemas(): Array<{ name: string; schema: JsonSchema }> {
     { name: '자료 그림 자리 찾기 (사진)', schema: locateJsonSchema('image') },
     { name: 'AI로 다시 정리', schema: reorganizeJsonSchema },
     { name: '마인드맵·표·연표', schema: visualJsonSchema },
+    { name: '원래 문제 꺼내기 (기출·문제집)', schema: problemsJsonSchema({ figures: false }) },
+    { name: '원래 문제 꺼내기 + 자료 그림', schema: problemsJsonSchema({ figures: true }) },
     { name: '문제', schema: quizJsonSchema },
     { name: '문제 + 자료 그림', schema: quizFiguresJsonSchema },
     { name: '문제 검사', schema: checkJsonSchema },

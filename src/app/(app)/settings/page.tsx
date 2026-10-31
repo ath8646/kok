@@ -59,6 +59,7 @@ const TASK_NAME: Record<string, string> = {
   redraw: '자료 그림 다시 그리기',
   locate: '자료 그림 자리 찾기',
   cover: '표지 그림',
+  problems: '원래 문제 꺼내기',
   reorganize: '합친 노트 다시 정리',
   course: '단계별 학습 만들기',
   theme: '테마 만들기',

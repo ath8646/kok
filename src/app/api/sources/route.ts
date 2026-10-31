@@ -24,6 +24,7 @@ import { pdfPageCount } from '@/lib/pdf';
 import { keepPictureMarks } from '@/lib/doc-pictures';
 import { isOfficeText } from '@/lib/office/names';
 import { adminClient } from '@/lib/supabase/admin';
+import { MATERIAL_PICKS, type MaterialPick } from '@/lib/material-type';
 
 export const maxDuration = 300;
 
@@ -41,6 +42,11 @@ const Body = z.object({
   review: z.boolean().optional(),
   /** 자료 넣기 창에서 고른 단원 (없으면 단원 없이: 정리가 끝나도 AI 가 단원을 정하지 않는다) */
   unit: z.string().max(200).optional().catch(undefined),
+  /** 자료 넣기 창에서 고른 자료 종류 (없거나 auto 면 AI 가 정리하면서 고른다: lib/material-type.ts) */
+  material: z
+    .enum(MATERIAL_PICKS as [MaterialPick, ...MaterialPick[]])
+    .optional()
+    .catch(undefined),
 });
 
 export async function POST(req: NextRequest) {
@@ -160,7 +166,7 @@ export async function POST(req: NextRequest) {
     const cover = coverWanted({ canFigures: acc.canFigures, autoCover: acc.settings.visual.autoCover, featureOn: feats.covers, append: !!parentId });
     // 노트에 더할 때는 지금 노트와 합치는 단계가 하나 더 있다. Pro 그림 풀이·자료 그림 다시 그리기·표지 그림을 하면 그 값도 (화면 계산과 같게)
     const estimate =
-      estimateEnergy({ kind: b.kind, pages, images, chars: text?.length ?? 0 }, model, L.usdPerEnergy) +
+      estimateEnergy({ kind: b.kind, pages, images, chars: text?.length ?? 0 }, model, L.usdPerEnergy, { exam: b.material === 'exam' }) +
       (parentId ? Math.ceil(estimateSmallTask(model, L.usdPerEnergy, 9000, 3000)) : 0) +
       (figures ? estimateFigures(quizModel, L.usdPerEnergy) : 0) +
       (redraws ? estimateRedraws(visualModel, L.usdPerEnergy) : 0) +
@@ -206,6 +212,16 @@ export async function POST(req: NextRequest) {
     if (unit && !parentId) {
       const { error: uErr } = await admin.from('sources').update({ unit }).eq('id', b.id).eq('user_id', acc.userId);
       if (uErr) console.warn('[kok] could not set the unit of the new note', uErr.message);
+    }
+
+    // 고른 자료 종류 (처리를 시작하기 전에 적는다: 파이프라인이 draft.materialPick 을 읽는다)
+    if (b.material && b.material !== 'auto') {
+      const { error: mErr } = await admin
+        .from('sources')
+        .update({ draft: { materialPick: b.material } })
+        .eq('id', b.id)
+        .eq('user_id', acc.userId);
+      if (mErr) console.warn('[kok] could not set the material type of the new source', mErr.message);
     }
 
     const origin = req.nextUrl.origin;

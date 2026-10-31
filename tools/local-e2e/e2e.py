@@ -3586,7 +3586,10 @@ async def main():
         await octx.close()
 
         # ---------------- 그림 풀이·AI 채팅
-        step("Pro: a new note's questions come with figures and step-by-step solutions")
+        # 표지 그림·레슨·AI로 다시 정리·시그니처 테마·AI 테마는 Max 혜택이라, 여기부터 학생은 Max (Pro 혜택도 모두 있다.
+        # 남은 Pro 는 Max 뒤로: 쿠폰과 같은 규칙). 여기서 만드는 노트에 그림 풀이와 표지가 함께 붙는다
+        psql(f"update public.profiles set max_until = now() + interval '60 days', pro_until = pro_until + interval '60 days' where id = '{student_id}'")
+        step("Max (Pro perks too): a new note's questions come with figures and step-by-step solutions")
         psql(f"delete from public.energy_ledger where user_id = '{student_id}'; delete from public.rate_hits where user_id = '{student_id}'")
         ctx, page = await new_ctx(browser, "student")
         await page.goto(BASE + "/library")
@@ -3672,8 +3675,6 @@ async def main():
         await dlg.get_by_role("button", name="저장", exact=True).click()
         await poll_db(f"select (steps is null)::text || (figure is null)::text from public.questions where id = '{own_qid}'", "truetrue")
 
-        # 표지 그림·레슨·AI로 다시 정리·시그니처 테마·AI 테마는 Max 혜택이라, 여기부터 학생은 Max (남은 Pro 는 Max 뒤로: 쿠폰과 같은 규칙)
-        psql(f"update public.profiles set max_until = now() + interval '60 days', pro_until = pro_until + interval '60 days' where id = '{student_id}'")
         step("Max: a new note gets a cover picture on its library card — redraw it, take it out; the setting turns it off; a failed cover never stops the note")
         psql(f"delete from public.rate_hits where user_id = '{student_id}'")
         cover_of = lambda sid: psql(f"select coalesce(cover::text, '') from public.sources where id = '{sid}'")  # noqa: E731

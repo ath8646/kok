@@ -1126,6 +1126,55 @@ async def terminal_steps(browser, page):
     await pctx.close()
 
 
+async def composer_touch_steps(browser):
+    """폰(손가락이 주된 입력): 자료 넣기 창을 열어도 키보드가 저절로 올라오지 않는다. 글 칸은 눌렀을 때만 초점 (넓은 화면·마우스는 예전처럼 바로 글 칸)"""
+    step("phone: the composer opens without focusing the text box (no keyboard until it is tapped)")
+    ctx = await browser.new_context(viewport={"width": 390, "height": 760}, has_touch=True, is_mobile=True, device_scale_factor=1, locale="ko-KR")
+    await ctx.add_cookies([session_cookie(*USERS["student"])])
+    page = await ctx.new_page()
+    page.on("console", lambda m: ERRORS.append(f"[composer-touch] console.{m.type}: {m.text}") if m.type == "error" else None)
+    page.on("pageerror", lambda e: ERRORS.append(f"[composer-touch] pageerror: {e}"))
+    await page.goto(BASE + "/library")
+    fab = page.get_by_role("button", name="자료 넣기", exact=True)
+    await expect(fab).to_be_visible()
+    await fab.tap()
+    composer = page.get_by_role("dialog", name="자료 넣기")
+    box = composer.get_by_label("공부한 내용")
+    await expect(box).to_be_visible()
+    # 초점은 창(form)에: 키보드는 올라오지 않고, 화면 읽기 프로그램은 창 안에 있다
+    await wait_js(page, "document.activeElement?.tagName === 'FORM' && !!document.activeElement.closest('[role=dialog][aria-label=\"자료 넣기\"]')")
+    await expect(box).not_to_be_focused()
+    # 과목·단원을 골라도 글 칸으로 가지 않고 누른 단추에 남는다
+    subj = composer.locator("button[aria-haspopup='listbox']")
+    await subj.tap()
+    await composer.get_by_role("listbox", name="과목").get_by_role("option").first.tap()
+    await expect(composer.get_by_role("listbox", name="과목")).to_be_hidden()
+    await expect(subj).to_be_focused()
+    await expect(box).not_to_be_focused()
+    unit = composer.get_by_role("button", name=re.compile("^단원: "))
+    await unit.tap()
+    await composer.get_by_role("radiogroup", name="단원").get_by_role("radio").first.tap()
+    await expect(composer.get_by_role("radiogroup", name="단원")).to_be_hidden()
+    await expect(unit).to_be_focused()
+    # 빈 노트 ↔ AI 정리도 마찬가지
+    await composer.get_by_role("button", name="빈 노트", exact=True).tap()
+    await expect(composer.get_by_label("노트 이름")).to_be_visible()
+    await expect(composer.get_by_label("노트 이름")).not_to_be_focused()
+    await composer.get_by_role("button", name="AI 정리로", exact=True).tap()
+    await expect(composer.get_by_role("button", name="빈 노트", exact=True)).to_be_focused()
+    await expect(box).not_to_be_focused()
+    # 글 칸을 누르면 그때 초점 (= 키보드)
+    await box.tap()
+    await expect(box).to_be_focused()
+    await page.keyboard.type("폰에서 적어 보는 글")
+    await expect(box).to_have_value("폰에서 적어 보는 글")
+    await shot(page, "06-composer-phone", full=False)
+    await box.fill("")
+    await page.keyboard.press("Escape")
+    await expect(composer).to_be_hidden()
+    await ctx.close()
+
+
 async def tab_steps(browser):
     """탭을 오갈 때 (src/lib/view-cache.ts): 다시 들어온 화면은 처음부터 그대로 보이고, 처음 읽는 동안에도 임시 글이 보였다가 바뀌지 않는다.
     데이터를 바꾼 뒤에는 기억해 둔 옛 화면을 보이지 않는다. 복습을 끝낸 뒤 '홈으로'는 미리 읽어 둔 홈이 바로 보인다"""
@@ -5251,6 +5300,7 @@ async def main():
 
         await figure_steps(browser)
         await tab_steps(browser)
+        await composer_touch_steps(browser)
         await office_code_steps(browser)
         await office_picture_steps(browser)
         await browser.close()

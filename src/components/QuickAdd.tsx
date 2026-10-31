@@ -1101,6 +1101,20 @@ export function QuickAddProvider({
 }
 
 // ------------------------------------------------------------- 입력창
+/** 손가락이 주된 입력인 기기 (폰·태블릿): 글 칸에 초점을 두면 화면 키보드가 올라와 창의 반을 가린다 */
+function touchFirst(): boolean {
+  return typeof window !== 'undefined' && typeof window.matchMedia === 'function' && window.matchMedia('(pointer: coarse)').matches;
+}
+
+/**
+ * 글 칸으로 초점을 옮긴다. 폰에서는 키보드가 저절로 올라오지 않게 글 칸 대신 instead(창·누른 단추)에 두고,
+ * 키보드는 학생이 칸을 눌렀을 때만 올라온다 (초점은 창 안에 남아 화면 읽기 프로그램이 길을 잃지 않는다)
+ */
+function focusTyping(field: HTMLElement | null, instead: HTMLElement | null) {
+  if (touchFirst()) instead?.focus({ preventScroll: true });
+  else field?.focus();
+}
+
 function Composer({
   me,
   closing,
@@ -1145,6 +1159,10 @@ function Composer({
 }) {
   const toast = useToast();
   const area = useRef<HTMLTextAreaElement>(null);
+  const formRef = useRef<HTMLFormElement>(null);
+  const subjectBtn = useRef<HTMLButtonElement>(null);
+  const unitBtn = useRef<HTMLButtonElement>(null);
+  const blankBtn = useRef<HTMLButtonElement>(null);
   const fileInput = useRef<HTMLInputElement>(null);
   const cameraInput = useRef<HTMLInputElement>(null);
   const [picking, setPicking] = useState(false);
@@ -1161,11 +1179,12 @@ function Composer({
   const [blankBusy, setBlankBusy] = useState(false);
   const titleInput = useRef<HTMLInputElement>(null);
   useEffect(() => {
-    if (blank) titleInput.current?.focus();
+    if (blank) focusTyping(titleInput.current, formRef.current);
   }, [blank]);
 
   useEffect(() => {
-    area.current?.focus();
+    // 폰에서는 창만 열고 키보드는 올리지 않는다 (붙이기·사진·과목을 먼저 볼 수 있게)
+    focusTyping(area.current, formRef.current);
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') onClose();
     };
@@ -1252,14 +1271,17 @@ function Composer({
     onSubject(data.id as string);
     setNewName('');
     setPicking(false);
+    focusTyping(area.current, subjectBtn.current);
   };
 
   return (
     <div className="fixed inset-0 z-50" role="dialog" aria-modal="true" aria-label="자료 넣기">
       <button type="button" aria-label="닫기" className="kok-scrim absolute inset-0 cursor-default" onClick={onClose} />
       <form
+        ref={formRef}
+        tabIndex={-1}
         data-closing={closing}
-        className="kok-composer kok-card absolute inset-x-3 top-[calc(12px+env(safe-area-inset-top))] grid gap-3 rounded-[28px] p-4 shadow-[0_24px_60px_var(--shadow-strong)] sm:inset-x-auto sm:bottom-[104px] sm:right-8 sm:top-auto sm:w-[460px]"
+        className="kok-composer kok-card absolute inset-x-3 top-[calc(12px+env(safe-area-inset-top))] grid gap-3 rounded-[28px] p-4 shadow-[0_24px_60px_var(--shadow-strong)] focus:outline-none sm:inset-x-auto sm:bottom-[104px] sm:right-8 sm:top-auto sm:w-[460px]"
         onSubmit={(e) => {
           e.preventDefault();
           if (blank) makeBlank();
@@ -1270,6 +1292,7 @@ function Composer({
           <div className="flex min-w-0 flex-wrap items-center gap-1.5">
             <div className="relative min-w-0">
               <button
+                ref={subjectBtn}
                 type="button"
                 className="press inline-flex max-w-[200px] items-center gap-2 rounded-full bg-surface-2 py-1.5 pl-3 pr-2.5 text-sm font-semibold"
                 aria-haspopup="listbox"
@@ -1301,7 +1324,7 @@ function Composer({
                           onSubject(first.id);
                           setPicking(false);
                           setPickQuery('');
-                          area.current?.focus();
+                          focusTyping(area.current, subjectBtn.current);
                         }
                       }}
                     />
@@ -1322,7 +1345,7 @@ function Composer({
                           onSubject(s.id);
                           setPicking(false);
                           setPickQuery('');
-                          area.current?.focus();
+                          focusTyping(area.current, subjectBtn.current);
                         }}
                       >
                         <span className="h-2.5 w-2.5 shrink-0 rounded-full" style={{ background: subjectVar(s.color) }} aria-hidden="true" />
@@ -1362,6 +1385,7 @@ function Composer({
             {/* 단원: 고르지 않으면 단원 없이 (AI 가 정하지 않는다) */}
             <div className="relative min-w-0">
               <button
+                ref={unitBtn}
                 type="button"
                 aria-haspopup="dialog"
                 aria-expanded={unitPicking}
@@ -1397,7 +1421,7 @@ function Composer({
                     onPick={(u) => {
                       onUnit(u);
                       setUnitPicking(false);
-                      area.current?.focus();
+                      focusTyping(area.current, unitBtn.current);
                     }}
                   />
                 </div>
@@ -1436,7 +1460,7 @@ function Composer({
                 className="press inline-flex h-10 items-center gap-1 rounded-full pl-2 pr-3.5 text-sm font-semibold text-muted hover:bg-surface-2 hover:text-ink"
                 onClick={() => {
                   setBlank(false);
-                  requestAnimationFrame(() => area.current?.focus());
+                  requestAnimationFrame(() => focusTyping(area.current, blankBtn.current));
                 }}
               >
                 <Icon d={ICONS.back} size={18} />
@@ -1530,6 +1554,7 @@ function Composer({
                 <Icon d={ICONS.camera} size={21} />
               </button>
               <button
+                ref={blankBtn}
                 type="button"
                 className="press inline-flex h-10 shrink-0 items-center gap-1.5 rounded-full px-3 text-sm font-semibold text-muted hover:bg-surface-2 hover:text-ink"
                 title="AI 없이 직접 채우는 노트"

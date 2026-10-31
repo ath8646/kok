@@ -3667,7 +3667,9 @@ async def main():
         await dlg.get_by_role("button", name="저장", exact=True).click()
         await poll_db(f"select (steps is null)::text || (figure is null)::text from public.questions where id = '{own_qid}'", "truetrue")
 
-        step("Pro: a new note gets a cover picture on its library card — redraw it, take it out; the setting turns it off; a failed cover never stops the note")
+        # 표지 그림·레슨·AI로 다시 정리·시그니처 테마·AI 테마는 Max 혜택이라, 여기부터 학생은 Max (남은 Pro 는 Max 뒤로: 쿠폰과 같은 규칙)
+        psql(f"update public.profiles set max_until = now() + interval '60 days', pro_until = pro_until + interval '60 days' where id = '{student_id}'")
+        step("Max: a new note gets a cover picture on its library card — redraw it, take it out; the setting turns it off; a failed cover never stops the note")
         psql(f"delete from public.rate_hits where user_id = '{student_id}'")
         cover_of = lambda sid: psql(f"select coalesce(cover::text, '') from public.sources where id = '{sid}'")  # noqa: E731
         cover_calls = lambda sid: int(psql(f"select count(*) from public.energy_ledger where source_id = '{sid}' and task = 'cover'"))  # noqa: E731
@@ -3767,8 +3769,8 @@ async def main():
             r = await page.request.delete(BASE + f"/api/sources/{test_sid}", headers={"origin": BASE})
             assert r.ok, (r.status, await r.text())
 
-        # ---------------- 단계별 학습 (Pro) · PDF 요약 정리 · 오답노트 여러 개 빼기
-        step("course (Pro): pick a level, a lesson path is made from the note, finish a lesson, the progress is saved")
+        # ---------------- 단계별 학습 (Max) · PDF 요약 정리 · 오답노트 여러 개 빼기
+        step("course (Max): pick a level, a lesson path is made from the note, finish a lesson, the progress is saved")
         psql(f"delete from public.rate_hits where user_id = '{student_id}'")
         fig_nid = psql(f"select id from public.notes where source_id = '{fig_sid}'")
         await page.goto(BASE + f"/notes/{fig_sid}?tab=course")
@@ -3852,17 +3854,17 @@ async def main():
         assert r.ok, await r.text()
         assert psql(f"select count(*) from public.note_courses where note_id = '{fig_nid}'") == "0"
 
-        step("course: a free account sees what Pro gets, and the API refuses")
+        step("course: a free account sees that Max has it, and the API refuses")
         octx, opage = await new_ctx(browser, "other")
         await opage.goto(BASE + f"/notes/{sid}?tab=course")
         assert await wait_ready(opage), "other's course tab did not open"
-        await expect(opage.get_by_role("heading", name="단계별 학습은 Pro에서")).to_be_visible()
+        await expect(opage.get_by_role("heading", name="단계별 학습은 Max에서")).to_be_visible()
         await expect(opage.get_by_role("region", name="예시 길")).to_be_visible()
         await shot(opage, "103-course-free")
         await no_hscroll(opage, "course free")
         r = await opage.request.post(BASE + f"/api/notes/{fig_nid}/course", headers={"origin": BASE}, data={"level": "middle"})
         assert r.status == 403 and (await r.json())["error"] == "pro_only", (r.status, await r.text())
-        # 표지 그림도 Pro: 무료 계정은 카드 메뉴에 없고, 서버도 그리지 않는다 (에너지를 쓰기 전에)
+        # 표지 그림도 Max: 무료 계정은 카드 메뉴에 없고, 서버도 그리지 않는다 (에너지를 쓰기 전에)
         r = await opage.request.post(BASE + f"/api/sources/{sid}/cover", headers={"origin": BASE}, data={})
         assert r.status == 403 and (await r.json())["error"] == "pro_only", (r.status, await r.text())
         await opage.goto(BASE + "/library")
@@ -4305,7 +4307,7 @@ async def main():
         await shot(page, "49-note-theme-dark", full=False)
         await ctx.close()
 
-        step("themes (Pro): AI theme with a background picture")
+        step("themes (Max): AI theme with a background picture")
         ctx, page = await new_ctx(browser, "student")
         await page.goto(BASE + "/settings#theme")
         brightness = page.get_by_role("radiogroup", name="화면 밝기")
@@ -4390,7 +4392,7 @@ async def main():
         await shot(page, "50-home-ai-picture", full=False)
         await no_hscroll(page, "home with a theme picture")
 
-        step("themes (Pro): a pattern when the free pictures run out")
+        step("themes (Max): a pattern when the free pictures run out")
         await page.goto(BASE + "/settings#theme")
         urllib.request.urlopen("http://localhost:54321/__cf?mode=quota")
         try:
@@ -4534,7 +4536,7 @@ async def main():
         await wait_saved({"light": "preset:default", "dark": "preset:default"})
         await wait_css(page, "--tab-float", "0")
 
-        step("themes (Pro): signature themes — the whole look changes, the theme sets the brightness, motion can be turned off")
+        step("themes (Max): signature themes — the whole look changes, the theme sets the brightness, motion can be turned off")
         await page.goto(BASE + "/settings#theme")
         # 시그니처 테마 칸은 평소에 접혀 있다 (작은 그림 여섯 장만): 누르면 펼쳐지고, 다시 누르면 접힌다
         skins = page.get_by_role("radiogroup", name="시그니처 테마")
@@ -4651,7 +4653,7 @@ async def main():
         await wait_saved({"light": "preset:default", "dark": "preset:default"})
         await page.get_by_text("밝을 때와 어두울 때 테마를 따로 고르기", exact=True).click()
 
-        step("themes (Pro): theme studio — a signature style with my colours, tap the preview to find a setting, undo, unsaved changes")
+        step("themes (Max): theme studio — a signature style with my colours, tap the preview to find a setting, undo, unsaved changes")
         await page.get_by_role("button", name="새 테마 만들기").click()
         await chooser.get_by_role("button", name="글리치에서 시작하기").click()
         studio = page.get_by_role("dialog", name="새 테마 · 글리치")
@@ -5648,7 +5650,7 @@ async def main():
             assert r.status == 404, r.status
         await ctx.close()
 
-        step("Pro: 'AI로 다시 정리' on a merged note (also from the menu after closing the tip) makes a new version; the note before stays in the version list")
+        step("Max: 'AI로 다시 정리' on a merged note (also from the menu after closing the tip) makes a new version; the note before stays in the version list")
         ctx, page = await new_ctx(browser, "student")
         await auto_confirm(page)
         await page.goto(BASE + f"/notes/{keep}")

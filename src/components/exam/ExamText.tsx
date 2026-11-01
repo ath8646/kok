@@ -145,11 +145,6 @@ export function ExamPrompt({
   );
 }
 
-/** 접힌 목록에 보일 발문 (문제 글의 묻는 문장, 없으면 앞부분) */
-export function examAsk(text: string, style: ExamStyle): string {
-  return examLayout(text, style).ask;
-}
-
 /** 정답·해설: '이름: 내용'·①·(가)마다 한 줄 (이름은 굵게), 아니면 한 문단 그대로 */
 export function ExplainText({ text, className }: { text: string; className?: string }) {
   const lines = useMemo(() => explainLines(text), [text]);

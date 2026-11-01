@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { choiceMark, examLayout, examStyle, explainLines, questionFormat, type ExamBlock } from '@/lib/exam-layout';
+import { choiceMark, examLayout, examStyle, examSummary, explainLines, questionFormat, type ExamBlock } from '@/lib/exam-layout';
 
 /** 덩이를 읽기 쉬운 글로: stem: …, box[p:…|①:…|#head|label: …], bogi[…], text: … */
 const show = (blocks: ExamBlock[]) =>
@@ -181,5 +181,31 @@ describe('형식 이름 (questionFormat)', () => {
     expect(questionFormat({ type: 'cloze', prompt: '', answer: 'a' }).label).toBe('빈칸');
     expect(choiceMark(0)).toBe('①');
     expect(choiceMark(4)).toBe('⑤');
+  });
+});
+
+describe('접힌 목록 (examSummary)', () => {
+  it('짧은 자료와 한 덩이인 발문은 그 덩이째 (흔한 발문만 보이지 않게)', () => {
+    const s = examSummary(
+      '그림은 식물 세포를 나타낸 것이다. 옳은 것만을 <보기>에서 있는 대로 고른 것은?\n\n<보기>\nㄱ. 엽록체에서 광합성이 일어난다.\nㄴ. 핵에는 유전 물질이 있다.',
+      'science',
+    );
+    expect(s.ask).toBe('그림은 식물 세포를 나타낸 것이다. 옳은 것만을 <보기>에서 있는 대로 고른 것은?');
+    expect(s.hint).toBe('ㄱ. 엽록체에서 광합성이 일어난다.');
+  });
+
+  it('자료 상자가 있으면 발문 뒤에 자료 첫머리 (길면 줄임)', () => {
+    const s = examSummary(`학생 A: 광합성은 빛이 있어야 일어나요.\n학생 B: ${'그래서 밤에는 '.repeat(12)}일어나지 않아요.\n\n이에 대한 설명으로 옳은 것은?`, 'science');
+    expect(s.ask).toBe('이에 대한 설명으로 옳은 것은?');
+    expect(s.hint.startsWith('학생 A: 광합성은 빛이 있어야 일어나요. 학생 B: 그래서')).toBe(true);
+    expect(s.hint.length).toBeLessThanOrEqual(80);
+    expect(s.hint.endsWith('…')).toBe(true);
+  });
+
+  it('자료가 없는 한 줄 문제는 발문만, 하위 문제는 한 줄로', () => {
+    expect(examSummary('광합성이 일어나는 세포 소기관은?')).toEqual({ ask: '광합성이 일어나는 세포 소기관은?', hint: '' });
+    const sub = examSummary('다음 실험을 보고 물음에 답하시오. 수조 A에만 빛을 비추었다. (1) 기포가 나온 수조를 쓰시오. (2) 그 까닭을 설명하시오.', 'science');
+    expect(sub.ask).not.toContain('\n');
+    expect(sub.ask).toContain('(2) 그 까닭을 설명하시오.');
   });
 });

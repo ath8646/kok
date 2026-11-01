@@ -3,7 +3,7 @@
 // 새 문제는 AI 가 이 꼴(자료 → 빈 줄 → 발문, 단계·조건은 한 줄씩)로 쓰고(prompts.ts EXAM_LAYOUT_RULE),
 // 예전 문제(한 덩어리 글)는 문장으로 나눠 묻는 문장을 찾는다. 글자는 바꾸지 않는다 (나누고 자리만 옮긴다: 빈칸은 한 칸으로 줄 수 있다)
 import { splitBogi } from './bogi';
-import { codeRanges } from './richtext';
+import { codeRanges, previewText } from './richtext';
 
 /** 시험지 모양: 국어·영어는 지문(읽는 글), 수학은 조건·풀이, 과학·사회는 자료·실험 상자, 코딩은 코드 */
 export type ExamStyle = 'korean' | 'english' | 'math' | 'science' | 'social' | 'code' | 'general';
@@ -158,7 +158,7 @@ export type ExamLayout = {
   /** 원래 문제 번호 ('1-가-1)', '[1~2]') */
   label: string | null;
   blocks: ExamBlock[];
-  /** 접힌 목록에 보일 발문 (없으면 문제 글 앞부분) */
+  /** 묻는 문장 (없으면 문제 글 전체). 접힌 목록은 examSummary */
   ask: string;
 };
 
@@ -469,4 +469,38 @@ export function questionFormat(q: { type: string; prompt: string; answer: unknow
 /** 객관식 보기 번호 (실제 시험처럼 ①②③…) */
 export function choiceMark(i: number): string {
   return CIRCLED[i] ?? `${i + 1}.`;
+}
+
+// ------------------------------------------------------------- 접힌 목록
+/** 덩이 글을 한 줄로 (코드 블록이 든 글은 줄을 지킨다) */
+const oneLine = (s: string) => (/```/.test(s) ? s.trim() : s.replace(/\s+/g, ' ').trim());
+
+/** 자료 줄을 읽는 차례대로 한 줄 글로 */
+function lineText(l: ExamLine): string {
+  if (l.kind === 'step') return `${l.mark} ${l.text}`;
+  if (l.kind === 'head') return `[${l.text}]`;
+  if (l.kind === 'label') return `${l.label}: ${l.text}`;
+  return l.text;
+}
+
+/** 접힌 목록의 알아보기 글 길이 (두 줄에 다 보이지 않아도 된다: 화면 읽기 프로그램이 너무 길게 읽지 않게) */
+const HINT_MAX = 80;
+
+/**
+ * 문제 목록에 접어 둘 때의 두 줄: 발문은 풀 때 굵게 보이는 그대로(짧은 자료와 한 덩이면 그 덩이째),
+ * 그 뒤에 흐리게 자료 첫머리(없으면 <보기> 첫 줄). '이에 대한 설명으로 옳은 것은?'처럼 흔한 발문만으로는
+ * 어느 문제인지 알 수 없어서 (발문이 길면 두 줄에서 잘려 안 보인다)
+ */
+export function examSummary(prompt: string, style: ExamStyle = 'general'): { ask: string; hint: string } {
+  const layout = examLayout(prompt, style);
+  const flat = (s: string) => s.replace(/\s+/g, ' ').trim();
+  const want = flat(layout.ask);
+  const stem = layout.blocks.find((b): b is Extract<ExamBlock, { kind: 'stem' }> => b.kind === 'stem' && flat(b.text).includes(want));
+  const ask = oneLine(stem ? stem.text : layout.ask);
+  const box = layout.blocks.find((b): b is Extract<ExamBlock, { kind: 'box' }> => b.kind === 'box');
+  const bogi = layout.blocks.find((b): b is Extract<ExamBlock, { kind: 'bogi' }> => b.kind === 'bogi');
+  let hint = box ? previewText(box.lines.map(lineText).join(' ')) : bogi?.items.length ? previewText(bogi.items[0]) : '';
+  hint = flat(hint);
+  if (!hint || flat(ask).includes(hint)) return { ask, hint: '' };
+  return { ask, hint: hint.length > HINT_MAX ? `${hint.slice(0, HINT_MAX - 1).trimEnd()}…` : hint };
 }

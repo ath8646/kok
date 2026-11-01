@@ -14,9 +14,9 @@ import { SourceFigureView } from './figure/SourceFigureView';
 import { readQuestionFigure } from '@/lib/source-figures';
 import { QuestionEditor, type QuestionDraft } from './QuestionEditor';
 import { RichText } from './RichText';
-import { ExamPrompt, ExplainText, examAsk } from './exam/ExamText';
+import { ExamPrompt, ExplainText } from './exam/ExamText';
 import { ReportSheet, type ReportWhat } from './ReportSheet';
-import { choiceMark, examStyle, questionFormat, type ExamStyle } from '@/lib/exam-layout';
+import { choiceMark, examStyle, examSummary, questionFormat, type ExamStyle } from '@/lib/exam-layout';
 import { Button, Chip, Energy, ICONS, Icon, IconButton, Sheet, cx, api, useToast, DONE } from './ui';
 import { BarAction, PICKED_RING, PickBadge, SelectionBar, pickKeyHandler, useMultiSelect } from './SelectionBar';
 import { useLongPress } from './useLongPress';
@@ -265,7 +265,7 @@ export function QuestionList({
             key={q.id}
             q={q}
             number={i + 1}
-            ask={examAsk(q.prompt, st)}
+            summary={examSummary(q.prompt, st)}
             selecting={selecting}
             picked={picked.has(q.id)}
             onPick={() => togglePick(q.id)}
@@ -451,7 +451,7 @@ export function QuestionList({
 function QuestionItem({
   q,
   number,
-  ask,
+  summary,
   selecting,
   picked,
   onPick,
@@ -464,8 +464,8 @@ function QuestionItem({
   q: QuestionRow;
   /** 목록의 번호 (시험지처럼 1. 2. …) */
   number: number;
-  /** 접혔을 때 보일 발문 */
-  ask: string;
+  /** 접혔을 때 보일 발문과 자료 첫머리 (examSummary) */
+  summary: { ask: string; hint: string };
   selecting: boolean;
   picked: boolean;
   onPick: () => void;
@@ -517,10 +517,13 @@ function QuestionItem({
           </span>
           <span className="min-w-0 flex-1">
             <span className="mb-1 flex flex-wrap items-center gap-1.5">{chips}</span>
-            {/* 접혔을 때: 묻는 문장 두 줄 (line-clamp 는 display 를 바꾸면 풀린다: block 을 같이 쓰지 않는다) */}
+            {/* 접혔을 때: 묻는 문장 + 흐린 자료 첫머리, 두 줄까지 (line-clamp 는 display 를 바꾸면 풀린다: block 을 같이 쓰지 않는다) */}
             {!isOpen ? (
-              <span className="line-clamp-2 font-semibold leading-relaxed">
-                <RichText text={ask} />
+              <span className="line-clamp-2 leading-relaxed">
+                <span className="font-semibold">
+                  <RichText text={summary.ask} />
+                </span>
+                {summary.hint ? <span className="text-muted"> · {summary.hint}</span> : null}
               </span>
             ) : null}
           </span>

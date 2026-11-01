@@ -332,7 +332,8 @@ function subLines(stem: string): string {
  * 자료가 짧으면 상자 없이 발문 한 덩이 (한두 줄 문제는 예전처럼). style: 수학은 (가)(나) 조건을 늘 줄로 나눈다
  */
 export function examLayout(prompt: string, style: ExamStyle = 'general'): ExamLayout {
-  let text = (prompt ?? '').trim();
+  // 저장된 값이 글이 아니어도 그리다 멈추지 않게
+  let text = String(prompt ?? '').trim();
   let label: string | null = null;
   const lm = LABEL.exec(text);
   if (lm && text.length > lm[0].length + 4) {
@@ -362,7 +363,7 @@ export function examLayout(prompt: string, style: ExamStyle = 'general'): ExamLa
   }
   if (bogi) blocks.push({ kind: 'bogi', items: bogi });
   if (after) blocks.push({ kind: 'text', text: after });
-  return { label, blocks, ask: ask || (prompt ?? '').trim() };
+  return { label, blocks, ask: ask || String(prompt ?? '').trim() };
 }
 
 function mainBlocks(text: string, style: ExamStyle): { blocks: ExamBlock[]; ask: string } {
@@ -423,7 +424,7 @@ const SENT_LABEL = /^(?:(\((?:가|나|다|라|마|바|사)\)|\(\d{1,2}\))\s*[:�
  */
 export function explainLines(text: string): ExplainLine[] {
   const out: ExplainLine[] = [];
-  for (const raw of (text ?? '').split('\n')) {
+  for (const raw of String(text ?? '').split('\n')) {
     const line = raw.trim();
     if (!line) continue;
     const skip = skipRanges(line);

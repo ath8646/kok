@@ -11,7 +11,10 @@ import { autoGrade, type GradableQuestion } from '@/lib/grading';
 import {
   CHECK_RETRIES,
   checkAnswerText,
+  choiceOrder,
+  clozeBlank,
   lessonSteps,
+  matchColumns,
   orderCorrect,
   shuffled,
   starsFor,
@@ -54,9 +57,35 @@ const MODE_TEXT: Record<PlayerMode, { done: string; quit: string }> = {
 };
 /** 연속 정답 칩이 뜨는 수 (그 뒤로는 5개마다) */
 const COMBO_AT = [3, 5, 10];
-const BLANK = /(_{2,}|\(\s*\)|\[\s*\])/;
+/** 화면이 바뀐 뒤 아래 단추를 잠깐 막는 시간 (ms): 두 번 누른 손가락이 바뀐 화면의 단추(모르겠어요·계속·다음 레슨)를 누르지 않게 */
+const COOL_MS = 350;
+
+/** 누른 숫자 1~9 (한글 입력기가 켜져 있어도 읽히게 자판 자리 e.code 먼저) */
+function keyDigit(e: KeyboardEvent): number | null {
+  const m = /^(?:Digit|Numpad)([1-9])$/.exec(e.code) ?? /^([1-9])$/.exec(e.key);
+  return m ? Number(m[1]) : null;
+}
+
+/**
+ * 키보드로 누른 단추가 꺼지거나 사라질 때 다음 칸에 초점 (화면이 다시 그려진 뒤, 레슨 창 안에서 고른 차례대로 처음 찾은 칸).
+ * 마우스·손가락으로 누른 것(detail > 0)은 그대로 둔다
+ */
+function focusNext(e: React.MouseEvent<HTMLElement>, ...selectors: string[]) {
+  if (e.detail !== 0) return;
+  const scope = e.currentTarget.closest('[role="dialog"]');
+  requestAnimationFrame(() => {
+    for (const sel of selectors) {
+      const el = scope?.querySelector<HTMLElement>(sel);
+      if (el) {
+        el.focus();
+        return;
+      }
+    }
+  });
+}
 
 export function LessonPlayer({
+  shuffleKey = '',
   title,
   subtitle,
   goal,
@@ -69,6 +98,8 @@ export function LessonPlayer({
   onClose,
   onFinish,
 }: {
+  /** 보기·칩·짝·순서 칸을 섞는 씨앗의 앞부분 (창마다 다르게: 레슨을 다시 해도 같은 자리를 외우지 않게) */
+  shuffleKey?: string;
   title: string;
   /** 작은 글: 단계 이름 등 */
   subtitle?: string;
@@ -104,6 +135,8 @@ export function LessonPlayer({
   const [report, setReport] = useState<ReportWhat | null>(null);
   /** 맞힌 수 (칭찬 말을 돌려 가며) */
   const [okCount, setOkCount] = useState(0);
+  /** 0 이 아니면 아래 단추를 잠깐 막는 중 (COOL_MS) */
+  const [cooling, setCooling] = useState(0);
   /** 문제마다 처음 답이 맞았는지 (별·틀린 문제) */
   const firsts = useRef(new Map<string, boolean>());
   const best = useRef(0);
@@ -119,11 +152,20 @@ export function LessonPlayer({
   const total = cards.length + checks.length;
   const progress = done ? 1 : total ? Math.min(1, cleared / total) : 1;
   const text = MODE_TEXT[mode];
+  /** 보기를 섞는 씨앗 (창 + 문제 번호 + 몇 번째 풀이: 다시 나오거나 레슨을 다시 하면 다르게 섞인다) */
+  const seed = pc && step?.kind === 'check' ? `${shuffleKey}:${pc.key}:${step.attempt}` : '';
 
   useEffect(() => {
     started.current = Date.now();
     panel.current?.focus();
   }, []);
+
+  useEffect(() => {
+    if (!cooling) return;
+    const t = setTimeout(() => setCooling(0), COOL_MS);
+    return () => clearTimeout(t);
+  }, [cooling]);
+  const cool = () => setCooling((n) => n + 1);
 
   // 연속 정답 칩은 잠깐만
   useEffect(() => {
@@ -148,6 +190,7 @@ export function LessonPlayer({
       missed: checks.filter((c) => wrongFirst.includes(c.key)),
     });
     sound.done();
+    cool();
     onFinish(result);
   };
 
@@ -155,6 +198,7 @@ export function LessonPlayer({
     setGraded(null);
     setAnswer(null);
     setHint(false);
+    cool();
     if (pos + 1 >= queue.length) finish();
     else setPos(pos + 1);
     panel.current?.scrollTo({ top: 0 });
@@ -178,6 +222,7 @@ export function LessonPlayer({
     const retry = !ok && step.attempt < CHECK_RETRIES && !(c.type === 'match' && given !== null);
     if (step.attempt === 0) firsts.current.set(pc.key, ok);
     setGraded({ ok, given, wrongPairs, retry });
+    cool();
     if (ok) {
       setCleared((n) => n + 1);
       setOkCount((n) => n + 1);
@@ -247,23 +292,32 @@ export function LessonPlayer({
       // 그림 안의 단추·칸은 저마다 키를 받는다
       if (t?.closest('[data-own-keys]')) return;
       if (e.key === 'Enter') {
-        // 단추·글 칸에서 누른 Enter 는 그 칸이 받는다
-        if (typing || t?.closest('button, a')) return;
+        // 누르고 있는 Enter(되풀이)는 처음 한 번만: 채점 → 계속 → 다음 문제로 줄줄이 넘어가지 않게
+        if (e.repeat) {
+          e.preventDefault();
+          return;
+        }
+        if (typing) return;
+        // 단추에서 누른 Enter 는 그 단추가 받는다. 다만 고른 답(눌린 보기·채운 빈칸, data-confirm)에서는 확인
+        // (마우스로 고른 보기에 초점이 남아 Enter 가 같은 보기를 다시 누르기만 하던 것)
+        const btn = t?.closest('button, a');
+        if (btn && !(btn.hasAttribute('data-confirm') && ready)) return;
         e.preventDefault();
         primary();
         return;
       }
       if (typing || graded || done || !pc) return;
       const c = pc.check;
+      const digit = keyDigit(e);
       if (c.type === 'ox') {
+        // 한글 입력기가 켜져 있으면 e.key 가 'ㅐ'·'ㅌ'·'Process' 라서 자판 자리(e.code)로도 본다
         const k = e.key.toLowerCase();
-        if (k === 'o' || k === '1') setAnswer(true);
-        else if (k === 'x' || k === '2') setAnswer(false);
+        if (e.code === 'KeyO' || k === 'o' || digit === 1) setAnswer(true);
+        else if (e.code === 'KeyX' || k === 'x' || digit === 2) setAnswer(false);
         return;
       }
-      if ((c.type === 'mcq' || c.type === 'cloze') && c.choices?.length && /^[1-9]$/.test(e.key)) {
-        const order = shuffled(c.choices.length, `${pc.key}:${step?.kind === 'check' ? step.attempt : 0}`);
-        const i = order[Number(e.key) - 1];
+      if ((c.type === 'mcq' || c.type === 'cloze') && c.choices?.length && digit) {
+        const i = choiceOrder(c, seed)[digit - 1];
         if (i === undefined) return;
         setAnswer(c.type === 'mcq' ? i : c.choices[i]);
       }
@@ -281,7 +335,14 @@ export function LessonPlayer({
   }, []);
 
   const target = pc?.target ?? reportTarget;
-  const seed = pc && step?.kind === 'check' ? `${pc.key}:${step.attempt}` : '';
+  /** 신고에 남길 보던 칸 (보기는 화면에 보인 차례로 번호를 단다: 학생이 '2번'이라고 쓰면 그 보기) */
+  const stepSnapshot = () => {
+    if (done || !step) return undefined;
+    if (step.kind === 'card') return lessonStepSnapshot({ kind: 'card', card: cards[step.index] }, pos) || undefined;
+    const c = checks[step.index].check;
+    const order = (c.type === 'mcq' || c.type === 'cloze') && c.choices?.length ? choiceOrder(c, seed) : undefined;
+    return lessonStepSnapshot({ kind: 'check', check: c, order }, pos) || undefined;
+  };
 
   return (
     <div ref={root} className="kok-player fixed inset-0 z-[70] flex flex-col bg-bg" role="dialog" aria-modal="true" aria-label={title}>
@@ -324,13 +385,7 @@ export function LessonPlayer({
         {target ? (
           <button
             type="button"
-            onClick={() =>
-              setReport({
-                kind: 'course',
-                target,
-                snapshot: done || !step ? undefined : lessonStepSnapshot(step.kind === 'card' ? { kind: 'card', card: cards[step.index] } : { kind: 'check', check: checks[step.index].check }, pos) || undefined,
-              })
-            }
+            onClick={() => setReport({ kind: 'course', target, snapshot: stepSnapshot() })}
             aria-label="이상해요 (신고)"
             title="이상해요"
             className="press -ml-1 grid h-11 w-11 shrink-0 place-items-center rounded-full text-muted hover:bg-surface-2 hover:text-ink"
@@ -386,12 +441,19 @@ export function LessonPlayer({
       {/* 신고 창: 이 창 안에 둬야 창(z 70) 위에 뜬다 */}
       <ReportSheet what={report} onClose={() => setReport(null)} />
 
-      {/* 아래: 채점 띠 또는 큰 단추 */}
+      {/* 아래: 채점 띠 또는 큰 단추. 화면이 바뀐 직후(cooling)에는 잠깐 누를 수 없다 (두 번 누름이 다음 단추로 넘어가지 않게) */}
       {graded && pc ? (
-        <Feedback check={pc.check} graded={graded} praise={PRAISE[Math.max(0, okCount - 1) % PRAISE.length]} onContinue={proceed} actionRef={action} />
+        <Feedback
+          check={pc.check}
+          graded={graded}
+          praise={PRAISE[Math.max(0, okCount - 1) % PRAISE.length]}
+          onContinue={proceed}
+          actionRef={action}
+          cooling={!!cooling}
+        />
       ) : (
         <div className="border-t border-line bg-surface px-4 pb-[calc(14px+env(safe-area-inset-bottom))] pt-3">
-          <div className="mx-auto flex w-full max-w-lg items-center gap-3">
+          <div className={cx('mx-auto flex w-full max-w-lg items-center gap-3', cooling > 0 && 'pointer-events-none')}>
             {done ? (
               next ? (
                 <>
@@ -426,7 +488,7 @@ export function LessonPlayer({
                 ) : pc.check.type === 'short' || (pc.check.type === 'cloze' && !pc.check.choices) ? (
                   <p className="min-w-0 flex-1 text-right text-sm text-muted">답을 적고 확인을 눌러요</p>
                 ) : (
-                  <Button size="lg" className="flex-1" disabled={!ready} onClick={primary}>
+                  <Button size="lg" className="flex-1" disabled={!ready} onClick={primary} data-primary="">
                     확인
                   </Button>
                 )}
@@ -488,24 +550,17 @@ function Mark({ state, className }: { state: Exclude<MarkState, 'none'>; classNa
   );
 }
 
-/** 빈칸이 든 문장: blank 로 빈칸 자리를 그린다 (낱말 고르기는 누를 수 있는 칸) */
-function ClozePrompt({ text, blank }: { text: string; blank: () => ReactNode }) {
-  const parts = text.split(BLANK);
-  // 빈칸이 둘 이상이면 첫 칸만 답 자리 (나머지는 그냥 밑줄)
-  const answerAt = parts.findIndex((p) => BLANK.test(p));
+/**
+ * 빈칸이 든 문장: 코드 밖의 첫 빈칸(clozeBlank) 자리에 blank 를 그린다 (낱말 고르기는 누를 수 있는 칸).
+ * 코드 안의 빈칸(print()·__init__·코드 블록의 ____)은 코드 그대로 둔다: 그때 고른 낱말은 문제 아래 칸에 (CheckView)
+ */
+function ClozePrompt({ text, at, blank }: { text: string; at: { start: number; end: number } | null; blank: () => ReactNode }) {
+  if (!at) return <RichText text={text} />;
   return (
     <>
-      {parts.map((p, i) =>
-        !BLANK.test(p) ? (
-          <RichText key={i} text={p} />
-        ) : i === answerAt ? (
-          <span key={i}>{blank()}</span>
-        ) : (
-          <span key={i} className="mx-1 inline-block min-w-12 border-b-[3px] border-line align-baseline">
-            &nbsp;
-          </span>
-        ),
-      )}
+      <RichText text={text.slice(0, at.start)} />
+      {blank()}
+      <RichText text={text.slice(at.end)} />
     </>
   );
 }
@@ -536,6 +591,7 @@ function CheckView({
 }) {
   const typed = check.type === 'short' || (check.type === 'cloze' && !check.choices);
   const bank = check.type === 'cloze' && !!check.choices;
+  const slot = useMemo(() => (check.type === 'cloze' ? clozeBlank(check.prompt) : null), [check.type, check.prompt]);
   const inputRef = useRef<HTMLInputElement>(null);
   useEffect(() => {
     if (!typed) return;
@@ -544,6 +600,8 @@ function CheckView({
   }, [typed]);
   const instruction =
     check.type === 'match' ? '왼쪽과 오른쪽에서 짝을 하나씩 눌러요' : check.type === 'order' ? '차례대로 눌러서 위 줄에 놓아요' : bank ? '알맞은 낱말을 골라요' : '';
+
+  const bankBlank = () => <BankBlank value={typeof answer === 'string' ? answer : null} graded={graded} onClear={() => onAnswer(null)} />;
 
   return (
     <div className="kok-step-next mt-4 grid gap-3">
@@ -561,18 +619,20 @@ function CheckView({
           {check.type === 'cloze' ? (
             <ClozePrompt
               text={check.prompt}
-              blank={() =>
-                bank ? (
-                  <BankBlank value={typeof answer === 'string' ? answer : null} graded={graded} onClear={() => onAnswer(null)} />
-                ) : (
-                  <span className="mx-1 inline-block min-w-16 border-b-[3px] border-accent align-baseline">&nbsp;</span>
-                )
-              }
+              at={slot}
+              blank={() => (bank ? bankBlank() : <span className="mx-1 inline-block min-w-16 border-b-[3px] border-accent align-baseline">&nbsp;</span>)}
             />
           ) : (
             <RichText text={check.prompt} />
           )}
         </p>
+        {/* 빈칸이 코드 안에 있으면(코드 빈칸 문제) 고른 낱말은 여기에 */}
+        {bank && !slot ? (
+          <p className="mt-3 flex flex-wrap items-center gap-1 text-[15px] font-semibold text-muted">
+            빈칸에 들어갈 말
+            {bankBlank()}
+          </p>
+        ) : null}
         {instruction ? <p className="mt-1.5 text-sm text-muted">{instruction}</p> : null}
 
         {check.type === 'mcq' && check.choices ? (
@@ -648,7 +708,7 @@ function markOf(right: boolean, picked: boolean, graded: Graded | null): MarkSta
 
 function Choices({ check, seed, answer, onAnswer, graded }: { check: CourseCheck; seed: string; answer: number | null; onAnswer: (v: number) => void; graded: Graded | null }) {
   const choices = check.choices ?? [];
-  const order = useMemo(() => shuffled(choices.length, seed), [choices.length, seed]);
+  const order = useMemo(() => choiceOrder(check, seed), [check, seed]);
   return (
     <div className="mt-4 grid gap-2" role="group" aria-label="보기">
       {order.map((i, d) => {
@@ -661,6 +721,8 @@ function Choices({ check, seed, answer, onAnswer, graded }: { check: CourseCheck
             type="button"
             disabled={!!graded}
             aria-pressed={!graded ? picked : undefined}
+            // 고른 보기에서 누른 Enter 는 확인 (LessonPlayer 의 키보드)
+            data-confirm={!graded && picked ? '' : undefined}
             onClick={() => onAnswer(i)}
             className={cx(
               'press flex min-h-[52px] items-start gap-3 rounded-2xl border-2 px-4 py-3 text-left text-[16px] transition-[color,background-color,border-color,opacity] duration-200',
@@ -715,6 +777,7 @@ function OxChoices({ check, answer, onAnswer, graded }: { check: CourseCheck; an
             type="button"
             disabled={!!graded}
             aria-pressed={!graded ? picked : undefined}
+            data-confirm={!graded && picked ? '' : undefined}
             onClick={() => onAnswer(v)}
             aria-label={v ? 'O 맞다' : 'X 틀리다'}
             className={cx(
@@ -748,7 +811,13 @@ function BankBlank({ value, graded, onClear }: { value: string | null; graded: G
     <button
       type="button"
       disabled={!!graded}
-      onClick={onClear}
+      data-slot=""
+      // 채운 빈칸에서 누른 Enter 는 확인 (빼기는 누르기·스페이스)
+      data-confirm={!graded ? '' : undefined}
+      onClick={(e) => {
+        onClear();
+        focusNext(e, '[data-bank] button:not(:disabled)');
+      }}
       aria-label={`빈칸: ${value} (눌러서 빼기)`}
       className={cx('press mx-1 inline-flex min-w-16 items-center justify-center rounded-xl border-2 px-2.5 py-0.5 align-baseline text-[17px] font-semibold', tone)}
     >
@@ -763,9 +832,9 @@ function BankBlank({ value, graded, onClear }: { value: string | null; graded: G
 
 function WordBank({ check, seed, answer, onAnswer, graded }: { check: CourseCheck; seed: string; answer: string | null; onAnswer: (v: string) => void; graded: Graded | null }) {
   const words = check.choices ?? [];
-  const order = useMemo(() => shuffled(words.length, seed), [words.length, seed]);
+  const order = useMemo(() => choiceOrder(check, seed), [check, seed]);
   return (
-    <div className="mt-4 flex flex-wrap gap-2" role="group" aria-label="고를 낱말">
+    <div className="mt-4 flex flex-wrap gap-2" role="group" aria-label="고를 낱말" data-bank="">
       {order.map((i, d) => {
         const used = answer === words[i];
         return (
@@ -773,7 +842,11 @@ function WordBank({ check, seed, answer, onAnswer, graded }: { check: CourseChec
             key={i}
             type="button"
             disabled={!!graded || used}
-            onClick={() => onAnswer(words[i])}
+            onClick={(e) => {
+              onAnswer(words[i]);
+              // 고른 칩은 꺼진다: 키보드로 골랐으면 채운 빈칸으로 (Enter 로 확인, 스페이스로 빼기)
+              focusNext(e, '[data-slot]');
+            }}
             aria-label={`${d + 1}. ${words[i]}`}
             className={cx(
               'press min-h-11 rounded-xl border-2 px-3.5 py-2 text-[16px] font-semibold transition-[background-color,border-color,opacity] duration-200',
@@ -805,7 +878,11 @@ function OrderBoard({ check, seed, answer, onAnswer, graded }: { check: CourseCh
                 <button
                   type="button"
                   disabled={!!graded}
-                  onClick={() => onAnswer(placed.filter((x) => x !== i))}
+                  onClick={(e) => {
+                    onAnswer(placed.filter((x) => x !== i));
+                    // 뺀 칸은 아래 줄로 돌아간다: 키보드로 뺐으면 그 칸에 초점
+                    focusNext(e, `[data-order-item="${i}"]`);
+                  }}
                   aria-label={`${at + 1}번째: ${items[i]} (눌러서 빼기)`}
                   className={cx('press flex w-full items-start gap-2.5 rounded-xl border-2 px-3 py-2.5 text-left text-[15px] font-semibold', tone)}
                 >
@@ -822,7 +899,7 @@ function OrderBoard({ check, seed, answer, onAnswer, graded }: { check: CourseCh
         )}
       </ol>
       {!graded ? (
-        <div className="flex flex-wrap gap-2" role="group" aria-label="놓을 칸">
+        <div className="flex flex-wrap gap-2" role="group" aria-label="놓을 칸" data-order-bank="">
           {order.map((i) => {
             const used = answer.includes(i);
             return (
@@ -830,7 +907,12 @@ function OrderBoard({ check, seed, answer, onAnswer, graded }: { check: CourseCh
                 key={i}
                 type="button"
                 disabled={used}
-                onClick={() => onAnswer([...answer, i])}
+                data-order-item={i}
+                onClick={(e) => {
+                  onAnswer([...answer, i]);
+                  // 놓은 칸은 꺼진다: 키보드로 놓았으면 남은 첫 칸으로, 다 놓았으면 '확인'으로
+                  focusNext(e, '[data-order-bank] button:not(:disabled)', '[data-primary]');
+                }}
                 className={cx(
                   'press min-h-11 rounded-xl border-2 px-3.5 py-2 text-left text-[15px] font-semibold transition-[background-color,border-color] duration-200',
                   used ? 'border-dashed border-line bg-surface-2 text-transparent' : 'border-line bg-surface hover:border-accent/60',
@@ -849,8 +931,8 @@ function OrderBoard({ check, seed, answer, onAnswer, graded }: { check: CourseCh
 /** 짝 맞추기: 왼쪽 하나·오른쪽 하나를 누르면 바로 채점 (맞으면 흐려지고, 틀리면 흔들린다). 다 맞추면 onDone(틀린 수) */
 function MatchBoard({ check, seed, disabled, onDone }: { check: CourseCheck; seed: string; disabled: boolean; onDone: (wrongs: number) => void }) {
   const pairs = check.pairs ?? [];
-  const lefts = useMemo(() => shuffled(pairs.length, `${seed}:l`), [pairs.length, seed]);
-  const rights = useMemo(() => shuffled(pairs.length, `${seed}:r`, true), [pairs.length, seed]);
+  // 두 줄을 따로 섞되, 처음부터 맞춰진 판이 되지 않게 (matchColumns)
+  const { lefts, rights } = useMemo(() => matchColumns(pairs.length, seed), [pairs.length, seed]);
   const [sel, setSel] = useState<{ side: 'l' | 'r'; i: number } | null>(null);
   const [matched, setMatched] = useState<number[]>([]);
   const [miss, setMiss] = useState<{ l: number; r: number; n: number } | null>(null);
@@ -860,7 +942,7 @@ function MatchBoard({ check, seed, disabled, onDone }: { check: CourseCheck; see
     const t = setTimeout(() => setMiss(null), 450);
     return () => clearTimeout(t);
   }, [miss]);
-  const pick = (side: 'l' | 'r', i: number) => {
+  const pick = (side: 'l' | 'r', i: number, e: React.MouseEvent<HTMLButtonElement>) => {
     if (disabled || matched.includes(i)) return;
     if (!sel || sel.side === side) {
       setSel(sel && sel.side === side && sel.i === i ? null : { side, i });
@@ -873,6 +955,8 @@ function MatchBoard({ check, seed, disabled, onDone }: { check: CourseCheck; see
       const m = [...matched, l];
       setMatched(m);
       if (m.length === pairs.length) onDone(wrongs.current);
+      // 맞춘 두 칸은 꺼진다: 키보드로 맞췄으면 남은 왼쪽 첫 칸으로
+      else focusNext(e, '[data-tile^="l"]:not(:disabled)');
     } else {
       wrongs.current++;
       setMiss({ l, r, n: (miss?.n ?? 0) + 1 });
@@ -884,15 +968,23 @@ function MatchBoard({ check, seed, disabled, onDone }: { check: CourseCheck; see
     const on = sel?.side === side && sel.i === i;
     const bad = miss && (side === 'l' ? miss.l : miss.r) === i;
     return (
+      // 칸을 다시 만들지 않는다 (초점이 사라지지 않게): 잇달아 틀리면 흔들림 이름을 바꿔 처음부터 다시 흔든다
       <button
-        key={`${side}${i}${bad ? `-${miss?.n}` : ''}`}
+        key={`${side}${i}`}
         type="button"
+        data-tile={`${side}${i}`}
         disabled={disabled || done}
         aria-pressed={on}
-        onClick={() => pick(side, i)}
+        onClick={(e) => pick(side, i, e)}
         className={cx(
           'press flex min-h-[56px] w-full items-center justify-center rounded-2xl border-2 px-3 py-2.5 text-center text-[15px] font-semibold leading-snug transition-[background-color,border-color,opacity] duration-200',
-          done ? 'border-ok/40 bg-ok-soft text-ok opacity-60' : bad ? 'kok-shake border-bad bg-bad-soft' : on ? 'border-accent bg-accent-soft' : 'border-line bg-surface hover:border-accent/60',
+          done
+            ? 'border-ok/40 bg-ok-soft text-ok opacity-60'
+            : bad
+              ? cx(miss.n % 2 ? 'kok-shake' : 'kok-shake-b', 'border-bad bg-bad-soft')
+              : on
+                ? 'border-accent bg-accent-soft'
+                : 'border-line bg-surface hover:border-accent/60',
         )}
       >
         <span className="min-w-0">
@@ -920,12 +1012,15 @@ function Feedback({
   praise,
   onContinue,
   actionRef,
+  cooling,
 }: {
   check: CourseCheck;
   graded: Graded;
   praise: string;
   onContinue: () => void;
   actionRef: React.RefObject<HTMLButtonElement | null>;
+  /** 채점 직후 잠깐 누를 수 없다 ('확인'을 두 번 누른 것이 '계속'까지 누르지 않게) */
+  cooling: boolean;
 }) {
   const ok = graded.ok;
   const matchMiss = check.type === 'match' && graded.given !== null && !ok;
@@ -936,6 +1031,7 @@ function Feedback({
       className={cx(
         'border-t px-4 pb-[calc(14px+env(safe-area-inset-bottom))] pt-4 transition-colors duration-200',
         ok ? 'border-ok/30 bg-ok-soft' : matchMiss ? 'border-warn/30 bg-warn-soft' : 'border-bad/30 bg-bad-soft',
+        cooling && 'pointer-events-none',
       )}
     >
       <div className="mx-auto grid w-full max-w-lg gap-3">

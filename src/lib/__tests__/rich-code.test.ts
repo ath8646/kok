@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { docToRich, richToDoc, type DocNode } from '@/lib/rich-doc';
-import { codeBlock, codeSpan, hasRichMarks, parseRich, plainMathText, previewText, splitMath, stripMarks, stripRich, type Inline } from '@/lib/richtext';
+import { codeBlock, codeRanges, codeSpan, hasRichMarks, parseRich, plainMathText, previewText, splitMath, stripMarks, stripRich, type Inline } from '@/lib/richtext';
 
 vi.mock('server-only', () => ({}));
 
@@ -145,5 +145,20 @@ describe('AI 에 보낼 노트의 코드', () => {
     expect(long.endsWith('…\n```')).toBe(true);
     expect((long.match(/^```/gm) ?? []).length).toBe(2);
     expect(short).toBe('```c\nint x;\n```');
+  });
+});
+
+describe('코드가 차지하는 자리 (codeRanges)', () => {
+  const pieces = (s: string) => codeRanges(s).map(([a, b]) => s.slice(a, b));
+  it('`조각`과 ``` 블록 (울타리 줄까지), \\` 는 코드가 아니다', () => {
+    expect(pieces('값은 `print()` 와 ``a`b`` 예요')).toEqual(['`print()`', '``a`b``']);
+    expect(pieces('글\n```python\nx = ____\n```\n뒤 `y`')).toEqual(['```python\nx = ____\n```\n', '`y`']);
+    // 닫지 않은 블록은 끝까지, 닫지 않은 백틱은 코드가 아니다
+    expect(pieces('앞\n```\n끝까지 코드')).toEqual(['```\n끝까지 코드']);
+    expect(pieces('백틱 하나 ` 만')).toEqual([]);
+    expect(pieces('\\`아님\\` 그리고 `맞음`')).toEqual(['`맞음`']);
+    // parseRich 가 코드로 읽는 것과 같다
+    const s = '앞 `a` 가운데 ``b`` 뒤';
+    expect(pieces(s).length).toBe(lines(s)[0].split('{').length - 1);
   });
 });

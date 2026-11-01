@@ -116,6 +116,11 @@ export function CoursePanel({
   const [ended, setEnded] = useState(false);
   /** 진도 저장을 한 줄로 (빨리 끝낸 두 레슨의 저장이 엇갈려 앞 것이 덮지 않게) */
   const saving = useRef<Promise<unknown>>(Promise.resolve());
+  /**
+   * DB 에 있는 것으로 아는 진도와 그 행의 updated_at: 저장은 읽은 그대로일 때만 (다른 화면이 레슨을 다시 만들었거나
+   * 진도를 저장했으면 덮지 않는다. 같은 레슨이면 그 진도에 이 결과를 더해 다시 저장)
+   */
+  const known = useRef<{ progress: CourseProgress; stamp: string } | null>(null);
 
   useEffect(() => {
     let alive = true;
@@ -132,12 +137,10 @@ export function CoursePanel({
           return;
         }
         const plan = data ? readCoursePlan(data.plan) : null;
+        const progress = readProgress(data?.progress);
+        known.current = data && plan ? { progress, stamp: String(data.updated_at) } : null;
         setFailed(false);
-        setCourse(
-          data && plan
-            ? { id: data.id, level: data.level as CourseLevel, plan, progress: readProgress(data.progress), updatedAt: String(data.updated_at) }
-            : null,
-        );
+        setCourse(data && plan ? { id: data.id, level: data.level as CourseLevel, plan, progress, updatedAt: String(data.updated_at) } : null);
       });
     return () => {
       alive = false;
@@ -190,13 +193,36 @@ export function CoursePanel({
     (s: Session, r: LessonResult) => {
       if (!course) return;
       setEnded(true);
-      const progress = applyResult(course.progress, s.node, r, new Date().toISOString());
-      setCourse({ ...course, progress });
-      const id = course.id;
-      saving.current = saving.current.then(async () => {
-        const { error } = await sb().from('note_courses').update({ progress }).eq('id', id);
-        if (error) toast('진도를 저장하지 못했어요. 인터넷을 확인해 주세요.', 'bad');
-      });
+      const at = new Date().toISOString();
+      setCourse({ ...course, progress: applyResult(course.progress, s.node, r, at) });
+      const { id, plan } = course;
+      /** DB 의 진도에 이 결과를 더해 저장 (읽은 updated_at 그대로일 때만) */
+      const save = async (tries: number): Promise<void> => {
+        const base = known.current;
+        if (!base) return;
+        const progress = applyResult(base.progress, s.node, r, at);
+        const { data, error } = await sb().from('note_courses').update({ progress }).eq('id', id).eq('updated_at', base.stamp).select('updated_at');
+        if (error) {
+          toast('진도를 저장하지 못했어요. 인터넷을 확인해 주세요.', 'bad');
+          return;
+        }
+        if (data?.length) {
+          known.current = { progress, stamp: String(data[0].updated_at) };
+          if (tries) setCourse((c) => (c && c.id === id ? { ...c, progress } : c));
+          return;
+        }
+        // 그사이 다른 화면이 진도를 저장했거나 레슨을 다시 만들었다(또는 지웠다): 지금 것을 읽는다
+        const { data: row } = await sb().from('note_courses').select('plan, progress, updated_at').eq('id', id).maybeSingle();
+        const fresh = row ? readCoursePlan(row.plan) : null;
+        if (row && fresh && tries < 2 && JSON.stringify(fresh) === JSON.stringify(plan)) {
+          // 같은 레슨: 다른 화면의 진도에 이 결과를 더해 다시
+          known.current = { progress: readProgress(row.progress), stamp: String(row.updated_at) };
+          return save(tries + 1);
+        }
+        toast('다른 화면에서 레슨이 바뀌어서 새로 읽었어요.');
+        setTick((t) => t + 1);
+      };
+      saving.current = saving.current.then(() => save(0));
     },
     [course, toast],
   );
@@ -406,6 +432,7 @@ export function CoursePanel({
       {session ? (
         <LessonPlayer
           key={session.id}
+          shuffleKey={session.id}
           title={session.title}
           subtitle={session.subtitle}
           goal={session.goal}

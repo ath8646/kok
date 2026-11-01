@@ -107,13 +107,20 @@ export function cardSnapshot(c: CourseCard): string {
   return [c.heading, c.text, c.tip ? `팁: ${c.tip}` : ''].filter(Boolean).map(oneLine).join(' / ');
 }
 
-/** 확인 문제 하나 (보기·정답·해설). 짝 맞추기는 짝, 순서 맞추기는 바른 차례, 낱말 고르기 빈칸은 고를 낱말까지 */
-export function checkSnapshot(c: CourseCheck): string {
+/**
+ * 확인 문제 하나 (보기·정답·해설). 짝 맞추기는 짝, 순서 맞추기는 바른 차례, 낱말 고르기 빈칸은 고를 낱말까지.
+ * order: 화면에 보인 보기 차례 (레슨 플레이어가 섞는다): 주면 보기 번호를 그 차례로 단다 (학생이 '2번'이라고 쓰면 그 보기)
+ */
+export function checkSnapshot(c: CourseCheck, order?: readonly number[]): string {
   const explain = c.explanation ? ` (해설: ${oneLine(c.explanation)})` : '';
   if (c.type === 'match') return `${oneLine(c.prompt)} 짝: ${(c.pairs ?? []).map((p) => `${oneLine(p.left)} = ${oneLine(p.right)}`).join(', ')}${explain}`;
   if (c.type === 'order') return `${oneLine(c.prompt)} 바른 차례: ${(c.choices ?? []).map(oneLine).join(' → ')}${explain}`;
-  const choices = c.choices?.length ? ` ${c.type === 'cloze' ? '고를 낱말' : '보기'}: ${c.choices.map((x, i) => `${i + 1}) ${oneLine(x)}`).join(' ')}` : '';
-  const answer = c.type === 'mcq' ? `${Number(c.answer) + 1}번` : c.type === 'ox' ? (c.answer ? 'O' : 'X') : String(c.answer ?? '').trim();
+  const list = c.choices ?? [];
+  const shown = order && order.length === list.length ? order : list.map((_, i) => i);
+  const choices = list.length
+    ? ` ${c.type === 'cloze' ? '고를 낱말' : '보기'}${order ? '(화면 차례)' : ''}: ${shown.map((i, d) => `${d + 1}) ${oneLine(list[i] ?? '')}`).join(' ')}`
+    : '';
+  const answer = c.type === 'mcq' ? `${shown.indexOf(Number(c.answer)) + 1}번` : c.type === 'ox' ? (c.answer ? 'O' : 'X') : String(c.answer ?? '').trim();
   return `${oneLine(c.prompt)}${choices} → 정답 ${answer}${explain}`;
 }
 
@@ -126,11 +133,14 @@ export function lessonSnapshot(l: CourseLesson): string {
   return clipSnapshot(lines.join('\n'));
 }
 
-/** 레슨에서 지금 보던 칸 (어느 카드·문제가 이상했는지) */
-export function lessonStepSnapshot(step: { kind: 'card'; card: CourseCard } | { kind: 'check'; check: CourseCheck } | null, index: number): string {
+/** 레슨에서 지금 보던 칸 (어느 카드·문제가 이상했는지). 문제의 order 는 화면에 보인 보기 차례 */
+export function lessonStepSnapshot(
+  step: { kind: 'card'; card: CourseCard } | { kind: 'check'; check: CourseCheck; order?: readonly number[] } | null,
+  index: number,
+): string {
   if (!step) return '';
   return clip(
-    `보던 칸 ${index + 1} (${step.kind === 'card' ? '카드' : '문제'}): ${step.kind === 'card' ? cardSnapshot(step.card) : checkSnapshot(step.check)}`,
+    `보던 칸 ${index + 1} (${step.kind === 'card' ? '카드' : '문제'}): ${step.kind === 'card' ? cardSnapshot(step.card) : checkSnapshot(step.check, step.order)}`,
     800,
   );
 }

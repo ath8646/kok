@@ -2219,9 +2219,11 @@ async def course_steps(browser, page, fig_sid, sid):
     await lesson.locator("button", has_text="물을 밖으로 버린다").click()
     await lesson.locator("button", has_text="빛을 모아 양분을 만든다").click()
     await expect(lesson.locator("button[aria-pressed='true']", has_text="빛을 모아 양분을 만든다")).to_be_visible()
-    await check_btn.click()
+    # '확인'을 두 번 눌러도(같은 자리에 '계속'이 올라온다) 채점 띠를 건너뛰지 않는다
+    await check_btn.dblclick()
     await expect(lesson.get_by_text("맞았어요!")).to_be_visible()
-    await expect(lesson.get_by_role("button", name="계속")).to_be_focused()
+    await page.wait_for_timeout(500)
+    await expect(lesson.get_by_text("맞았어요!")).to_be_visible()
     await shot(page, "102-course-check", full=False)
     # Enter 로도 계속
     await page.keyboard.press("Enter")
@@ -2248,16 +2250,28 @@ async def course_steps(browser, page, fig_sid, sid):
     pool = lesson.get_by_role("group", name="놓을 칸")
     await pool.get_by_role("button", name="포도당을 만든다").click()
     await lesson.get_by_role("button", name=re.compile("^1번째: 포도당을 만든다")).click()
+    # 키보드로도 (스페이스): 놓은 칸은 꺼지고 초점은 남은 칸으로, 다 놓으면 '확인'으로 → Enter 로 채점
     for item in ("빛을 받는다", "물을 나눈다", "포도당을 만든다"):
-        await pool.get_by_role("button", name=item).click()
+        await pool.get_by_role("button", name=item).focus()
+        await page.keyboard.press("Space")
+        await expect(lesson.get_by_role("button", name=re.compile(f"번째: {item}"))).to_be_visible()
+        if item != "포도당을 만든다":
+            await page.wait_for_function("document.activeElement?.hasAttribute('data-order-item') && !document.activeElement.disabled", timeout=5000)
     await shot(page, "102-course-order", full=False)
-    await check_btn.click()
+    await expect(check_btn).to_be_focused()
+    await page.keyboard.press("Enter")
     await expect(lesson.get_by_role("status").filter(has_text=re.compile("좋아요!|맞았어요!|정확해요!|훌륭해요!"))).to_be_visible()
     await lesson.get_by_role("button", name="계속").click()
-    # 틀린 OX 가 다시 나온다: 이번엔 맞힌다
+    # 틀린 OX 가 다시 나온다: 이번엔 맞힌다. 한글 입력기가 켜진 채 O 를 눌러도(e.key 'ㅐ') 고른다
     await expect(lesson.get_by_text("다시 풀어 봐요")).to_be_visible()
+    await page.evaluate("(document.activeElement || document.body).dispatchEvent(new KeyboardEvent('keydown', { key: 'ㅐ', code: 'KeyO', bubbles: true }))")
+    await expect(lesson.get_by_role("button", name="O 맞다")).to_have_attribute("aria-pressed", "true")
+    await lesson.get_by_role("button", name="X 틀리다").click()
+    # 마우스로 고른 보기에 초점이 남아도 Enter 는 확인 (같은 보기를 다시 누르지 않는다)
     await lesson.get_by_role("button", name="O 맞다").click()
-    await check_btn.click()
+    await page.keyboard.press("Enter")
+    await expect(lesson.get_by_role("status").filter(has_text=re.compile("좋아요!|맞았어요!|정확해요!|훌륭해요!|바로 그거예요!"))).to_be_visible()
+    await expect(lesson.get_by_role("button", name="계속")).to_be_focused()
     await lesson.get_by_role("button", name="계속").click()
     # 끝 화면: 별은 처음 답 기준 (4개 중 3개 = 75% → 별 2개), 정확도·시간·최고 연속, 틀린 문제, '다음 레슨'
     await expect(lesson.get_by_text("레슨 끝!")).to_be_visible()
@@ -2363,6 +2377,14 @@ async def course_steps(browser, page, fig_sid, sid):
     await sec2.click()
     await expect(sec2).to_have_attribute("aria-expanded", "false")
     await expect(page.get_by_role("region", name=re.compile(r"단계 "))).to_have_count(0)
+    # 뒤 섹션의 칸 말풍선에서 '앞 레슨부터' → 지금 할 칸의 섹션이 펼쳐지고 그 칸의 말풍선
+    await sec2.click()
+    await page.get_by_role("region", name=re.compile(r"^3단계")).get_by_role("button", name=re.compile(r"아직 차례가 아니에요")).first.evaluate("el => el.click()")
+    await page.get_by_role("dialog", name=re.compile(r"^레슨 정보: ")).get_by_role("button", name="앞 레슨부터").evaluate("el => el.click()")
+    await expect(sec1).to_have_attribute("aria-expanded", "true")
+    await expect(page.locator("[data-node-current='true'] [role='dialog']")).to_be_visible()
+    await page.keyboard.press("Escape")
+    await expect(page.get_by_role("dialog", name=re.compile(r"^레슨 정보: "))).to_have_count(0)
     # 이어서 하기는 섹션과 상관없이 지금 할 레슨을 연다 (레슨 창 위에 섹션·단계)
     await page.get_by_role("button", name=re.compile("첫 레슨 시작")).click()
     first_lesson = page.get_by_role("dialog", name=re.compile(r"^레슨"))

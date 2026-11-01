@@ -7,6 +7,8 @@ import {
   applyResult,
   checkAnswerText,
   checkKey,
+  choiceOrder,
+  clozeBlank,
   courseNodes,
   courseSections,
   courseStats,
@@ -15,6 +17,7 @@ import {
   lessonKey,
   lessonMinutes,
   lessonSteps,
+  matchColumns,
   mistakeChecks,
   mistakeCount,
   orderCorrect,
@@ -493,5 +496,83 @@ describe('듀오링고식 레슨: 새 문제 종류와 검사', () => {
     // 작은 길은 그대로
     const small = settleCourse(zCourseAi.parse(aiRaw), ['k1'])!;
     expect(fitPlanSize(small)).toBe(small);
+  });
+});
+
+describe('레슨 화면의 규칙 (검토에서 찾은 것)', () => {
+  it('짝 맞추기 판: 같은 줄에 제 짝이 둘 넘게 나란히 놓이지 않는다 (처음부터 맞춰진 판이 없다)', () => {
+    for (const n of [2, 3, 4, 5]) {
+      for (let s = 0; s < 1500; s++) {
+        const { lefts, rights } = matchColumns(n, `0-${s % 7}-${s}:0`);
+        expect([...lefts].sort()).toEqual([...rights].sort());
+        expect(new Set(lefts).size).toBe(n);
+        const aligned = rights.filter((r, k) => r === lefts[k]).length;
+        expect(aligned).toBeLessThanOrEqual(n === 2 ? 0 : 1);
+      }
+    }
+    // 같은 씨앗이면 같은 판 (다시 그려도 칸이 움직이지 않게)
+    expect(matchColumns(4, 'x')).toEqual(matchColumns(4, 'x'));
+  });
+
+  it('보기 차례: 섞되, 다른 보기 자리를 가리키는 보기가 있으면(예전 레슨) 그대로', () => {
+    const mcq = { type: 'mcq' as const, choices: ['잎', '뿌리', '줄기', '꽃'] };
+    expect([...choiceOrder(mcq, 's')].sort()).toEqual([0, 1, 2, 3]);
+    expect(choiceOrder(mcq, 's')).toEqual(shuffled(4, 's'));
+    expect(choiceOrder({ type: 'mcq', choices: ['잎', '뿌리', '줄기', '①과 ② 모두'] }, 's')).toEqual([0, 1, 2, 3]);
+    expect(choiceOrder({ type: 'mcq', choices: ['잎', '뿌리', '위의 것 모두'] }, 's')).toEqual([0, 1, 2]);
+    // 낱말 칩은 늘 섞는다
+    expect(choiceOrder({ type: 'cloze', choices: ['①', '②', '③'] }, 's')).toEqual(shuffled(3, 's'));
+  });
+
+  it('예전 레슨의 객관식: 보기 번호를 떼고 읽는다 (화면이 번호를 따로 단다)', () => {
+    const old = readCoursePlan({
+      title: 't',
+      intro: '',
+      units: [
+        {
+          title: 'u',
+          summary: '',
+          lessons: [
+            {
+              title: 'l',
+              goal: '',
+              key_point_ids: [],
+              cards: [{ kind: 'concept', heading: '', text: 'x', tip: '' }],
+              checks: [
+                { type: 'mcq', prompt: 'q', choices: ['① 잎', '② 뿌리', '③ 줄기', '④ ①과 ② 모두'], answer: 3, accepted: [], explanation: '' },
+                { type: 'mcq', prompt: 'q2', choices: ['A. Lincoln', 'B. Obama', 'Carter'], answer: 0, accepted: [], explanation: '' },
+              ],
+            },
+          ],
+        },
+      ],
+    })!;
+    const [labeled, names] = old.units[0].lessons[0].checks;
+    expect(labeled.choices).toEqual(['잎', '뿌리', '줄기', '①과 ② 모두']);
+    expect(labeled.answer).toBe(3);
+    // '①과 ② 모두'가 있으니 섞지 않는다: 화면 번호 1·2 가 ①·② 그대로
+    expect(choiceOrder(labeled, '0-0-0:0')).toEqual([0, 1, 2, 3]);
+    // 번호가 모든 보기에 차례대로 붙지 않았으면 그대로 ('A. Lincoln' 지키기)
+    expect(names.choices).toEqual(['A. Lincoln', 'B. Obama', 'Carter']);
+  });
+
+  it('빈칸 자리: 코드 밖의 첫 빈칸 (print()·__init__·snake_case 는 빈칸이 아니다)', () => {
+    // [빈칸 앞 글, 빈칸]
+    const at = (p: string) => {
+      const b = clozeBlank(p);
+      return b ? [p.slice(0, b.start), p.slice(b.start, b.end)] : null;
+    };
+    expect(at('`print()` 함수는 값을 화면에 ____ 해요.')).toEqual(['`print()` 함수는 값을 화면에 ', '____']);
+    expect(at('`__init__` 메서드는 객체를 만들 때 ____ 돼요.')).toEqual(['`__init__` 메서드는 객체를 만들 때 ', '____']);
+    expect(at('__init__ 메서드는 객체를 만들 때 ____ 돼요.')).toEqual(['__init__ 메서드는 객체를 만들 때 ', '____']);
+    expect(at('my_var__x 와 __ 중에서')).toEqual(['my_var__x 와 ', '__']);
+    expect(at('광합성은 ____에서 일어나요')).toEqual(['광합성은 ', '____']);
+    expect(at('광합성은 ( )에서 일어나요')).toEqual(['광합성은 ', '( )']);
+    expect(at('print() 로 ( ) 를 출력해요')).toEqual(['print() 로 ', '( )']);
+    // 밑줄 셋 이상이 먼저 (두 개짜리는 그다음)
+    expect(at('__ 와 ___')).toEqual(['__ 와 ', '___']);
+    // 코드 블록 안의 빈칸은 코드 그대로 (고른 낱말은 문제 아래 칸에)
+    expect(at('다음 코드의 빈칸은?\n```python\nfor i in ____(3):\n    print(i)\n```')).toBeNull();
+    expect(at('빈칸이 없는 문장')).toBeNull();
   });
 });

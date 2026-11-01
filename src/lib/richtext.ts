@@ -363,6 +363,61 @@ const FENCE_CLOSE = /^[ \t]*(`{3,})[ \t]*$/;
 
 type Chunk = { code: false; text: string } | { code: true; lang: string; lines: string[] };
 
+/**
+ * 글에서 코드가 차지하는 자리 [start, end): ``` 블록(울타리 줄까지, 닫지 않으면 끝까지)과 `조각`.
+ * 읽는 규칙은 parseRich 와 같다 (\` 는 코드가 아니다). 코드 안을 건드리지 않고 글을 다룰 때 (레슨 빈칸 자리)
+ */
+export function codeRanges(src: string): Array<[number, number]> {
+  const out: Array<[number, number]> = [];
+  const lines = src.split('\n');
+  const starts: number[] = [];
+  let at = 0;
+  for (const l of lines) {
+    starts.push(at);
+    at += l.length + 1;
+  }
+  const spans = (from: number, to: number) => {
+    let i = from;
+    while (i < to) {
+      if (src[i] === '\\' && (src[i + 1] === '`' || src[i + 1] === '$')) {
+        i += 2;
+        continue;
+      }
+      if (src[i] !== '`') {
+        i++;
+        continue;
+      }
+      const code = codeSpanAt(src, i);
+      if (code && code.end <= to) {
+        out.push([i, code.end]);
+        i = code.end;
+        continue;
+      }
+      while (src[i] === '`') i++;
+    }
+  };
+  let from = 0;
+  let i = 0;
+  while (i < lines.length) {
+    const open = FENCE_OPEN.exec(lines[i]);
+    if (!open) {
+      i++;
+      continue;
+    }
+    spans(from, starts[i]);
+    const begin = starts[i];
+    i++;
+    while (i < lines.length) {
+      const close = FENCE_CLOSE.exec(lines[i++]);
+      if (close && close[1].length >= open[2].length) break;
+    }
+    from = i < lines.length ? starts[i] : src.length;
+    out.push([begin, from]);
+  }
+  spans(from, src.length);
+  return out;
+}
+
 /** 글을 코드 블록과 나머지로 나눈다. 닫는 ``` 이 없으면 끝까지 코드, 블록 안 줄은 여는 줄만큼 들여쓰기를 뺀다 */
 function chunks(src: string): Chunk[] {
   const out: Chunk[] = [];

@@ -106,6 +106,8 @@ describe('신고 (lib/report.ts)', () => {
     expect(s).toContain('카드 1: 틸라코이드 / 빛을 받아요');
     expect(s).toContain('문제 1: 어디서? 보기: 1) 틸라코이드 2) 스트로마 → 정답 1번');
     expect(lessonStepSnapshot({ kind: 'check', check: lesson.checks[0] }, 1)).toMatch(/^보던 칸 2 \(문제\)/);
+    // 레슨 화면은 보기를 섞는다: 보던 칸의 번호는 화면에 보인 차례 (학생이 '2번'이라고 쓰면 그 보기)
+    expect(lessonStepSnapshot({ kind: 'check', check: lesson.checks[0], order: [1, 0] }, 1)).toContain('보기(화면 차례): 1) 스트로마 2) 틸라코이드 → 정답 2번');
     expect(lessonStepSnapshot(null, 0)).toBe('');
     const long = lessonSnapshot({ ...lesson, cards: Array.from({ length: 40 }, () => ({ ...lesson.cards[0], text: '가'.repeat(400) })) });
     expect(long.length).toBeLessThanOrEqual(REPORT_SNAPSHOT_MAX);

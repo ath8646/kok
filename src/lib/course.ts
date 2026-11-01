@@ -9,7 +9,7 @@ import { coursePlanRange } from '@/lib/ai/scale';
 import { readChatQuestion, toQuestionRow, type CourseAi, type CourseOutline, type CourseUnitAi, type Note } from './ai/schemas';
 import { normalizeAnswer, type QuestionType } from './grading';
 import { stripChoiceLabels } from './material-questions';
-import { plainMathText } from './richtext';
+import { codeRanges, plainMathText } from './richtext';
 
 // ------------------------------------------------------------- 수준
 export const COURSE_LEVELS = ['elementary', 'middle', 'high', 'college', 'expert'] as const;
@@ -182,12 +182,23 @@ const zPlan = z.object({
     .catch([]),
 });
 
-/** 저장된 학습 내용을 읽는다 (모양이 깨졌으면 null) */
+/**
+ * 저장된 학습 내용을 읽는다 (모양이 깨졌으면 null).
+ * 예전 레슨의 객관식은 보기 번호(① · 1.)를 단 채로 저장돼 있어서 뗀다 (화면이 번호를 따로 달고 보기를 섞는다)
+ */
 export function readCoursePlan(raw: unknown): CoursePlan | null {
   const r = zPlan.safeParse(raw);
   if (!r.success) return null;
   const plan = r.data as CoursePlan;
-  const units = plan.units.filter((u) => u.lessons.length);
+  const units = plan.units
+    .filter((u) => u.lessons.length)
+    .map((u) => ({
+      ...u,
+      lessons: u.lessons.map((l) => ({
+        ...l,
+        checks: l.checks.map((c) => (c.type === 'mcq' && c.choices ? { ...c, choices: stripChoiceLabels(c.choices) } : c)),
+      })),
+    }));
   if (!units.length) return null;
   return { ...plan, units };
 }
@@ -651,6 +662,49 @@ export function shuffled(n: number, seed: string, moved = false): number[] {
   }
   if (moved && n > 1 && out.every((x, i) => x === i)) out.push(out.shift()!);
   return out;
+}
+
+/**
+ * 객관식·낱말 칩을 보일 차례 (seed 가 같으면 같다: 키보드 숫자·신고의 번호도 이것으로).
+ * 다른 보기 자리를 가리키는 보기가 있으면('①과 ② 모두': 예전 레슨) 섞지 않고 처음 차례 그대로
+ */
+export function choiceOrder(c: Pick<CourseCheck, 'type' | 'choices'>, seed: string): number[] {
+  const n = c.choices?.length ?? 0;
+  if (c.type === 'mcq' && c.choices?.some((x) => POSITIONAL.test(x))) return Array.from({ length: n }, (_, i) => i);
+  return shuffled(n, seed);
+}
+
+/**
+ * 짝 맞추기의 두 줄 차례 (왼쪽·오른쪽 따로 섞는다). 같은 줄에 제 짝이 나란히 놓인 줄은 하나까지만
+ * (따로 섞기만 하면 짝 3개 판의 다섯에 하나는 처음부터 다 맞춰진 채로 나왔다)
+ */
+export function matchColumns(n: number, seed: string): { lefts: number[]; rights: number[] } {
+  const lefts = shuffled(n, `${seed}:l`);
+  for (let t = 0; t < 24; t++) {
+    const rights = shuffled(n, `${seed}:r${t || ''}`);
+    if (rights.filter((r, k) => r === lefts[k]).length <= 1) return { lefts, rights };
+  }
+  // 한 칸씩 밀면 어느 줄도 제 짝이 아니다
+  return { lefts, rights: lefts.map((_, k) => lefts[(k + 1) % n]) };
+}
+
+/** 빈칸 자리 찾기 차례: 밑줄 셋 이상 → 밑줄 둘 → ( )·[ ]. 낱말에 붙은 것(snake_case·__init__·print())은 빈칸이 아니다 */
+const BLANKS = [/(?<![A-Za-z0-9_])_{3,}(?![A-Za-z0-9_])/g, /(?<![A-Za-z0-9_])__(?![A-Za-z0-9_])/g, /(?<![A-Za-z0-9_])(?:\(\s*\)|\[\s*\])/g];
+
+/**
+ * 빈칸 문제의 답 자리 (글에서 [start, end)): 코드(`조각`·``` 블록) 밖의 첫 빈칸. 없으면 null
+ * (코드 안의 빈칸은 코드 그대로 보이고 고른 낱말은 문제 아래 칸에)
+ */
+export function clozeBlank(prompt: string): { start: number; end: number } | null {
+  const code = codeRanges(prompt);
+  for (const re of BLANKS) {
+    for (const m of prompt.matchAll(re)) {
+      const start = m.index ?? 0;
+      const end = start + m[0].length;
+      if (!code.some(([a, b]) => start < b && end > a)) return { start, end };
+    }
+  }
+  return null;
 }
 
 /** 레슨에 걸리는 시간 어림 (분): 카드 20초, 문제 20~40초 (말풍선) */

@@ -20,6 +20,7 @@ import {
 } from '@/lib/course';
 import { confirmOpen } from '../Confirm';
 import { Button, ICONS, Icon, cx } from '../ui';
+import { prefersReducedMotion } from '../useReducedMotion';
 
 /** 지그재그 자리 (칸마다 가로로 얼마나 옮기는지, 단위 px) */
 const ZIGZAG = [0, 1, 2, 1, 0, -1, -2, -1];
@@ -32,9 +33,16 @@ type Ctx = {
   /** 말풍선이 열린 칸 */
   picked: string | null;
   pick: (id: string | null) => void;
+  /** 칸의 말풍선을 연다 (접힌 섹션의 칸이면 그 섹션을 펼친다: '앞 레슨부터') */
+  reveal: (id: string) => void;
   onStart: (node: CourseNode) => void;
   onGuide: (unit: number) => void;
 };
+
+/** 처음 펼칠 섹션: 지금 할 칸이 든 섹션 (다 끝냈으면 마지막 섹션) */
+function nowSection(sections: CourseSection[]): number {
+  return (sections.find((x) => x.state === 'current') ?? sections.find((x) => x.state !== 'done') ?? sections[sections.length - 1]).index;
+}
 
 export function CoursePath({
   plan,
@@ -55,7 +63,16 @@ export function CoursePath({
   onGuide: (unit: number) => void;
 }) {
   const [picked, setPicked] = useState<string | null>(null);
-  const ctx: Ctx = { plan, nodes, progress, picked, pick: setPicked, onStart, onGuide };
+  // 섹션: 학생이 고른 섹션 (-1 = 모두 접음). at: 고를 때의 '지금 섹션' (그것이 바뀌면 고른 것을 잊는다)
+  const [secPick, setSecPick] = useState<{ index: number; at: number } | null>(null);
+  const now = sections ? nowSection(sections) : 0;
+  const openSec = secPick && secPick.at === now ? secPick.index : now;
+  const reveal = (id: string) => {
+    const sec = sections?.find((s) => s.nodes.some((n) => n.id === id));
+    if (sec && sec.index !== openSec) setSecPick({ index: sec.index, at: now });
+    setPicked(id);
+  };
+  const ctx: Ctx = { plan, nodes, progress, picked, pick: setPicked, reveal, onStart, onGuide };
   if (!sections) {
     return (
       <div className="grid gap-6">
@@ -63,7 +80,17 @@ export function CoursePath({
       </div>
     );
   }
-  return <Sections ctx={ctx} sections={sections} />;
+  return (
+    <Sections
+      ctx={ctx}
+      sections={sections}
+      open={openSec}
+      onToggle={(index) => {
+        setSecPick({ index: openSec === index ? -1 : index, at: now });
+        setPicked(null);
+      }}
+    />
+  );
 }
 
 /** 단계들의 길 (단계 머리 카드 + 지그재그 칸), 총정리가 든 칸 목록이면 맨 끝에 총정리 */
@@ -106,16 +133,12 @@ function Units({ ctx, nodes, units }: { ctx: Ctx; nodes: CourseNode[]; units: nu
 
 /**
  * 섹션으로 나눈 길: 펼친 섹션 하나만 칸을 보인다. 처음에는 지금 할 칸이 든 섹션(다 끝냈으면 마지막 섹션).
- * 학생이 고른 섹션은 지금 할 칸의 섹션이 바뀔 때까지 기억한다 (레슨을 끝내 다음 섹션으로 넘어가면 그 섹션이 펼쳐진다)
+ * 학생이 고른 섹션은 지금 할 칸의 섹션이 바뀔 때까지 기억한다 (레슨을 끝내 다음 섹션으로 넘어가면 그 섹션이 펼쳐진다).
+ * 고른 섹션은 CoursePath 가 들고 있다 (다른 섹션의 칸 말풍선에서 '앞 레슨부터'를 누르면 지금 할 칸의 섹션을 펼치게)
  */
-function Sections({ ctx, sections }: { ctx: Ctx; sections: CourseSection[] }) {
-  const now = (sections.find((x) => x.state === 'current') ?? sections.find((x) => x.state !== 'done') ?? sections[sections.length - 1]).index;
-  // 고른 섹션 (-1 = 모두 접음). at: 고를 때의 '지금 섹션' (그것이 바뀌면 고른 것을 잊는다)
-  const [pick, setPick] = useState<{ index: number; at: number } | null>(null);
-  const open = pick && pick.at === now ? pick.index : now;
+function Sections({ ctx, sections, open, onToggle }: { ctx: Ctx; sections: CourseSection[]; open: number; onToggle: (index: number) => void }) {
   const toggle = (index: number, el: HTMLElement) => {
-    setPick({ index: open === index ? -1 : index, at: now });
-    ctx.pick(null);
+    onToggle(index);
     // 위 섹션이 접히면 누른 머리가 위로 올라가 화면 밖으로 나갈 수 있다: 누른 머리가 보이게
     requestAnimationFrame(() => el.scrollIntoView({ block: 'nearest' }));
   };
@@ -282,9 +305,15 @@ function NodePopover({ ctx, node, offset, anchor }: { ctx: Ctx; node: CourseNode
   useEffect(() => {
     // 첫 단추에 초점 (차례가 아닌 칸은 '앞 레슨부터': 실수로 건너뛰지 않게)
     box.current?.querySelector<HTMLButtonElement>('button')?.focus({ preventScroll: true });
-    // 말풍선이 화면 아래에 걸리면 보이게 (아래 메뉴에 가리지 않게)
-    requestAnimationFrame(() => box.current?.scrollIntoView({ block: 'nearest', behavior: 'smooth' }));
     const anchorEl = anchor.current;
+    requestAnimationFrame(() => {
+      const behavior = prefersReducedMotion() ? 'auto' : 'smooth';
+      const a = anchorEl?.getBoundingClientRect();
+      // 칸이 화면 밖이면(다른 섹션에서 '앞 레슨부터'로 연 칸) 칸을 가운데로,
+      // 아니면 말풍선이 화면 아래에 걸릴 때만 보이게 (아래 메뉴에 가리지 않게)
+      if (a && (a.top < 0 || a.bottom > window.innerHeight)) anchorEl?.scrollIntoView({ block: 'center', behavior });
+      else box.current?.scrollIntoView({ block: 'nearest', behavior });
+    });
     const onDown = (e: PointerEvent) => {
       const t = e.target as Node;
       if (box.current?.contains(t) || anchorEl?.contains(t)) return;
@@ -349,14 +378,7 @@ function NodePopover({ ctx, node, offset, anchor }: { ctx: Ctx; node: CourseNode
               아직 차례가 아니에요. {skipped ? `앞 칸 ${skipped}개를 건너뛰어요.` : ''} 앞에서 배운 것 위에 쌓이는 내용이라 차례대로 하면 더 쉬워요.
             </p>
             <div className="grid grid-cols-2 gap-2">
-              <Button
-                variant="secondary"
-                onClick={() => {
-                  if (!current) return ctx.pick(null);
-                  ctx.pick(current.id);
-                  requestAnimationFrame(() => document.querySelector('[data-node-current="true"]')?.scrollIntoView({ block: 'center', behavior: 'smooth' }));
-                }}
-              >
+              <Button variant="secondary" onClick={() => (current ? ctx.reveal(current.id) : ctx.pick(null))}>
                 앞 레슨부터
               </Button>
               <Button

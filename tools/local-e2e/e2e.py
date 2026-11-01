@@ -5920,9 +5920,10 @@ async def main():
         chip = lambda pg, sid: pg.get_by_role("tablist", name="과목").locator(f'[data-chip="{sid}"]')  # noqa: E731
         row = await chip_ids(phone)
         assert len(row) >= 3, row
-        # 손가락: 첫 칩을 꾹 눌러 셋째 칩 자리로 끌면 그 자리로, 놓은 뒤 따라오는 누르기로 과목이 열리지 않는다
-        await touch_drag(phone, chip(phone, row[0]), chip(phone, row[2]))
-        want = [row[1], row[2], row[0], *row[3:]]
+        # 손가락: 첫 칩을 꾹 눌러 둘째 칩 자리로 끌면 그 자리로, 놓은 뒤 따라오는 누르기로 과목이 열리지 않는다
+        # (셋째 칩은 폰에서 화면 끝에 걸쳐 줄 끝 넘김 자리(15%)에 들어갈 수 있다: 줄 끝 넘김은 아래에서 따로 본다)
+        await touch_drag(phone, chip(phone, row[0]), chip(phone, row[1]))
+        want = [row[1], row[0], *row[2:]]
         await poll_db(order_sql(row), ",".join(want))
         assert await chip_ids(phone) == want, await chip_ids(phone)
         assert phone.url.endswith("/library"), phone.url

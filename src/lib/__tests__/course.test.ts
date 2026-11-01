@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { zCourseAi } from '@/lib/ai/schemas';
+import { clozeBlank } from '@/lib/cloze';
 import {
   COURSE_LIMITS,
   COURSE_PLAN_BYTES,
@@ -8,7 +9,6 @@ import {
   checkAnswerText,
   checkKey,
   choiceOrder,
-  clozeBlank,
   courseNodes,
   courseSections,
   courseStats,

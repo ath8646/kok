@@ -1444,6 +1444,8 @@ export default function NotePage() {
               me={me}
               noteId={note.id}
               subjectId={note.subject_id}
+              subjectName={subject?.name}
+              material={material?.type}
               questions={docQuestions}
               cards={cards}
               keyPoints={keyPoints}

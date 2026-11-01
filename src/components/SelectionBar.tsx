@@ -1,8 +1,8 @@
 'use client';
 // 여러 개 고르기: 카드를 꾹 누르면 고르기가 시작되고, 아래 띠에서 한꺼번에 바꾼다 (자료함 · 오답노트 · PDF 요약 목록이 같이 쓴다)
 // - useMultiSelect: 고르는 중인지·고른 번호들. 고르는 동안 + 버튼을 숨기고(띠가 그 자리를 쓴다) Esc 로 끝낸다
-// - SelectionBar: 아래 띠 (폰은 아래 메뉴 자리를 덮고, 넓은 화면은 가운데에 뜬다). 안에는 BarAction 만 넣는다
-import { Children, useCallback, useEffect, useState, type ReactNode } from 'react';
+// - SelectionBar: 아래 띠 (폰은 아래 메뉴 자리를 덮고, 넓은 화면은 가운데에 뜬다). 안에는 BarAction 만 넣는다, 맨 앞은 '선택 해제'(onClear)
+import { Children, isValidElement, useCallback, useEffect, useState, type ReactNode } from 'react';
 import { useQuickAdd } from './QuickAdd';
 import { ICONS, Icon, Spinner, cx } from './ui';
 
@@ -78,10 +78,14 @@ export function pickKeyHandler(onPick: () => void) {
 
 /**
  * 여러 개 고르는 동안 아래 띠. 단추(BarAction)마다 한 칸씩 같은 너비로 나눈다
- * (폰은 아래 메뉴 자리를 덮고, 넓은 화면은 가운데에 뜬다: 엄지가 닿는 자리에 큰 단추)
+ * (폰은 아래 메뉴 자리를 덮고, 넓은 화면은 가운데에 뜬다: 엄지가 닿는 자리에 큰 단추).
+ * onClear: 맨 앞 칸의 '선택 해제' (고르기를 끝낸다: 긴 목록을 내려가 있어도 위로 올라가지 않게)
  */
-export function SelectionBar({ count, noun = '자료', children }: { count: number; noun?: string; children: ReactNode }) {
-  const cols = Math.max(1, Children.toArray(children).filter(Boolean).length);
+export function SelectionBar({ count, noun = '자료', onClear, children }: { count: number; noun?: string; onClear?: () => void; children: ReactNode }) {
+  const kids = Children.toArray(children).filter(Boolean);
+  const cols = Math.max(1, kids.length + (onClear ? 1 : 0));
+  // 큰 단추 하나(prominent)면 '선택 해제'는 좁게, 큰 단추가 나머지를 다 쓴다
+  const wide = !!onClear && kids.length === 1 && isValidElement(kids[0]) && !!(kids[0].props as { prominent?: boolean }).prominent;
   return (
     <div className="pointer-events-none fixed inset-x-0 bottom-0 z-50 md:bottom-6 md:left-60 md:flex md:justify-center">
       <div
@@ -91,8 +95,29 @@ export function SelectionBar({ count, noun = '자료', children }: { count: numb
           'kok-selbar pointer-events-auto grid border-t border-line bg-surface px-1.5 pb-[calc(6px+env(safe-area-inset-bottom))] pt-1.5 md:rounded-[24px] md:border md:pb-1.5 md:shadow-[0_12px_36px_var(--shadow-strong)]',
           cols >= 5 ? 'md:w-[520px]' : cols >= 3 ? 'md:w-[440px]' : 'md:w-[360px]',
         )}
-        style={{ gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))` }}
+        style={{ gridTemplateColumns: wide ? 'auto minmax(0, 1fr)' : `repeat(${cols}, minmax(0, 1fr))` }}
       >
+        {onClear ? (
+          <button
+            type="button"
+            onClick={onClear}
+            aria-label={`선택 해제 (${count}개 고름)`}
+            className={cx(
+              'press flex min-h-[52px] flex-col items-center justify-center gap-0.5 rounded-2xl py-1.5 text-[12px] font-semibold text-muted hover:bg-surface-2 hover:text-ink',
+              wide && 'px-3',
+            )}
+          >
+            <span className="relative grid h-6 place-items-center">
+              <Icon d={ICONS.close} size={22} />
+              {count ? (
+                <span className="absolute -right-3 -top-1.5 grid h-[18px] min-w-[18px] place-items-center rounded-full bg-accent px-1 text-[11px] font-bold leading-none text-accent-ink tabular-nums" aria-hidden="true">
+                  {count}
+                </span>
+              ) : null}
+            </span>
+            선택 해제
+          </button>
+        ) : null}
         {children}
       </div>
     </div>

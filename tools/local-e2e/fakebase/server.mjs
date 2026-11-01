@@ -1476,21 +1476,34 @@ async function handleClaude(req, res) {
     task = 'problems';
     out = fakeProblems();
   } else if (props.questions) {
-    task = /looks wrong/.test(textOf) ? 'fix' : 'quiz';
+    task = 'quiz';
     // 문제 지시에 들어간 자료 종류 지침 (e2e 가 맞는 지침을 보냈는지 본다)
-    if (task === 'quiz') {
-      const rule = /original questions copied from the material/.test(textOf)
-        ? 'exam'
-        : /never ask the meaning of a single entry/.test(textOf)
-          ? 'vocab'
-          : /This note is about solving/.test(textOf)
-            ? 'math'
-            : /about a work or a passage/.test(textOf)
-              ? 'reading'
-              : 'general';
-      stats.quizRules = [...(stats.quizRules || []), rule].slice(-20);
-    }
-    out = task === 'fix' ? { questions: [fakeQuiz().questions[0]] } : /comes from the new material/.test(textOf) ? fakeNewQuiz() : fakeQuiz();
+    const rule = /original questions copied from the material/.test(textOf)
+      ? 'exam'
+      : /never ask the meaning of a single entry/.test(textOf)
+        ? 'vocab'
+        : /This note is about solving/.test(textOf)
+          ? 'math'
+          : /about a work or a passage/.test(textOf)
+            ? 'reading'
+            : 'general';
+    stats.quizRules = [...(stats.quizRules || []), rule].slice(-20);
+    // 과목마다 시험지 모양 지침 (SUBJECT_LAYOUT: e2e 가 과목에 맞는 지침을 보냈는지 본다)
+    const layout = /This is a Korean language subject/.test(textOf)
+      ? 'korean'
+      : /This is an English subject/.test(textOf)
+        ? 'english'
+        : /This is a math subject/.test(textOf)
+          ? 'math'
+          : /This is a science subject/.test(textOf)
+            ? 'science'
+            : /This is a social studies or history subject/.test(textOf)
+              ? 'social'
+              : /This is a programming subject/.test(textOf)
+                ? 'code'
+                : 'none';
+    stats.quizLayouts = [...(stats.quizLayouts || []), layout].slice(-20);
+    out = /comes from the new material/.test(textOf) ? fakeNewQuiz() : fakeQuiz();
     // 자료 그림이 있으면 그림마다 그림 문제 하나 (<figures> 의 번호로)
     const figIds = [...((textOf.match(/<figures>\n([\s\S]*?)\n<\/figures>/) || [])[1] || '').matchAll(/"id":"(f\d+)"/g)].map((m) => m[1]);
     const withFig = props.questions?.items?.properties?.figure_id;

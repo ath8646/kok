@@ -122,7 +122,7 @@ export function estimateEnergy(m: MaterialEstimate, model: ModelId, usdPerEnergy
   return Math.max(1, Math.ceil(usdToEnergy(usd, usdPerEnergy)));
 }
 
-/** 작은 AI 작업 하나(채점, 문제 고치기 등)의 예상 에너지 */
+/** 작은 AI 작업 하나(채점, 그림 다시 만들기 등)의 예상 에너지 */
 export function estimateSmallTask(model: ModelId, usdPerEnergy: number, inputTokens = 3000, outputTokens = 800): number {
   const usd = costUsd(model, { input_tokens: inputTokens, output_tokens: outputTokens });
   return Math.max(0.1, Math.round(usdToEnergy(usd, usdPerEnergy) * 10) / 10);

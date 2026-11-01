@@ -9,7 +9,7 @@ import { coursePlanRange } from '@/lib/ai/scale';
 import { readChatQuestion, toQuestionRow, type CourseAi, type CourseOutline, type CourseUnitAi, type Note } from './ai/schemas';
 import { normalizeAnswer, type QuestionType } from './grading';
 import { stripChoiceLabels } from './material-questions';
-import { codeRanges, plainMathText } from './richtext';
+import { plainMathText } from './richtext';
 
 // ------------------------------------------------------------- 수준
 export const COURSE_LEVELS = ['elementary', 'middle', 'high', 'college', 'expert'] as const;
@@ -686,25 +686,6 @@ export function matchColumns(n: number, seed: string): { lefts: number[]; rights
   }
   // 한 칸씩 밀면 어느 줄도 제 짝이 아니다
   return { lefts, rights: lefts.map((_, k) => lefts[(k + 1) % n]) };
-}
-
-/** 빈칸 자리 찾기 차례: 밑줄 셋 이상 → 밑줄 둘 → ( )·[ ]. 낱말에 붙은 것(snake_case·__init__·print())은 빈칸이 아니다 */
-const BLANKS = [/(?<![A-Za-z0-9_])_{3,}(?![A-Za-z0-9_])/g, /(?<![A-Za-z0-9_])__(?![A-Za-z0-9_])/g, /(?<![A-Za-z0-9_])(?:\(\s*\)|\[\s*\])/g];
-
-/**
- * 빈칸 문제의 답 자리 (글에서 [start, end)): 코드(`조각`·``` 블록) 밖의 첫 빈칸. 없으면 null
- * (코드 안의 빈칸은 코드 그대로 보이고 고른 낱말은 문제 아래 칸에)
- */
-export function clozeBlank(prompt: string): { start: number; end: number } | null {
-  const code = codeRanges(prompt);
-  for (const re of BLANKS) {
-    for (const m of prompt.matchAll(re)) {
-      const start = m.index ?? 0;
-      const end = start + m[0].length;
-      if (!code.some(([a, b]) => start < b && end > a)) return { start, end };
-    }
-  }
-  return null;
 }
 
 /** 레슨에 걸리는 시간 어림 (분): 카드 20초, 문제 20~40초 (말풍선) */

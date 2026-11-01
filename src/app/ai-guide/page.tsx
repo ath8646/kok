@@ -10,7 +10,7 @@ export default async function AiGuidePage() {
   // 요금제마다의 에너지는 관리자가 바꿀 수 있어서 그때의 값을 읽는다
   const plans = await getPublicPlans();
   return (
-    <LegalPage title="AI 사용 안내" updated="2026년 10월 31일">
+    <LegalPage title="AI 사용 안내" updated="2026년 11월 1일">
       <p>
         KOK에서 정리 노트, 그림, 문제, 단답형 채점, 채팅 답, 레슨, 표지 그림은 사람이 아니라 생성형 AI(Anthropic의 Claude)가 만들어요. AI 테마의 배경 그림은
         Cloudflare의 그림 AI가 그려요. 채팅에서 답하는 것도 사람이 아니라 AI예요. 안심하고 쓰려면 아래를 꼭 기억해 주세요.
@@ -47,11 +47,14 @@ export default async function AiGuidePage() {
           <li>직접 만든 빈 노트처럼 내가 쓴 것에는 AI 표시를 붙이지 않아요.</li>
         </ul>
       </Sec>
-      <Sec title="이상하면 &lsquo;이상해요&rsquo;로 알려 주세요">
+      <Sec title="이상하면 신고로 알려 주세요">
         <ul className="list-disc pl-5">
-          <li>문제, 노트, 채팅 답, 표지 그림, 레슨, AI 테마 그림 어디서나 &lsquo;이상해요&rsquo;를 눌러 틀리거나 불쾌한 내용을 알릴 수 있어요.</li>
-          <li>신고하면 고른 이유와 신고할 때 본 AI 결과가 운영자에게 가요. 운영자가 확인하고, 문제는 쉬게 하거나 AI 지시를 고쳐요.</li>
-          <li>문제를 신고하면 AI가 고친 문제를 바로 제안해서, 내가 골라 바꿀 수 있어요.</li>
+          <li>
+            노트, 채팅 답, 표지 그림, 레슨, AI 테마 그림에서는 &lsquo;이상해요&rsquo;를, 문제에서는 &lsquo;문제 신고&rsquo;(깃발)를 눌러 틀리거나 불쾌한 내용을
+            알릴 수 있어요.
+          </li>
+          <li>신고하면 고른 이유와 신고할 때 본 AI 결과(문제는 문제·정답·해설)가 운영자에게 가요. 운영자가 확인하고, 틀린 문제는 복습에서 빼거나 AI 지시를 고쳐요.</li>
+          <li>보내기 전에 적은 글을 살펴요. 링크·연락처·욕설이 있거나 알아볼 수 없는 글이면 고쳐 달라고 알려 드려요. 같은 신고는 한 번만 받아요.</li>
         </ul>
       </Sec>
       <Sec title="개인정보는 올리지 마세요">
@@ -87,7 +90,9 @@ export default async function AiGuidePage() {
           </li>
           <li>AI 테마 그림은 사람·글자·캐릭터 없이 풍경과 무늬로만 그리게 해요.</li>
           <li>AI 사용량에는 하루 한도가 있고, 오늘 할 복습이 끝나면 그만해도 된다고 알려 줘요.</li>
-          <li>AI 결과마다 &lsquo;이상해요&rsquo; 신고가 있고, 운영자가 신고를 확인해요. 운영 규칙을 어기는 계정은 AI 기능을 막을 수 있어요.</li>
+          <li>
+            AI 결과마다 신고(&lsquo;이상해요&rsquo;·&lsquo;문제 신고&rsquo;)가 있고, 운영자가 신고를 확인해요. 운영 규칙을 어기는 계정은 AI 기능을 막을 수 있어요.
+          </li>
           <li>
             Anthropic의 이용 정책과 미성년자 이용 지침(AI라는 것을 알리기, 맞지 않는 내용 거르기, 살펴보고 신고받기, 안전하게 쓰는 법 안내)과 한국의 개인정보
             보호법·인공지능기본법을 지키려고 노력해요.

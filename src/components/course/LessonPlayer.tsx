@@ -12,7 +12,6 @@ import {
   CHECK_RETRIES,
   checkAnswerText,
   choiceOrder,
-  clozeBlank,
   lessonSteps,
   matchColumns,
   orderCorrect,
@@ -23,6 +22,7 @@ import {
   type LessonResult,
   type Stars as StarCount,
 } from '@/lib/course';
+import { clozeBlank } from '@/lib/cloze';
 import { lessonStepSnapshot } from '@/lib/report';
 import { questionFigure, type SourceFigure } from '@/lib/source-figures';
 import { RichText } from '../RichText';

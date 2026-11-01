@@ -12,7 +12,9 @@ import {
   legacyReportReason,
   lessonSnapshot,
   lessonStepSnapshot,
+  questionSnapshot,
   reportReason,
+  reportTextProblem,
   storedChatSolution,
 } from '@/lib/report';
 
@@ -131,5 +133,45 @@ describe('신고 (lib/report.ts)', () => {
     expect(r).toContain('--- 신고한 결과 ---');
     expect(r.length).toBe(1000);
     expect(legacyReportReason('chat', '틀려요', null)).toBe('[채팅 답] 틀려요');
+  });
+});
+
+describe('문제 신고: 보낼 글 검사·문제 모습', () => {
+  it('이유 칩만·보통 글은 보낸다 (공부 글의 비슷한 말은 막지 않는다)', () => {
+    for (const ok of [
+      '정답이 틀렸어요',
+      '정답이 틀렸어요: ②가 아니라 ③이에요',
+      '해설이 틀렸어요: 씨 발아 실험에서 빛은 필요 없어요',
+      '문제나 보기가 이상해요: 전쟁이 영향을 미친 년도가 틀려요',
+      '불이 꺼져요가 아니라 꺼지지 않아요',
+      'ㄱ, ㄴ, ㄷ, ㄹ, ㅁ, ㅂ, ㅅ 순서가 틀렸어요',
+      '시발점이 틀렸어요',
+      'this hit is wrong',
+      'ㄱㄴ',
+    ])
+      expect(reportTextProblem(ok), ok).toBeNull();
+  });
+
+  it('링크·개인정보·욕설·알아볼 수 없는 글은 막고 고칠 말을 준다', () => {
+    expect(reportTextProblem('정답이 틀렸어요: https://example.com 참고')).toMatch(/링크/);
+    expect(reportTextProblem('www.naver.com 보세요')).toMatch(/링크/);
+    expect(reportTextProblem('010-1234-5678로 연락 주세요')).toMatch(/개인정보/);
+    expect(reportTextProblem('me@example.com')).toMatch(/개인정보/);
+    expect(reportTextProblem('이거 씨1발 뭐야')).toMatch(/고운 말/);
+    expect(reportTextProblem('ㅅㅂ 틀렸네')).toMatch(/고운 말/);
+    expect(reportTextProblem('what the fuck')).toMatch(/고운 말/);
+    expect(reportTextProblem('정답이 틀렸어요: ?!?!?!')).toMatch(/글로/);
+    expect(reportTextProblem('ㅋㅋㅋㅋㅋㅋ')).toMatch(/알아볼 수 있게/);
+    expect(reportTextProblem('ㅁㄴㅇㄹ')).toMatch(/알아볼 수 있게/);
+    expect(reportTextProblem('aaaaaa')).toMatch(/알아볼 수 있게/);
+  });
+
+  it('문제 신고의 이유와 문제 모습 (운영자가 읽는다)', () => {
+    expect(REPORT_KINDS).toContain('question');
+    expect(REPORT_REASONS.question.at(-1)).toBe(REPORT_HARMFUL);
+    const s = questionSnapshot({ type: 'mcq', prompt: '광합성이 일어나는 곳은?', choices: ['뿌리', '잎'], answer: 1, explanation: '잎의 엽록체' });
+    expect(s).toBe('문제(mcq): 광합성이 일어나는 곳은?\n보기: 1) 뿌리 2) 잎\n정답: 2번 (잎)\n해설: 잎의 엽록체');
+    expect(questionSnapshot({ type: 'ox', prompt: 'p', choices: null, answer: false })).toContain('정답: X');
+    expect(questionSnapshot({ type: 'short', prompt: 'x'.repeat(5000), choices: null, answer: 'a' }).length).toBeLessThanOrEqual(REPORT_SNAPSHOT_MAX);
   });
 });

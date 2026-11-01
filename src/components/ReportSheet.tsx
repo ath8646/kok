@@ -1,16 +1,18 @@
 'use client';
-// '이상해요' 신고: AI 가 만든 노트·채팅 답·표지 그림·테마 그림·레슨에서 틀리거나 이상한 곳을 알린다 (/api/reports).
-// 이유를 하나 고르고(칩, 다시 누르면 풀림) 더 적을 말은 글로. 보내면 알림을 띄우고 닫는다.
+// 신고 ('문제 신고'·'이상해요'): 복습 문제와 AI 가 만든 노트·채팅 답·표지 그림·테마 그림·레슨에서 틀리거나 이상한 곳을 운영자에게 알린다 (/api/reports).
+// 이유를 하나 고르고(칩, 다시 누르면 풀림) 더 적을 말은 글로. 보내기 전에 글을 검사하고(reportTextProblem: 서버도 같은 검사),
+// 보내면 고맙다는 알림을 띄우고 닫는다.
 // - ReportForm: 시트 없이 쓰는 몸통 (표지 그림 창처럼 이미 열린 시트 안에서 내용만 바꿔 보일 때)
 // - ReportSheet: 시트 + 몸통. 전체 화면 창(레슨·테마 만들기) 안에 두면 그 창 위에 뜬다 (Esc 는 그 창이 먼저 받으니 창이 닫기를 막는다)
 import { useEffect, useId, useRef, useState } from 'react';
-import { REPORT_REASONS, REPORT_REASON_MAX, reportReason, type ReportKind } from '@/lib/report';
-import { Button, DONE, ICONS, Icon, Sheet, api, cx, inputClass, useToast } from './ui';
+import { REPORT_REASONS, REPORT_REASON_MAX, reportReason, reportTextProblem, type ReportKind } from '@/lib/report';
+import { ApiError, Button, ICONS, Icon, Sheet, api, cx, inputClass, useToast } from './ui';
 
 /** 무엇을 신고하는지: target 은 서버가 결과를 다시 읽을 번호, snapshot 은 저장하지 않는 결과(홈 채팅 답·보던 칸) */
 export type ReportWhat = { kind: ReportKind; target?: string; snapshot?: string };
 
 const INTRO: Record<ReportKind, string> = {
+  question: '문제·정답·해설에서 틀리거나 이상한 곳을 알려 주세요. 관리자가 확인하고, 틀린 문제는 복습에서 뺄게요.',
   note: '정리나 그림에서 틀린 곳, 이상한 곳을 알려 주세요. 관리자가 확인해요. 직접 고칠 수도 있어요.',
   chat: 'AI 답에서 틀리거나 이상한 곳을 알려 주세요. 관리자가 확인하고 더 잘 답하게 고칠게요.',
   cover: '표지 그림이 노트와 맞지 않거나 이상하면 알려 주세요. 다시 그리기로 새로 그릴 수도 있어요.',
@@ -18,6 +20,7 @@ const INTRO: Record<ReportKind, string> = {
   course: '레슨에서 틀리거나 이상한 곳을 알려 주세요. 지금 보던 카드나 문제도 같이 보내요.',
 };
 const PLACEHOLDER: Record<ReportKind, string> = {
+  question: '예: 정답이 ②가 아니라 ③이에요',
   note: '예: 2번 개념 설명이 교과서와 달라요',
   chat: '예: 3단계 계산이 틀렸어요',
   cover: '예: 연표의 순서가 거꾸로예요',
@@ -29,6 +32,7 @@ export function ReportForm({ what, onDone, autoFocus = false }: { what: ReportWh
   // 이미 열린 창의 내용이 바뀌어 신고 칸이 될 때 (표지 창): 누른 단추가 사라지니 첫 이유 칩에 초점
   const reasons = useRef<HTMLDivElement>(null);
   const reasonsId = useId();
+  const problemId = useId();
   useEffect(() => {
     if (autoFocus) reasons.current?.querySelector<HTMLButtonElement>('button')?.focus();
   }, [autoFocus]);
@@ -36,16 +40,25 @@ export function ReportForm({ what, onDone, autoFocus = false }: { what: ReportWh
   const [picked, setPicked] = useState<string | null>(null);
   const [text, setText] = useState('');
   const [busy, setBusy] = useState(false);
+  /** 보낼 수 없는 글일 때 고칠 말 (칸 아래에) */
+  const [problem, setProblem] = useState<string | null>(null);
   const reason = reportReason(picked, text);
   const send = async () => {
     if (!reason || busy) return;
+    const p = reportTextProblem(reason);
+    setProblem(p);
+    if (p) return;
     setBusy(true);
     try {
       await api('/api/reports', { method: 'POST', body: JSON.stringify({ ...what, reason }) });
-      toast('신고했어요. 고마워요!', 'ok', DONE);
+      // 고맙다는 말은 늘 (완료 알림을 꺼도)
+      toast('신고해 주셔서 감사합니다! 꼼꼼히 확인할게요.', 'ok');
       onDone();
     } catch (e) {
-      toast((e as Error).message, 'bad');
+      const m = (e as Error).message;
+      // 서버의 글 검사에 걸리면 칸 아래에, 그 밖의 오류는 알림으로
+      if (e instanceof ApiError && e.code === 'bad_report_text') setProblem(m);
+      else toast(m, 'bad');
       setBusy(false);
     }
   };
@@ -80,14 +93,24 @@ export function ReportForm({ what, onDone, autoFocus = false }: { what: ReportWh
         </div>
       </div>
       <textarea
-        className={cx(inputClass, 'min-h-24')}
+        className={cx(inputClass, 'min-h-24', problem && 'border-bad!')}
         value={text}
         // 고른 이유('…: ')와 합쳐 1000자 안
         maxLength={REPORT_REASON_MAX - 100}
-        onChange={(e) => setText(e.target.value)}
+        onChange={(e) => {
+          setText(e.target.value);
+          if (problem) setProblem(null);
+        }}
         placeholder={picked ? '더 알려 줄 것이 있으면 적어 주세요 (없어도 돼요)' : PLACEHOLDER[what.kind]}
         aria-label="자세한 내용"
+        aria-invalid={problem ? true : undefined}
+        aria-describedby={problem ? problemId : undefined}
       />
+      {problem ? (
+        <p id={problemId} role="alert" className="-mt-1 text-sm font-semibold text-bad">
+          {problem}
+        </p>
+      ) : null}
       <Button type="submit" size="lg" disabled={!reason} busy={busy}>
         <Icon d={ICONS.flag} size={18} />
         보내기
@@ -98,7 +121,7 @@ export function ReportForm({ what, onDone, autoFocus = false }: { what: ReportWh
 
 export function ReportSheet({ what, onClose }: { what: ReportWhat | null; onClose: () => void }) {
   return (
-    <Sheet open={!!what} onClose={onClose} title="이상해요">
+    <Sheet open={!!what} onClose={onClose} title={what?.kind === 'question' ? '문제 신고' : '이상해요'}>
       {what ? <ReportForm key={`${what.kind}:${what.target ?? ''}`} what={what} onDone={onClose} /> : null}
     </Sheet>
   );

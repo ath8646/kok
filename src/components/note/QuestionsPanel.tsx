@@ -9,6 +9,7 @@ import { QuestionEditor } from '../QuestionEditor';
 import { QuestionList, QuestionPreview, createOwnQuestion, type CardInfo, type QuestionRemoval } from '../QuestionList';
 import { ApiError, Button, Energy, LinkButton, Sheet, api, useToast, DONE } from '../ui';
 import { questionFigure, type SourceFigure } from '@/lib/source-figures';
+import { examStyle } from '@/lib/exam-layout';
 
 /** figure_id: 그림 문제의 자료 그림 번호 (바꿀 때 서버가 노트의 그림을 붙인다) */
 type PreviewRow = Pick<QuestionRow, 'type' | 'prompt' | 'choices' | 'answer' | 'accepted' | 'explanation' | 'difficulty' | 'pages'> & {
@@ -29,10 +30,15 @@ export function QuestionsPanel({
   removeMany,
   oldVersion,
   figures = [],
+  subjectName,
+  material,
 }: {
   me: MeResponse;
   noteId: string;
   subjectId: string;
+  /** 과목 이름과 노트의 자료 종류 (과목마다 시험지 모양: examStyle) */
+  subjectName?: string;
+  material?: string | null;
   questions: QuestionRow[];
   cards: Map<string, CardInfo>;
   keyPoints: Array<{ id: string; title: string }>;
@@ -114,6 +120,7 @@ export function QuestionsPanel({
         removeMany={removeMany}
         conceptEdit={oldVersion?.setConcept}
         emptyText={oldVersion ? '이 버전에는 문제가 없어요.' : '이 노트에는 아직 문제가 없어요.'}
+        styleOf={(q) => examStyle({ subject: subjectName, material, text: q.prompt })}
       />
 
       <Sheet open={adding} onClose={() => setAdding(false)} title="문제 직접 만들기">
@@ -186,7 +193,7 @@ export function QuestionsPanel({
                 const f = q.figure_id ? figures.find((x) => x.id === q.figure_id) : undefined;
                 return (
                   <li key={i} className="rounded-2xl border border-line p-3">
-                    <QuestionPreview q={f ? { ...q, source_figure: questionFigure(f) } : q} />
+                    <QuestionPreview q={f ? { ...q, source_figure: questionFigure(f) } : q} style={examStyle({ subject: subjectName, material, text: q.prompt })} />
                   </li>
                 );
               })}

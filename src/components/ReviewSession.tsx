@@ -8,7 +8,7 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, typ
 import { useMe } from '@/components/AppShell';
 import { MindMap } from '@/components/MindMap';
 import { QuestionCard, type GradeOutcome, type ReviewQuestion } from '@/components/QuestionCard';
-import { ReportSheet } from '@/components/QuestionList';
+import { ReportSheet, type ReportWhat } from '@/components/ReportSheet';
 import { ReviewStart, StartSkeleton, type StartChoice, type StartPick } from '@/components/review/ReviewStart';
 import { Button, Card, EmptyState, ICONS, Icon, LargeHeader, LinkButton, Sheet, Swap, api, cx, useToast } from '@/components/ui';
 import {
@@ -45,7 +45,8 @@ import { warmHome } from '@/lib/home-data';
 import { readView, viewStamp, writeView } from '@/lib/view-cache';
 import { resumePlan, sessionTally, type AnswerResult, type ResumeResult, type SessionKey, type SessionRow } from '@/lib/review-session';
 import { kstDateString } from '@/lib/time';
-import { dueLabel, reviewCard, type StoredCard } from '@/lib/srs';
+import { reviewCard, type StoredCard } from '@/lib/srs';
+import { examStyle } from '@/lib/exam-layout';
 import { ACCEPTED_MAX_CHARS, zMindmap, type Mindmap } from '@/lib/ai/schemas';
 import type { CardRow, MeResponse, QuestionRow } from '@/lib/types';
 
@@ -341,7 +342,7 @@ export function ReviewSession({
   const [stopped, setStopped] = useState(false);
   const [now, setNow] = useState(0);
   const [visual, setVisual] = useState<{ spec: Mindmap; kp: string | null } | null>(null);
-  const [reportQ, setReportQ] = useState<QuestionRow | null>(null);
+  const [report, setReport] = useState<ReportWhat | null>(null);
   const [streak, setStreak] = useState(0);
   // 끝 화면에서 '조금 더 하기'·'한 번 더 풀기'로 돌아온 횟수: 그때는 탭을 바꿀 때처럼 화면이 살짝 떠오른다
   const [round, setRound] = useState(0);
@@ -798,12 +799,8 @@ export function ReviewSession({
             q={item.q as ReviewQuestion}
             index={idx}
             progress={progressOf(queue, idx)}
-            nextLabel={(rating) => {
-              const c = item.card;
-              const stored: StoredCard = { due: c.due, state: c.state, reps: c.reps, lapses: c.lapses, last_review: c.last_review, fsrs: c.fsrs ?? {} };
-              return dueLabel(reviewCard(stored, rating, new Date(), settings.retention).due);
-            }}
             subjectName={subjectNames.get(item.q.subject_id)}
+            style={examStyle({ subject: subjectNames.get(item.q.subject_id), text: item.q.prompt })}
             onSubmit={onSubmit}
             autoRate={(correct, ms) => autoRating(item.q.type, correct, ms)}
             onNext={onNext}
@@ -815,19 +812,14 @@ export function ReviewSession({
               if (error) toast('저장하지 못했어요.', 'bad');
             }}
             onShowVisual={item.q.note_id ? showVisual : undefined}
-            onReport={() => setReportQ(item.q)}
+            onReport={() => setReport({ kind: 'question', target: item.q.id })}
           />
         ) : null}
-        <p className="text-center text-xs text-muted">
-          <Link href="/ai-guide" className="underline">
-            AI가 만든 문제는 틀릴 수 있어요
-          </Link>
-        </p>
 
         <Sheet open={!!visual} onClose={() => setVisual(null)} title="그림으로 보기">
           {visual ? <MindMap spec={visual.spec} settings={me.settings.visual} highlightKeyPoint={visual.kp} /> : null}
         </Sheet>
-        <ReportSheet q={reportQ} onClose={() => setReportQ(null)} onChanged={() => {}} figuresOn={figuresOn} />
+        <ReportSheet what={report} onClose={() => setReport(null)} />
       </>
     ) : null;
 

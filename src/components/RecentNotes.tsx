@@ -207,7 +207,7 @@ export function RecentNotes({
 
       {/* 여러 개 고르기: 아래 띠 (폰은 아래 메뉴 자리, 넓은 화면은 가운데 떠 있는 띠) */}
       {selecting ? (
-        <SelectionBar count={pickedRows.length} noun="노트">
+        <SelectionBar count={pickedRows.length} noun="노트" onClear={endSelect}>
           {organize ? (
             <BarAction icon={ICONS.star} label={labels.star ? '별표' : '별표 빼기'} disabled={off} busy={busy === 'star'} onClick={() => void patch('star')} />
           ) : null}

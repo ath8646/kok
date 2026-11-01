@@ -208,7 +208,7 @@ export function NotePdfs({ noteId, noteTitle, canCreate }: { noteId: string; not
       {!selecting && list.length > 1 ? <p className="-mt-1 px-1 text-xs text-muted">카드를 꾹 누르면 여러 개를 한꺼번에 지울 수 있어요.</p> : null}
 
       {selecting ? (
-        <SelectionBar count={pickedRows.length} noun="PDF">
+        <SelectionBar count={pickedRows.length} noun="PDF" onClear={endSelect}>
           <BarAction
             icon={ICONS.trash}
             label={pickedRows.length ? `${pickedRows.length}개 지우기` : '지울 PDF를 골라 주세요'}

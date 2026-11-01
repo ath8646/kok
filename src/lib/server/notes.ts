@@ -138,7 +138,7 @@ export function noteForPrompt(note: Note, maxChars = NOTE_PROMPT_MAX_CHARS): str
   return out;
 }
 
-/** 채점·문제 고치기에 쓸 노트 일부 (그 개념 + 요약) */
+/** 채점에 쓸 노트 일부 (그 개념 + 요약) */
 export function noteExcerpt(note: Note, keyPointId: string | null): string {
   const kp = keyPointId ? note.key_points.find((k) => k.id === keyPointId) : undefined;
   return JSON.stringify({

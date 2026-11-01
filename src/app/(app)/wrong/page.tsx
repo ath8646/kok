@@ -373,7 +373,7 @@ export default function WrongPage() {
 
       {/* 여러 개 고르기: 아래 띠 (폰은 아래 메뉴 자리, 넓은 화면은 가운데 떠 있는 띠) */}
       {selecting ? (
-        <SelectionBar count={pickedCount} noun="문제">
+        <SelectionBar count={pickedCount} noun="문제" onClear={endSelect}>
           <BarAction
             icon={ICONS.check}
             label={pickedCount ? `${pickedCount}개 다 외웠어요 · 빼기` : '뺄 문제를 골라 주세요'}

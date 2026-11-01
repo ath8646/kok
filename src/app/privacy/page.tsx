@@ -10,7 +10,7 @@ export const revalidate = 300;
 export default async function PrivacyPage() {
   const site = await getSiteInfo();
   return (
-    <LegalPage title="개인정보처리방침" updated="2026년 10월 31일">
+    <LegalPage title="개인정보처리방침" updated="2026년 11월 1일">
       <p>KOK(이하 &lsquo;서비스&rsquo;)은 공부에 꼭 필요한 정보만 모으고, 이용자가 언제든 내려받거나 지울 수 있게 해요.</p>
 
       <Sec title="1. 모으는 정보와 이유">
@@ -69,7 +69,9 @@ export default async function PrivacyPage() {
                 <td className="py-2 pr-3">자료 공유(커뮤니티) 운영, 하루 받기 수 세기, 신고 확인과 규칙을 어긴 글 지우기</td>
               </tr>
               <tr className="border-b border-line align-top">
-                <td className="py-2 pr-3">&lsquo;이상해요&rsquo; 신고 내용(고른 이유, 적은 말, 신고할 때 본 AI 결과)</td>
+                <td className="py-2 pr-3">
+                  &lsquo;이상해요&rsquo;·&lsquo;문제 신고&rsquo; 내용(고른 이유, 적은 말, 신고할 때 본 AI 결과나 문제·정답·해설)
+                </td>
                 <td className="py-2 pr-3">AI가 만든 틀리거나 맞지 않는 내용을 확인하고 고치기</td>
               </tr>
               <tr className="border-b border-line align-top">

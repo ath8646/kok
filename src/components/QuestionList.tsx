@@ -1,6 +1,7 @@
 'use client';
-// 문제 관리: 보기, 고치기, 잠그기, 쉬게 하기, 지우기, 이상해요 신고.
-// 꾹 누르면(키보드는 Shift+F10) 여러 개 고르기: 아래 띠에서 한꺼번에 쉬게 하기·다시 내기·잠그기·지우기 (노트의 문제 탭·문제 모아 보기)
+// 문제 관리: 실제 시험지처럼 보기(번호·발문·자료 상자·①② 보기, 펼치면 정답·해설), 고치기, 잠그기, 쉬게 하기, 지우기, 문제 신고.
+// 과목마다 시험지 모양이 다르다 (lib/exam-layout.ts examStyle: 과목 이름·노트 자료 종류·문제 글).
+// 꾹 누르면(키보드는 Shift+F10) 여러 개 고르기: 아래 띠에서 한꺼번에 쉬게 하기·다시 내기·잠그기·지우기·선택 해제 (노트의 문제 탭·문제 모아 보기)
 import { useMemo, useState, type ReactNode } from 'react';
 import type { QuestionRow } from '@/lib/types';
 import { THINK_OUT, estimateSmallTask } from '@/lib/ai/models';
@@ -12,58 +13,79 @@ import { QuestionFigure, StepsDisclosure, useSolution } from './figure/SolutionV
 import { SourceFigureView } from './figure/SourceFigureView';
 import { readQuestionFigure } from '@/lib/source-figures';
 import { QuestionEditor, type QuestionDraft } from './QuestionEditor';
-import { answerText, type ReviewQuestion } from './QuestionCard';
 import { RichText } from './RichText';
-import { PromptText } from './PromptText';
-import { Button, Chip, Energy, ICONS, Icon, IconButton, Sheet, cx, inputClass, api, useToast, DONE } from './ui';
+import { ExamPrompt, ExplainText, examAsk } from './exam/ExamText';
+import { ReportSheet, type ReportWhat } from './ReportSheet';
+import { choiceMark, examStyle, questionFormat, type ExamStyle } from '@/lib/exam-layout';
+import { Button, Chip, Energy, ICONS, Icon, IconButton, Sheet, cx, api, useToast, DONE } from './ui';
 import { BarAction, PICKED_RING, PickBadge, SelectionBar, pickKeyHandler, useMultiSelect } from './SelectionBar';
 import { useLongPress } from './useLongPress';
 
 /** 한 번에 고치는 문제 수 (주소 길이를 넘지 않게) */
 const BULK = 100;
 
-const TYPE_LABEL = { mcq: '객관식', ox: 'OX', cloze: '빈칸', short: '단답' } as const;
+/** 정답을 한 줄 글로 (객관식은 ③ 보기 글, OX 는 O·X) */
+function answerLine(q: Pick<QuestionRow, 'type' | 'choices' | 'answer'>): string {
+  if (q.type === 'mcq') return `${choiceMark(Number(q.answer))} ${q.choices?.[Number(q.answer)] ?? ''}`;
+  if (q.type === 'ox') return q.answer ? 'O' : 'X';
+  return String(q.answer ?? '');
+}
 
+/**
+ * 문제 하나를 시험지처럼: 발문·자료 상자·<보기>(ExamPrompt) → ①② 보기 → (정답을 보이면) 정답·해설 칸.
+ * style: 과목마다 시험지 모양 (없으면 문제 글로 짐작)
+ */
 export function QuestionPreview({
   q,
   showAnswer = true,
+  style,
 }: {
   q: Pick<QuestionRow, 'type' | 'prompt' | 'choices' | 'answer' | 'explanation'> & { figure?: unknown; steps?: unknown; source_figure?: unknown };
   showAnswer?: boolean;
+  style?: ExamStyle;
 }) {
   const solution = useSolution(q);
   const { me } = useMe();
   // 자료 그림 문제: 답을 보여 줄 때는 그림의 제목·설명도 (풀기 전에는 숨긴다)
   const sourceFig = useMemo(() => readQuestionFigure(q.source_figure), [q.source_figure]);
+  const st = style ?? examStyle({ text: q.prompt });
+  const descriptive = questionFormat(q).descriptive;
   return (
-    <div className="grid gap-1.5">
-      <p className="font-semibold leading-relaxed">
-        <PromptText text={q.prompt} />
-      </p>
+    <div className="grid gap-3">
+      <ExamPrompt text={q.prompt} style={st} />
       <QuestionFigure solution={solution} className="my-1" />
       {sourceFig ? (
         <SourceFigureView fig={sourceFig} variant={showAnswer ? 'card' : 'question'} originalFirst={!!me?.settings.visual.originalFirst} className="my-1" />
       ) : null}
       {q.type === 'mcq' && q.choices ? (
-        <ol className="grid gap-0.5 pl-1 text-sm">
+        <ol className="grid gap-1 text-[15px]" aria-label="선택지">
           {q.choices.map((c, i) => (
-            <li key={i} className={cx(showAnswer && Number(q.answer) === i ? 'font-bold text-ok' : 'text-muted')}>
-              {i + 1}. <RichText text={c} />
+            <li key={i} className={cx('kok-exam-step', showAnswer && Number(q.answer) === i ? 'font-bold text-ok' : 'text-ink')}>
+              <span aria-hidden="true">{choiceMark(i)}</span>
+              <span className="min-w-0">
+                <span className="sr-only">{i + 1}번 </span>
+                <RichText text={c} />
+              </span>
             </li>
           ))}
         </ol>
       ) : null}
       {showAnswer ? (
-        <p className="text-sm">
-          <b className="text-ok">정답</b> <RichText text={answerText(q as ReviewQuestion)} />
-        </p>
+        // 문제집의 정답·해설처럼: 가는 줄 아래에 정답, 해설 (여러 부분이면 한 줄씩)
+        <div className="grid gap-2 border-t border-dashed border-line pt-3 text-sm leading-relaxed">
+          <div className={descriptive ? 'grid gap-1' : undefined}>
+            <b className="text-ok">정답</b>{' '}
+            {descriptive ? <ExplainText text={answerLine(q)} /> : <RichText text={answerLine(q)} />}
+          </div>
+          {q.explanation ? (
+            <div className="grid gap-1 text-muted">
+              <b className="text-ink">{st === 'math' ? '풀이' : '해설'}</b>
+              <ExplainText text={q.explanation} />
+            </div>
+          ) : null}
+          <StepsDisclosure solution={solution} className="mt-1" />
+        </div>
       ) : null}
-      {showAnswer && q.explanation ? (
-        <p className="text-sm text-muted">
-          <RichText text={q.explanation} />
-        </p>
-      ) : null}
-      {showAnswer ? <StepsDisclosure solution={solution} className="mt-1" /> : null}
     </div>
   );
 }
@@ -92,6 +114,7 @@ export function QuestionList({
   removeMany,
   conceptEdit,
   emptyText = '문제가 없어요.',
+  styleOf,
 }: {
   questions: QuestionRow[];
   cards?: Map<string, CardInfo>;
@@ -106,12 +129,14 @@ export function QuestionList({
    */
   conceptEdit?: (questionId: string, keyPointId: string | null) => Promise<boolean>;
   emptyText?: string;
+  /** 문제마다 시험지 모양 (과목 이름·노트 자료 종류로: examStyle). 없으면 문제 글로 짐작 */
+  styleOf?: (q: QuestionRow) => ExamStyle;
 }) {
   const toast = useToast();
   const ask = useConfirm();
   const { me } = useMe();
   const [editing, setEditing] = useState<QuestionRow | null>(null);
-  const [reporting, setReporting] = useState<QuestionRow | null>(null);
+  const [reporting, setReporting] = useState<ReportWhat | null>(null);
   const [saving, setSaving] = useState(false);
   const [open, setOpen] = useState<string | null>(null);
   const [solving, setSolving] = useState<string | null>(null);
@@ -231,13 +256,16 @@ export function QuestionList({
       ) : questions.length > 1 ? (
         <p className="px-1 text-xs text-muted">문제를 꾹 누르면 여러 개를 골라 한꺼번에 쉬게 하거나 지울 수 있어요.</p>
       ) : null}
-      {questions.map((q) => {
+      {questions.map((q, i) => {
         const c = cards?.get(q.id);
         const isOpen = open === q.id;
+        const st = styleOf?.(q) ?? examStyle({ text: q.prompt });
         return (
           <QuestionItem
             key={q.id}
             q={q}
+            number={i + 1}
+            ask={examAsk(q.prompt, st)}
             selecting={selecting}
             picked={picked.has(q.id)}
             onPick={() => togglePick(q.id)}
@@ -246,7 +274,7 @@ export function QuestionList({
             onToggle={() => setOpen(isOpen ? null : q.id)}
             chips={
               <>
-                <Chip>{TYPE_LABEL[q.type]}</Chip>
+                <Chip>{questionFormat(q).label}</Chip>
                 {q.created_by === 'ai' ? <Chip>AI</Chip> : <Chip tone="ok">내가 만듦</Chip>}
                 {q.locked ? (
                   <Chip tone="hl">
@@ -262,7 +290,7 @@ export function QuestionList({
               </>
             }
           >
-            <QuestionPreview q={q} />
+            <QuestionPreview q={q} style={st} />
             <div className="flex flex-wrap gap-2">
               <Button size="sm" variant="secondary" onClick={() => setEditing(q)}>
                 고치기
@@ -295,8 +323,9 @@ export function QuestionList({
                   그림 풀이 만들기 <Energy n={solveEst} />
                 </Button>
               ) : null}
-              <Button size="sm" variant="ghost" onClick={() => setReporting(q)}>
-                이상해요
+              <Button size="sm" variant="ghost" onClick={() => setReporting({ kind: 'question', target: q.id })}>
+                <Icon d={ICONS.flag} size={15} />
+                문제 신고
               </Button>
               <Button
                 size="sm"
@@ -325,7 +354,7 @@ export function QuestionList({
 
       {/* 여러 개 고르기: 아래 띠 (폰은 아래 메뉴 자리, 넓은 화면은 가운데 떠 있는 띠) */}
       {selecting ? (
-        <SelectionBar count={chosen.length} noun="문제">
+        <SelectionBar count={chosen.length} noun="문제" onClear={endSelect}>
           <BarAction
             icon={anyActive || !restable.length ? ICONS.reviewOff : ICONS.review}
             label={anyActive || !restable.length ? '쉬기' : '다시 내기'}
@@ -410,7 +439,7 @@ export function QuestionList({
         ) : null}
       </Sheet>
 
-      <ReportSheet q={reporting} onClose={() => setReporting(null)} onChanged={onChanged} figuresOn={figuresOn} />
+      <ReportSheet what={reporting} onClose={() => setReporting(null)} />
     </div>
   );
 }
@@ -421,6 +450,8 @@ export function QuestionList({
  */
 function QuestionItem({
   q,
+  number,
+  ask,
   selecting,
   picked,
   onPick,
@@ -431,6 +462,10 @@ function QuestionItem({
   children,
 }: {
   q: QuestionRow;
+  /** 목록의 번호 (시험지처럼 1. 2. …) */
+  number: number;
+  /** 접혔을 때 보일 발문 */
+  ask: string;
   selecting: boolean;
   picked: boolean;
   onPick: () => void;
@@ -477,11 +512,15 @@ function QuestionItem({
           tabIndex={selecting ? -1 : undefined}
           aria-hidden={selecting || undefined}
         >
+          <span className="font-display text-[17px] leading-7 tabular-nums" aria-hidden="true">
+            {number}.
+          </span>
           <span className="min-w-0 flex-1">
             <span className="mb-1 flex flex-wrap items-center gap-1.5">{chips}</span>
+            {/* 접혔을 때: 묻는 문장 두 줄 (line-clamp 는 display 를 바꾸면 풀린다: block 을 같이 쓰지 않는다) */}
             {!isOpen ? (
-              <span className="line-clamp-2 block font-semibold">
-                <RichText text={q.prompt} />
+              <span className="line-clamp-2 font-semibold leading-relaxed">
+                <RichText text={ask} />
               </span>
             ) : null}
           </span>
@@ -496,157 +535,6 @@ function QuestionItem({
       </div>
       {selecting ? <PickBadge picked={picked} /> : null}
     </div>
-  );
-}
-
-type Proposal = Pick<QuestionRow, 'type' | 'prompt' | 'choices' | 'answer' | 'accepted' | 'explanation' | 'difficulty' | 'pages'> & { key_point_id: string };
-
-export function ReportSheet({
-  q,
-  onClose,
-  onChanged,
-  figuresOn = false,
-}: {
-  q: (Pick<QuestionRow, 'id' | 'type' | 'prompt' | 'choices' | 'answer' | 'explanation'> & { figure?: unknown; steps?: unknown }) | null;
-  onClose: () => void;
-  onChanged: () => void;
-  /** 그림 풀이 칸이 있는 DB 인지 (고친 문제로 바꾸면 예전 그림 풀이를 지운다) */
-  figuresOn?: boolean;
-}) {
-  const toast = useToast();
-  const [reason, setReason] = useState('');
-  const [fix, setFix] = useState(true);
-  const [busy, setBusy] = useState(false);
-  const [result, setResult] = useState<{ proposal: Proposal | null; removeSuggested?: boolean; fixError?: string } | null>(null);
-
-  const close = () => {
-    setReason('');
-    setResult(null);
-    setBusy(false);
-    onClose();
-  };
-
-  return (
-    <Sheet open={!!q} onClose={close} title="이상해요">
-      {q && !result ? (
-        <div className="grid gap-3">
-          <QuestionPreview q={q} />
-          <label className="grid gap-1.5 text-sm font-semibold">
-            무엇이 이상한가요?
-            <textarea
-              className={cx(inputClass, 'min-h-24 font-normal')}
-              value={reason}
-              maxLength={1000}
-              placeholder="예: 정답이 2번이 아니라 3번이에요"
-              onChange={(e) => setReason(e.target.value)}
-            />
-          </label>
-          <label className="flex items-center gap-2 text-sm">
-            <input type="checkbox" className="h-5 w-5 accent-[var(--accent)]" checked={fix} onChange={(e) => setFix(e.target.checked)} />
-            AI가 고친 문제를 제안받기 (에너지 1 미만)
-          </label>
-          <Button
-            busy={busy}
-            disabled={!reason.trim()}
-            onClick={async () => {
-              setBusy(true);
-              try {
-                const r = await api<{ proposal: Proposal | null; removeSuggested?: boolean; fixError?: string }>(`/api/questions/${q.id}/report`, {
-                  method: 'POST',
-                  body: JSON.stringify({ reason: reason.trim(), fix }),
-                });
-                if (!fix) {
-                  toast('신고했어요. 고마워요!', 'ok', DONE);
-                  close();
-                  return;
-                }
-                setResult(r);
-              } catch (e) {
-                toast((e as Error).message, 'bad');
-              } finally {
-                setBusy(false);
-              }
-            }}
-          >
-            보내기
-          </Button>
-        </div>
-      ) : null}
-      {q && result ? (
-        <div className="grid gap-3">
-          <p className="text-sm text-muted">신고가 들어갔어요.</p>
-          {result.proposal ? (
-            <>
-              <p className="font-bold">AI가 고친 문제</p>
-              <div className="rounded-2xl border-2 border-accent p-4">
-                <QuestionPreview q={result.proposal} />
-              </div>
-              <div className="flex gap-2">
-                <Button
-                  onClick={async () => {
-                    const p = result.proposal!;
-                    const { error } = await sb()
-                      .from('questions')
-                      .update({
-                        type: p.type,
-                        prompt: p.prompt,
-                        choices: p.choices,
-                        answer: p.answer,
-                        accepted: p.accepted,
-                        explanation: p.explanation,
-                        difficulty: p.difficulty,
-                        edited: true,
-                        ...(figuresOn && (q.steps || q.figure) && clearsSolution(q, p) ? { figure: null, steps: null } : {}),
-                      })
-                      .eq('id', q.id);
-                    if (error) toast('바꾸지 못했어요.', 'bad');
-                    else {
-                      toast('고친 문제로 바꿨어요.', 'ok', DONE);
-                      onChanged();
-                      close();
-                    }
-                  }}
-                >
-                  이걸로 바꾸기
-                </Button>
-                <Button variant="ghost" onClick={close}>
-                  그대로 두기
-                </Button>
-              </div>
-            </>
-          ) : result.removeSuggested ? (
-            <>
-              <p>AI는 이 문제를 지우는 게 좋겠다고 했어요.</p>
-              <div className="flex gap-2">
-                <Button
-                  variant="danger"
-                  onClick={async () => {
-                    const { error } = await sb().from('questions').delete().eq('id', q.id);
-                    if (error) toast('지우지 못했어요.', 'bad');
-                    else {
-                      onChanged();
-                      close();
-                    }
-                  }}
-                >
-                  지우기
-                </Button>
-                <Button variant="ghost" onClick={close}>
-                  그대로 두기
-                </Button>
-              </div>
-            </>
-          ) : (
-            <>
-              <p className="text-sm">{result.fixError ?? '고친 문제를 만들지 못했어요.'} 직접 고칠 수도 있어요.</p>
-              <Button variant="secondary" onClick={close}>
-                닫기
-              </Button>
-            </>
-          )}
-        </div>
-      ) : null}
-    </Sheet>
   );
 }
 

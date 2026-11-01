@@ -2073,7 +2073,7 @@ body.kok-editing .kok-fab {
   }
 }
 
-/* 문제 글의 <보기> 상자 (실제 시험처럼 위 가운데에 이름: components/PromptText.tsx) */
+/* 문제 글의 <보기> 상자 (실제 시험처럼 위 가운데에 이름: components/exam/ExamText.tsx) */
 .kok-bogi {
   display: block;
   position: relative;
@@ -2102,4 +2102,87 @@ body.kok-editing .kok-fab {
   padding-left: 1.5em;
   text-indent: -1.5em;
   line-height: 1.65;
+}
+
+/* ------------------------------------------------------------ 시험지 (문제 글: lib/exam-layout.ts → components/exam/ExamText.tsx)
+   발문은 굵게, 자료·지문은 가는 테두리 상자 (과목마다: 국어·영어는 명조 계열의 읽는 지문, 코딩은 코드 칸 그대로),
+   ①② 단계·(가) 조건은 내어쓰기, ㉠ 표시는 굵게, 빈칸 (가)는 작은 칸. 원래 문제 번호는 작은 알약 */
+:root {
+  --font-exam-serif: 'Gowun Batang', 'Noto Serif KR', 'Nanum Myeongjo', 'NanumMyeongjo', 'AppleMyungjo', 'Batang', serif;
+}
+.kok-exam-label {
+  justify-self: start;
+  border-radius: 999px;
+  background: var(--surface-2);
+  padding: 2px 10px;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--muted);
+}
+.kok-exam-stem {
+  font-weight: 600;
+  line-height: 1.6;
+  white-space: pre-wrap;
+}
+.kok-exam-box {
+  display: grid;
+  gap: 6px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: var(--surface);
+  padding: 12px 14px;
+  font-size: 0.92em;
+  font-weight: 400;
+  line-height: 1.7;
+}
+/* 국어·영어: 읽는 지문 (명조 계열, 문단 첫 줄 들여쓰기). 설정에서 글꼴을 골랐거나 시그니처 테마면 그 글꼴 그대로 */
+.kok-exam-box:is([data-style='korean'], [data-style='english']) {
+  line-height: 1.85;
+}
+:root:not([data-font]):not([data-skin]) .kok-exam-box:is([data-style='korean'], [data-style='english']) {
+  font-family: var(--font-exam-serif);
+}
+.kok-exam-box:is([data-style='korean'], [data-style='english']) > .kok-exam-p {
+  text-indent: 1em;
+}
+/* 코딩: 코드 블록이 이미 칸이라 상자 테두리 없이 */
+.kok-exam-box[data-style='code'] {
+  border: 0;
+  background: none;
+  padding: 0;
+}
+.kok-exam-head {
+  font-weight: 700;
+  font-size: 0.95em;
+}
+.kok-exam-step,
+.kok-explain-step {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  column-gap: 0.45em;
+}
+.kok-exam-step-mark {
+  font-weight: 400;
+}
+.kok-exam-mark {
+  font-weight: 700;
+}
+.kok-exam-blank {
+  display: inline-block;
+  margin: 0 0.1em;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 0 0.3em;
+  font-size: 0.92em;
+  font-weight: 600;
+  line-height: 1.4;
+  text-indent: 0;
+}
+.kok-exam > .kok-bogi {
+  margin: 6px 0 0;
+}
+/* 복습 채점 띠의 정답·해설 칸: 띠 안에서만 넘긴다. 아래에 더 읽을 글이 있으면 끝을 흐리게 */
+.kok-feedback-body.is-more {
+  -webkit-mask-image: linear-gradient(to bottom, #000 calc(100% - 28px), transparent);
+  mask-image: linear-gradient(to bottom, #000 calc(100% - 28px), transparent);
 }

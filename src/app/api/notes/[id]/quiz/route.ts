@@ -23,6 +23,7 @@ import {
 import { figuresForPrompt, questionFigure, readFigures, type SourceFigure } from '@/lib/source-figures';
 import { normalizeAnswer } from '@/lib/grading';
 import { readNoteMaterial } from '@/lib/material-type';
+import { examStyle } from '@/lib/exam-layout';
 
 // 문제 만들기(최대 140초) + 검사(최대 60초)
 export const maxDuration = 300;
@@ -85,6 +86,9 @@ export async function POST(req: NextRequest, ctx: RouteContext<'/api/notes/[id]/
 
     const qs = acc.settings.quiz;
     const material = readNoteMaterial(note.raw)?.type;
+    // 과목마다 시험지 꼴 (lib/exam-layout.ts): 과목 이름과 자료 종류로
+    const { data: subj } = await admin.from('subjects').select('name').eq('id', note.subject_id).maybeSingle();
+    const style = examStyle({ subject: typeof subj?.name === 'string' ? subj.name : '', material });
     const json = await runTask(admin, acc, app, {
       task: 'quiz',
       effortOf: 'quiz',
@@ -102,6 +106,7 @@ export async function POST(req: NextRequest, ctx: RouteContext<'/api/notes/[id]/
               originals: material === 'exam' ? kept.length : 0,
               covered: material === 'exam' ? [...new Set(kept.map((q) => String(q.key_point_id ?? '')).filter(Boolean))] : [],
               cards: material === 'vocab' ? kept.length : 0,
+              style,
             },
           ),
         ),

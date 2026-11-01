@@ -327,7 +327,7 @@ async def send_report(page, reason, text=None):
     if text:
         await rsheet.get_by_label("자세한 내용").fill(text)
     await rsheet.get_by_role("button", name="보내기").click()
-    await expect(page.get_by_text("신고했어요. 고마워요!").last).to_be_visible()
+    await expect(page.get_by_text("신고해 주셔서 감사합니다! 꼼꼼히 확인할게요.").last).to_be_visible()
 
 
 async def edit_on(page):
@@ -586,12 +586,12 @@ async def figure_steps(browser):
             await page.keyboard.press("Escape")
             await expect(zoom_q).to_have_count(0)
         await page.get_by_role("button", name="모르겠어요").click()
-        await expect(page.get_by_role("button", name="다음", exact=True)).to_be_visible(timeout=15000)
+        await expect(page.get_by_role("button", name="계속", exact=True)).to_be_visible(timeout=15000)
         if seen:
             await expect(page.locator("main")).to_contain_text("5세기 고구려 영토")
             await shot(page, "98-figure-question-result", full=False)
             break
-        await page.get_by_role("button", name="다음", exact=True).click()
+        await page.get_by_role("button", name="계속", exact=True).click()
     assert seen, "figure question did not show up"
     await ctx.close()
 
@@ -1010,13 +1010,15 @@ async def answer_any(page):
     """지금 문제에 아무 답이나 하고 다음으로 (유형마다)"""
     if await page.get_by_role("button", name="O 맞다").count():
         await page.get_by_role("button", name="X 틀리다").click()
+        await page.get_by_role("button", name="확인", exact=True).click()
     elif await page.get_by_label("답").count():
         await page.get_by_label("답").fill("모르겠다")
         await page.get_by_role("button", name="확인").click()
     else:
-        await page.locator("main button:has-text('1')").first.click()
-    await expect(page.get_by_role("button", name="다음", exact=True)).to_be_visible(timeout=15000)
-    await page.get_by_role("button", name="다음", exact=True).click()
+        await page.get_by_role("group", name="선택지").get_by_role("button").first.click()
+        await page.get_by_role("button", name="확인", exact=True).click()
+    await expect(page.get_by_role("button", name="계속", exact=True)).to_be_visible(timeout=15000)
+    await page.get_by_role("button", name="계속", exact=True).click()
 
 
 async def terminal_steps(browser, page):
@@ -2124,6 +2126,133 @@ async def relay_steps():
         db(f"delete from public.sources where id = '{sid}'")
 
 
+EXAM_Q1 = "안녕? 산으로 체험학습을 가야 하는데, 무엇을 주의해야 할까? ㉠ 산을 오를 때에는 혈당량이 낮아질 수 있고, 산 정상에 오랜 시간 머무르면 체온이 낮아질 수 있습니다. 따라서 에너지를 보충할 수 있는 간식을 준비하는 것이 좋습니다. ㉠의 상황에서 항상성을 유지하기 위해 사람의 몸에서 일어나는 혈당량 조절 과정과 체온 조절 과정을 각각 1가지씩 설명하시오."
+EXAM_A1 = "혈당량 조절: 혈당량이 낮아지면 이자에서 글루카곤이 분비되어 혈당량이 높아진다. 체온 조절: 체온이 낮아지면 근육이 떨려 열 발생량이 늘어 체온이 올라간다."
+EXAM_Q2 = "1-가-1) 플랑크톤 P의 광합성 여부를 검증하는 실험이다. 실험 과정은 ① 수조 A와 B에 해수를 채운다. ② 크기가 같은 P를 각각 넣는다. ③ (가) ④ 30분 후 P의 깊이를 확인한다. ⑤ P를 에탄올에 넣고 물 중탕한다. ⑥ P를 받침 유리 위에 올려놓고 (나) ⑦ 현미경으로 관찰한다. 실험 결과는 수조 A의 P만 떠올랐고, ⑦에서 수조 A의 P만 청람색으로 변했다. 빈칸 (가), (나)에 알맞은 실험 과정을 각각 설명하시오."
+EXAM_A2 = "(가) 수조 A에만 빛을 비춘다. (나) 아이오딘 용액을 떨어뜨린다."
+EXAM_Q3 = "다음은 사람의 혈당량 조절 과정을 나타낸 것이다. (가)는 혈당량이 높을 때, (나)는 혈당량이 낮을 때 일어나는 과정이다. 이에 대한 설명으로 옳은 것만을 <보기>에서 있는 대로 고른 것은?\n<보기>\nㄱ. (가)에서 인슐린이 분비된다.\nㄴ. (나)에서 글루카곤이 분비된다.\nㄷ. 이자는 내분비샘이다."
+
+
+async def exam_steps(browser):
+    """문제를 실제 시험지처럼 (과목마다 모양): 목록·풀기·채점 띠·문제 신고(검사·고맙다는 알림)·선택 해제.
+    학생의 과학 과목에 빈 노트를 만들고 문제 셋을 넣어 본다 (따로 돌리기: python3 e2e_exam.py)"""
+    step("exam paper: questions look like a real exam (material box, ①② steps, <보기>, the asked sentence in bold); solving is pick → 확인 → a feedback strip with 계속; 문제 신고 checks what is sent and says thanks")
+    student = USERS["student"][0]
+    ctx, page = await new_ctx(browser, "student")
+    subject = db(f"select id from public.subjects where user_id = '{student}' and name = '과학' order by created_at limit 1")
+    r = await page.request.post(BASE + "/api/notes/blank", headers={"origin": BASE}, data={"subjectId": subject, "title": "시험지 모양 노트"})
+    assert r.ok, (r.status, await r.text())
+    xsid = db(f"select id from public.sources where user_id = '{student}' and title = '시험지 모양 노트' order by created_at desc limit 1")
+    xnid = db(f"select id from public.notes where source_id = '{xsid}'")
+    rows = [
+        ("short", EXAM_Q1, None, json.dumps(EXAM_A1, ensure_ascii=False), "두 과정 모두 시상 하부가 조절해요."),
+        ("short", EXAM_Q2, None, json.dumps(EXAM_A2, ensure_ascii=False), "빛의 유무만 다르게 하고, 녹말이 생겼는지 확인해요."),
+        ("mcq", EXAM_Q3, json.dumps(["ㄱ", "ㄴ", "ㄱ, ㄷ", "ㄱ, ㄴ, ㄷ"], ensure_ascii=False), "3", "인슐린은 혈당량을 낮추고 글루카곤은 높여요."),
+    ]
+    for i, (t, prompt, choices, answer, ex) in enumerate(rows):
+        qid = db(
+            "insert into public.questions (user_id, note_id, subject_id, type, prompt, choices, answer, explanation, created_by, created_at) values "
+            f"('{student}', '{xnid}', '{subject}', '{t}', $q${prompt}$q$, {('$c$' + choices + '$c$::jsonb') if choices else 'null'}, $a${answer}$a$::jsonb, $e${ex}$e$, 'ai', now() + interval '{i} seconds') returning id"
+        ).splitlines()[0]
+        db(f"insert into public.cards (question_id, user_id, subject_id) values ('{qid}', '{student}', '{subject}')")
+    q1 = db(f"select id from public.questions where note_id = '{xnid}' and type = 'short' order by created_at limit 1")
+
+    # 문제 탭: 번호와 형식(서술형·객관식), 접으면 묻는 문장 두 줄. 펼치면 자료 상자(단계 한 줄씩)·발문·정답 줄
+    await page.goto(BASE + f"/notes/{xsid}?tab=questions")
+    items = page.locator("[data-question]")
+    await expect(items).to_have_count(3)
+    await expect(items.nth(0)).to_contain_text("서술형")
+    await expect(items.nth(2)).to_contain_text("객관식")
+    await expect(items.nth(1)).to_contain_text("빈칸 (가), (나)에 알맞은 실험 과정을 각각 설명하시오.")
+    await items.nth(1).get_by_text("보기", exact=True).click()
+    box = items.nth(1).get_by_role("group", name="자료")
+    await expect(box).to_be_visible()
+    for mark in ["①", "④", "⑦"]:
+        await expect(box.locator(".kok-exam-step-mark", has_text=mark)).to_have_count(1)
+    await expect(box.get_by_text("실험 결과는 수조 A의 P만 떠올랐고", exact=False)).to_be_visible()
+    await expect(items.nth(1).locator(".kok-exam-label")).to_have_text("1-가-1)")
+    await expect(items.nth(1).locator(".kok-exam-stem")).to_have_text("빈칸 (가), (나)에 알맞은 실험 과정을 각각 설명하시오.")
+    await expect(items.nth(1).locator(".kok-explain-step").first).to_contain_text("(가)")
+    await shot(page, "21x-exam-list", full=False)
+    await items.nth(2).get_by_text("보기", exact=True).click()
+    await expect(items.nth(2).get_by_role("group", name="보기")).to_contain_text("ㄷ. 이자는 내분비샘이다.")
+    await expect(items.nth(2).get_by_role("list", name="선택지")).to_contain_text("④")
+    await expect(items.nth(2).locator(".kok-exam-stem")).to_have_text(re.compile(r"^다음은 사람의 혈당량 조절 과정을 나타낸 것이다\. 이에 대한 설명으로"))
+    await no_hscroll(page, "exam list")
+
+    # 꾹 눌러 고르면 아래 띠의 '선택 해제'로 끝낸다 (위로 올라가지 않아도)
+    await long_press(page, items.nth(0))
+    clear = page.get_by_role("button", name="선택 해제 (1개 고름)")
+    await expect(clear).to_be_visible()
+    await clear.click()
+    await expect(page.get_by_role("toolbar", name=re.compile("^고른 문제"))).to_have_count(0)
+
+    # 문제 신고: 이유 + 적은 말. 링크는 칸 아래에서 막고, 고치면 보낸다 → 고맙다는 알림, 같은 신고는 한 번만
+    # (한 번에 한 문제만 펼친다: 2번을 다시 펼친다)
+    await items.nth(1).get_by_text("보기", exact=True).click()
+    await items.nth(1).get_by_role("button", name="문제 신고").click()
+    rsheet = page.get_by_role("dialog", name="문제 신고")
+    await expect(rsheet).to_be_visible()
+    await rsheet.get_by_role("button", name="정답이 틀렸어요").click()
+    await rsheet.get_by_label("자세한 내용").fill("https://example.com 참고하세요")
+    await rsheet.get_by_role("button", name="보내기").click()
+    await expect(rsheet.get_by_role("alert")).to_contain_text("링크")
+    await rsheet.get_by_label("자세한 내용").fill("(나)는 베네딕트 용액이에요")
+    await rsheet.get_by_role("button", name="보내기").click()
+    await expect(page.get_by_text("신고해 주셔서 감사합니다! 꼼꼼히 확인할게요.").last).to_be_visible()
+    await expect(rsheet).to_have_count(0)
+    rep = db("select target_type || '|' || reason || '|' || (snapshot like '문제(short): 1-가-1)%정답: (가)%')::text from public.reports order by created_at desc limit 1")
+    assert rep == "question|정답이 틀렸어요: (나)는 베네딕트 용액이에요|true", rep
+    n0 = len(ERRORS)
+    await items.nth(1).get_by_role("button", name="문제 신고").click()
+    await rsheet.get_by_role("button", name="정답이 틀렸어요").click()
+    await rsheet.get_by_label("자세한 내용").fill("(나)는 베네딕트 용액이에요")
+    await rsheet.get_by_role("button", name="보내기").click()
+    await expect(page.get_by_text("이미 보낸 신고예요", exact=False).last).to_be_visible()
+    # 일부러 낸 409 는 오류 목록에서 뺀다
+    assert all("/api/reports" in e or "status of 409" in e for e in ERRORS[n0:]), ERRORS[n0:]
+    del ERRORS[n0:]
+    await page.keyboard.press("Escape")
+    # 서버도 같은 검사를 한다 (욕설)
+    r = await page.request.post(BASE + "/api/reports", headers={"origin": BASE}, data={"kind": "question", "target": q1, "reason": "씨발 틀렸네"})
+    assert r.status == 400 and (await r.json())["error"] == "bad_report_text", (r.status, await r.text())
+
+    # 풀기: 서술형은 여러 줄 답안 칸, 자료 상자, 확인은 답을 적어야 켜진다
+    await page.goto(BASE + f"/notes/{xsid}/practice")
+    await expect(page.get_by_text(re.compile(r"^1 / 3$"))).to_be_visible(timeout=15000)
+    assert await page.get_by_label("답").evaluate("el => el.tagName") == "TEXTAREA"
+    await expect(page.get_by_role("group", name="자료")).to_contain_text("㉠ 산을 오를 때에는")
+    await expect(page.get_by_role("button", name="확인", exact=True)).to_be_disabled()
+    await shot(page, "21y-exam-solve", full=False)
+    # '모르겠어요'를 두 번 눌러도 채점 띠를 건너뛰지 않는다
+    await page.get_by_role("button", name="모르겠어요").dblclick()
+    await expect(page.get_by_text("정답을 확인해 봐요")).to_be_visible()
+    await page.wait_for_timeout(500)
+    await expect(page.get_by_text("정답을 확인해 봐요")).to_be_visible()
+    # 정답은 부분마다 한 줄 (이름은 굵게), '계속'은 내리지 않아도 보인다
+    await expect(page.locator("b", has_text="혈당량 조절").first).to_be_visible()
+    await expect(page.get_by_role("button", name="계속", exact=True)).to_be_in_viewport()
+    await shot(page, "21z-exam-feedback", full=False)
+    await page.get_by_role("button", name="계속", exact=True).click()
+    await expect(page.get_by_text(re.compile(r"^2 / 3$"))).to_be_visible()
+    await page.get_by_label("답").fill("빛을 비춘다")
+    await page.get_by_role("button", name="확인", exact=True).click()
+    await page.get_by_role("button", name="계속", exact=True).click()
+    # 객관식: 숫자 키로 고르고 Enter 로 확인, 한 번 더 Enter 로 계속
+    await expect(page.get_by_text(re.compile(r"^3 / 3$"))).to_be_visible()
+    await page.keyboard.press("4")
+    await expect(page.get_by_role("group", name="선택지").get_by_role("button").nth(3)).to_have_attribute("aria-pressed", "true")
+    await page.keyboard.press("Enter")
+    await expect(page.get_by_text("정답이에요")).to_be_visible()
+    await expect(page.get_by_role("button", name="계속", exact=True)).to_be_focused()
+    await page.keyboard.press("Enter")
+    # 틀린 두 문제는 한 번 더 나온다 (번호 대신 '한 번 더')
+    await expect(page.get_by_text("한 번 더", exact=True)).to_be_visible()
+    await page.get_by_role("button", name="그만하기").click()
+    await expect(page.get_by_role("heading", name="여기까지 풀었어요")).to_be_visible(timeout=10000)
+    await ctx.close()
+
+
 async def course_steps(browser, page, fig_sid, sid):
     """단계별 학습 (Max, 듀오링고식 레슨): 수준 고르기 → 길 → 칸 말풍선·건너뛰기 → 레슨(카드 → 그 카드 문제, 확인·채점 띠, 틀린 문제 다시,
     짝·순서 맞추기) → 끝 화면·다음 레슨 → 그만두기 묻기 → 틀린 문제 복습 → 핵심 정리 → 큰 노트 나눠 만들기 → 무료 계정
@@ -2513,6 +2642,9 @@ async def main():
         await shot(page, "07-processing", full=False)
         ok = await wait_ready(page)
         assert ok, "note did not become ready"
+        # 문제 지시에 과목마다 시험지 모양 지침 (prompts.ts SUBJECT_LAYOUT): 과학 과목이면 실험 과정·결과, (가)(나) 자료
+        layouts = json.loads(urllib.request.urlopen("http://localhost:54321/__stats").read()).get("quizLayouts", [])
+        assert layouts and layouts[-1] == "science", layouts
         step("note page")
         await expect(page.get_by_text("한 줄 요약")).to_be_visible()
         await shot(page, "08-note-summary")
@@ -3005,13 +3137,15 @@ async def main():
             card_text = await page.locator("main").inner_text()
             if await page.get_by_role("button", name="O 맞다").count():
                 await page.get_by_role("button", name="X 틀리다").click()
+                await page.get_by_role("button", name="확인", exact=True).click()
             elif await page.get_by_label("답").count():
                 await page.get_by_label("답").fill("잎의 구멍" if "기체가 드나드는" in card_text else "전분")
                 await page.get_by_role("button", name="확인").click()
             else:
-                await page.locator("main button:has-text('1')").first.click()
-            await expect(page.get_by_role("button", name="다음", exact=True)).to_be_visible(timeout=15000)
-            await page.get_by_role("button", name="다음", exact=True).click()
+                await page.get_by_role("group", name="선택지").get_by_role("button").first.click()
+                await page.get_by_role("button", name="확인", exact=True).click()
+            await expect(page.get_by_role("button", name="계속", exact=True)).to_be_visible(timeout=15000)
+            await page.get_by_role("button", name="계속", exact=True).click()
 
         await page.goto(BASE + "/home")
         await quick.click()
@@ -3104,6 +3238,7 @@ async def main():
             if await page.get_by_role("button", name="O 맞다").count():
                 answered_types.add("ox")
                 await page.get_by_role("button", name="X 틀리다").click()
+                await page.get_by_role("button", name="확인", exact=True).click()
             elif await page.get_by_label("답").count():
                 inp = page.get_by_label("답")
                 if "기체가 드나드는" in card_text:
@@ -3115,29 +3250,23 @@ async def main():
                 await page.get_by_role("button", name="확인").click()
             else:
                 answered_types.add("mcq")
-                await page.locator("main button:has-text('1')").first.click()
-            await expect(page.get_by_role("button", name="다음", exact=True)).to_be_visible(timeout=15000)
+                await page.get_by_role("group", name="선택지").get_by_role("button").first.click()
+                await page.get_by_role("button", name="확인", exact=True).click()
+            await expect(page.get_by_role("button", name="계속", exact=True)).to_be_visible(timeout=15000)
             if seen == 0:
                 await shot(page, "17-review-graded", full=False)
-                # 평가 단추: 다시·어려움·알맞음·쉬움이 저마다 다른 색 (고른 것은 그 색으로 채움), 다음 복습까지 보인다
-                rate = page.get_by_role("radiogroup", name="평가")
-                tones = await rate.evaluate(
-                    """(g) => [...g.querySelectorAll('[role=radio]')].map((b) => {
-                      const on = b.getAttribute('aria-checked') === 'true';
-                      const label = b.querySelector('span').textContent;
-                      return [label, on ? getComputedStyle(b).backgroundColor : getComputedStyle(b.querySelector('span')).color];
-                    })"""
-                )
-                assert [t[0] for t in tones] == ["다시", "어려움", "알맞음", "쉬움"], tones
-                assert len({t[1] for t in tones}) == 4, tones
-                await expect(rate.get_by_text(re.compile(r"^(곧|\d+(분|시간|일|달|년) 뒤)$")).first).to_be_visible()
-                await rate.get_by_role("radio", name=re.compile("^쉬움")).click()
-                await expect(rate.get_by_role("radio", name=re.compile("^쉬움"))).to_have_attribute("aria-checked", "true")
-                await shot(page, "17b-review-rating", full=False)
+                # 쉬움·어려움 평가는 없다 (맞음·틀림으로 정한다). 채점 띠는 화면 아래에 붙어 있고 '계속'은 내리지 않아도 보인다
+                assert await page.get_by_role("radiogroup", name="평가").count() == 0
+                await expect(page.get_by_text(re.compile("^(정답이에요|오답이에요|거의 맞았어요|정답을 확인해 봐요)$"))).to_be_visible()
+                await expect(page.get_by_role("button", name="계속", exact=True)).to_be_in_viewport()
+                # 'AI가 만든 문제는 틀릴 수 있어요' 대신 문제 신고 (위의 깃발·채점 띠)
+                assert await page.get_by_text("AI가 만든 문제는 틀릴 수 있어요").count() == 0
+                await expect(page.get_by_role("button", name="문제 신고").first).to_be_visible()
+                await shot(page, "17b-review-feedback", full=False)
             if "short" in answered_types and seen < 8 and "AI 채점" in await page.locator("main").inner_text():
                 await shot(page, "18-review-ai-grade", full=False)
             seen += 1
-            await page.get_by_role("button", name="다음", exact=True).click()
+            await page.get_by_role("button", name="계속", exact=True).click()
             await page.wait_for_timeout(200)
         if not await page.get_by_role("heading", name=re.compile("오늘 할 일 끝|다 풀었어요|다음에 또")).count():
             await shot(page, "debug-review")
@@ -3225,14 +3354,16 @@ async def main():
             """보이는 문제에 답하고 다음으로 (쓰는 답은 맞혀서 AI 채점을 부르지 않는다: AI 요청은 1분에 10번까지)"""
             if await page.get_by_role("button", name="O 맞다").count():
                 await page.get_by_role("button", name="O 맞다").click()
+                await page.get_by_role("button", name="확인", exact=True).click()
             elif await page.get_by_label("답").count():
                 card_text = await page.locator("main").inner_text()
                 await page.get_by_label("답").fill("기공" if "기체가 드나드는" in card_text else "녹말")
                 await page.get_by_role("button", name="확인").click()
             else:
-                await page.locator("main button:has-text('1')").first.click()
-            await expect(page.get_by_role("button", name="다음", exact=True)).to_be_visible(timeout=15000)
-            await page.get_by_role("button", name="다음", exact=True).click()
+                await page.get_by_role("group", name="선택지").get_by_role("button").first.click()
+                await page.get_by_role("button", name="확인", exact=True).click()
+            await expect(page.get_by_role("button", name="계속", exact=True)).to_be_visible(timeout=15000)
+            await page.get_by_role("button", name="계속", exact=True).click()
             await page.wait_for_timeout(150)
 
         # 문제 탭에서: 고르는 화면 없이 바로 그 노트의 첫 문제. 시간 제한·아래 메뉴 없이, 위에 노트 이름
@@ -3301,6 +3432,8 @@ async def main():
         await expect(page.get_by_text(re.compile(r"^1 / \d+$"))).to_be_visible()
         await page.get_by_role("button", name="그만하기").click()
         await page.wait_for_url(re.compile(rf"/notes/{sid}$"))
+
+        await exam_steps(browser)
 
         step("home / library / subject / questions")
         await page.goto(BASE + "/home")
@@ -4251,12 +4384,14 @@ async def main():
             has_fig = await page.get_by_role("img", name="문제 그림").count() > 0
             if await page.get_by_role("button", name="O 맞다").count():
                 await page.get_by_role("button", name="O 맞다" if has_fig else "X 틀리다").click()  # (가짜 OX 답은 모두 X)
+                await page.get_by_role("button", name="확인", exact=True).click()
             elif await page.get_by_label("답").count():
                 await page.get_by_label("답").fill("녹말" if "포도당은" in card_text else "기공")
                 await page.get_by_role("button", name="확인").click()
             else:
-                await page.locator("main button:has-text('1')").first.click()  # 가짜 객관식 답은 2번
-            await expect(page.get_by_role("button", name="다음", exact=True)).to_be_visible(timeout=15000)
+                await page.get_by_role("group", name="선택지").get_by_role("button").first.click()  # 가짜 객관식 답은 2번
+                await page.get_by_role("button", name="확인", exact=True).click()
+            await expect(page.get_by_role("button", name="계속", exact=True)).to_be_visible(timeout=15000)
             if has_fig:
                 steps_btn = page.get_by_role("button", name=re.compile("그림으로 보는 단계별 풀이"))
                 await expect(steps_btn).to_have_attribute("aria-expanded", "true")
@@ -4264,14 +4399,14 @@ async def main():
                 await page.get_by_role("region", name="단계별 풀이").focus()
                 await page.keyboard.press("ArrowRight")  # 풀이 안의 화살표 키는 풀이 단계를 넘긴다 (다음 문제로 가지 않는다)
                 await expect(page.get_by_role("button", name="2단계")).to_have_attribute("aria-current", "step")
-                await expect(page.get_by_role("button", name="다음", exact=True)).to_be_visible()
+                await expect(page.get_by_role("button", name="계속", exact=True)).to_be_visible()
                 await shot(page, "56-practice-figure-wrong", full=False)
                 await no_hscroll(page, "practice figure")
                 seen_fig = True
                 break
-            await page.get_by_role("button", name="다음", exact=True).click()
+            await page.get_by_role("button", name="계속", exact=True).click()
         assert seen_fig, "no question with a figure in practice"
-        await page.get_by_role("button", name="다음", exact=True).click()
+        await page.get_by_role("button", name="계속", exact=True).click()
         await page.get_by_role("button", name="그만하기").click()
 
         step("Pro: '그림 풀이 만들기' adds a step-by-step solution to one question")

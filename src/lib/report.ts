@@ -5,8 +5,8 @@ import { solutionAnswer, type ChatSolution } from './chat';
 import type { CourseCard, CourseCheck, CourseLesson } from './course';
 import type { Cover } from './cover';
 
-/** /api/reports 가 받는 종류 (문제 신고는 고친 문제를 같이 받는 /api/questions/[id]/report 가 따로) */
-export const REPORT_KINDS = ['note', 'chat', 'cover', 'theme', 'course'] as const;
+/** /api/reports 가 받는 종류 */
+export const REPORT_KINDS = ['question', 'note', 'chat', 'cover', 'theme', 'course'] as const;
 export type ReportKind = (typeof REPORT_KINDS)[number];
 
 /** DB 의 snapshot 칸 끝 (schema.sql reports_snapshot_check 와 같게) */
@@ -34,6 +34,7 @@ export const REPORT_HARMFUL = '불쾌하거나 해로운 내용이에요';
 
 /** 고를 수 있는 이유 (하나만 고르고, 더 적을 말은 글로) */
 export const REPORT_REASONS: Record<ReportKind, readonly string[]> = {
+  question: ['정답이 틀렸어요', '문제나 보기가 이상해요', '해설이 틀렸어요', REPORT_HARMFUL],
   note: ['틀린 내용이 있어요', '빠진 내용이 있어요', '그림이 이상해요', REPORT_HARMFUL],
   chat: ['틀린 내용이 있어요', '물어본 것과 다른 답이에요', '풀이가 이상해요', REPORT_HARMFUL],
   cover: ['노트와 맞지 않아요', '틀린 내용이 있어요', '글자가 이상해요', REPORT_HARMFUL],
@@ -50,6 +51,42 @@ export function reportReason(picked: string | null, text: string): string {
 
 const clip = (s: string, n: number) => (s.length > n ? `${s.slice(0, n - 1)}…` : s);
 const oneLine = (s: string) => s.replace(/\s+/g, ' ').trim();
+
+// ------------------------------------------------------------- 보낼 글 검사 (화면과 서버가 같이)
+/**
+ * 욕설: 기호·숫자를 끼워 써도 찾는다 (빈칸은 그대로 둔다: '씨 발아'·'영향을 미친 년도'·'불이 꺼져' 같은 공부 글을 막지 않게).
+ * '시발점'·'병신년'·'닥쳐오다'처럼 다른 뜻이 흔한 말은 넣지 않는다. 자음 줄임말은 따로 떨어져 있을 때만 ('ㄱㄴㄷㄹㅁㅂㅅ' 은 괜찮다)
+ */
+const ABUSE_KO = ['씨발', '씨빨', '좆', '존나', '개새끼', '지랄', '엿먹어', '니애미', '느금마', '애미뒤', '병신같'];
+const ABUSE_JAMO = /(?:^|[^ㄱ-ㅎ])(?:ㅅㅂ|ㅆㅂ|ㅂㅅ|ㅄ|ㅈㄴ|ㅈㄹ)(?:[^ㄱ-ㅎ]|$)/;
+const ABUSE_EN = /\b(?:fuck\w*|shit\w*|bitch\w*|asshole|motherfuck\w*)\b/i;
+
+/**
+ * 신고 글을 보내도 되는지: 안 되면 고칠 말 (되면 null). 이유 칩만 고른 글도 통과한다.
+ * 링크·전화번호·메일(개인정보), 욕설, 알아볼 수 없는 글(기호만·같은 글자 되풀이·자음만)을 막는다
+ */
+export function reportTextProblem(text: string): string | null {
+  const t = (text ?? '').trim();
+  if (!t) return null;
+  if (/\b01[016789][-\s.]?\d{3,4}[-\s.]?\d{4}\b|[\w.+-]+@[\w-]+\.[\w.]+/.test(t)) return '전화번호·메일 주소 같은 개인정보는 빼고 적어 주세요.';
+  if (/https?:\/\/|www\.|\b[a-z0-9-]+\.(?:com|net|org|kr|io|co|me|ly|gg|xyz|app|site|link)\b/i.test(t)) return '링크는 보낼 수 없어요. 무엇이 이상한지만 적어 주세요.';
+  const plain = t.replace(/[\d._*\-~!@#$%^&+=|\\/:;'"`,?()[\]{}<>]/g, '');
+  if (ABUSE_KO.some((w) => plain.includes(w)) || ABUSE_JAMO.test(t) || ABUSE_EN.test(t)) return '고운 말로 적어 주세요. 욕설은 보낼 수 없어요.';
+  // 고른 이유('…: ') 뒤의 적은 말만 본다
+  const own = t.includes(': ') ? t.slice(t.indexOf(': ') + 2).trim() : t;
+  const letters = own.replace(/[^\p{L}\p{N}]/gu, '');
+  if (own && !letters) return '무엇이 이상한지 글로 적어 주세요.';
+  if (letters.length >= 4 && (/^(.)\1+$/u.test(letters) || /^[ㄱ-ㅎㅏ-ㅣ]+$/.test(letters))) return '무엇이 이상한지 알아볼 수 있게 적어 주세요.';
+  return null;
+}
+
+/** 복습 문제 (신고할 때의 모습): 유형·문제·보기·정답·해설 */
+export function questionSnapshot(q: { type: string; prompt: string; choices: string[] | null; answer: unknown; explanation?: string | null }): string {
+  const choices = q.choices?.length ? `\n보기: ${q.choices.map((c, i) => `${i + 1}) ${oneLine(c)}`).join(' ')}` : '';
+  const answer =
+    q.type === 'mcq' ? `${Number(q.answer) + 1}번 (${q.choices?.[Number(q.answer)] ?? ''})` : q.type === 'ox' ? (q.answer ? 'O' : 'X') : String(q.answer ?? '');
+  return clipSnapshot(`문제(${q.type}): ${q.prompt.trim()}${choices}\n정답: ${answer}${q.explanation ? `\n해설: ${q.explanation.trim()}` : ''}`);
+}
 
 /** 운영자가 읽을 글의 끝을 맞춘다 */
 export function clipSnapshot(s: string): string {

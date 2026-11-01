@@ -7,6 +7,7 @@ import { Select } from '@/components/Select';
 import { LargeHeader, Segmented, inputClass } from '@/components/ui';
 import { fetchAll, fetchSubjects, questionCols, sb } from '@/lib/data';
 import { pickerOrder } from '@/lib/subject-order';
+import { examStyle } from '@/lib/exam-layout';
 import { useMe } from '@/components/AppShell';
 import type { QuestionRow, SubjectRow } from '@/lib/types';
 
@@ -22,6 +23,8 @@ function QuestionsView() {
   // 자료함의 '문제 모아 보기'로 들어오면 그 과목 (다른 화면에서 눌러 들어오면 그리는 동안 window.location 이 아직 앞 화면 주소라 useSearchParams 로 읽는다)
   const params = useSearchParams();
   const [subjects, setSubjects] = useState<SubjectRow[]>([]);
+  // 과목마다 시험지 모양 (examStyle)
+  const subjectName = useMemo(() => new Map(subjects.map((s) => [s.id, s.name])), [subjects]);
   const [questions, setQuestions] = useState<QuestionRow[] | null>(null);
   const [cards, setCards] = useState<Map<string, CardInfo>>(new Map());
   const [unitOf, setUnitOf] = useState<Map<string, string>>(new Map());
@@ -140,7 +143,7 @@ function QuestionsView() {
             { value: 'mcq', label: '객관식' },
             { value: 'ox', label: 'OX' },
             { value: 'cloze', label: '빈칸' },
-            { value: 'short', label: '단답' },
+            { value: 'short', label: '단답·서술' },
           ]}
         />
         <Segmented
@@ -160,7 +163,13 @@ function QuestionsView() {
         <div className="kok-card kok-shimmer kok-skel h-40" aria-hidden="true" />
       ) : (
         <>
-          <QuestionList questions={filtered.slice(0, 300)} cards={cards} onChanged={load} emptyText="조건에 맞는 문제가 없어요." />
+          <QuestionList
+            questions={filtered.slice(0, 300)}
+            cards={cards}
+            onChanged={load}
+            emptyText="조건에 맞는 문제가 없어요."
+            styleOf={(q) => examStyle({ subject: subjectName.get(q.subject_id), text: q.prompt })}
+          />
           {filtered.length > 300 ? <p className="text-sm text-muted">처음 300문제만 보여요. 조건을 좁혀 주세요.</p> : null}
         </>
       )}

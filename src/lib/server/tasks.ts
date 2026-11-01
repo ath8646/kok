@@ -1,4 +1,4 @@
-// 작은 AI 작업 (그림·문제 다시 만들기, 채점, 문제 고치기) 공통 처리
+// 작은 AI 작업 (그림·문제 다시 만들기, 채점 등) 공통 처리
 import 'server-only';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { estimateSmallTask } from '@/lib/ai/models';

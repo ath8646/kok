@@ -59,6 +59,7 @@ import {
 import { keepFromCurrent, remergeState } from '@/lib/append-merge';
 import { applyMergePlan, fallbackMergePlan, noteForPlan, partsForPlan, planOutTokens, zMergePlan, type MergePlan } from '@/lib/merge-plan';
 import { modelForTier, type AiTask, type UserSettings } from '@/lib/settings';
+import { examStyle } from '@/lib/exam-layout';
 import { planChunks, slicePdf, splitPdfBySize, splitText, PdfError } from '@/lib/pdf';
 import { isOfficeText } from '@/lib/office/names';
 import { DOC_PICTURES_PER_CHUNK, pictureNumbers, splitDocText } from '@/lib/doc-pictures';
@@ -1665,6 +1666,9 @@ async function quizPlan(ctx: Ctx): Promise<QuizPlan> {
   // 자료 종류 (lib/material-type.ts): 기출 조각에서 꺼낸 원래 문제(개념은 이름으로 다시 붙인다: 다시 합쳐 번호가 바뀌었을 수 있다),
   // 단어장이면 낱말마다 AI 없이 만든 카드 (노트에 더할 때는 새 자료의 낱말만). AI 문제는 이것들과 겹치지 않게 덜 만든다
   const material = materialOf(ctx.src.draft);
+  // 과목마다 시험지 꼴 (lib/exam-layout.ts): 과목 이름과 자료 종류로
+  const { data: subj } = await ctx.admin.from('subjects').select('name').eq('id', ctx.src.subject_id).maybeSingle();
+  const style = examStyle({ subject: typeof subj?.name === 'string' ? subj.name : '', material });
   // 자료 그림: 그림마다 그림 문제 하나 (AI 는 그림 대신 그림 설명을 본다. 노트에 더할 때는 새 자료의 그림만)
   const figures = draftFigures(ctx.src.draft);
   // 원래 문제의 그림은 그림 파일로 다시 찾는다 (다시 합쳐 그림 번호가 바뀌었을 수 있다). 그림이 없어졌으면 그 문제는 뺀다
@@ -1701,7 +1705,7 @@ async function quizPlan(ctx: Ctx): Promise<QuizPlan> {
       quizPrompt(
         // 지난 답이 너무 길어 잘렸으면 개념마다 하나씩 (문제 수가 줄어 답이 짧다)
         { types: q.types, mix: q.mix, language: q.language, perKeyPoint: ctx.src.draft.quizShort ? 1 : q.perKeyPoint, figures: figures.length },
-        { onlyNew: !!pid, material, originals: originals.length, covered, cards: vocab.length },
+        { onlyNew: !!pid, material, originals: originals.length, covered, cards: vocab.length, style },
       ),
     ),
   ];

@@ -92,7 +92,7 @@ export function QuestionEditor({
           { value: 'mcq', label: '객관식' },
           { value: 'ox', label: 'OX' },
           { value: 'cloze', label: '빈칸' },
-          { value: 'short', label: '단답' },
+          { value: 'short', label: '단답·서술' },
         ]}
       />
       <Field label="문제" htmlFor="q-prompt" hint={d.type === 'cloze' ? '가릴 곳에 ____ 를 넣어요. 예: 광합성은 ____ 에서 일어난다.' : undefined}>

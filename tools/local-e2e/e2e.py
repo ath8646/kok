@@ -2124,6 +2124,293 @@ async def relay_steps():
         db(f"delete from public.sources where id = '{sid}'")
 
 
+async def course_steps(browser, page, fig_sid, sid):
+    """단계별 학습 (Max, 듀오링고식 레슨): 수준 고르기 → 길 → 칸 말풍선·건너뛰기 → 레슨(카드 → 그 카드 문제, 확인·채점 띠, 틀린 문제 다시,
+    짝·순서 맞추기) → 끝 화면·다음 레슨 → 그만두기 묻기 → 틀린 문제 복습 → 핵심 정리 → 큰 노트 나눠 만들기 → 무료 계정
+    (따로 돌리기: python3 e2e_course.py)"""
+    psql = db
+    student_id = USERS["student"][0]
+    step("course (Max): pick a level, a lesson path is made from the note, finish a lesson, the progress is saved")
+    psql(f"delete from public.rate_hits where user_id = '{student_id}'")
+    fig_nid = psql(f"select id from public.notes where source_id = '{fig_sid}'")
+    await page.goto(BASE + f"/notes/{fig_sid}?tab=course")
+    assert await wait_ready(page), "course tab did not open"
+    await expect(page.get_by_role("tab", name="레슨")).to_have_attribute("aria-selected", "true")
+    await expect(page.get_by_role("heading", name="단계별로 배워 봐요")).to_be_visible()
+    await page.get_by_role("radio", name="초등학생").click()
+    await shot(page, "101-course-create", full=False)
+    n_course_ledger = int(psql(f"select count(*) from public.energy_ledger where user_id = '{student_id}' and task = 'course'"))
+    await page.get_by_role("button", name="단계별 학습 만들기").click()
+    await expect(page.get_by_role("button", name=re.compile("첫 레슨 시작"))).to_be_visible(timeout=60000)
+    assert psql(f"select level || ' ' || (progress = '{{}}'::jsonb)::text from public.note_courses where note_id = '{fig_nid}'") == "elementary true"
+    assert int(psql(f"select count(*) from public.energy_ledger where user_id = '{student_id}' and task = 'course'")) == n_course_ledger + 1
+    # 가짜 AI 는 레슨 4개(개념마다 하나)를 두 단계로: 답을 읽을 수 없는 문제·노트에 없는 개념 번호·그림 번호는 빠진다.
+    # 첫 레슨: 객관식(카드 1 뒤)·OX(카드 2 뒤)·짝 맞추기·순서 맞추기(카드 3 뒤) = 4문제, 자리(after)·힌트·짝·바른 차례가 남는다
+    plan_check = psql(f"select jsonb_array_length(plan->'units') || ' ' || jsonb_array_length(plan->'units'->0->'lessons'->0->'checks') || ' ' || jsonb_array_length(plan->'units'->0->'lessons'->0->'key_point_ids') from public.note_courses where note_id = '{fig_nid}'")
+    assert plan_check == "2 4 1", plan_check
+    l0 = f"(select plan->'units'->0->'lessons'->0 from public.note_courses where note_id = '{fig_nid}')"
+    shape0 = psql(
+        f"select string_agg((c->>'type') || ':' || coalesce(c->>'after', '-') || ':' || (c ? 'hint')::text || ':' || coalesce(jsonb_array_length(c->'pairs'), 0), ' ' order by i) "
+        f"from jsonb_array_elements({l0}->'checks') with ordinality as t(c, i)"
+    )
+    assert shape0 == "mcq:0:true:0 ox:1:false:0 match:2:false:3 order:2:false:0", shape0
+    assert psql(f"select ({l0}->'cards'->0 ? 'figure_id')::text") == "false", "a figure that is not in the note is dropped"
+    # 빈칸(두 번째 레슨)은 고를 낱말에 정답이 들어 있다
+    assert psql(f"select (plan->'units'->0->'lessons'->1->'checks'->1->'choices' ? '기공')::text from public.note_courses where note_id = '{fig_nid}'") == "true"
+    await expect(page.get_by_text("0 / 7 끝냄")).to_be_visible()
+    await expect(page.get_by_text("AI가 만든 레슨")).to_be_visible()
+    await shot(page, "101-course-path")
+    await no_hscroll(page, "course path")
+    # 칸을 누르면 바로 시작하지 않고 레슨 정보 말풍선 (듀오링고처럼): 지금 할 칸은 '시작', 차례가 아닌 칸은 건너뛰기를 묻는다
+    # (아래 메뉴에 가리지 않게 JS 로 누른다)
+    first_node = page.get_by_role("button", name=re.compile("^레슨 1.*지금 할 것"))
+    await first_node.evaluate("el => el.click()")
+    pop = page.get_by_role("dialog", name=re.compile("^레슨 정보: 레슨 1"))
+    await expect(pop).to_be_visible()
+    await expect(pop.get_by_text(re.compile(r"카드 3장 · 문제 4개 · 약 \d+분"))).to_be_visible()
+    await expect(pop.get_by_role("button", name="시작")).to_be_focused()
+    await shot(page, "101-course-popover", full=False)
+    await page.keyboard.press("Escape")
+    await expect(pop).to_have_count(0)
+    await expect(first_node).to_be_focused()
+    later = page.get_by_role("button", name=re.compile("^레슨 2.*아직 차례가 아니에요"))
+    await later.evaluate("el => el.click()")
+    skip = page.get_by_role("dialog", name=re.compile("^레슨 정보: 레슨 2"))
+    await expect(skip).to_be_visible()
+    await expect(skip.get_by_text("앞 칸 1개를 건너뛰어요", exact=False)).to_be_visible()
+    await shot(page, "101-course-skip", full=False)
+    # '앞 레슨부터'는 지금 할 칸의 말풍선으로
+    await skip.get_by_role("button", name="앞 레슨부터").evaluate("el => el.click()")
+    await expect(skip).to_have_count(0)
+    await expect(page.get_by_role("dialog", name=re.compile("^레슨 정보: 레슨 1"))).to_be_visible()
+    await expect(page.get_by_role("dialog", name=re.compile("^레슨 2"))).to_have_count(0)
+    await later.evaluate("el => el.click()")
+    await page.get_by_role("dialog", name=re.compile("^레슨 정보: 레슨 2")).get_by_role("button", name="건너뛰고 시작").evaluate("el => el.click()")
+    skipped = page.get_by_role("dialog", name=re.compile("^레슨 2"))
+    await expect(skipped).to_be_visible()
+    await expect(skipped.get_by_text("개념", exact=True)).to_be_visible()
+    # 레슨에도 '이상해요'(위 띠의 깃발): 레슨 창 위에 뜨고 Esc 는 신고 창만 닫는다. 서버가 레슨 내용을, 화면이 보던 칸을 남긴다
+    await skipped.get_by_role("button", name="이상해요 (신고)").click()
+    await expect(page.get_by_role("dialog", name="이상해요")).to_be_visible()
+    await page.keyboard.press("Escape")
+    await expect(page.get_by_role("dialog", name="이상해요")).to_be_hidden()
+    await expect(skipped).to_be_visible()
+    await skipped.get_by_role("button", name="이상해요 (신고)").click()
+    await send_report(page, "수준에 맞지 않아요")
+    await expect(skipped).to_be_visible()
+    rep = psql("select target_id || '|' || (snapshot like '%레슨: %카드 1: %보던 칸 1 (카드)%')::text from public.reports where target_type = 'course' order by id desc limit 1")
+    assert rep.startswith(f"{fig_nid}:l-") and rep.endswith("|true"), rep
+    # 아무것도 안 했으면 묻지 않고 닫힌다
+    await skipped.get_by_role("button", name="레슨 닫기").click()
+    await expect(skipped).to_have_count(0)
+    await expect(page.get_by_text("0 / 7 끝냄")).to_be_visible()
+    await expect(later).to_be_visible()
+    # 첫 레슨 (듀오링고식): 카드 → 그 카드 문제 (고르고 '확인' → 채점 띠 → '계속'), 틀린 문제는 레슨 끝에 다시
+    await page.get_by_role("button", name=re.compile("첫 레슨 시작")).click()
+    lesson = page.get_by_role("dialog", name=re.compile("^레슨 1"))
+    await expect(lesson.get_by_text("개념", exact=True)).to_be_visible()
+    await lesson.get_by_role("button", name="다음").click()
+    # 객관식: 고르기 전에는 확인이 꺼져 있고, 고른 뒤 바꿀 수 있다. 힌트는 답을 말하지 않는다
+    await expect(lesson.get_by_text("확인 문제", exact=True)).to_be_visible()
+    check_btn = lesson.get_by_role("button", name="확인", exact=True)
+    await expect(check_btn).to_be_disabled()
+    await lesson.get_by_role("button", name="힌트 보기").click()
+    await expect(lesson.get_by_text("잎이 하는 일을 떠올려 봐요")).to_be_visible()
+    await lesson.locator("button", has_text="물을 밖으로 버린다").click()
+    await lesson.locator("button", has_text="빛을 모아 양분을 만든다").click()
+    await expect(lesson.locator("button[aria-pressed='true']", has_text="빛을 모아 양분을 만든다")).to_be_visible()
+    await check_btn.click()
+    await expect(lesson.get_by_text("맞았어요!")).to_be_visible()
+    await expect(lesson.get_by_role("button", name="계속")).to_be_focused()
+    await shot(page, "102-course-check", full=False)
+    # Enter 로도 계속
+    await page.keyboard.press("Enter")
+    await expect(lesson.get_by_role("heading", name="예시")).to_be_visible()
+    await lesson.get_by_role("button", name="다음").click()
+    # OX 를 일부러 틀린다: 정답·해설과 '레슨 끝에 한 번 더'
+    await lesson.get_by_role("button", name="X 틀리다").click()
+    await check_btn.click()
+    await expect(lesson.get_by_text("아쉬워요")).to_be_visible()
+    await expect(lesson.get_by_text("이 문제는 레슨 끝에 한 번 더 나와요.")).to_be_visible()
+    await shot(page, "102-course-wrong", full=False)
+    await lesson.get_by_role("button", name="계속").click()
+    await lesson.get_by_role("button", name="다음").click()
+    # 짝 맞추기: 짝마다 바로 (틀리면 흔들리고 다시 고른다)
+    await expect(lesson.get_by_text("용어와 뜻을 짝지어 보세요")).to_be_visible()
+    await shot(page, "102-course-match", full=False)
+    for left, right in (("엽록체", "광합성이 일어나는 곳"), ("기공", "기체가 드나드는 구멍"), ("엽록소", "빛을 흡수하는 색소")):
+        await lesson.get_by_role("group", name="왼쪽").get_by_role("button", name=left, exact=True).click()
+        await lesson.get_by_role("group", name="오른쪽").get_by_role("button", name=right, exact=True).click()
+    await expect(lesson.get_by_role("status").filter(has_text=re.compile("좋아요!|맞았어요!|정확해요!"))).to_be_visible()
+    await lesson.get_by_role("button", name="계속").click()
+    # 순서 맞추기: 섞인 칸을 차례대로 누른다 (위 줄의 칸을 누르면 빠진다)
+    await expect(lesson.get_by_text("광합성이 일어나는 차례대로 놓아 보세요")).to_be_visible()
+    pool = lesson.get_by_role("group", name="놓을 칸")
+    await pool.get_by_role("button", name="포도당을 만든다").click()
+    await lesson.get_by_role("button", name=re.compile("^1번째: 포도당을 만든다")).click()
+    for item in ("빛을 받는다", "물을 나눈다", "포도당을 만든다"):
+        await pool.get_by_role("button", name=item).click()
+    await shot(page, "102-course-order", full=False)
+    await check_btn.click()
+    await expect(lesson.get_by_role("status").filter(has_text=re.compile("좋아요!|맞았어요!|정확해요!|훌륭해요!"))).to_be_visible()
+    await lesson.get_by_role("button", name="계속").click()
+    # 틀린 OX 가 다시 나온다: 이번엔 맞힌다
+    await expect(lesson.get_by_text("다시 풀어 봐요")).to_be_visible()
+    await lesson.get_by_role("button", name="O 맞다").click()
+    await check_btn.click()
+    await lesson.get_by_role("button", name="계속").click()
+    # 끝 화면: 별은 처음 답 기준 (4개 중 3개 = 75% → 별 2개), 정확도·시간·최고 연속, 틀린 문제, '다음 레슨'
+    await expect(lesson.get_by_text("레슨 끝!")).to_be_visible()
+    await expect(lesson.get_by_role("img", name="별 2개")).to_be_visible()
+    await expect(lesson.get_by_text("75%")).to_be_visible()
+    await expect(lesson.get_by_text("틀린 문제 1개")).to_be_visible()
+    await shot(page, "102-course-result", full=False)
+    # 끝 화면이 뜰 때 진도를 저장한다: 별 2개, 처음에 틀린 OX 는 틀린 문제에
+    await poll_db(f"select progress->'lessons'->'0-0'->>'stars' from public.note_courses where note_id = '{fig_nid}'", "2")
+    await poll_db(f"select string_agg(k, ',') from public.note_courses, jsonb_object_keys(progress->'mistakes') k where note_id = '{fig_nid}'", "0-0-1")
+    # '다음 레슨'은 길로 돌아가지 않고 다음 칸을 바로 연다 (아무것도 안 했으면 닫을 때 묻지 않는다)
+    await lesson.get_by_role("button", name="다음 레슨").click()
+    lesson2 = page.get_by_role("dialog", name=re.compile("^레슨 2"))
+    await expect(lesson2.get_by_text("개념", exact=True)).to_be_visible()
+    # 무언가 했으면 그만둘 때 한 번 묻는다 ('계속 하기'면 그대로)
+    await lesson2.get_by_role("button", name="다음").click()
+    await page.keyboard.press("Escape")
+    assert "레슨 그만두기" in await app_confirm(page, ok=False)
+    await expect(lesson2).to_be_visible()
+    await lesson2.get_by_role("button", name="레슨 닫기").click()
+    await app_confirm(page, ok=True)
+    await expect(lesson2).to_have_count(0)
+    await expect(page.get_by_role("button", name=re.compile("이어서 하기"))).to_be_visible()
+    await expect(page.get_by_text("1 / 7 끝냄")).to_be_visible()
+    # 끝낸 레슨은 다시 열 수 있고(별은 더 높은 것만 남는다), 다음 레슨이 '지금 할 것'
+    await expect(page.get_by_role("button", name=re.compile("^레슨 1.*끝냄 · 별 2개"))).to_be_visible()
+    await expect(page.get_by_role("button", name=re.compile("^레슨 2.*지금 할 것"))).to_be_visible()
+    # 틀린 문제 복습: 맞히면 틀린 문제에서 빠진다 (별은 없다)
+    await page.get_by_role("button", name="틀린 문제 복습 · 1개").click()
+    review = page.get_by_role("dialog", name="틀린 문제 복습")
+    await review.get_by_role("button", name="O 맞다").click()
+    await review.get_by_role("button", name="확인", exact=True).click()
+    await review.get_by_role("button", name="계속").click()
+    await expect(review.get_by_text("틀린 문제 복습 끝!")).to_be_visible()
+    assert await review.get_by_role("img", name=re.compile("^별")).count() == 0
+    await review.get_by_role("button", name="완료").click()
+    await poll_db(f"select coalesce(progress->'mistakes', 'null'::jsonb)::text from public.note_courses where note_id = '{fig_nid}'", "null")
+    await expect(page.get_by_role("button", name=re.compile("^틀린 문제 복습"))).to_have_count(0)
+    assert psql(f"select progress->'lessons'->'0-0'->>'stars' from public.note_courses where note_id = '{fig_nid}'") == "2"
+    # 단계 핵심 정리: 그 단계 레슨의 목표·카드를 한 시트에
+    await page.get_by_role("button", name="1단계 핵심 정리").evaluate("el => el.click()")
+    guide = page.get_by_role("dialog", name="1단계 핵심 정리")
+    await expect(guide.get_by_text("k1 개념을 설명할 수 있어요")).to_be_visible()
+    await expect(guide.get_by_text("이렇게 외워요: 잎 = 공장").first).to_be_visible()
+    await shot(page, "102-course-guide", full=False)
+    await page.keyboard.press("Escape")
+    await expect(guide).to_have_count(0)
+    # 수준을 바꿔 다시 만들면 진도는 처음부터, 지우면 표에서 사라진다
+    r = await page.request.post(BASE + f"/api/notes/{fig_nid}/course", headers={"origin": BASE}, data={"level": "expert"})
+    assert r.ok, await r.text()
+    assert psql(f"select level || ' ' || (progress = '{{}}'::jsonb)::text || ' ' || count(*) from public.note_courses where note_id = '{fig_nid}' group by level, progress") == "expert true 1"
+    r = await page.request.post(BASE + f"/api/notes/{fig_nid}/course", headers={"origin": BASE}, data={"level": "phd"})
+    assert r.status == 400, (r.status, await r.text())
+    r = await page.request.delete(BASE + f"/api/notes/{fig_nid}/course", headers={"origin": BASE})
+    assert r.ok, await r.text()
+    assert psql(f"select count(*) from public.note_courses where note_id = '{fig_nid}'") == "0"
+
+    step("course: a big note (12 concepts) is made in two passes — the path's outline, then every stage at once — and a stage the AI cannot write comes from the note")
+    stats_of = lambda: json.loads(urllib.request.urlopen("http://localhost:54321/__stats").read())  # noqa: E731
+    body_before = psql(f"select body::text from public.notes where id = '{fig_nid}'")
+    big_kps = [
+        {"id": f"k{i + 1}", "title": f"개념 {i + 1}", "explanation": f"개념 {i + 1}의 설명이에요.", "why": "시험에 나와요.", "importance": "medium", "pages": []}
+        for i in range(12)
+    ]
+    psql(f"update public.notes set body = jsonb_set(body, '{{key_points}}', '{json.dumps(big_kps, ensure_ascii=False)}'::jsonb) where id = '{fig_nid}'")
+    psql(f"delete from public.rate_hits where user_id = '{student_id}'")
+    s0 = stats_of()["tasks"]
+    r = await page.request.post(BASE + f"/api/notes/{fig_nid}/course", headers={"origin": BASE}, data={"level": "high"})
+    assert r.ok, await r.text()
+    s1 = stats_of()["tasks"]
+    assert s1.get("course_outline", 0) == s0.get("course_outline", 0) + 1, (s0, s1)
+    assert s1.get("course_unit", 0) == s0.get("course_unit", 0) + 4, (s0, s1)
+    assert s1.get("course", 0) == s0.get("course", 0), "a big note is not made in one pass"
+    shape = psql(
+        f"select jsonb_array_length(plan->'units') || ' ' || (select count(*) from jsonb_array_elements(plan->'units') u, jsonb_array_elements(u->'lessons') l) "
+        f"from public.note_courses where note_id = '{fig_nid}'"
+    )
+    assert shape == "4 12", shape
+    # 단계마다 따로 받은 카드 (가짜 AI: '단계 레슨 N')
+    assert psql(f"select plan->'units'->1->'lessons'->0->'cards'->0->>'text' from public.note_courses where note_id = '{fig_nid}'").startswith("단계 레슨 1"), "stage cards"
+    # 긴 길은 섹션으로: 섹션 1(1~2단계) · 섹션 2(3~4단계, 총정리). 지금 하는 섹션만 펼치고, 머리를 누르면 그 섹션을 펼친다
+    await page.goto(BASE + f"/notes/{fig_sid}?tab=course")
+    assert await wait_ready(page), "course tab did not open"
+    sec1 = page.get_by_role("button", name=re.compile(r"^섹션 1 · 1~2단계 · 지금 하는 섹션"))
+    sec2 = page.get_by_role("button", name=re.compile(r"^섹션 2 · 3~4단계"))
+    await expect(sec1).to_have_attribute("aria-expanded", "true")
+    await expect(sec2).to_have_attribute("aria-expanded", "false")
+    await expect(page.get_by_role("region", name=re.compile(r"^1단계"))).to_be_visible()
+    await expect(page.get_by_role("region", name=re.compile(r"^3단계"))).to_have_count(0)
+    await expect(page.get_by_role("region", name="총정리")).to_have_count(0)
+    await shot(page, "101-course-sections")
+    await no_hscroll(page, "course sections")
+    await sec2.click()
+    await expect(sec2).to_have_attribute("aria-expanded", "true")
+    await expect(sec1).to_have_attribute("aria-expanded", "false")
+    await expect(page.get_by_role("region", name=re.compile(r"^3단계"))).to_be_visible()
+    await expect(page.get_by_role("region", name=re.compile(r"^1단계"))).to_have_count(0)
+    await expect(page.get_by_role("region", name="총정리")).to_be_visible()
+    # 뒤 섹션의 칸은 아직 차례가 아니다 (누르면 건너뛸지 묻는다)
+    await expect(page.get_by_role("button", name=re.compile(r"아직 차례가 아니에요")).first).to_be_visible()
+    await shot(page, "101-course-section-2", full=False)
+    # 다시 누르면 접힌다 (모든 섹션이 접힌 채로)
+    await sec2.click()
+    await expect(sec2).to_have_attribute("aria-expanded", "false")
+    await expect(page.get_by_role("region", name=re.compile(r"단계 "))).to_have_count(0)
+    # 이어서 하기는 섹션과 상관없이 지금 할 레슨을 연다 (레슨 창 위에 섹션·단계)
+    await page.get_by_role("button", name=re.compile("첫 레슨 시작")).click()
+    first_lesson = page.get_by_role("dialog", name=re.compile(r"^레슨"))
+    await expect(first_lesson.get_by_text(re.compile(r"^섹션 1 · 1단계 · "))).to_be_visible()
+    await first_lesson.get_by_role("button", name="레슨 닫기").click()
+    await expect(first_lesson).to_have_count(0)
+    # 모든 단계가 안 되면 노트로만 채운 길을 주지 않고 AI 가 바쁘다고 알린다 (지금 길은 그대로)
+    psql(f"delete from public.rate_hits where user_id = '{student_id}'")
+    urllib.request.urlopen("http://localhost:54321/__fail?task=course_unit")
+    try:
+        r = await page.request.post(BASE + f"/api/notes/{fig_nid}/course", headers={"origin": BASE}, data={"level": "middle"})
+    finally:
+        urllib.request.urlopen("http://localhost:54321/__fail?task=")
+    assert r.status == 503 and (await r.json())["error"] == "ai_busy", (r.status, await r.text())
+    assert psql(f"select level from public.note_courses where note_id = '{fig_nid}'") == "high"
+    # 뼈대를 못 받으면 개념 차례대로 뼈대를 만들고 단계는 AI 로 (한 번에 만들지 않는다)
+    psql(f"delete from public.rate_hits where user_id = '{student_id}'")
+    urllib.request.urlopen("http://localhost:54321/__fail?task=course_outline")
+    try:
+        r = await page.request.post(BASE + f"/api/notes/{fig_nid}/course", headers={"origin": BASE}, data={"level": "college"})
+    finally:
+        urllib.request.urlopen("http://localhost:54321/__fail?task=")
+    assert r.ok, await r.text()
+    assert psql(f"select level || ' ' || (plan->'units'->0->'lessons'->0->'key_point_ids'->>0) from public.note_courses where note_id = '{fig_nid}'") == "college k1"
+    r = await page.request.delete(BASE + f"/api/notes/{fig_nid}/course", headers={"origin": BASE})
+    assert r.ok, await r.text()
+    psql(f"update public.notes set body = $kok${body_before}$kok$::jsonb where id = '{fig_nid}'")
+
+    step("course: a free account sees that Max has it, and the API refuses")
+    octx, opage = await new_ctx(browser, "other")
+    await opage.goto(BASE + f"/notes/{sid}?tab=course")
+    assert await wait_ready(opage), "other's course tab did not open"
+    await expect(opage.get_by_role("heading", name="단계별 학습은 Max에서")).to_be_visible()
+    await expect(opage.get_by_role("region", name="예시 길")).to_be_visible()
+    await shot(opage, "103-course-free")
+    await no_hscroll(opage, "course free")
+    r = await opage.request.post(BASE + f"/api/notes/{fig_nid}/course", headers={"origin": BASE}, data={"level": "middle"})
+    assert r.status == 403 and (await r.json())["error"] == "pro_only", (r.status, await r.text())
+    # 표지 그림도 Max: 무료 계정은 카드 메뉴에 없고, 서버도 그리지 않는다 (에너지를 쓰기 전에)
+    r = await opage.request.post(BASE + f"/api/sources/{sid}/cover", headers={"origin": BASE}, data={})
+    assert r.status == 403 and (await r.json())["error"] == "pro_only", (r.status, await r.text())
+    await opage.goto(BASE + "/library")
+    await opage.get_by_role("button", name=re.compile("메뉴$")).nth(1).click()
+    await expect(opage.get_by_role("menu")).to_be_visible()
+    assert await opage.get_by_role("menuitem", name="표지 그림").count() == 0
+    await octx.close()
+
+
 async def main():
     import subprocess
     subprocess.run(["bash", str(pathlib.Path(__file__).parent / "db.sh"), "reset"], check=True)
@@ -4089,184 +4376,8 @@ async def main():
             assert r.ok, (r.status, await r.text())
 
         # ---------------- 단계별 학습 (Max) · PDF 요약 정리 · 오답노트 여러 개 빼기
-        step("course (Max): pick a level, a lesson path is made from the note, finish a lesson, the progress is saved")
-        psql(f"delete from public.rate_hits where user_id = '{student_id}'")
+        await course_steps(browser, page, fig_sid, sid)
         fig_nid = psql(f"select id from public.notes where source_id = '{fig_sid}'")
-        await page.goto(BASE + f"/notes/{fig_sid}?tab=course")
-        assert await wait_ready(page), "course tab did not open"
-        await expect(page.get_by_role("tab", name="레슨")).to_have_attribute("aria-selected", "true")
-        await expect(page.get_by_role("heading", name="단계별로 배워 봐요")).to_be_visible()
-        await page.get_by_role("radio", name="초등학생").click()
-        await shot(page, "101-course-create", full=False)
-        n_course_ledger = int(psql(f"select count(*) from public.energy_ledger where user_id = '{student_id}' and task = 'course'"))
-        await page.get_by_role("button", name="단계별 학습 만들기").click()
-        await expect(page.get_by_role("button", name=re.compile("첫 레슨 시작"))).to_be_visible(timeout=60000)
-        assert psql(f"select level || ' ' || (progress = '{{}}'::jsonb)::text from public.note_courses where note_id = '{fig_nid}'") == "elementary true"
-        assert int(psql(f"select count(*) from public.energy_ledger where user_id = '{student_id}' and task = 'course'")) == n_course_ledger + 1
-        # 가짜 AI 는 레슨 4개(개념마다 하나)를 두 단계로: 답을 읽을 수 없는 문제·노트에 없는 개념 번호는 빠진다
-        plan_check = psql(f"select jsonb_array_length(plan->'units') || ' ' || jsonb_array_length(plan->'units'->0->'lessons'->0->'checks') || ' ' || jsonb_array_length(plan->'units'->0->'lessons'->0->'key_point_ids') from public.note_courses where note_id = '{fig_nid}'")
-        assert plan_check == "2 2 1", plan_check
-        await expect(page.get_by_text("0 / 7 끝냄")).to_be_visible()
-        await expect(page.get_by_text("AI가 만든 레슨")).to_be_visible()
-        await shot(page, "101-course-path")
-        await no_hscroll(page, "course path")
-        # 아직 차례가 아닌 칸을 누르면 건너뛸지 묻는다: '앞 레슨부터'는 닫기만, '건너뛰고 시작'은 그 레슨을 연다 (진도는 끝내야 적힌다)
-        # (아래 메뉴에 가리지 않게 JS 로 누른다)
-        later = page.get_by_role("button", name=re.compile("^레슨 2.*아직 차례가 아니에요 · 눌러서 건너뛰기"))
-        await later.evaluate("el => el.click()")
-        skip = page.get_by_role("dialog", name="앞 레슨을 건너뛸까요?")
-        await expect(skip).to_be_visible()
-        await shot(page, "101-course-skip", full=False)
-        await skip.get_by_role("button", name="앞 레슨부터").click()
-        await expect(skip).to_have_count(0)
-        await expect(page.get_by_role("dialog", name=re.compile("^레슨 2"))).to_have_count(0)
-        await later.evaluate("el => el.click()")
-        await skip.get_by_role("button", name="건너뛰고 시작").click()
-        skipped = page.get_by_role("dialog", name=re.compile("^레슨 2"))
-        await expect(skipped).to_be_visible()
-        await expect(skipped.get_by_text("개념", exact=True)).to_be_visible()
-        # 레슨에도 '이상해요'(위 띠의 깃발): 레슨 창 위에 뜨고 Esc 는 신고 창만 닫는다. 서버가 레슨 내용을, 화면이 보던 칸을 남긴다
-        await skipped.get_by_role("button", name="이상해요 (신고)").click()
-        await expect(page.get_by_role("dialog", name="이상해요")).to_be_visible()
-        await page.keyboard.press("Escape")
-        await expect(page.get_by_role("dialog", name="이상해요")).to_be_hidden()
-        await expect(skipped).to_be_visible()
-        await skipped.get_by_role("button", name="이상해요 (신고)").click()
-        await send_report(page, "수준에 맞지 않아요")
-        await expect(skipped).to_be_visible()
-        rep = psql("select target_id || '|' || (snapshot like '%레슨: %카드 1: %보던 칸 1 (카드)%')::text from public.reports where target_type = 'course' order by id desc limit 1")
-        assert rep.startswith(f"{fig_nid}:l-") and rep.endswith("|true"), rep
-        await skipped.get_by_role("button", name="레슨 닫기").click()
-        await expect(skipped).to_have_count(0)
-        await expect(page.get_by_text("0 / 7 끝냄")).to_be_visible()
-        await expect(later).to_be_visible()
-        # 첫 레슨: 카드 3장 → 확인 문제 2개 (객관식 1번·OX O 가 정답) → 별 3개
-        await page.get_by_role("button", name=re.compile("첫 레슨 시작")).click()
-        lesson = page.get_by_role("dialog", name=re.compile("^레슨 1"))
-        await expect(lesson.get_by_text("개념", exact=True)).to_be_visible()
-        for _ in range(3):
-            await lesson.get_by_role("button", name="다음").click()
-        await expect(lesson.get_by_text("확인 문제", exact=True)).to_be_visible()
-        await lesson.locator("button", has_text="빛을 모아 양분을 만든다").click()
-        await expect(lesson.get_by_text("맞았어요!")).to_be_visible()
-        await shot(page, "102-course-check", full=False)
-        await lesson.get_by_role("button", name="계속").click()
-        await lesson.get_by_role("button", name="O 맞다").click()
-        await lesson.get_by_role("button", name="계속").click()
-        await expect(lesson.get_by_text("레슨 끝!")).to_be_visible()
-        await expect(lesson.get_by_role("img", name="별 3개")).to_be_visible()
-        await shot(page, "102-course-result", full=False)
-        await lesson.get_by_role("button", name="완료").click()
-        await expect(page.get_by_role("button", name=re.compile("이어서 하기"))).to_be_visible()
-        await expect(page.get_by_text("1 / 7 끝냄")).to_be_visible()
-        await poll_db(f"select progress->'lessons'->'0-0'->>'stars' from public.note_courses where note_id = '{fig_nid}'", "3")
-        # 끝낸 레슨은 다시 열 수 있고(별은 더 높은 것만 남는다), 다음 레슨이 '지금 할 것'
-        await expect(page.get_by_role("button", name=re.compile("^레슨 1.*끝냄 · 별 3개"))).to_be_visible()
-        await expect(page.get_by_role("button", name=re.compile("^레슨 2.*지금 할 것"))).to_be_visible()
-        # 수준을 바꿔 다시 만들면 진도는 처음부터, 지우면 표에서 사라진다
-        r = await page.request.post(BASE + f"/api/notes/{fig_nid}/course", headers={"origin": BASE}, data={"level": "expert"})
-        assert r.ok, await r.text()
-        assert psql(f"select level || ' ' || (progress = '{{}}'::jsonb)::text || ' ' || count(*) from public.note_courses where note_id = '{fig_nid}' group by level, progress") == "expert true 1"
-        r = await page.request.post(BASE + f"/api/notes/{fig_nid}/course", headers={"origin": BASE}, data={"level": "phd"})
-        assert r.status == 400, (r.status, await r.text())
-        r = await page.request.delete(BASE + f"/api/notes/{fig_nid}/course", headers={"origin": BASE})
-        assert r.ok, await r.text()
-        assert psql(f"select count(*) from public.note_courses where note_id = '{fig_nid}'") == "0"
-
-        step("course: a big note (12 concepts) is made in two passes — the path's outline, then every stage at once — and a stage the AI cannot write comes from the note")
-        stats_of = lambda: json.loads(urllib.request.urlopen("http://localhost:54321/__stats").read())  # noqa: E731
-        body_before = psql(f"select body::text from public.notes where id = '{fig_nid}'")
-        big_kps = [
-            {"id": f"k{i + 1}", "title": f"개념 {i + 1}", "explanation": f"개념 {i + 1}의 설명이에요.", "why": "시험에 나와요.", "importance": "medium", "pages": []}
-            for i in range(12)
-        ]
-        psql(f"update public.notes set body = jsonb_set(body, '{{key_points}}', '{json.dumps(big_kps, ensure_ascii=False)}'::jsonb) where id = '{fig_nid}'")
-        psql(f"delete from public.rate_hits where user_id = '{student_id}'")
-        s0 = stats_of()["tasks"]
-        r = await page.request.post(BASE + f"/api/notes/{fig_nid}/course", headers={"origin": BASE}, data={"level": "high"})
-        assert r.ok, await r.text()
-        s1 = stats_of()["tasks"]
-        assert s1.get("course_outline", 0) == s0.get("course_outline", 0) + 1, (s0, s1)
-        assert s1.get("course_unit", 0) == s0.get("course_unit", 0) + 4, (s0, s1)
-        assert s1.get("course", 0) == s0.get("course", 0), "a big note is not made in one pass"
-        shape = psql(
-            f"select jsonb_array_length(plan->'units') || ' ' || (select count(*) from jsonb_array_elements(plan->'units') u, jsonb_array_elements(u->'lessons') l) "
-            f"from public.note_courses where note_id = '{fig_nid}'"
-        )
-        assert shape == "4 12", shape
-        # 단계마다 따로 받은 카드 (가짜 AI: '단계 레슨 N')
-        assert psql(f"select plan->'units'->1->'lessons'->0->'cards'->0->>'text' from public.note_courses where note_id = '{fig_nid}'").startswith("단계 레슨 1"), "stage cards"
-        # 긴 길은 섹션으로: 섹션 1(1~2단계) · 섹션 2(3~4단계, 총정리). 지금 하는 섹션만 펼치고, 머리를 누르면 그 섹션을 펼친다
-        await page.goto(BASE + f"/notes/{fig_sid}?tab=course")
-        assert await wait_ready(page), "course tab did not open"
-        sec1 = page.get_by_role("button", name=re.compile(r"^섹션 1 · 1~2단계 · 지금 하는 섹션"))
-        sec2 = page.get_by_role("button", name=re.compile(r"^섹션 2 · 3~4단계"))
-        await expect(sec1).to_have_attribute("aria-expanded", "true")
-        await expect(sec2).to_have_attribute("aria-expanded", "false")
-        await expect(page.get_by_role("region", name=re.compile(r"^1단계"))).to_be_visible()
-        await expect(page.get_by_role("region", name=re.compile(r"^3단계"))).to_have_count(0)
-        await expect(page.get_by_role("region", name="총정리")).to_have_count(0)
-        await shot(page, "101-course-sections")
-        await no_hscroll(page, "course sections")
-        await sec2.click()
-        await expect(sec2).to_have_attribute("aria-expanded", "true")
-        await expect(sec1).to_have_attribute("aria-expanded", "false")
-        await expect(page.get_by_role("region", name=re.compile(r"^3단계"))).to_be_visible()
-        await expect(page.get_by_role("region", name=re.compile(r"^1단계"))).to_have_count(0)
-        await expect(page.get_by_role("region", name="총정리")).to_be_visible()
-        # 뒤 섹션의 칸은 아직 차례가 아니다 (누르면 건너뛸지 묻는다)
-        await expect(page.get_by_role("button", name=re.compile(r"아직 차례가 아니에요")).first).to_be_visible()
-        await shot(page, "101-course-section-2", full=False)
-        # 다시 누르면 접힌다 (모든 섹션이 접힌 채로)
-        await sec2.click()
-        await expect(sec2).to_have_attribute("aria-expanded", "false")
-        await expect(page.get_by_role("region", name=re.compile(r"단계 "))).to_have_count(0)
-        # 이어서 하기는 섹션과 상관없이 지금 할 레슨을 연다 (레슨 창 위에 섹션·단계)
-        await page.get_by_role("button", name=re.compile("첫 레슨 시작")).click()
-        first_lesson = page.get_by_role("dialog", name=re.compile(r"^레슨"))
-        await expect(first_lesson.get_by_text(re.compile(r"^섹션 1 · 1단계 · "))).to_be_visible()
-        await first_lesson.get_by_role("button", name="레슨 닫기").click()
-        await expect(first_lesson).to_have_count(0)
-        # 모든 단계가 안 되면 노트로만 채운 길을 주지 않고 AI 가 바쁘다고 알린다 (지금 길은 그대로)
-        psql(f"delete from public.rate_hits where user_id = '{student_id}'")
-        urllib.request.urlopen("http://localhost:54321/__fail?task=course_unit")
-        try:
-            r = await page.request.post(BASE + f"/api/notes/{fig_nid}/course", headers={"origin": BASE}, data={"level": "middle"})
-        finally:
-            urllib.request.urlopen("http://localhost:54321/__fail?task=")
-        assert r.status == 503 and (await r.json())["error"] == "ai_busy", (r.status, await r.text())
-        assert psql(f"select level from public.note_courses where note_id = '{fig_nid}'") == "high"
-        # 뼈대를 못 받으면 개념 차례대로 뼈대를 만들고 단계는 AI 로 (한 번에 만들지 않는다)
-        psql(f"delete from public.rate_hits where user_id = '{student_id}'")
-        urllib.request.urlopen("http://localhost:54321/__fail?task=course_outline")
-        try:
-            r = await page.request.post(BASE + f"/api/notes/{fig_nid}/course", headers={"origin": BASE}, data={"level": "college"})
-        finally:
-            urllib.request.urlopen("http://localhost:54321/__fail?task=")
-        assert r.ok, await r.text()
-        assert psql(f"select level || ' ' || (plan->'units'->0->'lessons'->0->'key_point_ids'->>0) from public.note_courses where note_id = '{fig_nid}'") == "college k1"
-        r = await page.request.delete(BASE + f"/api/notes/{fig_nid}/course", headers={"origin": BASE})
-        assert r.ok, await r.text()
-        psql(f"update public.notes set body = $kok${body_before}$kok$::jsonb where id = '{fig_nid}'")
-
-        step("course: a free account sees that Max has it, and the API refuses")
-        octx, opage = await new_ctx(browser, "other")
-        await opage.goto(BASE + f"/notes/{sid}?tab=course")
-        assert await wait_ready(opage), "other's course tab did not open"
-        await expect(opage.get_by_role("heading", name="단계별 학습은 Max에서")).to_be_visible()
-        await expect(opage.get_by_role("region", name="예시 길")).to_be_visible()
-        await shot(opage, "103-course-free")
-        await no_hscroll(opage, "course free")
-        r = await opage.request.post(BASE + f"/api/notes/{fig_nid}/course", headers={"origin": BASE}, data={"level": "middle"})
-        assert r.status == 403 and (await r.json())["error"] == "pro_only", (r.status, await r.text())
-        # 표지 그림도 Max: 무료 계정은 카드 메뉴에 없고, 서버도 그리지 않는다 (에너지를 쓰기 전에)
-        r = await opage.request.post(BASE + f"/api/sources/{sid}/cover", headers={"origin": BASE}, data={})
-        assert r.status == 403 and (await r.json())["error"] == "pro_only", (r.status, await r.text())
-        await opage.goto(BASE + "/library")
-        await opage.get_by_role("button", name=re.compile("메뉴$")).nth(1).click()
-        await expect(opage.get_by_role("menu")).to_be_visible()
-        assert await opage.get_by_role("menuitem", name="표지 그림").count() == 0
-        await octx.close()
 
         step("pdf summary: made without AI, listed in the visual tab, opened in the app, renamed, deleted with its file")
         n_ledger = int(psql(f"select count(*) from public.energy_ledger where user_id = '{student_id}'"))

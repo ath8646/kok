@@ -12,7 +12,7 @@ import {
   settleOutline,
   COURSE_LIMITS,
 } from '@/lib/course';
-import { zNote, zCourseOutline, zCourseUnit, courseOutlineJsonSchema, courseUnitJsonSchema } from '@/lib/ai/schemas';
+import { zNote, zCourseOutline, zCourseUnit, courseJsonSchema, courseOutlineJsonSchema, courseUnitJsonSchema } from '@/lib/ai/schemas';
 import { schemaProps, SCHEMA_PROPS_MAX } from '@/lib/ai/schema-registry';
 import { courseOutlinePrompt, coursePrompt, courseUnitPrompt } from '@/lib/ai/prompts';
 
@@ -37,10 +37,10 @@ const big = zNote.parse({
 });
 
 describe('큰 노트의 학습 길: 나눠 만들기', () => {
-  it('개념이 많은 노트(레슨 9개부터)만 나눠 만들고, 작은 노트는 예전처럼 한 번에', () => {
+  it('개념이 많은 노트(레슨 7개부터)만 나눠 만들고, 작은 노트는 예전처럼 한 번에', () => {
     expect(courseStaged(5)).toBe(false);
-    expect(courseStaged(8)).toBe(false);
-    expect(courseStaged(9)).toBe(true);
+    expect(courseStaged(6)).toBe(false);
+    expect(courseStaged(7)).toBe(true);
     expect(courseStaged(24)).toBe(true);
   });
 
@@ -71,6 +71,21 @@ describe('큰 노트의 학습 길: 나눠 만들기', () => {
     // 한 번에 만드는 지시는 예전과 같은 규칙
     expect(coursePrompt('high', plan)).toContain('- cards:');
     expect(coursePrompt('high', plan)).toContain('- units: 5 to 6 stages');
+  });
+
+  it('듀오링고식 지시: 가르치고 바로 확인(after), 짝·순서·낱말 고르기, 그럴듯한 오답과 오답 해설, 수준마다 문제 섞기', () => {
+    const plan = { units: { min: 2, max: 3 }, lessons: { min: 4, max: 6 } };
+    for (const p of [coursePrompt('middle', plan), courseUnitPrompt('middle', { index: 0, title: 'A', lessons: 2 })]) {
+      expect(p).toContain('"after" is the index');
+      expect(p).toContain('"match" (pairs: 3 to 5');
+      expect(p).toContain('"order" (choices: 3 to 6');
+      expect(p).toContain('why the most tempting wrong choice is wrong');
+      expect(p).toContain('figure_id: the id of a figure in <figures>');
+    }
+    expect(coursePrompt('elementary', plan)).toContain('nothing to type');
+    expect(coursePrompt('high', plan)).toContain('an order question');
+    // 답 모양: 문법 한도 안 (짝·순서·자리·힌트·그림 칸을 더해도)
+    expect(schemaProps(courseJsonSchema)).toBeLessThanOrEqual(SCHEMA_PROPS_MAX);
   });
 
   it('뼈대: 노트에 없는 개념 번호·빈 레슨은 빼고 수를 줄인다', () => {

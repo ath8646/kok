@@ -469,19 +469,26 @@ export const zHomeChat = z.object({
   solution: zChatSolutionRaw.optional().catch(undefined),
 });
 
-// ---------------------------------------------------------------- 단계별 학습 (Pro)
+// ---------------------------------------------------------------- 단계별 학습 (Max)
 /**
  * 노트 하나를 단계(unit) → 레슨(lesson) → 카드·확인 문제로 나눈 학습 길. 수준(level)에 맞춰 쓴다.
- * 확인 문제는 채팅 문제 모양(chatQuestionSchema 에서 key_point_id·difficulty 를 뺀 것): answer 는 글 하나 (readChatQuestion 이 문제 칸으로 바꾼다)
+ * 확인 문제는 채팅 문제 모양(answer 는 글 하나: readChatQuestion 이 문제 칸으로 바꾼다) + 레슨 칸:
+ * after = 이 문제가 나올 자리(몇 번째 카드 뒤), hint = 답을 알려 주지 않는 힌트, pairs = 짝 맞추기의 짝.
+ * 짝 맞추기(match)·순서 맞추기(order: choices 에 바른 차례)는 레슨에만 있다 (lib/course.ts settleCheck)
  */
 const courseCheckSchema: JsonSchema = obj({
-  type: quizItemProps.type,
+  type: { type: 'string', enum: ['mcq', 'ox', 'cloze', 'short', 'match', 'order'] },
+  after: int,
   prompt: str,
   choices: strArr,
   answer: str,
   accepted: strArr,
+  pairs: { type: 'array', items: obj({ left: str, right: str }) },
   explanation: str,
+  hint: str,
 });
+/** 레슨 카드: figure_id = 이 카드가 설명하는 노트 자료 그림 (<figures> 의 번호, 없으면 "") */
+const courseCardSchema: JsonSchema = obj({ kind: { type: 'string', enum: ['concept', 'example', 'compare', 'tip'] }, heading: str, text: str, tip: str, figure_id: str });
 export const courseJsonSchema: JsonSchema = obj({
   title: str,
   intro: str,
@@ -496,7 +503,7 @@ export const courseJsonSchema: JsonSchema = obj({
           title: str,
           goal: str,
           key_point_ids: strArr,
-          cards: { type: 'array', items: obj({ kind: { type: 'string', enum: ['concept', 'example', 'compare', 'tip'] }, heading: str, text: str, tip: str }) },
+          cards: { type: 'array', items: courseCardSchema },
           checks: { type: 'array', items: courseCheckSchema },
         }),
       },
@@ -525,7 +532,7 @@ export const courseUnitJsonSchema: JsonSchema = obj({
   lessons: {
     type: 'array',
     items: obj({
-      cards: { type: 'array', items: obj({ kind: { type: 'string', enum: ['concept', 'example', 'compare', 'tip'] }, heading: str, text: str, tip: str }) },
+      cards: { type: 'array', items: courseCardSchema },
       checks: { type: 'array', items: courseCheckSchema },
     }),
   },
@@ -540,6 +547,7 @@ const zCourseCard = z.object({
   heading: z.string().catch(''),
   text: z.string().catch(''),
   tip: z.string().catch(''),
+  figure_id: z.string().optional().catch(undefined),
 });
 
 export const zCourseOutline = z.object({

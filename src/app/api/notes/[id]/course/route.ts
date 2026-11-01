@@ -1,7 +1,7 @@
-// 단계별 학습 (Pro): 노트 하나를 AI 가 단계 → 레슨(카드·확인 문제)으로 나눈 학습 길로 만든다.
+// 단계별 학습 (Max): 노트 하나를 AI 가 단계 → 레슨(카드·확인 문제)으로 나눈 학습 길로 만든다.
 // POST { level }: 만들기 (있으면 새로 만들어 바꾸고 진도는 처음부터). DELETE: 지우기.
-// 참고 자료: 정리 노트(지문), 지금 문제(참고만), 자료 그림 설명, 원본 자료(글은 그대로, PDF·사진은 작을 때만 함께 보낸다).
-// 큰 노트(레슨 9개 넘게: lib/course.ts courseStaged)는 두 번에 나눠 만든다: 길의 뼈대 한 번 → 단계마다 레슨을 동시에.
+// 참고 자료: 정리 노트(지문), 지금 문제(참고만), 자료 그림 설명(카드에 그림을 붙일 수 있다), 원본 자료(글은 그대로, PDF·사진은 작을 때만 함께 보낸다).
+// 큰 노트(레슨 7개부터: lib/course.ts courseStaged)는 두 번에 나눠 만든다: 길의 뼈대 한 번 → 단계마다 레슨을 동시에.
 // 한 단계가 끝내 안 되면 그 단계만 노트의 설명·문제로 채워서(AI 없이) 길 전체가 실패하지 않게 한다
 import type { NextRequest } from 'next/server';
 import { z } from 'zod';
@@ -99,7 +99,8 @@ export async function POST(req: NextRequest, ctx: RouteContext<'/api/notes/[id]/
     const built = courseStaged(n)
       ? await buildStaged(admin, acc, app, { level, note: note.note, sourceId: note.source_id, questions, figures, left })
       : await buildOnce(admin, acc, app, { level, note: note.note, sourceId: note.source_id, questions, figures, src, left });
-    const plan = settleCourse(built.course, keyPointIds);
+    // 카드의 그림은 노트에 있는 그림만, 짝 맞추기가 없는 레슨에는 노트 용어로 짝 맞추기를 (AI 없이)
+    const plan = settleCourse(built.course, keyPointIds, { figureIds: figures.map((f) => f.id), terms: note.note.terms });
     if (!plan) throw new UserFacingError('ai_bad_output', 'AI가 학습 길을 제대로 만들지 못했어요. 다시 해 주세요.', 502);
     const { energy, model } = built;
 

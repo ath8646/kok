@@ -445,33 +445,33 @@ const COURSE_LEVELS: Record<CourseLevelKey, string> = {
     '- Sentences of at most 25 Korean characters, one fact per sentence, only words a 10-year-old knows; when the note uses a hard term, say it once and then explain it with a thing from daily life (school, home, food, play).',
     '- Every lesson has at least one "example" card about everyday life and one "tip" card with a memory trick or a rhyme; no "compare" cards about exceptions.',
     '- Do not use formulas, symbols or numbers beyond simple counting unless the note is about them; then show one tiny worked example.',
-    '- Checks: ox and mcq only, about the main idea in plain words (like "식물은 햇빛으로 양분을 만들어요. O일까요 X일까요?"); no cloze, no short answers, no trick choices.',
+    '- Checks: ox, easy mcq, match (a word and its simple meaning) and cloze with choices to pick from, about the main idea in plain words (like "식물은 햇빛으로 양분을 만들어요. O일까요 X일까요?"); nothing to type (no short, and every cloze has choices), no trick choices.',
   ].join('\n'),
   middle: [
     'Level: middle school (중학생, age 13 to 15). Write like a friendly textbook:',
     '- Sentences of at most 45 Korean characters. Define each term when it first appears (용어: 뜻), then show cause and effect ("~하면 ~해요").',
     '- Every lesson has a "concept" card for each term, one "example" card that applies it, and where the note has a confusable pair, one "compare" card that puts the two side by side.',
     "- Use the note's formulas as they are, with a one-line reading of what each symbol means.",
-    '- Checks: mcq, ox and cloze about definitions and relationships ("A가 늘면 B는 ____"); choices differ by one clear idea, not by wording.',
+    '- Checks: mcq, ox, cloze with choices, match and order about definitions, relationships and steps ("A가 늘면 B는 ____"); choices differ by one clear idea, not by wording.',
   ].join('\n'),
   high: [
     'Level: high school (고등학생, age 16 to 18). Be exam-oriented:',
     '- Precise terms as tests use them; each "concept" card states the rule and the condition or exception tests ask about.',
     '- Every lesson has at least one "compare" card on a distinction tests confuse and one "tip" card that names the typical trap.',
     '- "example" cards work through a problem the way an exam solution does, with the formula and the substitution.',
-    '- Checks: mostly application mcq and cloze worded like exam items (자료·조건을 주고 묻기), plus a short-answer question asking for the term or value; wrong choices are the typical traps.',
+    '- Checks: mostly application mcq and cloze worded like exam items (자료·조건을 주고 묻기), an order question where the note has a process or sequence, and a short-answer question asking for the term or value; wrong choices are the typical traps.',
   ].join('\n'),
   college: [
     'Level: university (대학생). Explain principles and the reasoning behind them:',
     '- Keep terms in their original language where the material does, and state why each principle holds, not only what it says.',
     '- "concept" cards give the definition and its derivation or justification; "compare" cards weigh two concepts or models critically; "example" cards are realistic cases with the numbers or data.',
-    '- Checks: short-answer questions that ask for a term, a reason or a value, plus mcq that require combining two ideas.',
+    '- Checks: short-answer questions that ask for a term, a reason or a value, mcq that require combining two ideas, and order questions for mechanisms, derivations or procedures.',
   ].join('\n'),
   expert: [
     'Level: professional (전문). Assume the reader knows the basics:',
     '- Go straight to mechanisms, edge cases, limitations and practical implications, with precise definitions and the conditions under which they hold.',
     '- "concept" cards are dense but exact; "compare" cards contrast approaches and when each is preferable; "tip" cards hold pitfalls seen in practice.',
-    '- Checks: subtle distinctions and applied judgement (어느 경우에 어떤 것을 쓰는지), mostly mcq and short answers.',
+    '- Checks: subtle distinctions and applied judgement (어느 경우에 어떤 것을 쓰는지), mostly mcq and short answers, with order questions for procedures.',
   ].join('\n'),
 };
 
@@ -486,9 +486,18 @@ const COURSE_PATH_RULES = (plan: CoursePlanSize) => [
   '- Each lesson covers one or two key points of the note. key_point_ids holds their ids copied from <note>. Order lessons so each one builds on the previous.',
   '- lesson.title: at most 20 characters. lesson.goal: one sentence starting with what the student will be able to do ("~을 설명할 수 있어요", "~을 구별할 수 있어요").',
 ];
+/**
+ * 레슨 하나 (듀오링고처럼 가르치고 바로 확인): 카드 3~5장, 문제 4~6개. after = 문제가 나올 자리(몇 번째 카드 뒤),
+ * 레슨 안에서 알아보기 → 떠올리기 → 적용 차례, 그럴듯한 오답, 해설에 오답이 틀린 까닭, 힌트 (PRD 15장 N)
+ */
 const COURSE_LESSON_RULES = [
-  '- cards: 3 to 6 cards that teach the lesson one idea at a time, in order. kind is "concept" (the idea itself), "example" (a worked example or everyday case), "compare" (how it differs from something it is confused with) or "tip" (a memory trick or pitfall). heading: at most 20 characters. text: 1 to 3 short sentences fit for the level (at most 220 characters). tip: an optional one-line memory hook or warning (at most 60 characters), or "".',
-  '- checks: 2 to 4 questions that confirm the lesson, each answerable from the cards of that lesson. type is "mcq" (exactly 4 choices, answer is the correct choice copied exactly), "ox" (answer is "O" or "X"), "cloze" (the sentence has "____" and answer is the missing word) or "short" (answer is a term, name or number; put other correct spellings in accepted). explanation: one or two sentences. Do not copy questions from <questions>; write new ones that fit the level.',
+  '- Each lesson teaches, then checks at once, like a language app: the student reads one card and right away answers one or two checks about it.',
+  '- cards: 3 to 5 cards that teach the lesson one idea at a time, in order. kind is "concept" (the idea itself), "example" (a worked example or everyday case), "compare" (how it differs from something it is confused with) or "tip" (a memory trick or pitfall). heading: at most 20 characters. text: 1 to 3 short sentences fit for the level (at most 220 characters). tip: an optional one-line memory hook or warning (at most 60 characters), or "". figure_id: the id of a figure in <figures> (copied exactly) when the card explains what that figure shows, otherwise "".',
+  '- checks: 4 to 6 per lesson. "after" is the index (from 0) of the card the check comes right after; a check tests that card or the cards before it, never a later card. Give every card that teaches something new one or two checks, and end the lesson with one check that applies the whole lesson to a new case (after = the last card). Within a lesson go from recognising (ox, mcq) to recalling (cloze, match, order) to applying (mcq about a new situation, short).',
+  '- type: "mcq" (exactly 4 choices; answer is the correct choice copied exactly), "ox" (answer is "O" or "X"; use both true and false statements across a lesson), "cloze" (the sentence has "____" for one missing word or phrase and answer is that word; choices: the answer plus 2 to 4 tempting words to pick from, or [] when the student should type it), "short" (answer is a term, name or number; put other correct spellings in accepted), "match" (pairs: 3 to 5 {left, right} pairs such as a term and its meaning or a cause and its effect, each side at most 30 characters, all lefts different and all rights different; the prompt says what to match; choices [] and answer ""), "order" (choices: 3 to 6 steps, stages or events in the correct order, without numbers, which the app shuffles; the prompt says what to put in order; answer ""). pairs is [] for every type except match.',
+  '- Wrong choices (mcq and cloze) must be plausible: what students really confuse, taken from the note\'s pitfalls, similar terms or a reversed cause and effect, in the same form and about the same length as the answer. Never "all of the above", "none of the above" or choices that point at other choices. Ask positively; use a negative question only when the point is an exception, and then put the negative word in **bold**.',
+  '- explanation: one or two sentences: why the answer is right and, for mcq and cloze, why the most tempting wrong choice is wrong. hint: one short line that points the way without giving the answer away, or "".',
+  '- Every check must be answerable from the cards of its lesson. Do not copy questions from <questions>; write new ones that fit the level.',
 ];
 const COURSE_STYLE =
   '- Write everything in Korean in a warm, encouraging tone (해요체), keeping terms, formulas ($...$), code (`...` or ``` blocks) and foreign-language examples in their original form. No markup other than these.';

@@ -1473,6 +1473,8 @@ export default function NotePage() {
               noteChars={noteChars}
               keyPoints={keyPoints.length}
               canCreate={!old && !appendRunning && !reorg}
+              terms={body?.terms}
+              figures={docFigures}
             />
           ) : null}
 

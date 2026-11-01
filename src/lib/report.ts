@@ -107,11 +107,14 @@ export function cardSnapshot(c: CourseCard): string {
   return [c.heading, c.text, c.tip ? `팁: ${c.tip}` : ''].filter(Boolean).map(oneLine).join(' / ');
 }
 
-/** 확인 문제 하나 (보기·정답·해설) */
+/** 확인 문제 하나 (보기·정답·해설). 짝 맞추기는 짝, 순서 맞추기는 바른 차례, 낱말 고르기 빈칸은 고를 낱말까지 */
 export function checkSnapshot(c: CourseCheck): string {
-  const choices = c.choices?.length ? ` 보기: ${c.choices.map((x, i) => `${i + 1}) ${oneLine(x)}`).join(' ')}` : '';
+  const explain = c.explanation ? ` (해설: ${oneLine(c.explanation)})` : '';
+  if (c.type === 'match') return `${oneLine(c.prompt)} 짝: ${(c.pairs ?? []).map((p) => `${oneLine(p.left)} = ${oneLine(p.right)}`).join(', ')}${explain}`;
+  if (c.type === 'order') return `${oneLine(c.prompt)} 바른 차례: ${(c.choices ?? []).map(oneLine).join(' → ')}${explain}`;
+  const choices = c.choices?.length ? ` ${c.type === 'cloze' ? '고를 낱말' : '보기'}: ${c.choices.map((x, i) => `${i + 1}) ${oneLine(x)}`).join(' ')}` : '';
   const answer = c.type === 'mcq' ? `${Number(c.answer) + 1}번` : c.type === 'ox' ? (c.answer ? 'O' : 'X') : String(c.answer ?? '').trim();
-  return `${oneLine(c.prompt)}${choices} → 정답 ${answer}${c.explanation ? ` (해설: ${oneLine(c.explanation)})` : ''}`;
+  return `${oneLine(c.prompt)}${choices} → 정답 ${answer}${explain}`;
 }
 
 /** 레슨 전체 (제목·목표·카드·확인 문제): 서버가 저장된 레슨에서 만든다 */

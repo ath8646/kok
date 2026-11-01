@@ -1959,6 +1959,65 @@ body.kok-editing .kok-fab {
 .kok-player {
   animation: kok-player-in 240ms var(--ease-out) backwards;
 }
+/* 연속 정답(3개부터): 진행 막대 위에 밝은 빛이 겹쳐 지나간다 (::after 의 opacity·transform 만) */
+.kok-lesson-fill {
+  position: relative;
+  overflow: hidden;
+}
+.kok-lesson-fill::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(90deg, transparent 0%, color-mix(in srgb, white 55%, transparent) 50%, transparent 100%);
+  opacity: 0;
+  transform: translateX(-100%);
+  transition: opacity 200ms var(--ease-out);
+}
+.kok-lesson-fill.is-hot {
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 30%, transparent);
+}
+.kok-lesson-fill.is-hot::after {
+  opacity: 1;
+  animation: kok-lesson-glint 1.4s var(--ease-out) infinite;
+}
+@keyframes kok-lesson-glint {
+  to {
+    transform: translateX(100%);
+  }
+}
+/* 연속 정답 칩: 톡 튀어나왔다가 (사라질 때는 그냥 빠진다) */
+@keyframes kok-combo-in {
+  from {
+    opacity: 0;
+    transform: translateY(-6px) scale(0.9);
+  }
+  60% {
+    opacity: 1;
+    transform: translateY(0) scale(1.06);
+  }
+}
+.kok-combo {
+  animation: kok-combo-in 260ms var(--ease-out) backwards;
+}
+/* 길 칸의 말풍선: 길의 가운데 줄에 두고(translate), 칸 쪽에서 살짝 내려오며 나타난다(transform·opacity) */
+.kok-node-pop {
+  translate: calc(-50% + var(--shift, 0px)) 0;
+  transform-origin: calc(50% - var(--shift, 0px)) 0;
+  animation: kok-node-pop 180ms var(--ease-out) backwards;
+}
+@keyframes kok-node-pop {
+  from {
+    opacity: 0;
+    transform: translateY(-6px) scale(0.97);
+  }
+}
+/* 별 3개를 받은 칸: 금빛 (형광펜 색, 그림자도 그 색으로) */
+.kok-path-node.is-perfect {
+  box-shadow: 0 6px 0 color-mix(in srgb, var(--hl) 70%, black 25%);
+}
+.kok-path-node.is-perfect:active {
+  box-shadow: 0 1px 0 color-mix(in srgb, var(--hl) 70%, black 25%);
+}
 
 /* 움직임 줄이기: 옮겨 다니는 움직임은 빼고 바로 보여 준다 */
 @media (prefers-reduced-motion: reduce) {

@@ -1088,22 +1088,45 @@ function fakeCourse(textOf) {
     ids = [];
   }
   if (!ids.length) ids = ['k1', 'k2'];
-  const check = (i) =>
+  // 레슨 칸(듀오링고식): after = 나올 자리(카드 번호), hint, pairs (짝 맞추기만), 빈칸은 고를 낱말(choices)
+  const base = { accepted: [], pairs: [], hint: '' };
+  const check = (i, after) =>
     i % 3 === 0
-      ? { type: 'mcq', prompt: `개념 ${i + 1}에 맞는 설명은?`, choices: ['빛을 모아 양분을 만든다', '물을 밖으로 버린다', '뿌리를 굵게 한다', '꽃을 피운다'], answer: '빛을 모아 양분을 만든다', accepted: [], explanation: '잎은 빛을 받아 양분을 만들어요.' }
+      ? { ...base, type: 'mcq', after, prompt: `개념 ${i + 1}에 맞는 설명은?`, choices: ['빛을 모아 양분을 만든다', '물을 밖으로 버린다', '뿌리를 굵게 한다', '꽃을 피운다'], answer: '빛을 모아 양분을 만든다', explanation: '잎은 빛을 받아 양분을 만들어요. 물을 버리는 것은 증산 작용이라 헷갈리기 쉬워요.', hint: '잎이 하는 일을 떠올려 봐요' }
       : i % 3 === 1
-        ? { type: 'ox', prompt: `개념 ${i + 1}: 광합성은 잎에서 일어난다.`, choices: [], answer: 'O', accepted: [], explanation: '맞아요. 잎의 엽록체에서 일어나요.' }
-        : { type: 'cloze', prompt: '잎에서 공기가 드나드는 작은 구멍을 ____이라고 해요.', choices: [], answer: '기공', accepted: ['stoma'], explanation: '기공은 잎 뒷면에 많아요.' };
+        ? { ...base, type: 'ox', after, prompt: `개념 ${i + 1}: 광합성은 잎에서 일어난다.`, choices: [], answer: 'O', explanation: '맞아요. 잎의 엽록체에서 일어나요.' }
+        : { ...base, type: 'cloze', after, prompt: '잎에서 공기가 드나드는 작은 구멍을 ____이라고 해요.', choices: ['엽록체', '뿌리털', '기공'], answer: '기공', accepted: ['stoma'], explanation: '기공은 잎 뒷면에 많아요. 엽록체는 광합성이 일어나는 곳이에요.' };
+  const match = {
+    ...base,
+    type: 'match',
+    after: 2,
+    prompt: '용어와 뜻을 짝지어 보세요',
+    choices: [],
+    answer: '',
+    pairs: [
+      { left: '엽록체', right: '광합성이 일어나는 곳' },
+      { left: '기공', right: '기체가 드나드는 구멍' },
+      { left: '엽록소', right: '빛을 흡수하는 색소' },
+    ],
+    explanation: '세 낱말 모두 잎의 광합성과 관련 있어요.',
+  };
+  const order = { ...base, type: 'order', after: 2, prompt: '광합성이 일어나는 차례대로 놓아 보세요', choices: ['빛을 받는다', '물을 나눈다', '포도당을 만든다'], answer: '', explanation: '빛 에너지로 물을 나누고, 그 에너지로 포도당을 만들어요.' };
   const lessons = ids.slice(0, 4).map((id, i) => ({
     title: `레슨 ${i + 1}: ${id}`,
     goal: `${id} 개념을 설명할 수 있어요`,
     key_point_ids: [id, 'zzz-not-a-key-point'],
     cards: [
-      { kind: 'concept', heading: '뜻', text: `${id} 개념의 뜻을 ${level} 수준으로 쉽게 풀어 써요.`, tip: '' },
-      { kind: 'example', heading: '예시', text: '생활 속 예시 하나.', tip: '이렇게 외워요: 잎 = 공장' },
-      { kind: 'tip', heading: '', text: '헷갈리기 쉬운 점.', tip: '' },
+      { kind: 'concept', heading: '뜻', text: `${id} 개념의 뜻을 ${level} 수준으로 쉽게 풀어 써요.`, tip: '', figure_id: 'f999' },
+      { kind: 'example', heading: '예시', text: '생활 속 예시 하나.', tip: '이렇게 외워요: 잎 = 공장', figure_id: '' },
+      { kind: 'tip', heading: '', text: '헷갈리기 쉬운 점.', tip: '', figure_id: '' },
     ],
-    checks: [check(i), check(i + 1), { type: 'mcq', prompt: '답을 읽을 수 없는 문제', choices: ['가', '나'], answer: '다', accepted: [], explanation: '' }],
+    checks: [
+      check(i, 0),
+      check(i + 1, 1),
+      { ...base, type: 'mcq', after: 2, prompt: '답을 읽을 수 없는 문제', choices: ['가', '나'], answer: '다', explanation: '' },
+      // 첫 레슨에는 짝 맞추기·순서 맞추기도
+      ...(i === 0 ? [match, order] : []),
+    ],
   }));
   const half = Math.ceil(lessons.length / 2);
   return {
@@ -1139,10 +1162,10 @@ function fakeCourseUnit(textOf) {
   return {
     lessons: Array.from({ length: n }, (_, i) => ({
       cards: [
-        { kind: 'concept', heading: '뜻', text: `단계 레슨 ${i + 1}의 뜻을 쉽게 풀어 써요.`, tip: '' },
-        { kind: 'example', heading: '예시', text: '생활 속 예시 하나.', tip: '' },
+        { kind: 'concept', heading: '뜻', text: `단계 레슨 ${i + 1}의 뜻을 쉽게 풀어 써요.`, tip: '', figure_id: '' },
+        { kind: 'example', heading: '예시', text: '생활 속 예시 하나.', tip: '', figure_id: '' },
       ],
-      checks: [{ type: 'ox', prompt: `단계 레슨 ${i + 1}: 맞는 말인가요?`, choices: [], answer: 'O', accepted: [], explanation: '맞아요.' }],
+      checks: [{ type: 'ox', after: 0, prompt: `단계 레슨 ${i + 1}: 맞는 말인가요?`, choices: [], answer: 'O', accepted: [], pairs: [], explanation: '맞아요.', hint: '' }],
     })),
   };
 }

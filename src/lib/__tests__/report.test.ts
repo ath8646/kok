@@ -109,6 +109,18 @@ describe('신고 (lib/report.ts)', () => {
     expect(lessonStepSnapshot(null, 0)).toBe('');
     const long = lessonSnapshot({ ...lesson, cards: Array.from({ length: 40 }, () => ({ ...lesson.cards[0], text: '가'.repeat(400) })) });
     expect(long.length).toBeLessThanOrEqual(REPORT_SNAPSHOT_MAX);
+    // 짝 맞추기·순서 맞추기·낱말 고르기 빈칸
+    const more = lessonSnapshot({
+      ...lesson,
+      checks: [
+        { type: 'match', prompt: '짝지어요', choices: null, answer: '', accepted: [], explanation: '', pairs: [{ left: '틸라코이드', right: '명반응' }] },
+        { type: 'order', prompt: '차례대로', choices: ['빛', '물 분해', 'ATP'], answer: '', accepted: [], explanation: '' },
+        { type: 'cloze', prompt: '____에서 빛을 받아요', choices: ['틸라코이드', '스트로마', '기공'], answer: '틸라코이드', accepted: [], explanation: '' },
+      ],
+    });
+    expect(more).toContain('문제 1: 짝지어요 짝: 틸라코이드 = 명반응');
+    expect(more).toContain('문제 2: 차례대로 바른 차례: 빛 → 물 분해 → ATP');
+    expect(more).toContain('고를 낱말: 1) 틸라코이드 2) 스트로마 3) 기공 → 정답 틸라코이드');
   });
 
   it('예전 DB 에 넣는 이유 글은 종류·결과를 붙여도 1000자 안', () => {

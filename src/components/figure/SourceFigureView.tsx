@@ -136,7 +136,8 @@ export function SourceFigureView({
   const question = variant === 'question';
   const [view, setView] = useState<View>(hasArt && !originalFirst && !question ? 'art' : 'original');
   const shown: View = view === 'art' && hasArt ? 'art' : 'original';
-  const [zoom, setZoom] = useState(false);
+  /** 크게 보기를 띄울 곳 (null 이면 닫힘): 전체 화면 창(레슨 등, z 70) 안의 그림이면 그 창 안에, 아니면 body */
+  const [zoom, setZoom] = useState<HTMLElement | null>(null);
   const kindLabel = FIG_KIND_LABEL[fig.kind];
   // 문제 위에서는 제목·설명을 화면 읽기에도 알리지 않는다 (답을 알려 줄 수 있어서)
   const name = question ? '자료 그림' : fig.title || kindLabel;
@@ -171,7 +172,7 @@ export function SourceFigureView({
         <button
           type="button"
           className="press inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-xs font-semibold text-muted hover:bg-surface-2 hover:text-ink"
-          onClick={() => setZoom(true)}
+          onClick={(e) => setZoom((e.currentTarget.closest('[role="dialog"]') as HTMLElement | null) ?? document.body)}
         >
           <Icon d={ICONS.expand} size={14} />
           크게 보기
@@ -195,10 +196,11 @@ export function SourceFigureView({
         </figcaption>
       ) : null}
       {footer}
-      {/* 카드·문제는 움직임(transform) 때문에 겹침 순서가 따로 생겨서, 크게 보기는 화면 맨 위(body)에 띄운다 */}
+      {/* 카드·문제는 움직임(transform) 때문에 겹침 순서가 따로 생겨서, 크게 보기는 화면 맨 위(body)에 띄운다.
+          전체 화면 창(레슨 플레이어 z 70) 안이면 그 창 안에 (body 의 시트(z 50)는 그 창 밑에 깔린다) */}
       {zoom
         ? createPortal(
-            <Sheet open onClose={() => setZoom(false)} title={name}>
+            <Sheet open onClose={() => setZoom(null)} title={name}>
               <div className="grid gap-3">
                 {hasArt ? (
                   <div className="flex justify-center">
@@ -209,7 +211,7 @@ export function SourceFigureView({
                 {!question && fig.caption ? <p className="text-sm leading-relaxed text-muted">{fig.caption}</p> : null}
               </div>
             </Sheet>,
-            document.body,
+            zoom,
           )
         : null}
     </figure>

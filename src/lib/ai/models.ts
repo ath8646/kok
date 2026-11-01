@@ -130,9 +130,15 @@ export function estimateSmallTask(model: ModelId, usdPerEnergy: number, inputTok
 
 /**
  * 먼저 생각하고 답하는 작은 작업의 예상 답 길이 (생각한 토큰도 답으로 센다). 서버의 에너지 확인과 화면의 예상이 같은 값을 쓴다
- * chat: 노트 채팅 (파일 없음), chatSolve: 사진·파일을 붙인 채팅과 AI에게 물어보기, solveOne: 문제 하나 그림 풀이 만들기
+ * chat: 노트 채팅 (파일 없음), chatSolve: 사진·파일을 붙인 채팅과 AI에게 물어보기 (사진 한 장에 문제가 두셋인 때쯤),
+ * solveOne: 문제 하나 그림 풀이 만들기
  */
-export const THINK_OUT = { chat: 1200, chatSolve: 3500, solveOne: 6000 } as const;
+export const THINK_OUT = { chat: 1200, chatSolve: 4500, solveOne: 6000 } as const;
+
+/** 채팅 답의 최대 길이 (생각 포함): 사진에 문제가 여럿이면 문제마다 풀이를 써서 길다 (CHAT_SOLUTIONS_MAX 개까지) */
+export const CHAT_MAX_TOKENS = 24_000;
+/** 채팅 답(첫 호출)을 기다리는 시간: 라우트 제한 시간(240초) 안에서 그림·저장할 여유를 남긴다 */
+export const CHAT_SOLVE_WAIT_MS = 170_000;
 
 /** 채팅 풀이의 그림(Pro, 풀이 뒤 두 번째 호출)의 예상 답 길이: 그림 설계도 + 단계마다 add·focus */
 export const CHAT_FIGURE_OUT = 2500;

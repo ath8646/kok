@@ -964,27 +964,61 @@ const toChatQuestion = (q) => ({
 const it = (p) => ({ refs: [], x: 0, y: 0, w: 0, h: 0, r: 0, expr: '', from: 0, to: 0, label: '', style: 'given', marks: 0, ...p });
 const noFigure = { include: false, view: { x_min: 0, x_max: 0, y_min: 0, y_max: 0 }, axes: false, grid: false, items: [] };
 
-/** 채팅에서 푼 문제 (사진·'풀어' 가 있으면): 직각삼각형 빗변. 첫 호출은 글 단계만, Pro 스키마면 그림이 도움이 된다고 표시 */
-function fakeChatSolution(solveProps, wantSolve) {
-  const pro = !!solveProps?.properties?.needs_figure;
-  const flag = pro ? { needs_figure: wantSolve } : {};
-  // 과목·단원 칸은 홈 채팅에만 있다 (실제 Claude 는 스키마에 있는 칸만 쓴다)
-  const guess = solveProps?.properties?.subject ? (wantSolve ? { subject: '수학', unit: '피타고라스 정리' } : { subject: '', unit: '' }) : {};
-  if (!wantSolve) return { include: false, problem: '', steps: [], ...flag, question: emptyQuestion, ...guess };
-  return {
-    include: true,
+/**
+ * 채팅에서 푼 문제들 (사진·'풀어' 가 있으면): 직각삼각형 빗변. '다 풀어'·'모두 풀어' 면 꼬리 문제가 있는 문제까지 셋
+ * (1번 빗변 + 2번 (1) 소금물 질량 + 2번 (2) 농도 객관식). 첫 호출은 글 단계만(단계마다 과목의 단계 이름),
+ * Pro 스키마면 그림이 도움이 된다고 첫 문제에만 표시. 과목·단원 칸은 홈 채팅에만 (실제 Claude 는 스키마에 있는 칸만 쓴다)
+ */
+function fakeChatSolutions(solveProps, wantSolve, multi) {
+  const item = solveProps?.items;
+  const pro = !!item?.properties?.needs_figure;
+  const guessOn = !!item?.properties?.subject;
+  if (!wantSolve) return [];
+  const flag = (v) => (pro ? { needs_figure: v } : {});
+  const guess = (subject, unit) => (guessOn ? { subject, unit } : {});
+  const first = {
+    label: multi ? '1번' : '',
     problem: '직각삼각형 ABC 에서 ∠A = 90°, AB = 4 cm, AC = 3 cm 일 때 빗변 BC 의 길이를 구하시오.',
     steps: CHAT_STEPS.map((text) => ({ text })),
-    ...flag,
+    ...flag(true),
     question: { ...emptyQuestion, type: 'short', prompt: '∠A = 90° 인 직각삼각형 ABC 에서 AB = 4 cm, AC = 3 cm 일 때 BC 의 길이는? (cm)', answer: '5', accepted: ['5cm', '5 cm'], explanation: '피타고라스 정리로 $3^2+4^2=25$ 이니 빗변은 5 cm 예요.', difficulty: 'easy' },
-    ...guess,
+    ...guess('수학', '피타고라스 정리'),
   };
+  if (!multi) return [first];
+  return [
+    first,
+    {
+      label: '2번 (1)',
+      problem: '[실험] 물 100 g 에 소금 25 g 을 모두 녹였다.\n(1) 만들어진 소금물의 질량은 몇 g 인가?',
+      steps: [
+        { text: '개념: 용액의 질량은 용매의 질량과 용질의 질량을 더한 값이에요.' },
+        { text: '계산: $100 + 25 = 125$ 예요.' },
+        { text: '결론: 정답은 125 g이에요.' },
+      ],
+      ...flag(false),
+      question: { ...emptyQuestion, type: 'short', prompt: '[실험] 물 100 g 에 소금 25 g 을 모두 녹였다.\n\n만들어진 소금물의 질량은 몇 g 인가?', answer: '125', accepted: ['125g', '125 g'], explanation: '용액의 질량은 용매와 용질의 질량을 더한 값이라 125 g 이에요.', difficulty: 'easy' },
+      ...guess('과학', '용액'),
+    },
+    {
+      label: '2번 (2)',
+      problem: '(2) 이 소금물의 퍼센트 농도는? ① 20% ② 25% ③ 125% ④ 80%',
+      steps: [
+        { text: '개념: 퍼센트 농도는 용질의 질량을 용액의 질량으로 나눈 뒤 100을 곱해요.' },
+        { text: '자료 해석: 용질은 25 g, 용액은 (1)에서 구한 125 g 이에요.' },
+        { text: '계산: $\\frac{25}{125} \\times 100 = 20$ 이에요.' },
+        { text: '결론: 정답은 ① 20%예요.' },
+      ],
+      ...flag(false),
+      question: { ...emptyQuestion, type: 'mcq', prompt: '[실험] 물 100 g 에 소금 25 g 을 모두 녹였다.\n\n이 소금물의 퍼센트 농도는?', choices: ['20%', '25%', '125%', '80%'], answer: '20%', explanation: '$25 \\div 125 \\times 100 = 20$ 이라 20% 예요.', difficulty: 'medium' },
+      ...guess('과학', '용액'),
+    },
+  ];
 }
 
 const CHAT_STEPS = [
-  '직각을 낀 두 변이 $3$ cm, $4$ cm 이에요. 빗변은 직각의 맞은편 $\\overline{BC}$ 예요.',
-  '피타고라스 정리: $\\overline{BC}^2 = 3^2 + 4^2 = 25$',
-  '그래서 $\\overline{BC} = 5$ cm 예요.',
+  '주어진 것: 직각을 낀 두 변이 $3$ cm, $4$ cm 이에요. 빗변은 직각의 맞은편 $\\overline{BC}$ 예요.',
+  '식 세우기: 피타고라스 정리로 $\\overline{BC}^2 = 3^2 + 4^2 = 25$',
+  '계산: 그래서 $\\overline{BC} = 5$ cm 예요.',
 ];
 
 /** 채팅 풀이의 그림 (Pro, 두 번째 호출): 문제 그림과 단계마다 add·focus */
@@ -1034,15 +1068,18 @@ function fakeChat(textOf, props = {}, images = 0) {
   const allowNote = !/adding to the note from chat is turned off/.test(textOf);
   const none = { kind: 'none', questions: [], note_addition: { key_point_id: '', title: '', text: '' }, terms: [] };
   const wantSolve = images > 0 || /풀어/.test(q);
-  const solution = props.solution ? { solution: fakeChatSolution(props.solution, wantSolve) } : {};
+  // '다 풀어'·'모두 풀어': 사진에 문제가 여럿 (꼬리 문제 둘 포함)
+  const multi = wantSolve && /다 풀어|모두 풀어/.test(q);
+  const solution = props.solutions ? { solutions: fakeChatSolutions(props.solutions, wantSolve, multi) } : {};
+  const solvedReply = multi ? '사진 속 문제 3개를 풀었어요. 번호를 눌러 하나씩 확인해 보세요.' : null;
   // 홈 AI 채팅 (노트 없음)
   if (!props.outside_note) {
     return wantSolve
-      ? { reply: '빗변 BC 는 **5 cm** 예요. 아래 단계별 풀이를 보세요.', ...solution }
+      ? { reply: solvedReply ?? '빗변 BC 는 **5 cm** 예요. 아래 단계별 풀이를 보세요.', ...solution }
       : { reply: '광합성은 식물이 빛 에너지로 물과 이산화탄소에서 포도당과 산소를 만드는 과정이에요.', ...solution };
   }
   if (wantSolve) {
-    return { reply: '빗변 BC 는 5 cm 예요. 단계별 풀이를 보세요.', outside_note: true, proposal: none, ...solution };
+    return { reply: solvedReply ?? '빗변 BC 는 5 cm 예요. 단계별 풀이를 보세요.', outside_note: true, proposal: none, ...solution };
   }
   if (/문제/.test(q) && allowQuestions) {
     return {

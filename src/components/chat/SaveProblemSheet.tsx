@@ -1,5 +1,6 @@
 'use client';
 // AI 채팅에서 푼 문제를 노트 문제로 넣기: 과목(또는 새 과목) → 단원 → 노트(또는 새 노트)를 고르고 [넣기].
+// 한 답에서 푼 문제가 여럿이면 한 번에 같은 노트로 넣을 수 있다 (과목·단원 짐작은 첫 문제의 것).
 // 문제는 복습 카드와 같이 만들고(오늘부터 복습), 그림 풀이도 같이 넣는다. AI 가 노트 문제를 다시 만들어도 남게 잠가 둔다.
 // 채팅 창을 떠나지 않고 끝낼 수 있게 과목도 여기서 만든다 (홈 채팅은 홈을 떠나면 사라진다)
 import { useEffect, useMemo, useState } from 'react';
@@ -10,7 +11,7 @@ import { fetchSources, fetchSubjects, sb } from '@/lib/data';
 import { subjectVar } from '@/lib/colors';
 import { pickerOrder } from '@/lib/subject-order';
 import { SUBJECT_COLORS } from '@/lib/settings';
-import type { ChatSolution } from '@/lib/chat';
+import { solutionLabel, type ChatSolution } from '@/lib/chat';
 import type { SubjectRow } from '@/lib/types';
 
 export type SavedPlace = { noteTitle: string; sourceId: string };
@@ -30,10 +31,22 @@ function sameName(a: string, b: string): boolean {
   return !!x && !!y && (x.includes(y) || y.includes(x));
 }
 
-export function SaveProblemSheet({ solution, onClose, onSaved }: { solution: ChatSolution | null; onClose: () => void; onSaved: (p: SavedPlace) => void }) {
+export function SaveProblemSheet({
+  solutions,
+  onClose,
+  onSaved,
+}: {
+  /** 넣을 풀이들 (넣을 문제가 있는 것만 넣는다) */
+  solutions: ChatSolution[] | null;
+  onClose: () => void;
+  onSaved: (p: SavedPlace) => void;
+}) {
   const { me } = useMe();
   const toast = useToast();
-  const open = !!solution?.question;
+  // 과목·단원·노트 이름 짐작은 첫 문제의 것
+  const solution = solutions?.[0] ?? null;
+  const items = useMemo(() => (solutions ?? []).filter((s) => !!s.question), [solutions]);
+  const open = items.length > 0;
   const [subjects, setSubjects] = useState<SubjectRow[] | null>(null);
   const [subjectId, setSubjectId] = useState('');
   const [newSubject, setNewSubject] = useState('');
@@ -46,9 +59,9 @@ export function SaveProblemSheet({ solution, onClose, onSaved }: { solution: Cha
   const [busy, setBusy] = useState(false);
 
   // 다른 문제로 열면 고른 것을 처음으로 (AI 가 짐작한 단원·이름을 미리 적어 둔다)
-  const [prev, setPrev] = useState<ChatSolution | null>(null);
-  if (solution !== prev) {
-    setPrev(solution);
+  const [prev, setPrev] = useState<ChatSolution[] | null>(null);
+  if (solutions !== prev) {
+    setPrev(solutions);
     if (solution) {
       setSubjects(null);
       setSubjectId('');
@@ -120,7 +133,6 @@ export function SaveProblemSheet({ solution, onClose, onSaved }: { solution: Cha
   const notes = newSubjectPicked ? NO_NOTES : loaded && loaded.subjectId === subjectId ? loaded.items : null;
   const units = useMemo(() => [...new Set((notes ?? []).map((n) => n.unit).filter(Boolean))], [notes]);
   const shown = useMemo(() => (notes ?? []).filter((n) => unit === ALL || unit === NEW || n.unit === unit), [notes, unit]);
-  const q = solution?.question ?? null;
   const makingNew = newSubjectPicked || unit === NEW || noteId === NEW;
 
   const pickSubject = (id: string) => {
@@ -132,7 +144,7 @@ export function SaveProblemSheet({ solution, onClose, onSaved }: { solution: Cha
   };
 
   const save = async () => {
-    if (!q || !me || busy) return;
+    if (!items.length || !me || busy) return;
     if (!subjectId) return toast('과목을 골라 주세요.', 'bad');
     if (newSubjectPicked && !newSubject.trim()) return toast('새 과목 이름을 적어 주세요.', 'bad');
     setBusy(true);
@@ -165,10 +177,12 @@ export function SaveProblemSheet({ solution, onClose, onSaved }: { solution: Cha
         setNoteId(made.noteId);
       }
       if (!target) throw new Error('노트를 골라 주세요.');
-      const { data, error } = await sb()
-        .from('questions')
-        .insert({
-          note_id: target.noteId,
+      const note = target;
+      // 여러 문제는 한 번에 (모두 들어가거나 하나도 안 들어간다)
+      const rows = items.map((s) => {
+        const q = s.question!;
+        return {
+          note_id: note.noteId,
           subject_id: sid,
           key_point_id: null,
           type: q.type,
@@ -181,17 +195,21 @@ export function SaveProblemSheet({ solution, onClose, onSaved }: { solution: Cha
           created_by: 'ai',
           // 노트 문제를 AI 로 다시 만들어도 지워지지 않게
           locked: true,
-          ...(me.features.figures && solution ? { figure: solution.figure, steps: solution.steps.length ? solution.steps : null } : {}),
-        })
-        .select('id')
-        .single();
-      if (error || !data) throw new Error('문제를 넣지 못했어요.');
-      const { error: cErr } = await sb().from('cards').insert({ question_id: data.id, subject_id: sid, due: new Date().toISOString() });
+          ...(me.features.figures ? { figure: s.figure, steps: s.steps.length ? s.steps : null } : {}),
+        };
+      });
+      const { data, error } = await sb().from('questions').insert(rows).select('id');
+      if (error || !data || data.length !== rows.length) throw new Error('문제를 넣지 못했어요.');
+      const ids = data.map((r) => r.id as string);
+      const due = new Date().toISOString();
+      const { error: cErr } = await sb()
+        .from('cards')
+        .insert(ids.map((id) => ({ question_id: id, subject_id: sid, due })));
       if (cErr) {
-        await sb().from('questions').delete().eq('id', data.id);
+        await sb().from('questions').delete().in('id', ids);
         throw new Error('복습 카드를 만들지 못했어요.');
       }
-      onSaved({ noteTitle: target.title, sourceId: target.sourceId });
+      onSaved({ noteTitle: note.title, sourceId: note.sourceId });
     } catch (e) {
       toast((e as Error).message, 'bad');
     } finally {
@@ -203,7 +221,7 @@ export function SaveProblemSheet({ solution, onClose, onSaved }: { solution: Cha
     <Sheet
       open={open}
       onClose={onClose}
-      title="노트에 넣기"
+      title={items.length > 1 ? `문제 ${items.length}개를 노트에 넣기` : '노트에 넣기'}
       footer={
         <div className="flex gap-2">
           <Button className="flex-1" busy={busy} disabled={!subjectId || (!makingNew && !noteId) || notes === null} onClick={save}>
@@ -215,11 +233,22 @@ export function SaveProblemSheet({ solution, onClose, onSaved }: { solution: Cha
         </div>
       }
     >
-      {q ? (
+      {items.length ? (
         <div className="grid gap-5">
-          <div className="rounded-2xl bg-surface-2/70 p-3.5">
-            <QuestionPreview q={{ ...q, figure: solution?.figure, steps: solution?.steps }} />
-          </div>
+          {items.length === 1 ? (
+            <div className="rounded-2xl bg-surface-2/70 p-3.5">
+              <QuestionPreview q={{ ...items[0].question!, figure: items[0].figure, steps: items[0].steps }} />
+            </div>
+          ) : (
+            <ol className="grid gap-2" aria-label="넣을 문제">
+              {items.map((s, i) => (
+                <li key={i} className="rounded-2xl bg-surface-2/70 p-3.5">
+                  <p className="mb-1.5 text-xs font-bold text-accent">{solutionLabel(s, i, items.length)}</p>
+                  <QuestionPreview q={{ ...s.question!, figure: s.figure, steps: s.steps }} />
+                </li>
+              ))}
+            </ol>
+          )}
 
           <section className="grid gap-2" aria-label="과목">
             <p className="text-sm font-bold">과목</p>

@@ -22,7 +22,7 @@ import {
   lessonSnapshot,
   questionSnapshot,
   reportTextProblem,
-  storedChatSolution,
+  storedChatSolutions,
   type ReportKind,
 } from '@/lib/report';
 
@@ -77,8 +77,9 @@ async function resolve(
       .order('created_at', { ascending: false })
       .limit(1)
       .maybeSingle();
-    const solution = withSolution ? storedChatSolution((withSolution as { solution?: unknown }).solution) : null;
-    return { targetId: m.id, snapshot: chatSnapshot({ question: asked?.content ?? null, reply: m.content, solution }) };
+    // 푼 문제가 여럿이면 모두 (첫 풀이 + more)
+    const solutions = withSolution ? storedChatSolutions((withSolution as { solution?: unknown }).solution) : [];
+    return { targetId: m.id, snapshot: chatSnapshot({ question: asked?.content ?? null, reply: m.content, solutions }) };
   }
   if (kind === 'cover') {
     if (!target || !UUID_RE.test(target)) throw notFound();

@@ -2,6 +2,7 @@
 // 한국어판은 "KOK PRD" 15장에 있다. 한쪽을 고치면 다른 쪽도 같이 고친다.
 
 import type { ArtKind } from '@/lib/art/spec';
+import { CHAT_SOLUTIONS_MAX } from '@/lib/chat';
 import type { ExamStyle } from '@/lib/exam-layout';
 import type { MaterialType } from '@/lib/material-type';
 
@@ -177,6 +178,7 @@ export function problemsPrompt(
     '  - type: "mcq" for a question with numbered choices, "ox" for a true-or-false question, "cloze" for a sentence with a blank to fill, "short" for a question whose answer is a word, a name, a number or a short phrase.',
     '  - prompt: the question exactly as written, without its number and its score. If it needs a passage, a table, a condition box (like <보기>) or given data that is written as text, put that part in the prompt before the question, copied exactly, keeping markers like (가), ㉠, ㄱ, ㄴ, ㄷ. Never shorten, summarize or reword it: if the whole prompt would be longer than 900 characters, skip the question. For cloze, write the blank as "____".',
     '  - Keep the layout of the exam paper with line breaks: the passage or data first, then an empty line, then the question sentence; each step (①), condition ((가)), speaker or table row on its own line; a <보기> box as a line "<보기>" followed by one line per item.',
+    '  - A question with sub-questions (like (1), (2), (3) that share one passage, table or set of data) becomes one question for each sub-question: put the shared part in each prompt, then that sub-question without its number, with its own choices, answer and explanation. Skip only the sub-questions you cannot copy or answer.',
     '  - choices (mcq only): every choice exactly as written, in order, without its number or letter (like ①, 1), A.).',
     '  - answer: for mcq, the correct choice copied exactly; for ox, "O" or "X"; for cloze and short, the answer, with other correct ways to write it in accepted. If the material gives the answer (an answer key, a marked choice or a solution), use it and set answer_from to "material". Otherwise solve the question yourself and set answer_from to "solved", but only if you are sure of the answer; if you are not sure, skip the question.',
     "  - explanation: the material's solution if it gives one, shortened to at most 3 sentences; otherwise why the answer is right, in at most 3 sentences.",
@@ -574,10 +576,25 @@ export const SOLVE_METHOD = [
   '- If something you need is missing or unreadable, say exactly what is missing instead of guessing.',
 ].join('\n');
 
+/**
+ * 과목마다 단계 풀이의 차례: 단계마다 '이름: 내용' (화면은 이름을 굵게 보인다: lib/step-title.ts).
+ * 노트 그림 풀이·채팅 풀이가 같이 쓴다. 마지막 단계의 이름에 '답'을 넣지 않는다 (정답 읽기가 '정답은 …'을 찾는다)
+ */
+export const SUBJECT_STEPS = [
+  'Step plan by subject: start every step with a short Korean step name and a colon, like "식 세우기: …", following the plan for the subject of the problem (several steps may share a name, like two "계산" steps). The last step also states the final answer.',
+  '- Math: "주어진 것" (what is given and what is asked; skip it when it is obvious), "식 세우기" (the equation, formula or relation to use), "계산" (one transformation per step), "검산" (substitute the answer back or estimate, then state the answer).',
+  '- Science: "개념" (the law, formula or concept that applies), "자료 해석" (read the experiment, table or graph; write known quantities with units), "계산" (only when there is a calculation), "결론" (the answer and why).',
+  '- Korean language and literature: "지문 근거" (quote the words of the passage that decide it), "선지 판단" (why the answer fits and why the most tempting wrong choice does not), "결론".',
+  '- English: "해석" (translate the key sentence or sentences into Korean), "근거·문법" (the evidence sentence or the grammar point that decides it), "결론".',
+  '- Social studies and history: "사료 단서" (the key words in the source, map or data), "시대·개념" (the period, event or concept they point to), "선지 판단", "결론".',
+  '- Programming: "코드 따라가기" (follow the code line by line with the values of the variables; one step per part or loop pass), "결론" (what it prints or returns, or the fix).',
+  '- Any other subject: short names that fit, like "핵심 개념", "적용", "결론".',
+].join('\n');
+
 /** 단계 풀이를 쓰는 법 (figures: 그림과 이어지는 add·focus 를 쓰는지) */
 export function stepRules(figures: boolean): string {
   return [
-    '- steps: 2 to 6 steps. Each step is one small idea in 1 or 2 short Korean sentences (해요체), with math as $...$. The last step states the final answer plainly, like "정답은 ③ 5 cm예요." (multiple choice: the choice number and its value; O/X: "정답은 O예요.").',
+    '- steps: 2 to 6 steps that follow the step plan below. Each step is its step name, a colon, then one small idea in 1 or 2 short Korean sentences (해요체), with math as $...$. The last step states the final answer plainly, like "결론: 정답은 ③ 5 cm예요." (multiple choice: the choice number and its value; O/X: "정답은 O예요.").',
     figures
       ? [
           '- add: ids of figure items that first appear in this step (helper lines, results, the answer). focus: ids of figure items to highlight in this step. Use [] when there is no figure.',
@@ -629,6 +646,7 @@ export function solvePrompt(o: { max: number; single?: boolean }): string {
       (o.single ? '' : ' If the marked answer looks wrong, skip that question.'),
     '- figure.include: true only if a picture makes the question or its solution clearer. Otherwise false, with view all 0, axes and grid false, and items [].',
     stepRules(true),
+    SUBJECT_STEPS,
     SOLVE_METHOD,
     FIGURE_RULES,
   ].join('\n');
@@ -673,31 +691,34 @@ export function chatQuestionRules(o: { types?: readonly string[]; note: boolean 
 }
 
 /**
- * 채팅에서 문제를 풀어 줄 때의 규칙 (노트 채팅·홈 AI 채팅). 넣을 문제의 유형은 문제 모양대로 (학생의 문제 유형 설정과 상관없이).
+ * 채팅에서 문제를 풀어 줄 때의 규칙 (노트 채팅·홈 AI 채팅). 사진·파일에 문제가 여럿이면 문제마다, 꼬리 문제((1)(2)(3))도 하나씩
+ * solutions 에 풀이를 하나씩 (CHAT_SOLUTIONS_MAX 개까지). 단계는 과목마다의 차례대로 (SUBJECT_STEPS).
+ * 넣을 문제의 유형은 문제 모양대로 (학생의 문제 유형 설정과 상관없이).
  * figures(Pro): 그림이 도움이 되는지만 표시하고, 그림은 풀이가 나온 뒤 따로 부른다 (chatFigurePrompt)
  */
 export function chatSolveRules(o: { note: boolean; figures: boolean }): string {
+  const max = CHAT_SOLUTIONS_MAX;
   return [
-    '- If the student sends a problem to solve (typed, or in an attached photo or file), solve it and set solution.include to true. Write solution first and reply last: work the problem out in the steps, and only then state the answer in reply.',
-    '  - solution.problem: the problem as you read it, in plain text with its choices, so the student can check that you read it right. If part of a photo is unclear, say in reply what you could not read.',
-    '  - If there are several problems and the student did not say which one, solve the first one and say in reply that they can ask for the others.',
+    `- If the student sends problems to solve (typed, or in an attached photo or file), put one item in solutions for each problem, in the order they appear, at most ${max}. Write solutions first and reply last: work each problem out in its steps, and only then write reply.`,
+    '  - A problem with sub-questions (like (1), (2), (3) under one passage, table or figure) gets one item for each sub-question, so that each sub-question has its own steps and its own answer. Never put several problems or sub-questions into one item.',
+    '  - label: the problem number as printed, with the sub-question, like "3번", "3번 (1)" or "(가)"; if the problems have no numbers, number them "1번", "2번" in order. Use "" when there is only one problem and it has no number.',
+    `  - If the student asks for some of the problems only (like "2번만 풀어 줘"), solve just those. If there are more than ${max}, solve the first ${max} and say in reply which ones are left and how to ask for them (for a photo or file: send it again and say which ones, like "6번부터 풀어 줘").`,
+    "  - problem: the problem as you read it, in plain text with its choices, so the student can check that you read it right. For sub-questions, write the shared passage, data or conditions only in the first sub-question's problem; the next items hold just their own sub-question. If part of a photo is unclear, say in reply what you could not read.",
     '  - If the photo or file also shows an answer or a solution (an answer key, a note, an earlier reply), do not copy it and do not trust it: solve the problem yourself, then say in reply whether that answer is right.',
-    '  - reply: one or two sentences with exactly the same final answer as your last step and solution.question (the same choice number and value); the steps hold the details. If your steps reached an answer you did not expect, recheck them and go with the checked steps. Never let the reply and the steps disagree.',
-    '  - solution.steps: 2 to 6 steps. Each step is one small idea in 1 or 2 short Korean sentences (해요체), with math as $...$. The last step states the final answer plainly, like "정답은 ③ 5 cm예요." (multiple choice: the choice number and its value; O/X: "정답은 O예요.").',
+    '  - steps: 2 to 6 steps that follow the step plan for the subject of the problem (below). Each step is its step name, a colon, then one small idea in 1 or 2 short Korean sentences (해요체), with math as $...$. The last step states the final answer plainly, like "결론: 정답은 ③ 5 cm예요." (multiple choice: the choice number and its value; O/X: "정답은 O예요.").',
     '  - Check your work: redo each calculation, and make sure the steps reach the answer.',
     o.figures
-      ? '  - solution.needs_figure: true only if a picture would make the problem or the solution clearer (geometry, graphs, forces, circuits, processes, cycles, cause and effect); the picture is drawn separately. Otherwise false.'
+      ? '  - needs_figure: true only if a picture would make that problem or its solution clearer (geometry, graphs, forces, circuits, processes, cycles, cause and effect); the picture is drawn separately. Otherwise false.'
       : '',
-    '  - solution.question: the same problem as a review question the student can save: mcq if the problem has choices, ox if it asks true or false, otherwise short. ' +
-      chatQuestionRules({ note: o.note }),
+    '  - question: the same problem as a review question the student can save: mcq if the problem has choices, ox if it asks true or false, otherwise short. ' +
+      chatQuestionRules({ note: o.note }) +
+      ' For a sub-question, question.prompt must stand alone: put the shared passage, data or conditions it needs first, then its own question sentence without the sub-question number.',
     o.note
       ? ''
-      : '  - solution.subject: the school subject in Korean, like "수학", "과학", "영어", "국어" or "사회". solution.unit: the unit or topic in Korean, like "이차함수" or "광합성". Each at most 20 characters.',
-    '- Otherwise set solution.include to false, solution.problem' +
-      (o.note ? '' : ', subject and unit') +
-      ' to "", solution.steps to []' +
-      (o.figures ? ', solution.needs_figure to false' : '') +
-      ', and fill solution.question with empty values (type "short", every text "", lists [], difficulty "medium").',
+      : '  - subject: the school subject in Korean, like "수학", "과학", "영어", "국어" or "사회". unit: the unit or topic in Korean, like "이차함수" or "광합성". Each at most 20 characters.',
+    '  - reply: with one item, one or two sentences with exactly the same final answer as its last step and its question (the same choice number and value); the steps hold the details. With several items, one or two short sentences about what you solved (like "문제 3개를 풀었어요. 번호를 눌러 하나씩 확인해 보세요."), without the answers: each item shows its own answer. If your steps reached an answer you did not expect, recheck them and go with the checked steps. Never let the reply and the steps disagree.',
+    '- If there is no problem to solve, set solutions to [].',
+    SUBJECT_STEPS,
     SOLVE_METHOD,
   ]
     .filter(Boolean)
@@ -710,7 +731,7 @@ export function chatSolveRules(o: { note: boolean; figures: boolean }): string {
  */
 export function chatFigurePrompt(): string {
   return [
-    'A student asked about the problem in <problem>, and the step-by-step solution in <steps> is already written (a JSON list; index is the step number from 0). Design a figure for it: the app draws the figure and reveals it step by step. If the photo or file the student sent comes first, follow the picture in it (its shape, labels and given values).',
+    'A student asked about the problem in <problem>, and the step-by-step solution in <steps> is already written (a JSON list; index is the step number from 0). Design a figure for it: the app draws the figure and reveals it step by step. If the photo or file the student sent comes first, follow the picture in it (its shape, labels and given values). When <problem> starts with a problem number like "(3번 (2))", draw the figure for that problem or sub-question only.',
     '- figure.include: true only if a picture makes the problem or the solution clearer (geometry, graphs, forces, circuits, processes, cycles, cause and effect). Otherwise false, with view all 0, axes and grid false, items [], and steps [].',
     '- steps: one item for each step in <steps>, with the same index. add lists the ids of figure items that first appear in that step (helper lines, results, the answer); focus lists the ids of figure items to highlight in that step. Do not rewrite the step texts.',
     "- Every figure item that is in no step's add is shown with the problem before the student answers, so it must not give the answer away. Put anything that shows the answer into the add of the step that explains it.",

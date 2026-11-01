@@ -2,6 +2,7 @@
 // 노트 채팅: 노트 화면 오른쪽 아래의 채팅 버튼을 누르면 '자료 넣기' 창처럼 이 화면 안에서 열린다.
 // 노트 내용(과 일반 지식)으로 답하고, 답마다 에너지를 쓴다. 대화는 노트마다 저장된다.
 // 사진·파일을 붙이거나 사진을 찍어 물어볼 수 있다: 문제를 보내면 단계로 풀어 주고(Pro 는 그림으로), 푼 문제는 이 노트 문제로 넣을 수 있다.
+// 문제가 여럿이면(꼬리 문제도) 문제마다 풀이가 하나씩 오고 번호 탭으로 본다: 하나씩 또는 모두 한 번에 넣는다.
 // 붙인 파일은 Pro 만 기록에 보관하고, 아니면 이름만 남는다.
 // AI 가 문제·노트에 넣자고 하면 미리보기를 보여 주고, 학생이 [넣기]를 눌러야 들어간다.
 import { perkNeed } from '@/lib/plans';
@@ -18,7 +19,7 @@ import {
   ImageViewer,
   PickStrip,
   SentFiles,
-  SolutionCard,
+  SolutionSet,
   ThinkingRow,
   TierPicker,
   useChatAttach,
@@ -29,7 +30,7 @@ import { THINK_OUT, estimateSmallTask } from '@/lib/ai/models';
 import { clientModel } from '@/lib/client-model';
 import { sb } from '@/lib/data';
 import { picksTokens, prepareChatFiles, releasePicks, type ChatPick } from '@/lib/chat-files';
-import { FILE_ONLY_CONTENT, type ChatMessage, type ChatProposal, type ChatQuestion } from '@/lib/chat';
+import { FILE_ONLY_CONTENT, packSolutions, solutionList, type ChatMessage, type ChatProposal, type ChatQuestion } from '@/lib/chat';
 import type { ModelTier } from '@/lib/settings';
 
 const CHAT_ICON = 'M4 5.5h16v10H9l-5 4zM8 9.5h8M8 12.5h5';
@@ -318,13 +319,23 @@ export function NoteChat({
     }
   };
 
-  /** AI 가 풀어 준 문제를 이 노트의 문제로 넣는다 (그림 풀이도 같이) */
-  const saveProblem = async (msg: ChatMessage) => {
-    setApplying(msg.id);
+  /** AI 가 풀어 준 문제(들)를 이 노트의 문제로 넣는다 (그림 풀이도 같이). indexes: 몇 번째 풀이들 (0부터) */
+  const saveProblem = async (msg: ChatMessage, indexes: number[]) => {
+    setApplying(`${msg.id}:${indexes.join(',')}`);
     try {
-      await api(`/api/notes/${noteId}/chat/apply`, { method: 'POST', body: JSON.stringify({ messageId: msg.id, action: 'save_problem' }) });
-      setMessages((m) => (m ?? []).map((x) => (x.id === msg.id && x.solution ? { ...x, solution: { ...x.solution, saved: true } } : x)));
-      toast('이 노트 문제로 넣었어요. 오늘부터 복습에 나와요.', 'ok', DONE);
+      const r = await api<{ added: number; saved?: number[] }>(`/api/notes/${noteId}/chat/apply`, {
+        method: 'POST',
+        body: JSON.stringify({ messageId: msg.id, action: 'save_problem', indexes }),
+      });
+      const done = new Set(r.saved ?? indexes);
+      setMessages((m) =>
+        (m ?? []).map((x) => {
+          if (x.id !== msg.id || !x.solution) return x;
+          const list = solutionList(x.solution).map((s, i) => (done.has(i) ? { ...s, saved: true } : s));
+          return { ...x, solution: packSolutions(list, x.solution.rev) };
+        }),
+      );
+      toast(r.added > 1 ? `문제 ${r.added}개를 이 노트에 넣었어요. 오늘부터 복습에 나와요.` : '이 노트 문제로 넣었어요. 오늘부터 복습에 나와요.', 'ok', DONE);
       onApplied();
     } catch (e) {
       if (e instanceof ApiError && e.code === 'done') load();
@@ -468,24 +479,53 @@ export function NoteChat({
                             <RichText text={m.content} />
                           </div>
                         ) : null}
-                        {m.role === 'assistant' && m.solution ? (
-                          <SolutionCard
-                            solution={m.solution}
-                            actions={
-                              m.solution.question ? (
-                                m.solution.saved ? (
-                                  <span className="inline-flex items-center gap-1.5 text-sm font-semibold text-ok">
-                                    <Icon d={ICONS.check} size={16} strokeWidth={2.6} />이 노트 문제로 넣었어요
-                                  </span>
-                                ) : (
-                                  <Button size="sm" variant="ink" busy={applying === m.id} onClick={() => saveProblem(m)}>
-                                    이 노트 문제로 넣기
-                                  </Button>
-                                )
-                              ) : null
-                            }
-                          />
-                        ) : null}
+                        {m.role === 'assistant' && m.solution
+                          ? (() => {
+                              const list = solutionList(m.solution);
+                              if (!list.length) return null;
+                              // 넣지 않은 문제가 둘 이상이면 한 번에
+                              const left = list.flatMap((s, i) => (s.question && !s.saved ? [i] : []));
+                              const busyHere = !!applying?.startsWith(`${m.id}:`);
+                              return (
+                                <SolutionSet
+                                  solutions={list}
+                                  saved={(i) => !!list[i]?.saved}
+                                  actions={(s, i) =>
+                                    s.question ? (
+                                      s.saved ? (
+                                        <span className="inline-flex items-center gap-1.5 text-sm font-semibold text-ok">
+                                          <Icon d={ICONS.check} size={16} strokeWidth={2.6} />이 노트 문제로 넣었어요
+                                        </span>
+                                      ) : (
+                                        <Button
+                                          size="sm"
+                                          variant="ink"
+                                          busy={applying === `${m.id}:${i}`}
+                                          disabled={busyHere && applying !== `${m.id}:${i}`}
+                                          onClick={() => saveProblem(m, [i])}
+                                        >
+                                          이 노트 문제로 넣기
+                                        </Button>
+                                      )
+                                    ) : null
+                                  }
+                                  footer={
+                                    left.length > 1 ? (
+                                      <Button
+                                        size="sm"
+                                        variant="secondary"
+                                        busy={applying === `${m.id}:${left.join(',')}`}
+                                        disabled={busyHere && applying !== `${m.id}:${left.join(',')}`}
+                                        onClick={() => saveProblem(m, left)}
+                                      >
+                                        {left.length}문제 모두 이 노트에 넣기
+                                      </Button>
+                                    ) : null
+                                  }
+                                />
+                              );
+                            })()
+                          : null}
                         {m.role === 'assistant' ? (
                           <div className="flex flex-wrap items-center gap-x-2 gap-y-1 pl-1 text-[11px] text-muted">
                             <AiMark label="AI 답" />

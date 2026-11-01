@@ -1,7 +1,18 @@
 import { describe, expect, it } from 'vitest';
 import { chatChoiceIndex, homeChatJsonSchema, noteChatJsonSchema, readChatQuestion, zChat, zHomeChat, zSolve } from '@/lib/ai/schemas';
-import { ANSWER_UNSURE, claimedChoice, finishReply, historyLine, readChatAnswer, readChatSolution, withChatFigure } from '@/lib/chat-solution';
-import { solutionAnswer, type ChatSolution } from '@/lib/chat';
+import {
+  ANSWER_UNSURE,
+  claimedChoice,
+  finishReply,
+  fitSolutions,
+  historyLine,
+  readChatAnswer,
+  readChatAnswers,
+  readChatSolution,
+  withChatFigure,
+} from '@/lib/chat-solution';
+import { CHAT_SOLUTIONS_MAX, packSolutions, solutionAnswer, solutionLabel, solutionList, solvedLine, type ChatSolution } from '@/lib/chat';
+import { stepParts } from '@/lib/step-title';
 import { claimIn, compareText, copulaFor, finalClaim, mentionsAnswer } from '@/lib/figure/solution';
 import { chatKindOf } from '@/lib/chat-files';
 
@@ -31,19 +42,19 @@ describe('채팅 풀이 받기', () => {
   it('무료(그림 칸 없음)도 글 단계 풀이를 받는다', () => {
     const out = zHomeChat.parse({
       reply: '5 cm 예요.',
-      solution: { include: true, problem: '문제', steps: [{ text: '식을 세워요' }, { text: '5 cm' }], question, subject: '수학', unit: '피타고라스' },
+      solutions: [{ label: '', problem: '문제', steps: [{ text: '식을 세워요' }, { text: '5 cm' }], question, subject: '수학', unit: '피타고라스' }],
     });
-    const sol = readChatSolution(out.solution, { figures: false })!;
+    const sol = readChatSolution(out.solutions[0], { figures: false })!;
     expect(sol.figure).toBeNull();
     expect(sol.steps.map((s) => s.text)).toEqual(['식을 세워요', '5 cm']);
     expect(sol.question).toMatchObject({ type: 'short', answer: '5', accepted: ['5cm'] });
     expect(sol.subject).toBe('수학');
   });
   it('Pro 그림은 두 번째 호출로: 단계 번호에 맞춰 add·focus 를 붙이고, 그릴 것이 없으면 풀이 그대로', () => {
-    const raw = { include: true, problem: '문제', steps: [{ text: '변 AB' }, { text: '답 4' }], needs_figure: true, question, subject: '', unit: '' };
-    const out = zHomeChat.parse({ reply: '', solution: raw });
-    expect(out.solution?.needs_figure).toBe(true);
-    const sol = readChatSolution(out.solution, { figures: false })!;
+    const raw = { label: '', problem: '문제', steps: [{ text: '변 AB' }, { text: '답 4' }], needs_figure: true, question, subject: '', unit: '' };
+    const out = zHomeChat.parse({ reply: '', solutions: [raw] });
+    expect(out.solutions[0]?.needs_figure).toBe(true);
+    const sol = readChatSolution(out.solutions[0], { figures: false })!;
     expect(sol.figure).toBeNull();
     const drawn = withChatFigure(sol, {
       figure: fig,
@@ -77,11 +88,13 @@ describe('채팅 풀이 받기', () => {
     expect(readChatQuestion({ prompt: 'x' })).toBeNull();
   });
   it('풀지 않았거나 단계가 없으면 없음, 문제 모양이 이상하면 넣을 문제만 없음', () => {
-    expect(readChatSolution(zHomeChat.parse({ reply: 'x', solution: { include: false } }).solution, { figures: true })).toBeNull();
-    expect(readChatSolution(zHomeChat.parse({ reply: 'x', solution: { include: true, steps: [] } }).solution, { figures: true })).toBeNull();
-    expect(readChatSolution(zHomeChat.parse({ reply: 'x' }).solution, { figures: true })).toBeNull();
+    // 예전 모양(include false)·단계 없음·풀이 칸 없음·객체가 아닌 칸
+    expect(readChatSolution(zHomeChat.parse({ reply: 'x', solutions: [{ include: false }] }).solutions[0], { figures: true })).toBeNull();
+    expect(readChatSolution(zHomeChat.parse({ reply: 'x', solutions: [{ steps: [] }] }).solutions[0], { figures: true })).toBeNull();
+    expect(zHomeChat.parse({ reply: 'x' }).solutions).toEqual([]);
+    expect(zHomeChat.parse({ reply: 'x', solutions: ['풀이', null, { problem: 'p' }] }).solutions).toHaveLength(1);
     const sol = readChatSolution(
-      zHomeChat.parse({ reply: '', solution: { include: true, steps: [{ text: '풀이' }], question: { ...question, answer: '' } } }).solution,
+      zHomeChat.parse({ reply: '', solutions: [{ steps: [{ text: '풀이' }], question: { ...question, answer: '' } }] }).solutions[0],
       {
         figures: false,
       },
@@ -95,12 +108,12 @@ describe('채팅 풀이 받기', () => {
       outside_note: false,
       proposal: { kind: 'none', questions: [], note_addition: { key_point_id: '', title: '', text: '' } },
     });
-    expect(out.solution).toBeUndefined();
+    expect(out.solutions).toEqual([]);
     const props = (s: Record<string, unknown>) => Object.keys((s as { properties: Record<string, unknown> }).properties);
-    expect(props(noteChatJsonSchema({ solve: false, figures: false }))).not.toContain('solution');
-    expect(props(noteChatJsonSchema({ solve: true, figures: true }))).toContain('solution');
+    expect(props(noteChatJsonSchema({ solve: false, figures: false }))).not.toContain('solutions');
+    expect(props(noteChatJsonSchema({ solve: true, figures: true }))).toContain('solutions');
     const sol = (s: Record<string, unknown>) =>
-      Object.keys((s as { properties: { solution: { properties: Record<string, unknown> } } }).properties.solution.properties);
+      Object.keys((s as { properties: { solutions: { items: { properties: Record<string, unknown> } } } }).properties.solutions.items.properties);
     // 그림 설계도는 첫 호출에 넣지 않는다 (답 모양이 크면 Claude 가 거절한다): Pro 는 그림이 도움이 되는지만
     expect(sol(homeChatJsonSchema(true))).toContain('needs_figure');
     expect(sol(homeChatJsonSchema(true))).not.toContain('figure');
@@ -169,9 +182,9 @@ describe('개념마다 기억 상태', () => {
 
 describe('답 글과 단계 풀이가 같은 답을 말한다', () => {
   it('풀이 칸이 답 글보다 먼저다 (AI 는 칸 순서대로 쓴다: 단계를 풀고 나서 답을 말하게)', () => {
-    expect(Object.keys(homeChatJsonSchema(true).properties as object)).toEqual(['solution', 'reply']);
-    expect(Object.keys(homeChatJsonSchema(false).properties as object)).toEqual(['solution', 'reply']);
-    expect(Object.keys(noteChatJsonSchema({ solve: true, figures: true }).properties as object)).toEqual(['solution', 'reply', 'outside_note', 'proposal']);
+    expect(Object.keys(homeChatJsonSchema(true).properties as object)).toEqual(['solutions', 'reply']);
+    expect(Object.keys(homeChatJsonSchema(false).properties as object)).toEqual(['solutions', 'reply']);
+    expect(Object.keys(noteChatJsonSchema({ solve: true, figures: true }).properties as object)).toEqual(['solutions', 'reply', 'outside_note', 'proposal']);
     expect(Object.keys(noteChatJsonSchema({ solve: false, figures: false }).properties as object)).toEqual(['reply', 'outside_note', 'proposal']);
   });
 
@@ -493,5 +506,146 @@ describe('정답이라고 밝힌 말 읽기·값 견주기', () => {
       ['π', null],
     ];
     for (const [a, end] of cases) expect([a, copulaFor(a)]).toEqual([a, end]);
+  });
+});
+
+describe('한 답에 문제가 여럿 (문제마다·꼬리 문제마다 풀이 하나)', () => {
+  const raw = (label: string, last: string, answer: string, type = 'short', choices: string[] = []) => ({
+    label,
+    problem: `${label} 문제`,
+    steps: [{ text: '식 세우기: 식을 세워요.' }, { text: last }],
+    question: { ...question, type, choices, answer, accepted: [] },
+    subject: '수학',
+    unit: '방정식',
+  });
+
+  it('풀이마다 따로 맞춘다: 엇갈린 풀이만 넣을 문제를 빼고(unsure) 번호를 들어 알린다', () => {
+    const out = readChatAnswers(
+      '문제 3개를 풀었어요.',
+      [raw('1번', '검산: 정답은 5예요.', '5'), raw('2번 (1)', '결론: 따라서 $x = 7$이에요.', '6'), raw('2번 (2)', '결론: 정답은 O예요.', 'O', 'ox')],
+      { figures: false },
+    );
+    expect(out.solutions.map((s) => s.label)).toEqual(['1번', '2번 (1)', '2번 (2)']);
+    expect(out.checks).toEqual(['none', 'dropped', 'none']);
+    expect(out.solutions[1]).toMatchObject({ question: null, unsure: true });
+    expect(out.solutions[0].question?.answer).toBe('5');
+    expect(out.reply).toBe('문제 3개를 풀었어요. 2번 (1)은 풀이 중에 답이 한 번 엇갈렸으니, 한 번 더 확인해 보세요.');
+    expect(out.needsFigure).toEqual([false, false, false]);
+  });
+
+  it('번호가 비면 차례로, 겹치면 뒤에 차례를 붙인다. 답 글이 비면 무엇을 풀었는지만', () => {
+    const out = readChatAnswers('', [raw('', '정답은 5예요.', '5'), raw('3번', '정답은 5예요.', '5'), raw('3번', '정답은 5예요.', '5')], { figures: false });
+    expect(out.solutions.map((s) => s.label)).toEqual(['1번', '3번', '3번 · 2']);
+    expect(out.reply).toBe('문제 3개를 풀었어요. 번호를 눌러 하나씩 확인해 보세요.');
+  });
+
+  it(`${CHAT_SOLUTIONS_MAX}개까지만, 단계가 없는 풀이는 버린다 (그림이 필요하다는 표시는 남은 풀이에 맞춘다)`, () => {
+    const many = Array.from({ length: 7 }, (_, i) => ({ ...raw(`${i + 1}번`, '정답은 5예요.', '5'), needs_figure: i === 2 }));
+    many[0] = { ...many[0], steps: [] };
+    const out = readChatAnswers('여러 문제를 풀었어요.', many, { figures: false });
+    expect(out.solutions.map((s) => s.label)).toEqual(['2번', '3번', '4번', '5번']);
+    expect(out.needsFigure).toEqual([false, true, false, false]);
+  });
+
+  it("답 글이 번호마다 답을 말하면 그 풀이와 맞춰 본다: '2번: ③' 이 다르면 그 줄만 고친다", () => {
+    const mcq = ['1', '2', '3', '4'];
+    const out = readChatAnswers(
+      '문제 2개를 풀었어요.\n- 1번: ③ 3이에요.\n2번은 X예요.\n2번은 계산 실수가 쉬우니 조심하세요.',
+      [raw('1번', '결론: 정답은 ④ 4예요.', '4', 'mcq', mcq), raw('2번', '결론: 정답은 O예요.', 'O', 'ox')],
+      { figures: false },
+    );
+    expect(out.reply).toBe('문제 2개를 풀었어요.\n- 1번: 정답은 ④번이에요 (4).\n2번: 정답은 O예요.\n2번은 계산 실수가 쉬우니 조심하세요.');
+    // 같은 답을 말하는 줄·번호로 시작하지 않는 줄은 그대로
+    const same = readChatAnswers('1번: ④ 4예요.\n둘 다 쉬워요.', [raw('1번', '정답은 ④ 4예요.', '4', 'mcq', mcq), raw('2번', '정답은 O예요.', 'O', 'ox')], {
+      figures: false,
+    });
+    expect(same.reply).toBe('1번: ④ 4예요.\n둘 다 쉬워요.');
+  });
+
+  it('풀이가 하나면 예전과 같다 (답 글도 맞춘다), 번호가 있으면 남긴다', () => {
+    const one = readChatAnswers('정답은 6이에요.', [raw('7번', '결론: 정답은 5예요.', '5')], { figures: false });
+    expect(one.solutions).toHaveLength(1);
+    expect(one.solutions[0].label).toBe('7번');
+    expect(one.reply).toBe('정답은 5예요. 아래 단계별 풀이를 확인해 보세요.');
+    expect(readChatAnswers('광합성은 …', [], { figures: false })).toMatchObject({ solutions: [], reply: '광합성은 …', checks: [] });
+  });
+
+  it('저장 모양: 첫 풀이 + more (예전 화면은 첫 풀이만 읽는다), 다시 읽으면 같은 목록', () => {
+    const a: ChatSolution = { label: '1번', problem: 'a', steps: [{ text: 'x', add: [], focus: [] }], figure: null, question: null, subject: '', unit: '' };
+    const b: ChatSolution = { ...a, label: '2번', problem: 'b', saved: true };
+    const stored = packSolutions([a, b], 3)!;
+    expect(stored).toMatchObject({ label: '1번', problem: 'a', rev: 3 });
+    expect(stored.more).toHaveLength(1);
+    expect(solutionList(stored)).toEqual([a, b]);
+    // 예전 기록 (more 없음)·모양이 다른 칸
+    expect(solutionList({ ...a, saved: true })).toEqual([{ ...a, saved: true }]);
+    expect(solutionList(null)).toEqual([]);
+    expect(solutionList({ ...a, more: [b, null, { problem: 'no steps' }] } as never)).toHaveLength(2);
+    expect(packSolutions([])).toBeNull();
+    // 다시 싸도 more 가 겹치지 않는다
+    expect(packSolutions(solutionList(stored))?.more).toHaveLength(1);
+  });
+
+  it('문제 번호 보이기·대화 기록 (번호와 함께, 여럿이면 짧게)', () => {
+    const s = (label: string, problem: string): ChatSolution => ({ label, problem, steps: [], figure: null, question: null, subject: '', unit: '' });
+    expect(solutionLabel(s('', 'p'), 0, 1)).toBe('');
+    expect(solutionLabel(s('', 'p'), 1, 3)).toBe('2번');
+    expect(solutionLabel(s('3번 (1)', 'p'), 0, 3)).toBe('3번 (1)');
+    expect(solvedLine([s('', '빗변은?')])).toBe('\n(풀이한 문제: 빗변은?)');
+    const many = solvedLine([s('1번', 'x'.repeat(500)), s('2번', '둘째')]);
+    expect(many).toContain('[1번] ' + 'x'.repeat(450) + ' / [2번] 둘째');
+    expect(many).not.toContain('x'.repeat(451));
+    expect(historyLine({ role: 'assistant', content: '2문제', solution: packSolutions([s('1번', '하나'), s('2번', '둘')]) })).toBe(
+      '2문제\n(풀이한 문제: [1번] 하나 / [2번] 둘)',
+    );
+  });
+
+  it('저장 칸에 맞추기: 뒤 풀이의 그림부터 빼고, 그다음 글을 줄이고, 마지막에 뒤 풀이를 뺀다', () => {
+    const figure = { ...fig, items: Array.from({ length: 30 }, (_, i) => ({ ...fig.items[0], id: `P${i}`, label: 'L'.repeat(40) })) } as never;
+    const big = (label: string): ChatSolution => ({
+      label,
+      problem: '문'.repeat(2000),
+      steps: Array.from({ length: 6 }, () => ({ text: '단'.repeat(400), add: [], focus: [] })),
+      figure,
+      question: null,
+      subject: '',
+      unit: '',
+    });
+    const out = fitSolutions([big('1번'), big('2번'), big('3번'), big('4번'), big('5번')]);
+    const size = new TextEncoder().encode(JSON.stringify(packSolutions(out))).length;
+    expect(size).toBeLessThan(60_000);
+    expect(out[0].figure).not.toBeNull();
+    expect(out.at(-1)?.figure ?? null).toBeNull();
+    expect(out.length).toBeGreaterThanOrEqual(2);
+    // 작으면 그대로
+    const small = [big('1번')].map((s) => ({ ...s, problem: 'p', steps: [{ text: 'a', add: [], focus: [] }], figure: null }));
+    expect(fitSolutions(small)).toEqual(small);
+  });
+});
+
+describe('단계 이름 (과목마다의 단계: 이름: 내용)', () => {
+  it('짧은 한글 이름 + 쌍점 + 빈칸이면 이름', () => {
+    expect(stepParts('식 세우기: $x+2=5$')).toEqual({ title: '식 세우기', body: '$x+2=5$' });
+    expect(stepParts('근거·문법: 가정법 과거예요.')).toEqual({ title: '근거·문법', body: '가정법 과거예요.' });
+    expect(stepParts('코드 따라가기: i가 0일 때 …')).toMatchObject({ title: '코드 따라가기' });
+    expect(stepParts('반복 2회: s = 3')).toMatchObject({ title: '반복 2회' });
+    expect(stepParts('정의： 속력은 거리 ÷ 시간이에요.')).toMatchObject({ title: '정의' });
+    expect(stepParts('결론: 정답은 ③ 5 cm예요.')).toEqual({ title: '결론', body: '정답은 ③ 5 cm예요.' });
+  });
+  it('문장·수식·비율은 이름이 아니다 (글 그대로)', () => {
+    for (const t of [
+      '따라서 답은: 5',
+      '정리하면: 3이에요',
+      '비율 2:3이에요.',
+      'x: 3',
+      '$a:b$ = 2:3',
+      '(가) 조건: 넓이가 6',
+      '1~3줄: i = 0',
+      '이 문장은 아주 길어서 이름이 될 수 없어요: 내용',
+      '식 세우기:',
+      '피타고라스 정리로 빗변을 구해요.',
+    ]) {
+      expect(stepParts(t)).toEqual({ title: null, body: t });
+    }
   });
 });

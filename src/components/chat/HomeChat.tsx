@@ -1,7 +1,9 @@
 'use client';
 // 홈의 'AI에게 물어보기': 위쪽 물어보기 줄을 누르면 자료 넣기 창처럼 채팅 창이 뜬다.
 // 아무 과목이나 묻고, 사진·파일로 문제를 보내면 단계로 풀어 준다 (Pro 는 그림으로 보는 단계).
-// 대화는 저장하지 않는다: 홈에 있는 동안만 남고 홈을 떠나면 사라진다. 푼 문제는 과목·단원·노트를 골라 노트 문제로 넣을 수 있다.
+// 사진에 문제가 여럿이면 문제마다(꼬리 문제도 하나씩) 풀이가 하나씩 오고, 번호 탭으로 하나씩 본다.
+// 대화는 저장하지 않는다: 홈에 있는 동안만 남고 홈을 떠나면 사라진다. 푼 문제는 과목·단원·노트를 골라 노트 문제로 넣을 수 있다
+// (하나씩, 또는 모두 한 번에).
 import { perkNeed } from '@/lib/plans';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
@@ -15,7 +17,7 @@ import { THINK_OUT, estimateSmallTask } from '@/lib/ai/models';
 import { clientModel } from '@/lib/client-model';
 import { sb } from '@/lib/data';
 import { picksTokens, prepareChatFiles, releasePicks, type ChatPick } from '@/lib/chat-files';
-import type { ChatSolution, ChatTurn, HomeChatReply } from '@/lib/chat';
+import { solvedLine, type ChatSolution, type ChatTurn, type HomeChatReply } from '@/lib/chat';
 import { chatSnapshot } from '@/lib/report';
 import type { ModelTier } from '@/lib/settings';
 import {
@@ -24,7 +26,7 @@ import {
   ImageViewer,
   PickStrip,
   SentFiles,
-  SolutionCard,
+  SolutionSet,
   ThinkingRow,
   TierPicker,
   useChatAttach,
@@ -42,11 +44,15 @@ type Msg = {
   /** 보낸 사진·파일 (사진은 이 화면에서만 쓰는 미리보기 주소) */
   files?: SentFile[];
   picks?: ChatPick[];
-  solution?: ChatSolution | null;
+  /** 푼 문제들 (문제마다 하나) */
+  solutions?: ChatSolution[];
   energy?: number;
-  /** 노트 문제로 넣은 곳 */
-  saved?: SavedPlace | null;
+  /** 노트 문제로 넣은 곳 (풀이 번호 → 곳) */
+  saved?: Record<number, SavedPlace>;
 };
+
+/** 노트에 넣기 창에 넘기는 것: 어느 말의 몇 번째 풀이들인지 */
+type Saving = { msgId: string; indexes: number[]; solutions: ChatSolution[] };
 
 const SUGGESTIONS: Array<{ label: string; text?: string; camera?: boolean }> = [
   { label: '사진으로 문제 풀기', camera: true },
@@ -55,11 +61,10 @@ const SUGGESTIONS: Array<{ label: string; text?: string; camera?: boolean }> = [
   { label: '영어 문장 해석해 줘', text: '"I wish I had studied harder." 해석하고 문법도 알려 줘' },
 ];
 
-/** 대화 기록 한 줄 (AI 에 보낼 때): 붙인 파일은 이름만, 푼 문제는 읽은 문제를 덧붙인다 (서버 historyLine 과 같게) */
+/** 대화 기록 한 줄 (AI 에 보낼 때): 붙인 파일은 이름만, 푼 문제는 번호와 읽은 문제를 덧붙인다 (서버 historyLine 과 같게) */
 function turnOf(m: Msg): ChatTurn {
   const files = (m.files ?? []).map((f) => `[${f.kind === 'image' ? '사진' : f.kind === 'pdf' ? 'PDF' : '글 파일'}: ${f.name}]`).join(' ');
-  const problem = m.solution?.problem ? `\n(풀이한 문제: ${m.solution.problem.slice(0, 600)})` : '';
-  return { role: m.role, content: `${files ? `${files} ` : ''}${m.content}`.slice(0, 1500) + problem };
+  return { role: m.role, content: `${files ? `${files} ` : ''}${m.content}`.slice(0, 1500) + solvedLine(m.solutions ?? []) };
 }
 
 /** 홈 위쪽의 물어보기 줄 + 채팅 창 (대화는 이 컴포넌트가 들고 있다: 홈을 떠나면 사라진다) */
@@ -74,7 +79,7 @@ export function HomeAsk() {
   const [text, setText] = useState('');
   const [sending, setSending] = useState(false);
   const [tier, setTier] = useState<ModelTier>(() => me?.settings.models.chat ?? 'fast');
-  const [saving, setSaving] = useState<Msg | null>(null);
+  const [saving, setSaving] = useState<Saving | null>(null);
   const [viewer, setViewer] = useState<SentFile | null>(null);
   const [report, setReport] = useState<ReportWhat | null>(null);
   const area = useRef<HTMLTextAreaElement>(null);
@@ -97,7 +102,7 @@ export function HomeAsk() {
       .slice(0, Math.max(at, 0))
       .reverse()
       .find((x) => x.role === 'user');
-    return chatSnapshot({ question: asked ? turnOf(asked).content : null, reply: m.content, solution: m.solution });
+    return chatSnapshot({ question: asked ? turnOf(asked).content : null, reply: m.content, solutions: m.solutions ?? [] });
   };
 
   const show = useCallback(() => {
@@ -189,7 +194,8 @@ export function HomeAsk() {
     try {
       const attachments = await prepareChatFiles(picks);
       const r = await api<HomeChatReply>('/api/chat', { method: 'POST', body: JSON.stringify({ message, tier, history, attachments }) });
-      setMessages((m) => [...m, { id: `a${++seq.current}`, role: 'assistant', content: r.reply, solution: r.solution, energy: r.energy }]);
+      const solutions = r.solutions ?? (r.solution ? [r.solution] : []);
+      setMessages((m) => [...m, { id: `a${++seq.current}`, role: 'assistant', content: r.reply, solutions, energy: r.energy }]);
       refresh();
     } catch (e) {
       // 보내지 못했으면 적은 글과 붙인 파일을 되돌린다
@@ -348,31 +354,47 @@ export function HomeAsk() {
                           <RichText text={m.content} />
                         </div>
                       ) : null}
-                      {m.role === 'assistant' && m.solution ? (
-                        <SolutionCard
-                          solution={m.solution}
-                          actions={
-                            m.solution.question ? (
-                              m.saved ? (
-                                <span className="inline-flex items-center gap-2 text-sm font-semibold text-ok">
-                                  <Icon d={ICONS.check} size={16} strokeWidth={2.6} />
-                                  &lsquo;{m.saved.noteTitle}&rsquo;에 넣었어요
-                                  <Link href={`/notes/${m.saved.sourceId}?tab=questions`} className="text-accent underline-offset-2 hover:underline">
-                                    노트 보기
-                                  </Link>
-                                </span>
-                              ) : (
-                                <button
-                                  type="button"
-                                  className="press inline-flex h-10 items-center gap-1.5 rounded-full bg-ink px-4 text-sm font-bold text-surface"
-                                  onClick={() => setSaving(m)}
-                                >
-                                  <Icon d={ICONS.plus} size={17} strokeWidth={2.4} />
-                                  노트에 넣기
-                                </button>
-                              )
-                            ) : null
-                          }
+                      {m.role === 'assistant' && m.solutions?.length ? (
+                        <SolutionSet
+                          solutions={m.solutions}
+                          saved={(i) => !!m.saved?.[i]}
+                          actions={(s, i) => {
+                            if (!s.question) return null;
+                            const place = m.saved?.[i];
+                            return place ? (
+                              <span className="inline-flex flex-wrap items-center gap-x-2 gap-y-1 text-sm font-semibold text-ok">
+                                <Icon d={ICONS.check} size={16} strokeWidth={2.6} />
+                                &lsquo;{place.noteTitle}&rsquo;에 넣었어요
+                                <Link href={`/notes/${place.sourceId}?tab=questions`} className="text-accent underline-offset-2 hover:underline">
+                                  노트 보기
+                                </Link>
+                              </span>
+                            ) : (
+                              <button
+                                type="button"
+                                className="press inline-flex h-10 items-center gap-1.5 rounded-full bg-ink px-4 text-sm font-bold text-surface"
+                                onClick={() => setSaving({ msgId: m.id, indexes: [i], solutions: [s] })}
+                              >
+                                <Icon d={ICONS.plus} size={17} strokeWidth={2.4} />
+                                노트에 넣기
+                              </button>
+                            );
+                          }}
+                          footer={(() => {
+                            // 넣지 않은 문제가 둘 이상이면 한 번에 (같은 과목·단원·노트로)
+                            const left = m.solutions.flatMap((s, i) => (s.question && !m.saved?.[i] ? [i] : []));
+                            if (left.length < 2) return null;
+                            return (
+                              <button
+                                type="button"
+                                className="press inline-flex h-10 items-center gap-1.5 rounded-full bg-accent-soft px-4 text-sm font-bold text-accent"
+                                onClick={() => setSaving({ msgId: m.id, indexes: left, solutions: left.map((i) => m.solutions![i]) })}
+                              >
+                                <Icon d={ICONS.layers} size={17} strokeWidth={2.2} />
+                                {left.length}문제 모두 노트에 넣기
+                              </button>
+                            );
+                          })()}
                         />
                       ) : null}
                       {m.role === 'assistant' ? (
@@ -422,13 +444,18 @@ export function HomeAsk() {
       ) : null}
 
       <SaveProblemSheet
-        solution={saving?.solution ?? null}
+        solutions={saving?.solutions ?? null}
         onClose={() => setSaving(null)}
         onSaved={(place) => {
-          const id = saving?.id;
-          setMessages((ms) => ms.map((x) => (x.id === id ? { ...x, saved: place } : x)));
+          const s = saving;
+          if (s) {
+            setMessages((ms) =>
+              ms.map((x) => (x.id === s.msgId ? { ...x, saved: { ...x.saved, ...Object.fromEntries(s.indexes.map((i) => [i, place])) } } : x)),
+            );
+          }
           setSaving(null);
-          toast(`'${place.noteTitle}'에 문제를 넣었어요.`, 'ok', DONE);
+          const n = s?.indexes.length ?? 1;
+          toast(n > 1 ? `'${place.noteTitle}'에 문제 ${n}개를 넣었어요.` : `'${place.noteTitle}'에 문제를 넣었어요.`, 'ok', DONE);
         }}
       />
       <ReportSheet what={report} onClose={() => setReport(null)} />

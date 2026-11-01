@@ -107,16 +107,20 @@ export function clipSnapshot(s: string): string {
   return clip(s.trim(), REPORT_SNAPSHOT_MAX);
 }
 
-/** 채팅 답: 물어본 말 + 답 + 풀이 단계·정답 */
-export function chatSnapshot(p: { question?: string | null; reply: string; solution?: ChatSolution | null }): string {
+/** 채팅 답: 물어본 말 + 답 + 푼 문제마다 번호·읽은 문제·풀이 단계·정답 */
+export function chatSnapshot(p: { question?: string | null; reply: string; solutions?: ChatSolution[] | null }): string {
   const parts: string[] = [];
   if (p.question?.trim()) parts.push(`학생: ${clip(p.question.trim(), 800)}`);
   parts.push(`AI: ${p.reply.trim()}`);
-  const s = p.solution;
-  if (s) {
-    if (s.problem.trim()) parts.push(`풀이한 문제: ${clip(oneLine(s.problem), 600)}`);
+  const list = p.solutions ?? [];
+  // 문제가 여럿이면 문제마다 줄여서 (운영자가 모두 볼 수 있게)
+  const per = list.length > 1 ? { problem: 300, step: 200 } : { problem: 600, step: 400 };
+  for (const s of list) {
+    const head = s.label ? `[${s.label}] ` : '';
+    if (s.problem.trim()) parts.push(`${head}풀이한 문제: ${clip(oneLine(s.problem), per.problem)}`);
+    else if (head) parts.push(head.trim());
     s.steps.forEach((st, i) => {
-      if (st.text.trim()) parts.push(`${i + 1}단계: ${clip(oneLine(st.text), 400)}`);
+      if (st.text.trim()) parts.push(`${i + 1}단계: ${clip(oneLine(st.text), per.step)}`);
     });
     const answer = solutionAnswer(s.question);
     if (answer) parts.push(`정답: ${answer}`);
@@ -124,17 +128,33 @@ export function chatSnapshot(p: { question?: string | null; reply: string; solut
   return clipSnapshot(parts.join('\n'));
 }
 
-/** 저장된 채팅 풀이(chat_messages.solution)를 글로 바꿀 만큼만 읽는다 (모양이 다르면 null) */
-export function storedChatSolution(raw: unknown): ChatSolution | null {
+/** 저장된 채팅 풀이 하나를 글로 바꿀 만큼만 읽는다 (모양이 다르면 null) */
+function storedOne(raw: unknown): ChatSolution | null {
   if (!raw || typeof raw !== 'object') return null;
-  const s = raw as { problem?: unknown; steps?: unknown; question?: unknown };
+  const s = raw as { label?: unknown; problem?: unknown; steps?: unknown; question?: unknown };
   if (!Array.isArray(s.steps)) return null;
   const steps = s.steps
     .filter((x): x is { text: string } => !!x && typeof x === 'object' && typeof (x as { text?: unknown }).text === 'string')
     .map((x) => ({ text: x.text, add: [], focus: [] }));
   const q = s.question as ChatSolution['question'];
   const question = q && typeof q === 'object' && typeof q.type === 'string' && typeof q.prompt === 'string' ? q : null;
-  return { problem: typeof s.problem === 'string' ? s.problem : '', steps, figure: null, question, subject: '', unit: '' };
+  return {
+    label: typeof s.label === 'string' ? s.label : '',
+    problem: typeof s.problem === 'string' ? s.problem : '',
+    steps,
+    figure: null,
+    question,
+    subject: '',
+    unit: '',
+  };
+}
+
+/** 저장된 채팅 풀이들(chat_messages.solution: 첫 풀이 + more)을 글로 바꿀 만큼만 읽는다 */
+export function storedChatSolutions(raw: unknown): ChatSolution[] {
+  const first = storedOne(raw);
+  if (!first) return [];
+  const more = (raw as { more?: unknown }).more;
+  return [first, ...(Array.isArray(more) ? more.map(storedOne).filter((s): s is ChatSolution => !!s) : [])];
 }
 
 /** 표지 그림: 모양과 글 (v1 은 그림 설명만) */

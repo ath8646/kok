@@ -1,4 +1,5 @@
 // 홈 AI 채팅: 노트 없이 아무 과목이나 묻고, 사진·파일로 보낸 문제를 단계로 풀어 준다 (Pro 는 그림 풀이).
+// 사진·파일에 문제가 여럿이면 문제마다(꼬리 문제도 하나씩) 풀이를 하나씩 만든다 (CHAT_SOLUTIONS_MAX 개까지).
 // 대화는 저장하지 않는다 (화면이 들고 있다가 홈을 떠나면 사라진다). 답마다 에너지를 쓴다
 import type { NextRequest } from 'next/server';
 import { z } from 'zod';
@@ -8,17 +9,17 @@ import { UserFacingError, errorResponse } from '@/lib/server/errors';
 import { runTaskFull } from '@/lib/server/tasks';
 import { textBlock } from '@/lib/server/claude';
 import { chatFileBlocks, readChatFiles, zChatAttachments } from '@/lib/server/chat-input';
-import { readChatAnswer } from '@/lib/chat-solution';
+import { readChatAnswers } from '@/lib/chat-solution';
 import { HOME_CHAT_SYSTEM, homeChatPrompt, wrap } from '@/lib/ai/prompts';
 import { homeChatJsonSchema, zHomeChat } from '@/lib/ai/schemas';
-import { drawChatFigure } from '@/lib/server/chat-figure';
+import { drawChatFigures } from '@/lib/server/chat-figure';
 import type { HomeChatReply } from '@/lib/chat';
-import { THINK_OUT } from '@/lib/ai/models';
+import { CHAT_MAX_TOKENS, CHAT_SOLVE_WAIT_MS, THINK_OUT } from '@/lib/ai/models';
 
-// AI 답(최대 100초, 먼저 생각하고 답한다) + Pro 그림(남은 시간 안에서)
-export const maxDuration = 120;
+// AI 답(먼저 생각하고 답한다: 문제가 여럿이면 길다) + Pro 그림(남은 시간 안에서)
+export const maxDuration = 240;
 /** 라우트 제한 시간 안에서 AI 를 기다릴 수 있는 시간 */
-const AI_BUDGET_MS = 112_000;
+const AI_BUDGET_MS = 228_000;
 
 const Body = z.object({
   message: z.string().trim().max(4000, '한 번에 4,000자까지 물어볼 수 있어요.').catch(''),
@@ -72,32 +73,30 @@ export async function POST(req: NextRequest) {
         textBlock(homeChatPrompt({ figures })),
       ],
       schema: homeChatJsonSchema(figures),
-      maxTokens: 16_000,
+      maxTokens: CHAT_MAX_TOKENS,
       outTokens: THINK_OUT.chatSolve,
       extraInputTokens: attached.tokens,
-      timeoutMs: 100_000,
+      timeoutMs: CHAT_SOLVE_WAIT_MS,
       think: true,
     });
     const out = zHomeChat.parse(res.json);
-    // 풀이를 읽고 마지막 단계·넣을 문제의 정답·답 글이 같은 답을 말하게 맞춘다 (꾸밈 기호도 걷어 낸다)
-    const read = readChatAnswer(out.reply, out.solution, { figures: false });
-    const { reply, check } = read;
-    if (check !== 'none') console.warn(`[kok] ask: steps and question disagreed (${check})`);
+    // 풀이마다 마지막 단계·넣을 문제의 정답(·풀이가 하나면 답 글)이 같은 답을 말하게 맞춘다 (꾸밈 기호도 걷어 낸다)
+    const read = readChatAnswers(out.reply, out.solutions, { figures: false });
+    if (read.checks.some((c) => c !== 'none')) console.warn(`[kok] ask: steps and question disagreed (${read.checks.join(',')})`);
     // Pro: 그림이 도움이 되는 문제면 두 번째 호출로 그림을 받아 붙인다 (못 그려도 풀이는 그대로)
-    let solution = read.solution;
+    let solutions = read.solutions;
     let energy = res.energy;
-    if (figures && solution && out.solution?.needs_figure) {
-      const fig = await drawChatFigure(admin, acc, app, {
+    if (figures && solutions.length) {
+      const fig = await drawChatFigures(admin, acc, app, solutions, read.needsFigure, {
         tier,
-        solution,
         leftMs: AI_BUDGET_MS - (Date.now() - started),
         files: attached.blocks,
         filesTokens: attached.tokens,
       });
-      solution = fig.solution;
+      solutions = fig.solutions;
       energy += fig.energy;
     }
-    const body: HomeChatReply = { reply, solution, energy: Math.round(energy * 1000) / 1000, model: res.model };
+    const body: HomeChatReply = { reply: read.reply, solutions, solution: solutions[0] ?? null, energy: Math.round(energy * 1000) / 1000, model: res.model };
     return Response.json({ ok: true, ...body });
   } catch (e) {
     return errorResponse(e);

@@ -286,11 +286,6 @@ export const chatQuestionSchema: JsonSchema = obj({
 });
 
 /**
- * 채팅에서 푼 문제: 읽은 문제, 글로 된 단계 풀이, 노트에 넣을 문제 모양, (홈 채팅만) 과목·단원 짐작.
- * figures(Pro): 그림이 도움이 되는지(needs_figure) — true 일 때만 두 번째 호출로 그림을 받는다 (chatFigureJsonSchema).
- * guess: 과목·단원 칸 (홈 채팅: 노트가 없어서 넣을 곳을 짐작한다. 노트 채팅은 이 노트에 넣으니 없다)
- */
-/**
  * 원래 문제 꺼내기 (기출·문제집): 채팅 문제 모양(answer 는 글 하나: 객관식은 정답 보기의 글 그대로라 번호를 하나 밀려 적는 일이 없다)
  * + 쪽, 답을 어디서 얻었는지(answer_from: material = 자료의 정답, solved = AI 가 푼 답 → 검사 단계가 다시 푼다), 자료 그림 번호
  */
@@ -308,15 +303,25 @@ export function problemsJsonSchema(o: { figures: boolean }): JsonSchema {
   });
 }
 
+/**
+ * 채팅에서 푼 문제 하나 (문제마다·꼬리 문제마다 하나): 문제 번호, 읽은 문제, 글로 된 단계 풀이, 노트에 넣을 문제 모양,
+ * (홈 채팅만) 과목·단원 짐작. figures(Pro): 그림이 도움이 되는지(needs_figure) — true 일 때만 두 번째 호출로 그림을 받는다
+ * (chatFigureJsonSchema). guess: 과목·단원 칸 (홈 채팅: 노트가 없어서 넣을 곳을 짐작한다. 노트 채팅은 이 노트에 넣으니 없다)
+ */
 export function chatSolutionSchema(o: { figures: boolean; guess: boolean }): JsonSchema {
   return obj({
-    include: { type: 'boolean' },
+    label: str,
     problem: str,
     steps: textStepsJsonSchema,
     ...(o.figures ? { needs_figure: { type: 'boolean' } } : {}),
     question: chatQuestionSchema,
     ...(o.guess ? { subject: str, unit: str } : {}),
   });
+}
+
+/** 푼 문제들 (풀 문제가 없으면 []). 칸 수는 풀이 하나와 같다 (속성 수는 배열 길이와 상관없다) */
+function chatSolutionsSchema(o: { figures: boolean; guess: boolean }): JsonSchema {
+  return { type: 'array', items: chatSolutionSchema(o) };
 }
 
 /** 노트 채팅이 넣자고 하는 것: 문제, 개념 글, 용어 (넣기 전에는 늘 학생에게 묻는다) */
@@ -333,7 +338,7 @@ const proposalSchema = obj({
  */
 export function noteChatJsonSchema(o: { solve: boolean; figures: boolean }): JsonSchema {
   return obj({
-    ...(o.solve ? { solution: chatSolutionSchema({ figures: o.figures, guess: false }) } : {}),
+    ...(o.solve ? { solutions: chatSolutionsSchema({ figures: o.figures, guess: false }) } : {}),
     reply: str,
     // 노트 밖 일반 지식을 보탰는지 (화면에 표시)
     outside_note: { type: 'boolean' },
@@ -343,7 +348,7 @@ export function noteChatJsonSchema(o: { solve: boolean; figures: boolean }): Jso
 
 /** 홈 AI 채팅 (노트 없이 아무 과목이나). 풀이를 먼저, 답 글은 마지막에 */
 export function homeChatJsonSchema(figures: boolean): JsonSchema {
-  return obj({ solution: chatSolutionSchema({ figures, guess: true }), reply: str });
+  return obj({ solutions: chatSolutionsSchema({ figures, guess: true }), reply: str });
 }
 
 /**
@@ -428,9 +433,10 @@ export function readChatQuestion(raw: unknown): QuizItem | null {
   return { ...base, type: q.type, choices: [], answer_index: -1, answer_bool: false, answer_text: answer };
 }
 
-/** 받은 풀이 (검사는 readChatSolution 이 한다) */
+/** 받은 풀이 하나 (검사는 readChatSolution 이 한다). include 는 예전 모양 (false 면 풀지 않은 것) */
 export const zChatSolutionRaw = z.object({
-  include: z.boolean().catch(false),
+  include: z.boolean().optional().catch(undefined),
+  label: z.string().optional().catch(undefined),
   problem: z.string().catch(''),
   // zod 4 는 z.unknown() 칸도 빠지면 오류라 optional (그림은 두 번째 호출에서 따로 받는다)
   steps: z.unknown().optional(),
@@ -450,10 +456,21 @@ export const zNoteAddition = z.object({
 });
 export type NoteAddition = z.infer<typeof zNoteAddition>;
 
+/** 받은 풀이들: 객체가 아닌 칸은 버린다 (풀이 칸이 없으면 []) */
+const zChatSolutionsRaw = z
+  .array(z.unknown())
+  .catch([])
+  .transform((a) =>
+    a.flatMap((x) => {
+      const r = zChatSolutionRaw.safeParse(x);
+      return r.success ? [r.data] : [];
+    }),
+  );
+
 export const zChat = z.object({
   reply: z.string().catch(''),
   outside_note: z.boolean().catch(false),
-  solution: zChatSolutionRaw.optional().catch(undefined),
+  solutions: zChatSolutionsRaw,
   proposal: z
     .object({
       kind: z.enum(['none', 'questions', 'note', 'terms']).catch('none'),
@@ -466,7 +483,7 @@ export const zChat = z.object({
 
 export const zHomeChat = z.object({
   reply: z.string().catch(''),
-  solution: zChatSolutionRaw.optional().catch(undefined),
+  solutions: zChatSolutionsRaw,
 });
 
 // ---------------------------------------------------------------- 단계별 학습 (Max)

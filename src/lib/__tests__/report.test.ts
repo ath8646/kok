@@ -15,7 +15,7 @@ import {
   questionSnapshot,
   reportReason,
   reportTextProblem,
-  storedChatSolution,
+  storedChatSolutions,
 } from '@/lib/report';
 
 const solution: ChatSolution = {
@@ -57,7 +57,7 @@ describe('신고 (lib/report.ts)', () => {
   });
 
   it('채팅 답: 물어본 말·답·풀이 단계·정답', () => {
-    const s = chatSnapshot({ question: '이거 풀어 줘', reply: '정답은 ② 2, 3이에요.', solution });
+    const s = chatSnapshot({ question: '이거 풀어 줘', reply: '정답은 ② 2, 3이에요.', solutions: [solution] });
     expect(s).toContain('학생: 이거 풀어 줘');
     expect(s).toContain('AI: 정답은');
     expect(s).toContain('1단계: 인수분해하면');
@@ -66,12 +66,32 @@ describe('신고 (lib/report.ts)', () => {
   });
 
   it('저장된 풀이는 모양이 맞을 때만 읽는다', () => {
-    expect(storedChatSolution(null)).toBeNull();
-    expect(storedChatSolution({ steps: 'no' })).toBeNull();
-    const read = storedChatSolution({ problem: 'p', steps: [{ text: 'a' }, { nope: 1 }, null], question: { type: 'ox', prompt: 'q', answer: false } });
-    expect(read?.steps.map((s) => s.text)).toEqual(['a']);
-    expect(chatSnapshot({ reply: 'r', solution: read })).toContain('정답: X');
-    expect(storedChatSolution({ steps: [], question: { bad: true } })?.question).toBeNull();
+    expect(storedChatSolutions(null)).toEqual([]);
+    expect(storedChatSolutions({ steps: 'no' })).toEqual([]);
+    const read = storedChatSolutions({ problem: 'p', steps: [{ text: 'a' }, { nope: 1 }, null], question: { type: 'ox', prompt: 'q', answer: false } });
+    expect(read).toHaveLength(1);
+    expect(read[0].steps.map((s) => s.text)).toEqual(['a']);
+    expect(chatSnapshot({ reply: 'r', solutions: read })).toContain('정답: X');
+    expect(storedChatSolutions({ steps: [], question: { bad: true } })[0]?.question).toBeNull();
+  });
+
+  it('푼 문제가 여럿이면 문제마다 번호·단계·정답 (첫 풀이 + more)', () => {
+    const stored = {
+      ...solution,
+      label: '1번',
+      more: [
+        { ...solution, label: '2번 (1)', problem: '둘째 문제', question: { ...solution.question!, type: 'ox', choices: null, answer: true } },
+        { steps: 'broken' },
+      ],
+      rev: 2,
+    };
+    const list = storedChatSolutions(stored);
+    expect(list.map((s) => s.label)).toEqual(['1번', '2번 (1)']);
+    const s = chatSnapshot({ question: '다 풀어 줘', reply: '문제 2개를 풀었어요.', solutions: list });
+    expect(s).toContain('[1번] 풀이한 문제: $x^2-5x+6=0$');
+    expect(s).toContain('[2번 (1)] 풀이한 문제: 둘째 문제');
+    expect(s).toContain('정답: ② 2, 3');
+    expect(s).toContain('정답: O');
   });
 
   it('표지 그림: 모양과 글 (비교는 쪽 이름도)', () => {

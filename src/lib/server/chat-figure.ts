@@ -1,6 +1,7 @@
 // 채팅 풀이의 그림 (Pro): 풀이(글 단계)가 나온 뒤 두 번째 호출로 문제 그림과 단계마다 add·focus 를 받아 풀이에 붙인다.
 // 한 호출에 그림까지 넣으면 structured outputs 의 스키마 한도("compiled grammar is too large")에 걸려서 따로 부른다.
-// 그림은 더해 주는 것이라 실패해도(시간·에너지 부족 포함) 풀이는 그대로 간다
+// 그림은 더해 주는 것이라 실패해도(시간·에너지 부족 포함) 풀이는 그대로 간다.
+// 한 답에 문제가 여럿이면 그림이 도움이 된다고 한 풀이 앞에서부터 CHAT_FIGURES_MAX 개까지 같이 부른다 (drawChatFigures)
 import 'server-only';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import type { ModelTier } from '@/lib/settings';
@@ -18,6 +19,8 @@ import type { Account, AppSettings } from './account';
 const MIN_MS = 12_000;
 /** 그림 호출 한 번의 최대 시간 */
 const MAX_MS = 45_000;
+/** 한 답에서 그림을 그리는 풀이 수 (같이 부른다: 시간·에너지) */
+export const CHAT_FIGURES_MAX = 2;
 
 /**
  * 풀이에 그림을 붙인다. leftMs: 라우트 제한 시간까지 남은 시간. 돌려주는 energy 는 그림 호출에 쓴 에너지 (실패·건너뜀은 0)
@@ -40,22 +43,27 @@ export async function drawChatFigure(
   if (!solution.steps.length || o.leftMs < MIN_MS) return { solution, energy: 0 };
   try {
     const steps = solution.steps.map((s, index) => ({ index, text: s.text }));
+    // 꼬리 문제는 읽은 문제에 그 물음만 있을 수 있어서 혼자 읽히는 넣을 문제 글도 같이 보낸다
+    const problem = [
+      solution.label ? `(${solution.label})` : '',
+      solution.problem || '(the problem is in the steps)',
+      solution.question?.prompt && !solution.problem.includes(solution.question.prompt) ? `Same problem as a standalone question: ${solution.question.prompt}` : '',
+    ]
+      .filter(Boolean)
+      .join('\n');
     const res = await runTaskFull(admin, acc, app, {
       task: 'chat',
       effortOf: 'solve',
       tier: o.tier,
-      content: [
-        ...(o.files ?? []),
-        textBlock(wrap('problem', solution.problem || '(the problem is in the steps)')),
-        textBlock(wrap('steps', JSON.stringify(steps))),
-        textBlock(chatFigurePrompt()),
-      ],
+      content: [...(o.files ?? []), textBlock(wrap('problem', problem)), textBlock(wrap('steps', JSON.stringify(steps))), textBlock(chatFigurePrompt())],
       schema: chatFigureJsonSchema,
       maxTokens: 8_000,
       outTokens: CHAT_FIGURE_OUT,
       extraInputTokens: o.filesTokens ?? 0,
       timeoutMs: Math.min(MAX_MS, o.leftMs),
       sourceId: o.sourceId ?? null,
+      // 같은 물음에 딸린 호출이라 1분 요청 수는 첫 호출(답)에서만 센다
+      rateLimit: false,
     });
     return { solution: withChatFigure(solution, res.json), energy: res.energy };
   } catch (e) {
@@ -63,4 +71,31 @@ export async function drawChatFigure(
     console.warn('[kok] chat figure skipped', e instanceof UserFacingError ? e.code : e);
     return { solution, energy: 0 };
   }
+}
+
+/**
+ * 풀이 여럿 중 그림이 도움이 된다고 한 풀이(wanted) 앞에서부터 CHAT_FIGURES_MAX 개에 그림을 붙인다 (같이 부른다).
+ * 돌려주는 energy 는 그림 호출에 쓴 에너지의 합
+ */
+export async function drawChatFigures(
+  admin: SupabaseClient,
+  acc: Account,
+  app: AppSettings,
+  solutions: ChatSolution[],
+  wanted: boolean[],
+  o: Omit<Parameters<typeof drawChatFigure>[3], 'solution'>,
+): Promise<{ solutions: ChatSolution[]; energy: number }> {
+  const picks = solutions
+    .map((_, i) => i)
+    .filter((i) => wanted[i])
+    .slice(0, CHAT_FIGURES_MAX);
+  if (!picks.length) return { solutions, energy: 0 };
+  const drawn = await Promise.all(picks.map((i) => drawChatFigure(admin, acc, app, { ...o, solution: solutions[i] })));
+  const out = solutions.slice();
+  let energy = 0;
+  picks.forEach((i, k) => {
+    out[i] = drawn[k].solution;
+    energy += drawn[k].energy;
+  });
+  return { solutions: out, energy };
 }

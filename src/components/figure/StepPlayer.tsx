@@ -1,9 +1,11 @@
 'use client';
 // 단계별 풀이: 한 단계씩 넘기며 보고, 그림은 단계마다 선이 더해지고 지금 단계의 부분이 형광펜으로 칠해진다.
 // 다음·이전 버튼, 좌우 화살표 키, 옆으로 밀기. '모든 단계'를 누르면 한 번에 펼쳐 본다.
+// 단계 이름('식 세우기: …', 과목마다 다르다)은 번호 옆에 굵게 따로 보인다 (lib/step-title.ts)
 import { useMemo, useRef, useState } from 'react';
 import type { Figure, Step } from '@/lib/figure/spec';
 import { visibleAt } from '@/lib/figure/spec';
+import { stepParts } from '@/lib/step-title';
 import { RichText } from '@/components/RichText';
 import { ICONS, Icon, cx } from '@/components/ui';
 import { FigureView } from './FigureView';
@@ -26,6 +28,8 @@ export function StepPlayer({
   const swipe = useRef<{ x: number; y: number; id: number } | null>(null);
   const n = steps.length;
   const step = steps[Math.min(k, n - 1)];
+  const parts = useMemo(() => steps.map((s) => stepParts(s.text)), [steps]);
+  const cur = parts[Math.min(k, n - 1)];
 
   const visible = useMemo(() => (figure ? visibleAt(figure, steps, all ? n - 1 : k) : undefined), [figure, steps, k, all, n]);
   const focus = useMemo(() => (all || !step ? new Set<string>() : new Set([...step.focus, ...step.add])), [step, all]);
@@ -79,6 +83,7 @@ export function StepPlayer({
               type="button"
               aria-current={i === k ? 'step' : undefined}
               aria-label={`${i + 1}단계`}
+              title={parts[i]?.title ?? undefined}
               className="group h-5 flex-1 py-2"
               onClick={() => go(i)}
             >
@@ -111,23 +116,24 @@ export function StepPlayer({
 
       {all ? (
         <ol className="grid gap-2.5">
-          {steps.map((s, i) => (
+          {parts.map((p, i) => (
             <li key={i} className="flex gap-3">
               <span className="mt-0.5 grid h-6 w-6 shrink-0 place-items-center rounded-full bg-accent text-xs font-bold text-accent-ink">{i + 1}</span>
-              <p className="min-w-0 flex-1 text-[15px] leading-relaxed">
-                <RichText text={s.text} />
-              </p>
+              <div className="min-w-0 flex-1 text-[15px] leading-relaxed">
+                {p.title ? <p className="kok-step-title text-[13px] font-bold text-accent">{p.title}</p> : null}
+                <RichText text={p.body} />
+              </div>
             </li>
           ))}
         </ol>
       ) : (
         <div className="grid gap-1" aria-live="polite">
           <p className="text-xs font-bold tracking-wide text-accent">
-            {k + 1}단계 <span className="font-semibold text-muted">/ {n}</span>
+            {k + 1}단계{cur?.title ? <span className="kok-step-title"> · {cur.title}</span> : null} <span className="font-semibold text-muted">/ {n}</span>
           </p>
-          <p key={k} className={cx('min-h-[3.2em] text-[16px] leading-relaxed', dir > 0 ? 'kok-step-next' : 'kok-step-prev')}>
-            <RichText text={step.text} />
-          </p>
+          <div key={k} className={cx('min-h-[3.2em] text-[16px] leading-relaxed', dir > 0 ? 'kok-step-next' : 'kok-step-prev')}>
+            <RichText text={cur?.body ?? step.text} />
+          </div>
         </div>
       )}
 

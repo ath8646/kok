@@ -4710,8 +4710,57 @@ async def main():
         thumb = chat.get_by_role("button", name="p1.jpg 크게 보기").locator("img")
         await expect(thumb).to_be_visible()
         await wait_js(page, "() => [...document.querySelectorAll('[aria-label=\"p1.jpg 크게 보기\"] img')].some((i) => i.complete && i.naturalWidth > 0)")
+
+        step("note chat (Pro): a photo with several problems → one solution per problem and per sub-question, subject step names, save one, then the rest at once")
+        await chat.locator("input[type=file]").first.set_input_files(str(tmp / "p2.jpg"))
+        await chat.get_by_label("물어볼 내용").fill("사진 속 문제 다 풀어 줘")
+        await chat.get_by_label("물어볼 내용").press("Enter")
+        tabs = chat.get_by_role("tablist", name="풀이한 문제")
+        await expect(tabs).to_be_visible(timeout=20000)
+        await expect(tabs.get_by_role("tab")).to_have_count(3)
+        await expect(tabs.get_by_role("tab", name="1번", exact=True)).to_have_attribute("aria-selected", "true")
+        # 첫 문제: 그림으로 보는 단계 (Pro), 단계 이름은 번호 옆에 (수학: 주어진 것 → 식 세우기 → 계산)
+        panel = chat.get_by_role("tabpanel")
+        await expect(panel.get_by_role("region", name="단계별 풀이").get_by_role("img")).to_be_visible()
+        await expect(panel.get_by_text("1단계 · 주어진 것")).to_be_visible()
+        await expect(panel.get_by_text("직각을 낀 두 변이")).to_be_visible()
+        # 화살표로 다음 문제 (꼬리 문제는 따로): 과학 단계 이름, 문제마다 정답
+        await tabs.get_by_role("tab", name="1번", exact=True).focus()
+        await page.keyboard.press("ArrowRight")
+        await expect(tabs.get_by_role("tab", name="2번 (1)")).to_have_attribute("aria-selected", "true")
+        await expect(tabs.get_by_role("tab", name="2번 (1)")).to_be_focused()
+        await expect(panel.get_by_text("1단계 · 개념")).to_be_visible()
+        await expect(panel.get_by_text("125", exact=True)).to_be_visible()
+        await tabs.get_by_role("tab", name="2번 (2)").click()
+        await expect(panel.get_by_text("① 20%", exact=True)).to_be_visible()
+        await panel.get_by_role("button", name="모든 단계").click()
+        await expect(panel.get_by_role("listitem").filter(has_text="자료 해석")).to_have_count(1)
+        await shot(page, "57b-note-chat-multi", full=False)
+        n_multi = fig_q("true")
+        await panel.get_by_role("button", name="이 노트 문제로 넣기", exact=True).click()
+        await expect(panel.get_by_text("이 노트 문제로 넣었어요")).to_be_visible()
+        assert fig_q("true") == n_multi + 1
+        assert fig_q("q.type = 'mcq' and q.locked and q.prompt like '%퍼센트 농도%'") == 1
+        # 남은 둘은 한 번에 (넣은 것은 다시 넣지 않는다)
+        await chat.get_by_role("button", name="2문제 모두 이 노트에 넣기").click()
+        await expect(chat.get_by_role("button", name=re.compile("모두 이 노트에 넣기"))).to_have_count(0)
+        assert fig_q("true") == n_multi + 3
+        assert fig_q("q.locked and q.prompt like '%소금물의 질량%'") == 1
+        multi_id = psql(f"select m.id from public.chat_messages m join public.notes n on n.id = m.note_id where n.source_id = '{fig_sid}' and m.solution ? 'more'")
+        assert psql(f"select jsonb_array_length(solution->'more')::text || '|' || (solution->>'saved') || '|' || (solution->'more'->1->>'saved') || '|' || (solution->>'rev') from public.chat_messages where id = '{multi_id}'") == "2|true|true|2"
+        r = await page.request.post(BASE + f"/api/notes/{fig_note}/chat/apply", headers={"origin": BASE}, data={"messageId": multi_id, "action": "save_problem", "indexes": [0, 1, 2]})
+        assert r.status == 409, r.status
+        assert fig_q("true") == n_multi + 3
+        # 다시 열어도 넣은 문제는 그대로 (저장된 풀이 셋, 탭마다 넣었다는 표시)
+        await page.keyboard.press("Escape")
+        await page.reload()
+        assert await wait_ready(page)
+        await page.get_by_role("button", name="노트에게 물어보기").click()
+        await expect(chat.get_by_role("tablist", name="풀이한 문제").get_by_role("tab")).to_have_count(3)
+        await chat.get_by_role("tablist", name="풀이한 문제").get_by_role("tab", name="2번 (1)").click()
+        await expect(chat.get_by_role("tabpanel").get_by_text("이 노트 문제로 넣었어요")).to_be_visible()
         # 대화를 지우면 보관한 사진도 지운다
-        assert psql(f"select count(*) from storage.objects where name like '{student_id}/chat/{fig_sid}/%'") == "1"
+        assert psql(f"select count(*) from storage.objects where name like '{student_id}/chat/{fig_sid}/%'") == "2"
         await chat.get_by_role("button", name="채팅 메뉴").click()
         await page.get_by_role("menuitem", name="대화 모두 지우기").click()
         await app_confirm(page)
@@ -4764,6 +4813,32 @@ async def main():
         await expect(ask).to_be_visible()
         rep = psql("select target_id || '|' || reason || '|' || (snapshot like '%학생: 이것도 풀어 줘%1단계: %정답: %')::text from public.reports where target_type = 'chat' order by id desc limit 1")
         assert rep == "home|풀이가 이상해요|true", rep
+        # 사진에 문제가 여럿이면 문제마다 풀이 (꼬리 문제도 따로): 모두 한 번에 같은 노트로
+        await ask.get_by_label("물어볼 내용").fill("사진 속 문제 다 풀어 줘")
+        await ask.get_by_label("물어볼 내용").press("Enter")
+        home_tabs = ask.get_by_role("tablist", name="풀이한 문제")
+        await expect(home_tabs.get_by_role("tab")).to_have_count(3, timeout=20000)
+        await expect(ask.get_by_text("사진 속 문제 3개를 풀었어요.")).to_be_visible()
+        await ask.get_by_role("button", name="3문제 모두 노트에 넣기").click()
+        many = page.get_by_role("dialog", name="문제 3개를 노트에 넣기")
+        await expect(many.get_by_role("list", name="넣을 문제").locator("> li")).to_have_count(3)
+        # 짐작은 첫 문제의 과목·단원: 이미 있는 수학 · 피타고라스 정리 노트 (이번에는 새 노트로)
+        await expect(many.get_by_role("radio", name="수학")).to_have_attribute("aria-checked", "true")
+        await expect(many.get_by_role("radiogroup", name="노트").get_by_role("radio", name=re.compile("^피타고라스 정리 문제"))).to_have_attribute("aria-checked", "true")
+        await shot(page, "61b-home-ask-save-many", full=False)
+        await many.get_by_role("radio", name="새 노트 만들기").click()
+        await many.get_by_label("새 노트 이름").fill("사진 속 여러 문제")
+        await many.get_by_role("button", name="새 노트를 만들어 넣기").click()
+        await expect(many).to_be_hidden()
+        await expect(page.get_by_text("'사진 속 여러 문제'에 문제 3개를 넣었어요.")).to_be_visible()
+        many_sid = psql(f"select id from public.sources where user_id = '{student_id}' and title = '사진 속 여러 문제'")
+        assert many_sid, "the new note for many problems"
+        await poll_db(f"select count(*) from public.questions q join public.notes n on n.id = q.note_id where n.source_id = '{many_sid}' and q.locked", "3")
+        assert psql(f"select count(*) from public.cards c join public.questions q on q.id = c.question_id join public.notes n on n.id = q.note_id where n.source_id = '{many_sid}'") == "3"
+        assert psql(f"select count(*) from public.questions q join public.notes n on n.id = q.note_id where n.source_id = '{math_sid}'") == "2"
+        await expect(ask.get_by_role("button", name=re.compile("모두 노트에 넣기"))).to_have_count(0)
+        await home_tabs.get_by_role("tab", name="2번 (2)").click()
+        await expect(ask.get_by_role("tabpanel").get_by_text(re.compile("사진 속 여러 문제.에 넣었어요"))).to_be_visible()
         # 홈을 떠나면 대화가 사라진다
         await page.keyboard.press("Escape")
         await expect(ask).to_be_hidden()

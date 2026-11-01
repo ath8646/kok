@@ -1,11 +1,12 @@
 'use client';
-// 채팅 창 조각 (노트 채팅·홈 AI 채팅 공통): 모델 고르기, 입력 줄(파일·사진 붙이기), 보낸 파일, 답 기다리기, 풀이 카드, 사진 크게 보기
-import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
+// 채팅 창 조각 (노트 채팅·홈 AI 채팅 공통): 모델 고르기, 입력 줄(파일·사진 붙이기), 보낸 파일, 답 기다리기,
+// 풀이 카드(문제가 여럿이면 번호 탭으로 하나씩), 사진 크게 보기
+import { useCallback, useEffect, useId, useRef, useState, type ReactNode } from 'react';
 import { RichText } from '@/components/RichText';
 import { StepPlayer } from '@/components/figure/StepPlayer';
 import { ICONS, Icon, Spinner, cx } from '@/components/ui';
 import { isSubmitKey } from '@/lib/quick-add';
-import { CHAT_FILE_LIMITS, solutionAnswer, type ChatSolution } from '@/lib/chat';
+import { CHAT_FILE_LIMITS, solutionAnswer, solutionLabel, type ChatSolution } from '@/lib/chat';
 import { pickChatFiles, releasePicks, type ChatPick } from '@/lib/chat-files';
 import { pushFileSink } from '@/lib/file-sink';
 import type { ModelTier } from '@/lib/settings';
@@ -164,10 +165,11 @@ export function ThinkingRow({ label }: { label: string }) {
 }
 
 /**
- * AI 가 풀어 준 문제: 읽은 문제(눌러서 펼치기), 단계별 풀이(Pro 는 그림), 아래에 넣기 같은 버튼.
- * 문제 글은 세 줄까지 보여 주고 더 길면 '더 보기'
+ * AI 가 풀어 준 문제 하나: 읽은 문제(눌러서 펼치기), 단계별 풀이(Pro 는 그림), 정답, 아래에 넣기 같은 버튼.
+ * 문제 글은 세 줄까지 보여 주고 더 길면 '더 보기'. label: 문제 번호 ('7번', 문제 탭이 있으면 탭이 보여 주니 없음).
+ * 단계와 정답이 엇갈려 넣을 문제를 뺀 풀이(unsure)는 넣기 단추가 없는 까닭을 알려 준다
  */
-export function SolutionCard({ solution, actions, className }: { solution: ChatSolution; actions?: ReactNode; className?: string }) {
+export function SolutionCard({ solution, actions, label, className }: { solution: ChatSolution; actions?: ReactNode; label?: string; className?: string }) {
   const [more, setMore] = useState(false);
   const long = solution.problem.length > 120 || solution.problem.split('\n').length > 3;
   // 노트에 넣을 문제의 정답 (단계 끝의 답과 같아야 한다. 넣기 전에 학생이 확인할 수 있게)
@@ -179,6 +181,7 @@ export function SolutionCard({ solution, actions, className }: { solution: ChatS
           <p className="mb-1 flex items-center gap-1.5 text-[11px] font-bold tracking-wide text-muted">
             <Icon d={ICONS.search} size={12} strokeWidth={2.4} />
             읽은 문제
+            {label ? <span className="rounded-full bg-accent-soft px-1.5 py-px text-[10px] font-bold text-accent">{label}</span> : null}
             {solution.subject ? (
               <span className="rounded-full bg-surface px-1.5 py-px text-[10px] font-semibold">
                 {[solution.subject, solution.unit].filter(Boolean).join(' · ')}
@@ -208,7 +211,90 @@ export function SolutionCard({ solution, actions, className }: { solution: ChatS
           </span>
         </p>
       ) : null}
+      {solution.unsure ? (
+        <p className="flex items-start gap-1.5 rounded-2xl bg-warn-soft px-3 py-2 text-[13px] font-semibold leading-snug text-warn">
+          <Icon d={ICONS.flag} size={14} strokeWidth={2.4} className="mt-px shrink-0" />
+          풀이 중에 답이 한 번 엇갈려서 노트에 넣을 문제로 만들지 않았어요. 단계를 한 번 더 확인해 보세요.
+        </p>
+      ) : null}
       {actions ? <div className="flex flex-wrap items-center gap-2">{actions}</div> : null}
+    </div>
+  );
+}
+
+/**
+ * AI 가 푼 문제들: 한 답에 여럿이면(문제마다·꼬리 문제마다) 위의 번호 탭('1번', '3번 (1)')으로 하나씩 본다.
+ * 하나면 풀이 카드 그대로. actions(s, i): 그 문제의 넣기 단추, saved(i): 넣었는지(탭에 체크), footer: '모두 넣기' 같은 단추
+ */
+export function SolutionSet({
+  solutions,
+  actions,
+  saved,
+  footer,
+}: {
+  solutions: ChatSolution[];
+  actions?: (s: ChatSolution, i: number) => ReactNode;
+  saved?: (i: number) => boolean;
+  footer?: ReactNode;
+}) {
+  const [at, setAt] = useState(0);
+  const tabs = useRef<Array<HTMLButtonElement | null>>([]);
+  const base = useId();
+  const n = solutions.length;
+  if (n <= 1) {
+    const s = solutions[0];
+    return s ? <SolutionCard solution={s} label={s.label || undefined} actions={actions?.(s, 0)} /> : null;
+  }
+  const i = Math.min(at, n - 1);
+  const go = (to: number) => {
+    const t = (to + n) % n;
+    setAt(t);
+    tabs.current[t]?.focus();
+  };
+  return (
+    <div className="grid w-full gap-2.5">
+      <div
+        role="tablist"
+        aria-label="풀이한 문제"
+        className="no-scrollbar -mx-1 flex gap-1.5 overflow-x-auto px-1 py-0.5"
+        onKeyDown={(e) => {
+          const to = e.key === 'ArrowRight' ? i + 1 : e.key === 'ArrowLeft' ? i - 1 : e.key === 'Home' ? 0 : e.key === 'End' ? n - 1 : null;
+          if (to === null) return;
+          e.preventDefault();
+          go(to);
+        }}
+      >
+        {solutions.map((s, j) => (
+          <button
+            key={j}
+            ref={(el) => {
+              tabs.current[j] = el;
+            }}
+            type="button"
+            role="tab"
+            id={`${base}-t${j}`}
+            aria-selected={j === i}
+            aria-controls={`${base}-p`}
+            tabIndex={j === i ? 0 : -1}
+            onClick={() => setAt(j)}
+            className={cx(
+              'press kok-chip inline-flex h-9 shrink-0 items-center gap-1 rounded-full px-3.5 text-sm font-bold ring-1 ring-inset',
+              j === i ? 'kok-chip-on ring-transparent' : 'kok-chip-off bg-surface text-ink ring-line hover:ring-accent',
+            )}
+          >
+            {solutionLabel(s, j, n)}
+            {saved?.(j) ? (
+              <Icon d={ICONS.check} size={13} strokeWidth={2.8} className="text-ok" />
+            ) : s.unsure ? (
+              <span className="h-1.5 w-1.5 rounded-full bg-warn" aria-hidden="true" />
+            ) : null}
+          </button>
+        ))}
+      </div>
+      <div role="tabpanel" id={`${base}-p`} aria-labelledby={`${base}-t${i}`}>
+        <SolutionCard key={i} solution={solutions[i]} actions={actions?.(solutions[i], i)} />
+      </div>
+      {footer ? <div className="flex flex-wrap items-center gap-2">{footer}</div> : null}
     </div>
   );
 }

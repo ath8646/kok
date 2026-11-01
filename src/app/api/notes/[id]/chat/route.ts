@@ -1,5 +1,6 @@
 // 노트 채팅: 노트 내용(과 일반 지식)으로 답한다. 답마다 에너지를 쓰고, 대화는 노트마다 저장한다.
-// 사진·파일을 붙여 물어볼 수 있다 (문제를 보내면 단계로 풀어 준다. Pro 는 그림 풀이, 붙인 파일도 보관).
+// 사진·파일을 붙여 물어볼 수 있다 (문제를 보내면 단계로 풀어 준다: 문제가 여럿이면 문제마다·꼬리 문제마다 하나씩.
+// Pro 는 그림 풀이, 붙인 파일도 보관). 풀이들은 첫 풀이 + more 로 저장한다 (예전 화면은 첫 풀이만 읽는다).
 // AI 가 문제·노트에 넣자고 하면 미리보기만 저장하고, 넣기는 학생이 [넣기]를 눌러야 한다 (chat/apply)
 import type { NextRequest } from 'next/server';
 import { z } from 'zod';
@@ -10,17 +11,24 @@ import { loadOwnedNote, noteForPrompt } from '@/lib/server/notes';
 import { runTaskFull } from '@/lib/server/tasks';
 import { textBlock } from '@/lib/server/claude';
 import { chatAttachmentMetas, chatFileBlocks, chatFolderIdsOfNotes, readChatFiles, removeChatFolders, zChatAttachments } from '@/lib/server/chat-input';
-import { historyLine, readChatAnswer } from '@/lib/chat-solution';
+import { fitSolutions, historyLine, readChatAnswers } from '@/lib/chat-solution';
 import { CHAT_SYSTEM, chatPrompt, wrap } from '@/lib/ai/prompts';
 import { noteChatJsonSchema, readChatQuestion, toQuestionRow, zChat } from '@/lib/ai/schemas';
-import { drawChatFigure } from '@/lib/server/chat-figure';
-import { CHAT_TERM_LIMITS, FILE_ONLY_CONTENT, type ChatAttachmentMeta, type ChatProposal, type ChatSolution } from '@/lib/chat';
-import { THINK_OUT } from '@/lib/ai/models';
+import { drawChatFigures } from '@/lib/server/chat-figure';
+import {
+  CHAT_TERM_LIMITS,
+  FILE_ONLY_CONTENT,
+  packSolutions,
+  type ChatAttachmentMeta,
+  type ChatProposal,
+  type StoredChatSolution,
+} from '@/lib/chat';
+import { CHAT_MAX_TOKENS, CHAT_SOLVE_WAIT_MS, THINK_OUT } from '@/lib/ai/models';
 
-// AI 답(최대 100초, 먼저 생각하고 답한다) + Pro 그림(남은 시간 안에서) + 저장
-export const maxDuration = 120;
+// AI 답(먼저 생각하고 답한다: 문제가 여럿이면 길다) + Pro 그림(남은 시간 안에서) + 저장
+export const maxDuration = 240;
 /** 라우트 제한 시간 안에서 AI 를 기다릴 수 있는 시간 (저장할 여유를 남긴다) */
-const AI_BUDGET_MS = 110_000;
+const AI_BUDGET_MS = 226_000;
 
 const Body = z.object({
   message: z.string().trim().max(2000, '한 번에 2,000자까지 물어볼 수 있어요.').catch(''),
@@ -66,7 +74,7 @@ export async function POST(req: NextRequest, ctx: RouteContext<'/api/notes/[id]/
       .order('created_at', { ascending: false })
       .limit(HISTORY_MESSAGES);
     if (hErr) throw hErr;
-    const rows = (past ?? []) as unknown as Array<{ role: string; content: string; attachments?: ChatAttachmentMeta[] | null; solution?: ChatSolution | null }>;
+    const rows = (past ?? []) as unknown as Array<{ role: string; content: string; attachments?: ChatAttachmentMeta[] | null; solution?: StoredChatSolution | null }>;
     const history = rows.reverse().map((m) => ({ role: m.role, content: historyLine({ ...m, content: String(m.content ?? '') }, HISTORY_CHARS) }));
 
     const s = acc.settings;
@@ -87,33 +95,34 @@ export async function POST(req: NextRequest, ctx: RouteContext<'/api/notes/[id]/
       ],
       // 답 모양이 크면 Claude 가 거절한다(속성 약 42개): 그림은 풀이 뒤에 따로 받는다 (drawChatFigure)
       schema: noteChatJsonSchema({ solve, figures }),
-      maxTokens: 16_000,
+      maxTokens: CHAT_MAX_TOKENS,
       outTokens: files.length ? THINK_OUT.chatSolve : THINK_OUT.chat,
       extraInputTokens: attached.tokens,
-      timeoutMs: 100_000,
+      timeoutMs: CHAT_SOLVE_WAIT_MS,
       sourceId: note.source_id,
       think: true,
     });
     const out = zChat.parse(res.json);
-    // 풀이를 읽고 마지막 단계·넣을 문제의 정답·답 글이 같은 답을 말하게 맞춘다 (화면은 굵은 글씨 같은 꾸밈 기호를 쓰지 않아서 걷어 낸다)
-    const read = readChatAnswer(out.reply, solve ? out.solution : undefined, { figures: false });
-    const { reply, check } = read;
-    if (check !== 'none') console.warn(`[kok] chat: steps and question disagreed (${check})`);
+    // 풀이마다 마지막 단계·넣을 문제의 정답(·풀이가 하나면 답 글)이 같은 답을 말하게 맞춘다 (화면은 굵은 글씨 같은 꾸밈 기호를 쓰지 않아서 걷어 낸다)
+    const read = readChatAnswers(out.reply, solve ? out.solutions : [], { figures: false });
+    const { reply } = read;
+    if (read.checks.some((c) => c !== 'none')) console.warn(`[kok] chat: steps and question disagreed (${read.checks.join(',')})`);
     // Pro: 그림이 도움이 되는 문제면 두 번째 호출로 그림을 받아 붙인다 (못 그려도 풀이는 그대로)
-    let solution = read.solution;
+    let solutions = read.solutions;
     let energy = res.energy;
-    if (figures && solution && out.solution?.needs_figure) {
-      const fig = await drawChatFigure(admin, acc, app, {
+    if (figures && solutions.length) {
+      const fig = await drawChatFigures(admin, acc, app, solutions, read.needsFigure, {
         tier,
-        solution,
         leftMs: AI_BUDGET_MS - (Date.now() - started),
         sourceId: note.source_id,
         files: attached.blocks,
         filesTokens: attached.tokens,
       });
-      solution = fig.solution;
+      solutions = fig.solutions;
       energy += fig.energy;
     }
+    // 저장 칸(64KB) 안에: 첫 풀이 + 나머지(more)
+    const solution = packSolutions(fitSolutions(solutions));
 
     // 넣자고 한 것: 설정에서 켠 것만, 쓸 수 있는 것만 남긴다
     let proposal: ChatProposal = { kind: 'none', outside: out.outside_note };
@@ -149,7 +158,7 @@ export async function POST(req: NextRequest, ctx: RouteContext<'/api/notes/[id]/
 
     const now = Date.now();
     // 여러 행을 한 번에 넣을 때 빠진 칸은 기본값이 아니라 null 이 되므로 칸을 모두 적는다
-    const extra = (a: ChatAttachmentMeta[] | null, sol: ChatSolution | null) => (solve ? { attachments: a, solution: sol } : {});
+    const extra = (a: ChatAttachmentMeta[] | null, sol: StoredChatSolution | null) => (solve ? { attachments: a, solution: sol } : {});
     const { data: saved, error } = await admin
       .from('chat_messages')
       .insert([

@@ -1,5 +1,5 @@
 // 매일 한 번 청소 (Vercel Cron): 기간이 지난 원본 파일 지우기, 정리를 시작하지 않은 올리기 지우기,
-// 멈춘 처리 정리, 오래된 요청·탈퇴 기록 지우기, 어느 테마도 쓰지 않는 배경 그림 지우기, 글이 되지 않은 자료 공유 파일 지우기
+// 끊긴 처리 다시 잇기·하루 넘게 멈춘 처리 정리, 오래된 요청·탈퇴 기록 지우기, 어느 테마도 쓰지 않는 배경 그림 지우기, 글이 되지 않은 자료 공유 파일 지우기
 import type { NextRequest } from 'next/server';
 import { timingSafeEqual } from 'node:crypto';
 import { adminClient } from '@/lib/supabase/admin';
@@ -9,6 +9,7 @@ import { removeFolder, sweepOrphanUploads } from '@/lib/server/files';
 import { errorResponse } from '@/lib/server/errors';
 import { TOMBSTONE_KEEP_MS } from '@/lib/server/tombstone';
 import { COMMUNITY_BUCKET } from '@/lib/server/share';
+import { resumeStalled } from '@/lib/server/kick';
 
 export const maxDuration = 300;
 
@@ -47,7 +48,13 @@ export async function GET(req: NextRequest) {
       if (n === 0) break;
     }
 
-    // 3) 하루 넘게 멈춘 처리: 실패로 바꾸고 에너지를 돌려준다
+    // 3) 끊긴 처리: 하루 안에 멈춘 것은 다시 잇고(DB 의 1분 확인이 없는 곳을 위해), 하루 넘게 멈춘 것은 실패로 바꾸고 에너지를 돌려준다
+    let resumed = 0;
+    try {
+      resumed = await resumeStalled(req.nextUrl.origin, 100);
+    } catch (e) {
+      console.warn('[kok] resume stalled failed', (e as Error).message);
+    }
     const dayAgo = new Date(now.getTime() - 86400_000).toISOString();
     const { data: stale } = await admin.from('sources').select('id, user_id').in('status', ['queued', 'processing']).lt('updated_at', dayAgo).limit(300);
     for (const s of stale ?? []) {
@@ -129,7 +136,7 @@ export async function GET(req: NextRequest) {
       }
     }
 
-    return Response.json({ ok: true, filesRemoved, orphans, stuck, themeImages, shareOrphans });
+    return Response.json({ ok: true, filesRemoved, orphans, resumed, stuck, themeImages, shareOrphans });
   } catch (e) {
     return errorResponse(e);
   }

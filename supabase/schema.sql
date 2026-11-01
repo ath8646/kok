@@ -1117,7 +1117,9 @@ create policy "settings: read" on public.app_settings
 -- 서버 전용 함수 (비밀 키로만 부를 수 있다)
 -- =====================================================================
 
--- 자료 처리 잠금: 동시에 두 번 처리되지 않게 한다
+-- 자료 처리 잠금: 동시에 두 번 처리되지 않게 한다 (서버는 잠금을 그 서버 함수가 끝나는 때까지만 잡는다).
+-- 앞에서 잡은 요청이 잠금을 놓지 못하고 끝났으면(서버 함수가 멈춤) draft.stalls 로 센다: 서버가 단계를 마치면 지우고,
+-- 같은 단계에서 여러 번 멈추면 실패로 바꾼다 (끝없이 다시 하지 않게)
 create or replace function public.kok_claim_source(p_id uuid, p_seconds int)
 returns setof public.sources
 language sql
@@ -1126,7 +1128,14 @@ set search_path = public
 as $$
   update public.sources
      set locked_until = now() + make_interval(secs => p_seconds),
-         status = case when status = 'queued' then 'processing' else status end
+         status = case when status = 'queued' then 'processing' else status end,
+         draft = case
+           when locked_until is null then draft
+           else jsonb_set(
+             draft, '{stalls}',
+             to_jsonb(case when jsonb_typeof(draft->'stalls') = 'number' then floor((draft->>'stalls')::numeric)::int else 0 end + 1)
+           )
+         end
    where id = p_id
      and status in ('queued', 'processing')
      and (locked_until is null or locked_until < now())
@@ -1360,7 +1369,7 @@ begin
   end if;
   update public.sources
      set status = 'queued', error = null, locked_until = null,
-         draft = coalesce(draft, '{}'::jsonb) || '{"attempts": 0, "remerged": 0}'::jsonb
+         draft = coalesce(draft, '{}'::jsonb) || '{"attempts": 0, "remerged": 0, "stalls": 0}'::jsonb
    where id = s.id;
   return jsonb_build_object('result', 'ok', 'need', v_need);
 end;
@@ -2766,6 +2775,89 @@ begin
     alter table public.reports drop constraint if exists reports_target_type_check;
     alter table public.reports add constraint reports_target_type_check
       check (target_type in ('question', 'note', 'visual', 'other', 'chat', 'cover', 'theme', 'course', 'share_post', 'share_comment', 'share_gallery'));
+  end if;
+end $$;
+
+-- =====================================================================
+-- 끊긴 자료 처리 다시 잇기 (DB 가 1분마다 확인한다)
+-- 자료 처리는 서버가 스스로를 다시 부르며(이어 달리기) 끝까지 간다. 서버 함수가 갑자기 꺼지는 등으로 그 줄이 끊기면
+-- 이 확인이 이 앱의 /api/internal/resume 을 불러 다시 잇는다 (학생이 사이트를 나가 있어도).
+-- pg_cron·pg_net 확장이 있어야 한다 (Supabase → Database → Extensions 에서도 켤 수 있다). 없으면 이 확인만 건너뛴다:
+-- 그래도 앱의 이어 달리기·매일 청소·열린 화면이 잇는다.
+-- =====================================================================
+-- 서버만 쓰는 값: 이 앱의 주소(site_url, 서버가 적는다), 이 앱을 부를 때 붙이는 암호(resume_token), 마지막 확인 때(resume_ping_at)
+create table if not exists public.server_values (
+  key text primary key,
+  value text not null,
+  updated_at timestamptz not null default now()
+);
+alter table public.server_values enable row level security;
+-- 정책 없음 = 서버(비밀 키)만
+revoke all on public.server_values from anon, authenticated;
+grant all on public.server_values to service_role;
+-- 암호는 DB 안에서 만들고 어디에도 적지 않는다 (서버는 이 표에서 읽어 견준다)
+insert into public.server_values (key, value)
+values ('resume_token', replace(gen_random_uuid()::text || gen_random_uuid()::text, '-', ''))
+on conflict (key) do nothing;
+
+-- 정리 중인 자료만 (1분 확인이 빨리 찾게)
+create index if not exists sources_active_idx on public.sources (updated_at) where status in ('queued', 'processing');
+
+create or replace function public.kok_resume_ping()
+returns void
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_url text;
+  v_token text;
+begin
+  -- 확인한 때 (관리자 화면에 '자동 이어 하기 켜짐'으로 보인다)
+  insert into public.server_values (key, value, updated_at) values ('resume_ping_at', now()::text, now())
+  on conflict (key) do update set value = excluded.value, updated_at = excluded.updated_at;
+  -- 정리 중인데 3분 넘게 아무도 하지 않는 자료가 있을 때만 부른다 (lib/relay.ts STALL_MS. 하루 넘게 멈춘 것은 매일 청소가 실패로 바꾼다)
+  if not exists (
+    select 1 from public.sources
+     where status in ('queued', 'processing')
+       and updated_at < now() - interval '3 minutes'
+       and updated_at > now() - interval '1 day'
+       and (locked_until is null or locked_until < now() - interval '15 seconds')
+  ) then
+    return;
+  end if;
+  select value into v_url from public.server_values where key = 'site_url';
+  select value into v_token from public.server_values where key = 'resume_token';
+  if v_url is null or v_token is null then
+    return;
+  end if;
+  execute 'select net.http_post(url := $1, body := $2, headers := $3, timeout_milliseconds := 10000)'
+    using v_url || '/api/internal/resume', '{}'::jsonb, jsonb_build_object('Content-Type', 'application/json', 'x-kok-resume', v_token);
+end;
+$$;
+revoke execute on function public.kok_resume_ping() from public, anon, authenticated;
+grant execute on function public.kok_resume_ping() to service_role;
+
+-- 1분마다 확인 (pg_cron·pg_net 을 켜고, 이미 있으면 그대로 둔다)
+do $$
+begin
+  begin
+    create extension if not exists pg_net with schema extensions;
+  exception when others then
+    raise notice 'pg_net 을 켜지 못했어요 (자동 이어 하기 없이 계속): %', sqlerrm;
+  end;
+  begin
+    create extension if not exists pg_cron;
+  exception when others then
+    raise notice 'pg_cron 을 켜지 못했어요 (자동 이어 하기 없이 계속): %', sqlerrm;
+  end;
+  if exists (select 1 from pg_extension where extname = 'pg_cron') and exists (select 1 from pg_extension where extname = 'pg_net') then
+    -- 같은 이름의 일이 있으면 pg_cron 이 그 일을 고친다 (다시 실행해도 하나)
+    begin
+      execute $q$select cron.schedule('kok-resume', '* * * * *', 'select public.kok_resume_ping()')$q$;
+    exception when others then
+      raise notice '1분 확인을 만들지 못했어요: %', sqlerrm;
+    end;
   end if;
 end $$;
 

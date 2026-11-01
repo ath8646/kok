@@ -2014,6 +2014,116 @@ async def plan_tier_steps(browser):
     await actx.close()
 
 
+def _secret_key():
+    """서버 이어 달리기 서명에 쓰는 비밀 키 (시험 값: env.sh)"""
+    v = os.environ.get("SUPABASE_SECRET_KEY")
+    if v:
+        return v
+    for line in (pathlib.Path(__file__).parent / "env.sh").read_text().splitlines():
+        m = re.match(r"export SUPABASE_SECRET_KEY=(.*)$", line.strip())
+        if m:
+            return m.group(1).strip().strip('"')
+    raise RuntimeError("SUPABASE_SECRET_KEY")
+
+
+def internal_token(sid):
+    """src/lib/server/internal.ts signInternal 과 같은 서명"""
+    import hashlib, hmac
+    key = hmac.new(_secret_key().encode(), b"kok-internal-v1", hashlib.sha256).digest()
+    ts = int(time.time() * 1000)
+    mac = base64.urlsafe_b64encode(hmac.new(key, f"{sid}.{ts}".encode(), hashlib.sha256).digest()).rstrip(b"=").decode()
+    return f"{ts}.{mac}"
+
+
+def post_json(path, body, headers):
+    import urllib.error
+    req = urllib.request.Request(BASE + path, data=json.dumps(body).encode(), headers={"content-type": "application/json", **headers}, method="POST")
+    try:
+        with urllib.request.urlopen(req, timeout=60) as r:
+            return r.status, json.loads(r.read() or b"{}")
+    except urllib.error.HTTPError as e:
+        return e.code, json.loads(e.read() or b"{}")
+
+
+async def relay_steps():
+    """자료 처리 이어 달리기가 끊겨도 잇는지 (src/lib/server/drive.ts·pipeline.ts runSteps, DB 의 1분 확인 /api/internal/resume):
+    아무도 하지 않는 자료·잠금을 놓지 못하고 멈춘 단계·세 번 멈춘 단계·곧 풀리는 잠금·오래 잡힌 잠금 (따로 돌리기: python3 e2e_relay.py)"""
+    me = USERS["student"][0]
+    db(f"delete from public.energy_ledger where user_id = '{me}'")
+    subj = db(f"select id from public.subjects where user_id = '{me}' order by created_at limit 1")
+    assert subj, "the student has a subject"
+    text = "광합성은 엽록체에서 빛 에너지로 포도당을 만드는 과정이다. 재료는 물과 이산화탄소이고 결과물은 포도당과 산소다."
+
+    def stalled(title, status, lock_sql, draft="{}", age_min=5):
+        sid = db(
+            f"insert into public.sources (user_id, subject_id, kind, title, text_content, status, energy_estimate, draft) "
+            f"values ('{me}', '{subj}', 'text', '{title}', '{text}', '{status}', 1, '{draft}'::jsonb) returning id"
+        ).splitlines()[0]
+        # 오래전에 멈춘 것처럼 (updated_at 을 바꾸는 트리거를 건너뛴다)
+        db(f"set session_replication_role = replica; update public.sources set updated_at = now() - interval '{age_min} minutes', locked_until = {lock_sql} where id = '{sid}'")
+        return sid
+
+    status_of = lambda sid: f"select status from public.sources where id = '{sid}'"  # noqa: E731
+    token = db("select value from public.server_values where key = 'resume_token'")
+    assert len(token) >= 32, "schema.sql makes the resume token"
+
+    step("relay: the DB check (/api/internal/resume) only works with the token from the DB")
+    code, _ = post_json("/api/internal/resume", {}, {"x-kok-resume": "x" * 64})
+    assert code == 403, code
+    code, _ = post_json("/api/internal/resume", {}, {})
+    assert code == 403, code
+
+    step("relay: a material nobody is working on (its first call never ran) is picked up by the DB check and finished")
+    s1 = stalled("아무도 안 하는 자료", "queued", "null")
+    code, body = post_json("/api/internal/resume", {}, {"x-kok-resume": token})
+    assert code == 200 and body.get("resumed", 0) >= 1, (code, body)
+    await poll_db(status_of(s1), "ready", timeout=90)
+    # 서버가 1분 확인이 부를 주소를 적어 둔다 (이 앱을 이어 달리게 한 뒤)
+    assert db("select value from public.server_values where key = 'site_url'").startswith("http"), "site url"
+
+    step("relay: a step whose server function stopped (lock left behind) is taken over, and the stall mark goes away when the step ends")
+    s2 = stalled("주인 없는 잠금", "processing", "now() - interval '1 minute'")
+    code, body = post_json("/api/internal/resume", {}, {"x-kok-resume": token})
+    assert code == 200 and body.get("resumed", 0) >= 1, (code, body)
+    await poll_db(status_of(s2), "ready", timeout=90)
+    assert db(f"select coalesce((draft ? 'stalls')::text, 'f') from public.sources where id = '{s2}'") == "false", db(f"select draft->'stalls' from public.sources where id = '{s2}'")
+
+    step("relay: a step that stopped three times ends with a reason (not forever) and gives the energy back")
+    s3 = stalled("세 번 멈춘 자료", "processing", "now() - interval '1 minute'", draft='{"stalls": 2}')
+    code, body = post_json("/api/internal/resume", {}, {"x-kok-resume": token})
+    assert code == 200, (code, body)
+    await poll_db(status_of(s3), "error", timeout=30)
+    assert "여러 번 멈췄어요" in db(f"select error from public.sources where id = '{s3}'")
+
+    step("relay: the next call waits for a lock that is about to end (its holder stopped), then carries on")
+    s4 = stalled("곧 풀리는 잠금", "processing", "now() + interval '6 seconds'", age_min=0)
+    t0 = time.time()
+    code, _ = post_json("/api/internal/process", {"id": s4}, {"x-kok-internal": internal_token(s4)})
+    assert code == 202, code
+    await poll_db(status_of(s4), "ready", timeout=90)
+    assert time.time() - t0 >= 5, "took the step only after the lock ended"
+
+    step("relay: a lock held for long (a live holder) is left to its holder, and bad signatures are refused")
+    s5 = stalled("오래 잡힌 잠금", "processing", "now() + interval '3 minutes'", age_min=0)
+    lock_of = f"select locked_until::text || ' ' || progress from public.sources where id = '{s5}'"
+    lock0 = db(lock_of)
+    code, _ = post_json("/api/internal/process", {"id": s5}, {"x-kok-internal": "1.bad"})
+    assert code == 403, code
+    code, _ = post_json("/api/internal/process", {"id": s5}, {"x-kok-internal": internal_token(s5)})
+    assert code == 202, code
+    await asyncio.sleep(4)
+    # 잡지 않았다: 잠금·진행이 그대로 (다른 요청이 잡은 단계는 그 요청에 맡긴다)
+    assert db(status_of(s5)) == "processing" and db(lock_of) == lock0, (lock0, db(lock_of))
+    # 잡은 요청이 놓으면 다음 요청이 끝까지 (예: 그 요청의 다음 부르기)
+    db(f"update public.sources set locked_until = null where id = '{s5}'")
+    code, _ = post_json("/api/internal/process", {"id": s5}, {"x-kok-internal": internal_token(s5)})
+    assert code == 202, code
+    await poll_db(status_of(s5), "ready", timeout=90)
+
+    for sid in (s1, s2, s3, s4, s5):
+        db(f"delete from public.sources where id = '{sid}'")
+
+
 async def main():
     import subprocess
     subprocess.run(["bash", str(pathlib.Path(__file__).parent / "db.sh"), "reset"], check=True)
@@ -2952,6 +3062,8 @@ async def main():
         # 조각 한도(시험 12KB)보다 큰 PDF: 서버가 나눠 저장하고 조각마다 정리한 뒤 조각을 지운다
         big_pdf = make_pdf(3, pad=5000)
         assert len(big_pdf) > 12000, len(big_pdf)
+        # 조각 정리를 늦춰 같이 부르는지 본다 (src/lib/relay.ts aiParallel: 뒤 조각을 앞 조각과 같이 정리해 둔다)
+        urllib.request.urlopen("http://localhost:54321/__delay?task=organize&ms=1500").read()
         before = json.loads(urllib.request.urlopen("http://localhost:54321/__stats").read())
         await drag_files(page, [("3단원_광합성.pdf", "application/pdf", big_pdf)])
         await expect(page.get_by_text("여기에 놓으면 KOK이 정리해요")).to_be_visible()
@@ -2969,6 +3081,14 @@ async def main():
         assert after["maxDocBytes"] <= 12000, after["maxDocBytes"]
         assert after["docs"] - before["docs"] >= 2, (before["docs"], after["docs"])  # 조각 2개 이상
         assert after["tasks"].get("organize", 0) - before["tasks"].get("organize", 0) >= 2, (before["tasks"], after["tasks"])  # 조각마다 정리
+        # 조각은 같이 정리하고(동시에 둘 넘게), 조각마다 한 번만 (같이 정리해 둔 조각을 다시 정리하지 않는다)
+        assert after["maxInflight"].get("organize", 0) >= 2, after["maxInflight"]
+        pdf_parts = int(db(f"select chunk_total from public.sources where title = '3단원 광합성' order by created_at desc limit 1"))
+        assert after["tasks"].get("organize", 0) - before["tasks"].get("organize", 0) == pdf_parts, (pdf_parts, before["tasks"], after["tasks"])
+        # 문제는 마인드맵과 같이 만들어 두고 문제 단계가 그것을 쓴다 (한 번만)
+        assert after["tasks"].get("quiz", 0) - before["tasks"].get("quiz", 0) == 1, (before["tasks"], after["tasks"])
+        assert after["tasks"].get("visual", 0) - before["tasks"].get("visual", 0) == 1, (before["tasks"], after["tasks"])
+        urllib.request.urlopen("http://localhost:54321/__delay").read()
         # 합치기는 계획만 받는다 (lib/merge-plan.ts: 합친 노트를 AI 가 다시 쓰지 않는다)
         assert after["tasks"].get("merge", 0) - before["tasks"].get("merge", 0) == 1, (before["tasks"], after["tasks"])
         pdf_sid = page.url.rstrip("/").split("/")[-1].split("?")[0]
@@ -6196,6 +6316,7 @@ async def main():
         await office_picture_steps(browser)
         await share_steps(browser)
         await plan_tier_steps(browser)
+        await relay_steps()
         await browser.close()
 
     # 실제 Claude 처럼 가짜 서버도 속성이 42개를 넘는 답 모양은 거절한다: 시험 내내 한 번도 없어야 하고, 채팅 풀이 그림은 두 번째 호출로 받았다

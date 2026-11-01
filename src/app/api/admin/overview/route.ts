@@ -16,6 +16,13 @@ export async function GET() {
     });
     if (error) throw error;
     const hint = keyHint();
+    // 끊긴 자료 처리 다시 잇기: DB 의 1분 확인(pg_cron·pg_net)이 최근에 돌았는지, 부를 이 앱의 주소를 알고 있는지 (표가 없는 예전 DB 면 꺼짐)
+    const { data: values } = await admin.from('server_values').select('key, value, updated_at').in('key', ['resume_ping_at', 'site_url']);
+    const pingAt = values?.find((r) => r.key === 'resume_ping_at')?.updated_at as string | undefined;
+    const resume = {
+      on: !!pingAt && Date.now() - Date.parse(pingAt) < 5 * 60_000,
+      site: !!values?.some((r) => r.key === 'site_url' && r.value),
+    };
     return Response.json(
       {
         ok: true,
@@ -28,6 +35,7 @@ export async function GET() {
           cronSecret: !!process.env.CRON_SECRET,
           // 테마 AI 그림 (없으면 무늬로 대신한다)
           cloudflare: cloudflareReady(),
+          resume,
         },
       },
       { headers: { 'Cache-Control': 'private, no-store' } },

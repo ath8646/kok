@@ -55,7 +55,14 @@ type Overview = {
     aiEnabled: boolean;
     site: { contactEmail: string; operatorName: string };
   };
-  env: { supabaseSecret: boolean; adminEmails: boolean; cronSecret: boolean; cloudflare?: boolean };
+  env: {
+    supabaseSecret: boolean;
+    adminEmails: boolean;
+    cronSecret: boolean;
+    cloudflare?: boolean;
+    /** 끊긴 자료 처리 다시 잇기: DB 의 1분 확인이 돌고 있는지, 부를 앱 주소를 아는지 (예전 서버는 없음) */
+    resume?: { on: boolean; site: boolean };
+  };
 };
 type UserRow = {
   id: string;
@@ -213,7 +220,20 @@ export default function AdminPage() {
           {ov.env.supabaseSecret ? <Chip tone="ok">Supabase 비밀 키 있음</Chip> : <Chip tone="bad">Supabase 비밀 키 없음</Chip>}
           {ov.env.adminEmails ? <Chip tone="ok">관리자 이메일 설정됨</Chip> : <Chip tone="warn">ADMIN_EMAILS 없음</Chip>}
           {ov.env.cloudflare ? <Chip tone="ok">테마 AI 그림(Cloudflare) 있음</Chip> : <Chip tone="warn">Cloudflare 없음 · AI 그림 대신 무늬</Chip>}
+          {ov.env.resume?.on ? (
+            <Chip tone={ov.env.resume.site ? 'ok' : 'warn'}>
+              {ov.env.resume.site ? '멈춘 정리 자동 이어 하기 켜짐' : '자동 이어 하기 · 앱 주소 기다리는 중'}
+            </Chip>
+          ) : (
+            <Chip tone="warn">멈춘 정리 자동 이어 하기 꺼짐</Chip>
+          )}
         </div>
+        {!ov.env.resume?.on ? (
+          <p className="text-xs text-muted">
+            Supabase → Database → Extensions 에서 pg_cron·pg_net 을 켜고 schema.sql 을 다시 실행하면, 학생이 사이트를 나가 있어도 멈춘 정리를 DB 가 1분마다 찾아
+            다시 이어요. 꺼져 있어도 정리는 서버에서 스스로 이어 가고, 매일 청소·열린 화면이 멈춘 것을 다시 이어요.
+          </p>
+        ) : null}
         <div className="flex flex-wrap items-center gap-2">
           <Segmented
             label="시험할 모델"

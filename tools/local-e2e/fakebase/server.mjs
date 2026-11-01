@@ -33,7 +33,9 @@ pg.types.setTypeParser(1184, (v) => {
   return m ? `${m[1]}T${m[2]}${m[3]}:${m[4] ?? '00'}` : v;
 });
 
-const stats = { messages: 0, tasks: {}, maxDocBytes: 0, docs: 0, noText: 0 };
+const stats = { messages: 0, tasks: {}, maxDocBytes: 0, docs: 0, noText: 0, inflight: {}, maxInflight: {} };
+/** 일마다 AI 답을 늦추는 시간 (ms, /__delay?task=…&ms=…): 같이 부르는 AI 가 정말 같이 도는지(maxInflight) 본다 */
+let taskDelay = {};
 let failTask = process.env.FAKE_FAIL_TASK || '';
 /**
  * __fail 의 mode: '' = 529 로 거절, 'no_text' = 생각만 하고 글 없이 끝난 답 (생각을 끈 요청에는 정상 답: 서버가 생각을 끄고 다시 부르는지 본다),
@@ -1521,7 +1523,14 @@ async function handleClaude(req, res) {
       });
     }
   }
-  await new Promise((r) => setTimeout(r, Number(process.env.FAKE_AI_DELAY || 300)));
+  // 같이 기다리는 요청 수 (일마다 가장 많았던 수를 남긴다)
+  stats.inflight[task] = (stats.inflight[task] || 0) + 1;
+  stats.maxInflight[task] = Math.max(stats.maxInflight[task] || 0, stats.inflight[task]);
+  try {
+    await new Promise((r) => setTimeout(r, taskDelay[task] ?? Number(process.env.FAKE_AI_DELAY || 300)));
+  } finally {
+    stats.inflight[task]--;
+  }
   return send(res, 200, {
     id: `msg_${crypto.randomUUID()}`,
     type: 'message',
@@ -1543,6 +1552,14 @@ const server = http.createServer(async (req, res) => {
   if (LOG) console.log('[fake]', req.method, url.pathname + url.search, auth.role);
   try {
     if (url.pathname === '/__stats') return send(res, 200, stats);
+    if (url.pathname === '/__delay') {
+      // task 가 없으면 모두 처음대로, 늘 가장 많았던 같이 기다린 수도 지운다
+      const t = url.searchParams.get('task') || '';
+      if (!t) taskDelay = {};
+      else taskDelay[t] = Number(url.searchParams.get('ms') || 0);
+      stats.maxInflight = {};
+      return send(res, 200, { taskDelay });
+    }
     if (url.pathname === '/__fail') {
       failTask = url.searchParams.get('task') || '';
       failMode = url.searchParams.get('mode') || '';

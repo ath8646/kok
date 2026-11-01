@@ -25,6 +25,8 @@ export class AiCallError extends Error {
   constructor(
     public kind: 'retryable' | 'refusal' | 'bad_output' | 'fatal',
     message: string,
+    /** API 응답 코드 (429 = 요청 한도, 529 = 바쁨, 0 = 연결 안 됨) */
+    public status = 0,
   ) {
     super(message);
   }
@@ -136,7 +138,7 @@ async function callOnce(
         throw new UserFacingError('ai_budget', 'AI 사용 한도에 닿았어요. 관리자에게 알려 주세요.', 503);
       }
       if (status === 429 || status === 529 || status >= 500 || status === 0) {
-        throw new AiCallError('retryable', `AI 서버가 바빠요 (${status}).`);
+        throw new AiCallError('retryable', `AI 서버가 바빠요 (${status}).`, status);
       }
       throw new AiCallError('fatal', `AI 요청 오류 (${status}): ${msg.slice(0, 200)}`);
     }

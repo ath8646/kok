@@ -1731,4 +1731,60 @@ begin
   if not (select pinned from public.subjects where id = s2) then raise exception 'pin should carry over'; end if;
 end $$;
 
+-- 끊긴 처리 다시 잇기: 서버만 쓰는 값과 1분 확인 함수는 학생이 쓸 수 없다
+set role authenticated;
+select set_config('request.jwt.claim.sub', '11111111-1111-1111-1111-111111111111', false);
+do $$ begin
+  begin
+    perform 1 from public.server_values;
+    raise exception 'server_values read should be denied';
+  exception when insufficient_privilege then null;
+  end;
+  begin
+    perform public.kok_resume_ping();
+    raise exception 'resume ping should be denied';
+  exception when insufficient_privilege then null;
+  end;
+  begin
+    perform public.kok_claim_source(gen_random_uuid(), 30);
+    raise exception 'claim should be denied';
+  exception when insufficient_privilege then null;
+  end;
+end $$;
+reset role;
+-- 잠금을 놓지 못하고 끝난 단계는 다음에 잡을 때 멈춘 수(draft.stalls)를 센다. 놓은 뒤 잡을 때는 세지 않고, 다시 하기는 0 으로
+do $$
+declare
+  a uuid := '11111111-1111-1111-1111-111111111111';
+  sid uuid;
+  r public.sources%rowtype;
+begin
+  if (select length(value) from public.server_values where key = 'resume_token') < 32 then raise exception 'resume token should exist'; end if;
+  insert into public.sources (user_id, subject_id, kind, text_content, status)
+  select a, id, 'text', 'x', 'processing' from public.subjects where user_id = a limit 1 returning id into sid;
+  select * into r from public.kok_claim_source(sid, 30);
+  if r.id is null or r.draft ? 'stalls' then raise exception 'first claim should not count a stall'; end if;
+  -- 서버 함수가 멈췄다: 잠금이 남은 채 시간이 지났다
+  update public.sources set locked_until = now() - interval '1 second' where id = sid;
+  select * into r from public.kok_claim_source(sid, 30);
+  if (r.draft->>'stalls')::int <> 1 then raise exception 'stall should be counted: %', r.draft; end if;
+  -- 잡혀 있는 동안에는 다른 요청이 잡지 못한다
+  select * into r from public.kok_claim_source(sid, 30);
+  if r.id is not null then raise exception 'locked source should not be claimed twice'; end if;
+  update public.sources set locked_until = now() - interval '1 second', draft = draft || '{"stalls": 2.7}'::jsonb where id = sid;
+  select * into r from public.kok_claim_source(sid, 30);
+  if (r.draft->>'stalls')::int <> 3 then raise exception 'odd stall values are read safely: %', r.draft; end if;
+  -- 잠금을 놓은 뒤 잡을 때는 세지 않는다
+  update public.sources set locked_until = null where id = sid;
+  select * into r from public.kok_claim_source(sid, 30);
+  if (r.draft->>'stalls')::int <> 3 then raise exception 'released lock should not count a stall'; end if;
+  update public.sources set status = 'error', locked_until = null where id = sid;
+  perform public.kok_retry_source(sid, a, null, null, null, null, null);
+  if (select (draft->>'stalls')::int from public.sources where id = sid) <> 0 then raise exception 'retry should reset stalls'; end if;
+  -- 1분 확인은 확장(pg_net)이 없어도 실패하지 않고, 확인한 때를 적는다
+  perform public.kok_resume_ping();
+  if not exists (select 1 from public.server_values where key = 'resume_ping_at') then raise exception 'ping time should be saved'; end if;
+  delete from public.sources where id = sid;
+end $$;
+
 select 'ALL RLS TESTS PASSED' as result;

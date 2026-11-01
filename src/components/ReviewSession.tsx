@@ -802,14 +802,20 @@ export function ReviewSession({
             subjectName={subjectNames.get(item.q.subject_id)}
             style={examStyle({ subject: subjectNames.get(item.q.subject_id), text: item.q.prompt })}
             onSubmit={onSubmit}
-            autoRate={(correct, ms) => autoRating(item.q.type, correct, ms)}
+            autoRate={(correct, ms) => autoRating(item.q.type, correct, ms, item.q)}
             onNext={onNext}
             onAppeal={async (given) => {
               const g = given.trim();
-              if (!g || g.length > ACCEPTED_MAX_CHARS) return toast(`인정할 답은 ${ACCEPTED_MAX_CHARS}자까지 넣을 수 있어요.`, 'bad');
+              if (!g) return false;
+              // 긴 답(서술형)은 같은 글로 다시 맞힐 일이 없어 정답 목록에 넣지 않고 이번만 맞은 것으로
+              if (g.length > ACCEPTED_MAX_CHARS) return 'counted';
               const accepted = Array.from(new Set([...(item.q.accepted ?? []), g])).slice(0, 10);
               const { error } = await sb().from('questions').update({ accepted }).eq('id', item.q.id);
-              if (error) toast('저장하지 못했어요.', 'bad');
+              if (error) {
+                toast('저장하지 못했어요. 다시 눌러 주세요.', 'bad');
+                return false;
+              }
+              return 'saved';
             }}
             onShowVisual={item.q.note_id ? showVisual : undefined}
             onReport={() => setReport({ kind: 'question', target: item.q.id })}

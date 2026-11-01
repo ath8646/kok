@@ -1372,6 +1372,13 @@ body.kok-editing .kok-fab {
   }
 }
 
+/* 복습 문제를 푸는 동안 알림은 화면 아래 띠(확인·채점 띠) 위에 뜬다: 띠 높이(키보드 포함)는 QuestionCard 가 --answer-dock 에 */
+body:has(.kok-answer-dock) .kok-toasts {
+  align-items: center;
+  padding-right: 16px;
+  bottom: calc(var(--answer-dock, 96px) + 12px);
+}
+
 /* 알림(토스트): 아래에서 올라온다 */
 .kok-toast {
   transition:

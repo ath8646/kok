@@ -66,11 +66,23 @@ export function autoGrade(q: GradableQuestion, given: unknown): AutoGrade {
 
 export type Rating = 1 | 2 | 3 | 4; // Again, Hard, Good, Easy
 
-/** 맞았는지와 걸린 시간으로 FSRS 평가를 자동으로 고른다 */
-export function autoRating(type: QuestionType, correct: boolean, ms: number): Rating {
+/** 문제 글 한 자를 읽는 데 (천천히 읽는 시험 글: 1초에 10자 안팎) */
+const READ_MS_PER_CHAR = 100;
+/** 답 한 자를 적는 데 (폰 한글 입력) */
+const WRITE_MS_PER_CHAR = 400;
+
+/**
+ * 맞았는지와 걸린 시간으로 FSRS 평가를 자동으로 고른다 (학생은 평가를 고르지 않는다: 맞음·틀림만 본다).
+ * 빠름·느림의 기준은 문제를 읽고 답을 적는 데 드는 시간만큼 늘린다: 긴 지문·서술형 답을 맞혔는데 늘 '어려움'이 되지 않게
+ */
+export function autoRating(type: QuestionType, correct: boolean, ms: number, q?: { prompt?: unknown; choices?: unknown; answer?: unknown }): Rating {
   if (!correct) return 1;
-  const fast = type === 'mcq' || type === 'ox' ? 6000 : 10000;
-  const slow = type === 'mcq' || type === 'ox' ? 20000 : 35000;
+  const pick = type === 'mcq' || type === 'ox';
+  const read = String(q?.prompt ?? '').length + (Array.isArray(q?.choices) ? q.choices.map(String).join('').length : 0);
+  const write = pick ? 0 : String(q?.answer ?? '').length;
+  const extra = read * READ_MS_PER_CHAR + write * WRITE_MS_PER_CHAR;
+  const fast = (pick ? 6000 : 10000) + extra * 0.3;
+  const slow = (pick ? 20000 : 35000) + extra;
   if (ms <= fast) return 4;
   if (ms >= slow) return 2;
   return 3;

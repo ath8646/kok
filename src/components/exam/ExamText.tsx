@@ -103,7 +103,8 @@ export function ExamPrompt({
   const layout = useMemo(() => examLayout(text, style), [text, style]);
   // 빈칸 칸은 첫 빈칸이 든 발문·글 덩이에 한 번만
   const blankAt = blank ? layout.blocks.findIndex((b) => (b.kind === 'stem' || b.kind === 'text') && !!clozeBlank(b.text)) : -1;
-  const words = (b: Extract<ExamBlock, { text: string }>, i: number) => (i === blankAt && blank ? <ClozeText text={b.text} blank={blank} /> : <MarkedText text={b.text} />);
+  const words = (b: Extract<ExamBlock, { text: string }>, i: number) =>
+    i === blankAt && blank ? <ClozeText text={b.text} blank={blank} /> : <MarkedText text={b.text} />;
   return (
     <div className={cx('kok-exam grid', size === 'lg' ? 'gap-3.5 text-[18px]' : 'gap-2.5 text-[15px]', className)} data-style={style}>
       {layout.label ? <span className="kok-exam-label">{layout.label}</span> : null}
@@ -148,11 +149,12 @@ export function ExamPrompt({
 /** 정답·해설: '이름: 내용'·①·(가)마다 한 줄 (이름은 굵게), 아니면 한 문단 그대로 */
 export function ExplainText({ text, className }: { text: string; className?: string }) {
   const lines = useMemo(() => explainLines(text), [text]);
+  // 글 칸은 div: RichText 가 코드 블록·목록 같은 덩이를 그릴 수 있다 (p 안에 덩이를 두지 않게)
   if (lines.length <= 1 && !lines[0]?.label) {
     return (
-      <p className={className}>
-        <RichText text={text} />
-      </p>
+      <div className={className}>
+        <RichText text={String(text ?? '')} />
+      </div>
     );
   }
   return (
@@ -160,21 +162,20 @@ export function ExplainText({ text, className }: { text: string; className?: str
       {lines.map((l, i) =>
         // 짧은 표시(①·(가))는 내어쓰기, 이름('혈당량 조절')은 줄 앞에 굵게
         l.label && l.label.length <= 4 ? (
-          <p key={i} className="kok-explain-step">
+          <div key={i} className="kok-explain-step">
             <b className="font-bold">{l.label}</b>
             <span className="min-w-0">
               <RichText text={l.text} />
             </span>
-          </p>
+          </div>
         ) : l.label ? (
-          <p key={i}>
-            <b className="font-bold">{l.label}</b>{' '}
-            <RichText text={l.text} />
-          </p>
+          <div key={i}>
+            <b className="font-bold">{l.label}</b> <RichText text={l.text} />
+          </div>
         ) : (
-          <p key={i}>
+          <div key={i}>
             <RichText text={l.text} />
-          </p>
+          </div>
         ),
       )}
     </div>

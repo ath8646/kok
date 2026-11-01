@@ -10,7 +10,10 @@ export type ExamStyle = 'korean' | 'english' | 'math' | 'science' | 'social' | '
 
 /** 과목 이름의 낱말 → 모양 (앞의 것이 먼저: '영문법'은 영어, '생명과학'은 과학, '문법'은 국어) */
 const STYLE_WORDS: ReadonlyArray<readonly [ExamStyle, RegExp]> = [
-  ['code', /코딩|프로그래밍|컴퓨터|^정보$|정보\s*(?:과학|처리|기술|교과)|알고리즘|자료\s*구조|파이썬|자바|c\+\+|c\s*언어|python|java|\bsql\b|coding|programming|computer/i],
+  [
+    'code',
+    /코딩|프로그래밍|컴퓨터|^정보$|정보\s*(?:과학|처리|기술|교과)|알고리즘|자료\s*구조|파이썬|자바|c\+\+|c\s*언어|python|java|\bsql\b|coding|programming|computer/i,
+  ],
   ['math', /수학|미적분|확률|통계|기하|대수|산수|math|calculus|algebra|geometry|statistics/i],
   ['science', /과학|물리|화학|생명|생물|지구|천문|science|physics|chemistry|biology/i],
   ['english', /영어|영문|영단어|english|토익|toeic|토플|toefl|텝스|teps|회화/i],
@@ -30,9 +33,9 @@ function latinShare(s: string): number {
  * (코드 블록·백틱 → 코딩, 수식 여럿 → 수학, 거의 영어 → 영어)
  */
 export function examStyle(o: { subject?: string | null; material?: string | null; text?: string | null }): ExamStyle {
-  const name = (o.subject ?? '').trim();
+  const name = String(o.subject ?? '').trim();
   if (name) for (const [style, re] of STYLE_WORDS) if (re.test(name)) return style;
-  const text = o.text ?? '';
+  const text = String(o.text ?? '');
   if (o.material === 'math') return 'math';
   if (o.material === 'reading') return latinShare(text) > 0.6 ? 'english' : 'korean';
   if (/^[ \t]*```/m.test(text) || (text.match(/`[^`\n]+`/g)?.length ?? 0) >= 2) return 'code';
@@ -58,10 +61,12 @@ const inside = (ranges: readonly Range[], i: number) => ranges.some(([a, b]) => 
 
 const ENDS = '.?!？！。';
 const CLOSERS = `"'”’」』)]）`;
+/** 마침표로 끝나도 문장 끝이 아닌 영어 줄임말 ('Mr. Smith', 'e.g. this') 과 이름 머리글자 ('J. K.') */
+const ABBREV = /(?:^|[\s("'“‘])(?:Mr|Mrs|Ms|Dr|Prof|Sr|Jr|St|Mt|vs|etc|No|Fig|Vol|pp?|cf|approx|e\.g|i\.e|a\.m|p\.m|U\.S|[A-Z])$/;
 
 /**
  * 문장 자리 [start, end) (양 끝 빈칸은 뺀다): 마침표·물음표 뒤에 빈칸이 오거나 줄이 바뀌면 끝.
- * 3.14 · a.b 처럼 바로 글자가 이어지면, 코드·수식 안이면, 번호('1.')면 끝이 아니다
+ * 3.14 · a.b 처럼 바로 글자가 이어지면, 코드·수식 안이면, 번호('1.')면, 영어 줄임말('Mr.')이면 끝이 아니다
  */
 function sentenceSpans(text: string, skip: readonly Range[] = skipRanges(text)): Range[] {
   const out: Range[] = [];
@@ -85,6 +90,7 @@ function sentenceSpans(text: string, skip: readonly Range[] = skipRanges(text)):
     while (j < text.length && (ENDS.includes(text[j]) || CLOSERS.includes(text[j]))) j++;
     if (j < text.length && !/\s/.test(text[j])) continue;
     if (ch === '.' && /(?:^|\s)\d{1,2}$/.test(text.slice(Math.max(0, i - 3), i))) continue;
+    if (ch === '.' && ABBREV.test(text.slice(Math.max(0, i - 8), i))) continue;
     push(j);
     start = j;
     i = j - 1;
@@ -116,8 +122,11 @@ const STRONG_ASK = new RegExp(
 );
 /** 묻는 것 같은 문장: 물음표로 끝나거나 '~인가.' */
 const WEAK_ASK = new RegExp(`[?？]${TAIL}|(?:인가|일까|는가|은가)\\s*[.。]${TAIL}`);
-/** 영어 문제 */
-const EN_ASK = /^(?:Choose|Select|Write|Explain|Describe|Find|Fill|Complete|Translate|Answer|Name|List|Calculate|Solve|Which|What|Why|How|Who|When|Where)\b.*[.?]$/;
+/**
+ * 영어 문제: 의문사로 시작해 물음표로 끝나거나, 시키는 말로 시작 (지문의 평서문 'When people sleep, …' 은 묻는 문장이 아니다)
+ */
+const EN_ASK =
+  /^(?:(?:Which|What|Why|How|Who|Whom|Whose|When|Where)\b.*[?？]|(?:Choose|Select|Write|Explain|Describe|Find|Fill|Complete|Translate|Answer|Name|List|Calculate|Solve|Circle|Underline|Rewrite|Correct)\b.*[.?:])["'”’)\]]*$/;
 /** 묻는 문장 뒤에 붙는 조건 ('(단, …)', '※ …') */
 const CONDITION = /^\(?\s*(?:단|※|\*)\s*[,，:]?\s/;
 /** 자료 앞의 이끄는 문장 ('다음은 … 실험이다.'): 실제 시험처럼 묻는 문장과 함께 위에 둔다 */
@@ -125,11 +134,19 @@ const LEAD = /^(?:다음|아래|그림|표|자료|그래프|지도|사진|도표
 /** 하위 문제 번호 '(1)' · '1)' */
 const SUBQ = /^\(?(\d{1,2})\)\s*/;
 
-function askIndex(sents: readonly string[]): number | null {
-  for (let i = sents.length - 1; i >= 0; i--) if (STRONG_ASK.test(sents[i]) || EN_ASK.test(sents[i])) return i;
-  for (let i = sents.length - 1; i >= 0; i--) if (WEAK_ASK.test(sents[i])) return i;
+/**
+ * 묻는 문장 자리와 세기 (2: 분명히 묻는 한국어 문장, 1: 영어 문제·물음표만). 한국어 발문이 있으면 그것이 먼저:
+ * 영어 시험은 발문이 한국어고 지문(영어)에 물음표 문장이 섞일 수 있다
+ */
+function askAt(sents: readonly string[]): { i: number; level: 1 | 2 } | null {
+  for (let i = sents.length - 1; i >= 0; i--) if (STRONG_ASK.test(sents[i])) return { i, level: 2 };
+  for (let i = sents.length - 1; i >= 0; i--) if (EN_ASK.test(sents[i])) return { i, level: 1 };
+  for (let i = sents.length - 1; i >= 0; i--) if (WEAK_ASK.test(sents[i])) return { i, level: 1 };
   return null;
 }
+const askIndex = (sents: readonly string[]): number | null => askAt(sents)?.i ?? null;
+/** 글의 문장들 */
+const sentencesOf = (text: string): string[] => sentenceSpans(text).map(([s, e]) => text.slice(s, e));
 
 /** 상자에 넣을 만한 자료인지: 길거나(두 문장 이상), 단계·표시·줄바꿈·코드가 있으면 */
 function boxWorthy(text: string): boolean {
@@ -142,17 +159,11 @@ function boxWorthy(text: string): boolean {
 // ------------------------------------------------------------- 자료 상자의 줄
 /** 상자 안 한 줄: 문단, 차례 칸(① … · (가) …), 제목([실험 과정]), 이름 붙은 줄(학생 A: … · 결과: …) */
 export type ExamLine =
-  | { kind: 'p'; text: string }
-  | { kind: 'step'; mark: string; text: string }
-  | { kind: 'head'; text: string }
-  | { kind: 'label'; label: string; text: string };
+  { kind: 'p'; text: string } | { kind: 'step'; mark: string; text: string } | { kind: 'head'; text: string } | { kind: 'label'; label: string; text: string };
 
 /** 시험지의 덩이 (그리는 차례대로) */
 export type ExamBlock =
-  | { kind: 'stem'; text: string }
-  | { kind: 'box'; lines: ExamLine[] }
-  | { kind: 'bogi'; items: string[] }
-  | { kind: 'text'; text: string };
+  { kind: 'stem'; text: string } | { kind: 'box'; lines: ExamLine[] } | { kind: 'bogi'; items: string[] } | { kind: 'text'; text: string };
 
 export type ExamLayout = {
   /** 원래 문제 번호 ('1-가-1)', '[1~2]') */
@@ -167,9 +178,29 @@ const HANGUL_MARKS = ['가', '나', '다', '라', '마', '바', '사', '아', '�
 /** 표시가 글 조각의 시작인지 (앞이 줄 처음·빈칸·문장 부호) */
 const startOk = (s: string, i: number) => i === 0 || /[\s.,:;(\[]/.test(s[i - 1]);
 
-/** ①②③… 차례 칸 (①부터 차례대로, 처음 나온 것만: 뒤의 '⑦에서'는 칸이 아니다). 둘이 안 되면 null */
-function circledAt(line: string, skip: readonly Range[]): Array<{ at: number; mark: string; len: number }> | null {
-  const out: Array<{ at: number; mark: string; len: number }> = [];
+type Mark = { at: number; mark: string; len: number };
+
+/** 표시 다음 말이 조사면 칸이 아니라 빈칸·가리키는 말이다 ('(가) 이므로', '(가) 에 알맞은 말') */
+const PARTICLE_AFTER =
+  /^\s*(?:이므로|이고|이며|이면|이라|이니|이다|이었|일|에서|에게|에|을|를|은|는|이|가|와|과|의|으로|로|도|만|까지|부터|처럼|보다)(?=[\s,，.。?!)\]]|$)/;
+/** 칸 글이 문장처럼 끝나는지 (빈칸 '(가)'·'____'·'( )' 만 있거나 그것으로 끝나는 칸도 된다) */
+const STEP_END = /(?:[.!?。]|[다요]|\((?:가|나|다|라|마|바|사|아|자|차)\)|_{2,}|\(\s*\))["'”’)\]]*\s*$/;
+
+/** 표시마다 바로 뒤에 빈칸이 있고 그다음이 조사가 아닌지 ('①, ②는'·'①과 ②'·'①은'은 차례가 아니라 보기를 가리키는 말) */
+function marksStartParts(line: string, marks: readonly Mark[]): boolean {
+  return marks.every((m) => {
+    const rest = line.slice(m.at + m.len);
+    return /^\s/.test(rest) && !PARTICLE_AFTER.test(rest);
+  });
+}
+
+/**
+ * ①②③… 차례 칸 (①부터 차례대로, 처음 나온 것만: 뒤의 '⑦에서'는 칸이 아니다). 둘이 안 되면 null.
+ * 보기를 가리키는 말('①, ②는 옳다')과 밑줄 친 말의 번호('The book ① that I read ② was …')는 칸이 아니다:
+ * 표시 뒤에 빈칸이 있어야 하고, 마지막 칸을 뺀 칸의 반 넘게가 문장으로 끝나야 한다 (실험 과정·풀이 단계)
+ */
+function circledAt(line: string, skip: readonly Range[]): Mark[] | null {
+  const out: Mark[] = [];
   let from = 0;
   for (const mark of CIRCLED) {
     let at = line.indexOf(mark, from);
@@ -178,15 +209,17 @@ function circledAt(line: string, skip: readonly Range[]): Array<{ at: number; ma
     out.push({ at, mark, len: 1 });
     from = at + 1;
   }
-  return out.length >= 2 ? out : null;
+  if (out.length < 2 || !marksStartParts(line, out)) return null;
+  const bodies = out.slice(0, -1).map((m, i) => line.slice(m.at + m.len, out[i + 1].at).trim());
+  return bodies.filter((b) => STEP_END.test(b)).length * 2 >= bodies.length ? out : null;
 }
 
 /**
  * (가)(나)… 조건 칸: 문장 첫머리에서 차례대로, 뒤에 글이 다섯 자 넘게 (빈칸 '(가)'는 칸이 아니다: '③ (가) ④').
  * 수학은 조건을 늘 이렇게 쓴다
  */
-function parenAt(line: string, skip: readonly Range[], math: boolean): Array<{ at: number; mark: string; len: number }> | null {
-  const out: Array<{ at: number; mark: string; len: number }> = [];
+function parenAt(line: string, skip: readonly Range[], math: boolean): Mark[] | null {
+  const out: Mark[] = [];
   let from = 0;
   for (const h of HANGUL_MARKS) {
     const mark = `(${h})`;
@@ -197,7 +230,8 @@ function parenAt(line: string, skip: readonly Range[], math: boolean): Array<{ a
     out.push({ at, mark, len: mark.length });
     from = at + mark.length;
   }
-  if (out.length < 2) return null;
+  // 표시 뒤가 조사면 빈칸이다 (수학적 귀납법의 '(가) 이므로')
+  if (out.length < 2 || !marksStartParts(line, out)) return null;
   // 칸마다 글이 있어야 한다 (표시 사이가 비면 빈칸 표시다)
   for (let i = 0; i < out.length; i++) {
     const end = i + 1 < out.length ? out[i + 1].at : line.length;
@@ -232,10 +266,22 @@ function stepLines(line: string, style: ExamStyle): ExamLine[] {
   return out;
 }
 
-/** 상자 머리 '[실험 과정]' · '<실험 결과>' · '【자료】' (보기 상자 표시는 bogi.ts 가 먼저 가져간다) */
-const HEAD = /^\s*[[［【〔<〈《]\s*([^\]］】〕>〉》\n]{1,24}?)\s*[\]］】〕>〉》]\s*/;
+/**
+ * 상자 머리 '[실험 과정]' · '<실험 결과>' · '【자료】' (보기 상자 표시는 bogi.ts 가 먼저 가져간다): 짝이 맞는 괄호 안의
+ * 한글 이름이 줄 앞에 따로 있을 때만 ('[0, 1]에서 연속인 함수'·'<p>' 는 머리가 아니다). 괄호까지 그대로 보인다
+ */
+const HEAD = /^\s*([[［【〔<〈《])\s*([^\]］】〕>〉》\n,，]{1,24}?)\s*([\]］】〕>〉》])(?=\s|$)/;
+const HEAD_PAIR: Record<string, string> = { '[': ']', '［': '］', '【': '】', '〔': '〕', '<': '>', '〈': '〉', '《': '》' };
+
+function headAt(line: string): { text: string; rest: string } | null {
+  const m = HEAD.exec(line);
+  if (!m || HEAD_PAIR[m[1]] !== m[3] || /^\d+$/.test(m[2].trim()) || !/[가-힣]/.test(m[2])) return null;
+  return { text: m[0].trim(), rest: line.slice(m[0].length).trim() };
+}
 /** 이름 붙은 줄 '학생 A: …' · '결과: …' (이름은 열두 자 안, 시각 '10:30' 은 아니다) */
 const LABEL_LINE = /^([^\s:：][^:：\n]{0,11}?)\s*[:：]\s+(\S[\s\S]*)$/;
+/** 이름으로 볼 수 없는 표시: 문장 끝·꾸미기(**·==·!!)·수식($)·코드(`)·괄호 */
+const LABEL_MARKUP = /[.?!。`$*=\\{}<>_~[\]]/;
 
 /** 줄 첫머리의 차례 표시 (단계·조건을 한 줄씩 쓴 새 꼴): ① · (가) · ㈎ 다음 빈칸 ('(가)는 …'의 (가)는 표시가 아니다) */
 const LINE_MARK = /^([①-⑳㈎-㈛]|\((?:가|나|다|라|마|바|사|아|자|차)\))\s+(\S[\s\S]*)$/;
@@ -250,20 +296,22 @@ function materialLines(text: string, style: ExamStyle): ExamLine[] {
       out.push({ kind: 'p', text: line });
       continue;
     }
-    const head = HEAD.exec(line);
-    if (head && !/^\d+$/.test(head[1])) {
-      out.push({ kind: 'head', text: head[1].trim() });
-      line = line.slice(head[0].length).trim();
+    const head = headAt(line);
+    if (head) {
+      out.push({ kind: 'head', text: head.text });
+      line = head.rest;
       if (!line) continue;
     }
     const lab = LABEL_LINE.exec(line);
-    if (lab && !/^[\d\s]+$/.test(lab[1]) && !/[.?!。`$]/.test(lab[1])) {
+    // 이름에 꾸미기·수식·코드 표시가 있으면 이름 줄이 아니다 (이름은 꾸미기 없이 굵게 그린다)
+    if (lab && !/^[\d\s]+$/.test(lab[1]) && !LABEL_MARKUP.test(lab[1])) {
       out.push({ kind: 'label', label: lab[1].trim(), text: lab[2].trim() });
       continue;
     }
-    // 한 줄에 칸이 여럿이면 나누고, 줄 앞에 표시 하나면 그 칸
+    // 한 줄에 칸이 여럿이면 나누고, 줄 앞에 표시 하나면 그 칸 ('(가) 이므로'처럼 조사가 이어지면 빈칸이다)
     const steps = stepLines(line, style);
-    const one = steps.length === 1 ? LINE_MARK.exec(line) : null;
+    const lm = steps.length === 1 ? LINE_MARK.exec(line) : null;
+    const one = lm && !PARTICLE_AFTER.test(line.slice(lm[1].length)) ? lm : null;
     out.push(...(one ? [{ kind: 'step' as const, mark: one[1], text: one[2].trim() }] : steps));
   }
   return out;
@@ -293,7 +341,8 @@ function inlineBogi(text: string): { before: string; items: string[] } | null {
     const sents = sentenceSpans(before).map(([s, e]) => before.slice(s, e));
     if (!sents.length || askIndex(sents) !== sents.length - 1) return null;
   }
-  const items = hits.map((h, i) => `${text[h.at]}. ${text.slice(h.body, i + 1 < hits.length ? hits[i + 1].at : text.length).trim()}`);
+  // 표시는 쓴 그대로 ('ㄱ)' 을 'ㄱ.' 로 바꾸지 않는다)
+  const items = hits.map((h, i) => text.slice(h.at, i + 1 < hits.length ? hits[i + 1].at : text.length).trim());
   return { before, items };
 }
 
@@ -355,6 +404,12 @@ export function examLayout(prompt: string, style: ExamStyle = 'general'): ExamLa
     }
   }
   const blocks: ExamBlock[] = [];
+  // 자료 → <보기> → 묻는 문장 (AI 가 발문을 마지막 문단에 쓴 꼴): 쓴 차례 그대로, 앞 글은 자료
+  if (bogi && after && askIndex(sentencesOf(after)) !== null && askIndex(sentencesOf(text)) === null) {
+    if (text) blocks.push(boxWorthy(text) ? { kind: 'box', lines: materialLines(text, style) } : { kind: 'text', text });
+    blocks.push({ kind: 'bogi', items: bogi }, { kind: 'stem', text: subLines(after) });
+    return { label, blocks, ask: after };
+  }
   let ask = '';
   if (text) {
     const main = mainBlocks(text, style);
@@ -366,17 +421,60 @@ export function examLayout(prompt: string, style: ExamStyle = 'general'): ExamLa
   return { label, blocks, ask: ask || String(prompt ?? '').trim() };
 }
 
+/** 마지막 문단이 '(2) …'면 '(1) …' 문단까지 거슬러 하위 문제를 모두 발문으로 (그 첫 문단 자리) */
+function subParagraphsFrom(paras: readonly string[]): number {
+  const last = paras.length - 1;
+  const n = SUBQ.exec(paras[last]);
+  if (!n || Number(n[1]) < 2) return last;
+  let want = Number(n[1]) - 1;
+  let from = last;
+  for (let i = last - 1; i >= 0 && want >= 1; i--) {
+    const m = SUBQ.exec(paras[i]);
+    if (!m || Number(m[1]) !== want) break;
+    from = i;
+    want--;
+  }
+  return want >= 1 ? last : from;
+}
+
 function mainBlocks(text: string, style: ExamStyle): { blocks: ExamBlock[]; ask: string } {
-  // 새 꼴: 자료 줄들 → 빈 줄 → 발문 (마지막 문단이 묻는 문장)
   const paras = splitOutside(text, /\n[ \t]*\n/)
     .map((p) => p.trim())
     .filter(Boolean);
   if (paras.length >= 2) {
-    const last = paras[paras.length - 1];
-    const lastSents = sentenceSpans(last).map(([s, e]) => last.slice(s, e));
-    if (askIndex(lastSents) !== null && !/^```/.test(last)) {
-      const material = paras.slice(0, -1).join('\n');
-      return { blocks: [{ kind: 'box', lines: materialLines(material, style) }, { kind: 'stem', text: subLines(last) }], ask: last };
+    // 새 꼴: 자료 문단들 → 빈 줄 → 발문 (마지막 문단이 묻는 문장, 하위 문제 문단은 모두)
+    const from = subParagraphsFrom(paras);
+    const stem = paras.slice(from).join('\n');
+    const lastAsk = /^```/.test(stem) ? null : askAt(sentencesOf(stem));
+    // 발문이 먼저인 꼴 (국어·영어 시험: '다음 글의 주제로 가장 적절한 것은?' → 지문): 첫 문단이 묻는 문장으로 끝나고
+    // 마지막 문단에는 그보다 약한 물음(지문 속 물음표 문장)만 있을 때
+    const firstSents = sentencesOf(paras[0]);
+    const firstAsk = askAt(firstSents);
+    const firstIsAsk = !!firstAsk && firstAsk.i === firstSents.length - 1 && !/^```/.test(paras[0]);
+    // 문단 모두가 하위 문제 '(1) …' '(2) …'
+    if (lastAsk && from === 0) return { blocks: [{ kind: 'stem', text: subLines(stem) }], ask: stem };
+    if (lastAsk && !(firstIsAsk && firstAsk.level > lastAsk.level)) {
+      // 첫 문단이 '다음 글을 읽고 물음에 답하시오.' 같은 지시 한 문장이면 상자 밖 위에
+      const order = from >= 2 && firstSents.length === 1 && firstAsk?.level === 2 ? paras[0] : '';
+      const material = paras.slice(order ? 1 : 0, from).join('\n');
+      return {
+        blocks: [
+          ...(order ? [{ kind: 'stem' as const, text: order }] : []),
+          { kind: 'box', lines: materialLines(material, style) },
+          { kind: 'stem', text: subLines(stem) },
+        ],
+        ask: stem,
+      };
+    }
+    if (firstIsAsk) {
+      const material = paras.slice(1).join('\n');
+      return {
+        blocks: [
+          { kind: 'stem', text: subLines(paras[0]) },
+          { kind: 'box', lines: materialLines(material, style) },
+        ],
+        ask: paras[0],
+      };
     }
   }
   const spans = sentenceSpans(text);
@@ -415,22 +513,30 @@ function mainBlocks(text: string, style: ExamStyle): { blocks: ExamBlock[]; ask:
 /** 정답·해설의 한 줄: 차례 표시(①)나 이름('혈당량 조절', '(가)')이 있으면 줄 앞에 굵게 */
 export type ExplainLine = { label: string | null; text: string };
 
-/** 문장 첫머리의 이름: '혈당량 조절: …' · '(가) …' · '(1) …' (이름은 열네 자 안, 괄호·문장 부호 없이) */
-const SENT_LABEL = /^(?:(\((?:가|나|다|라|마|바|사)\)|\(\d{1,2}\))\s*[:：]?\s*|([^\s:：.,()[\]][^:：.,()[\]\n]{0,13}?)\s*[:：]\s+)(\S[\s\S]*)$/;
+/**
+ * 문장 첫머리의 이름: '혈당량 조절: …' · '(가) …' · '(1) …' (이름은 열네 자 안, 괄호·문장 부호 없이.
+ * 수식·코드·꾸미기 표시가 든 것은 이름이 아니다: '$f: A \to B$ 는 …', '`x: int` 는 …')
+ */
+const SENT_LABEL =
+  /^(?:(\((?:가|나|다|라|마|바|사)\)|\(\d{1,2}\))\s*[:：]?\s*|([^\s:：.,()[\]$`*=!\\{}<>_~][^:：.,()[\]$`*=!\\{}<>_~\n]{0,13}?)\s*[:：]\s+)(\S[\s\S]*)$/;
 
 /**
  * 정답·해설을 줄로: 이미 나뉜 줄은 그대로, 한 줄에 '이름: …'이나 (가)·(1)로 시작하는 문장이 둘 넘으면 그 문장마다 새 줄,
- * ①②… 차례가 있으면 칸마다 한 줄. 이름이 없는 문장은 앞 줄에 이어 붙인다
+ * ①②… 차례가 있으면 칸마다 한 줄. 이름이 없는 문장은 앞 줄에 이어 붙인다.
+ * 코드 블록(```)이나 여러 줄 수식($$)이 든 글은 나누지 않는다 (줄을 나누면 코드·수식이 깨진다): 한 덩이 그대로
  */
 export function explainLines(text: string): ExplainLine[] {
+  const all = String(text ?? '');
+  if (/```|\$\$/.test(all)) return all.trim() ? [{ label: null, text: all.trim() }] : [];
   const out: ExplainLine[] = [];
-  for (const raw of String(text ?? '').split('\n')) {
+  for (const raw of all.split('\n')) {
     const line = raw.trim();
     if (!line) continue;
     const skip = skipRanges(line);
     const steps = circledAt(line, skip);
     if (steps) {
-      for (const l of stepLines(line, 'general')) out.push(l.kind === 'step' ? { label: l.mark, text: l.text } : { label: null, text: l.kind === 'label' ? `${l.label}: ${l.text}` : l.text });
+      for (const l of stepLines(line, 'general'))
+        out.push(l.kind === 'step' ? { label: l.mark, text: l.text } : { label: null, text: l.kind === 'label' ? `${l.label}: ${l.text}` : l.text });
       continue;
     }
     const spans = sentenceSpans(line, skip);
@@ -493,6 +599,20 @@ const HINT_MAX = 80;
  * 어느 문제인지 알 수 없어서 (발문이 길면 두 줄에서 잘려 안 보인다)
  */
 export function examSummary(prompt: string, style: ExamStyle = 'general'): { ask: string; hint: string } {
+  // 목록은 고르기·펼치기마다 다시 그려진다: 같은 문제는 한 번만 나눈다
+  const key = `${style}\u0000${String(prompt ?? '')}`;
+  const hit = summaryCache.get(key);
+  if (hit) return hit;
+  const out = summarize(String(prompt ?? ''), style);
+  if (summaryCache.size >= SUMMARY_CACHE_MAX) summaryCache.clear();
+  summaryCache.set(key, out);
+  return out;
+}
+
+const SUMMARY_CACHE_MAX = 2000;
+const summaryCache = new Map<string, { ask: string; hint: string }>();
+
+function summarize(prompt: string, style: ExamStyle): { ask: string; hint: string } {
   const layout = examLayout(prompt, style);
   const flat = (s: string) => s.replace(/\s+/g, ' ').trim();
   const want = flat(layout.ask);

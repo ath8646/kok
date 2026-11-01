@@ -57,6 +57,16 @@ describe('grading', () => {
     expect(autoRating('mcq', true, 10000)).toBe(3);
     expect(autoRating('short', true, 60000)).toBe(2);
   });
+  it('긴 지문·서술형 답은 읽고 적는 시간만큼 기준을 늘린다 (맞혔는데 늘 어려움이 되지 않게)', () => {
+    const passage = { prompt: '가'.repeat(300), answer: '혈당량 조절: 이자에서 글루카곤이 분비되어 혈당량이 높아진다.' };
+    // 60초: 짧은 단답이면 느림(어려움), 300자 지문 + 서술형 답이면 보통(알맞음)
+    expect(autoRating('short', true, 60000, { prompt: '광합성이 일어나는 곳은?', answer: '엽록체' })).toBe(2);
+    expect(autoRating('short', true, 60000, passage)).toBe(3);
+    // 그래도 아주 오래 걸리면 어려움
+    expect(autoRating('short', true, 180000, passage)).toBe(2);
+    // 객관식은 보기 글도 읽는다
+    expect(autoRating('mcq', true, 25000, { prompt: '가'.repeat(200), choices: ['나'.repeat(40), '다'.repeat(40)] })).toBe(3);
+  });
 });
 
 describe('cost and energy', () => {

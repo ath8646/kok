@@ -4,29 +4,9 @@
 import { useEditorState } from '@tiptap/react';
 import type { Editor } from '@tiptap/core';
 import { NodeSelection } from '@tiptap/pm/state';
-import { Fragment, useEffect, useState, type KeyboardEvent, type ReactNode, type RefObject } from 'react';
+import { Fragment, useState, type KeyboardEvent, type ReactNode, type RefObject } from 'react';
 import { cx, Icon, ICONS } from '@/components/ui';
-
-/** 폰 키보드가 가린 높이 (없으면 0): 줄을 그만큼 올린다 */
-function useKeyboardCover(): number {
-  const [cover, setCover] = useState(0);
-  useEffect(() => {
-    const v = window.visualViewport;
-    if (!v) return;
-    const update = () => {
-      const c = Math.round(window.innerHeight - (v.height + v.offsetTop));
-      setCover(c > 60 ? c : 0);
-    };
-    update();
-    v.addEventListener('resize', update);
-    v.addEventListener('scroll', update);
-    return () => {
-      v.removeEventListener('resize', update);
-      v.removeEventListener('scroll', update);
-    };
-  }, []);
-  return cover;
-}
+import { useKeyboardCover } from '@/components/useKeyboardCover';
 
 function BulletsIcon() {
   return (

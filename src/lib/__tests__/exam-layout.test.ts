@@ -36,7 +36,10 @@ describe('시험지 덩이 (examLayout)', () => {
     expect(box.kind).toBe('box');
     const lines = box.kind === 'box' ? box.lines : [];
     expect(lines.map((x) => (x.kind === 'step' ? x.mark : x.kind))).toEqual(['p', '①', '②', '③', '④', '⑤', '⑥', '⑦', 'p']);
-    expect(lines[0]).toEqual({ kind: 'p', text: '플랑크톤 P가 빛이 있는 환경에서 세포가 팽창하여 해수면으로 상승한다는 가설과 P의 광합성 여부를 함께 검증하는 실험이다. 실험 과정은' });
+    expect(lines[0]).toEqual({
+      kind: 'p',
+      text: '플랑크톤 P가 빛이 있는 환경에서 세포가 팽창하여 해수면으로 상승한다는 가설과 P의 광합성 여부를 함께 검증하는 실험이다. 실험 과정은',
+    });
     expect(lines[3]).toEqual({ kind: 'step', mark: '③', text: '(가)' });
     expect(lines[6]).toEqual({ kind: 'step', mark: '⑥', text: '각 수조의 P를 받침 유리 위에 올려놓고 (나)' });
     expect(lines[7]).toEqual({ kind: 'step', mark: '⑦', text: '거름종이로 여분의 용액을 제거하고 덮개 유리를 덮어 각 수조의 P를 현미경으로 관찰한다.' });
@@ -67,9 +70,10 @@ describe('시험지 덩이 (examLayout)', () => {
   });
 
   it('새 꼴 (자료 줄들 → 빈 줄 → 발문): 머리 [실험 과정], 줄마다 ① 칸, 이름 붙은 줄', () => {
-    const p = '[실험 과정]\n① 시험관에 녹말 용액을 넣는다.\n② 아이오딘 용액을 떨어뜨린다.\n[실험 결과]\n학생 A: 청람색으로 변했어요.\n\n이 실험에서 확인한 영양소는?';
+    const p =
+      '[실험 과정]\n① 시험관에 녹말 용액을 넣는다.\n② 아이오딘 용액을 떨어뜨린다.\n[실험 결과]\n학생 A: 청람색으로 변했어요.\n\n이 실험에서 확인한 영양소는?';
     expect(show(examLayout(p).blocks)).toEqual([
-      'box[#실험 과정 | ①:시험관에 녹말 용액을 넣는다. | ②:아이오딘 용액을 떨어뜨린다. | #실험 결과 | 학생 A: 청람색으로 변했어요.]',
+      'box[#[실험 과정] | ①:시험관에 녹말 용액을 넣는다. | ②:아이오딘 용액을 떨어뜨린다. | #[실험 결과] | 학생 A: 청람색으로 변했어요.]',
       'stem: 이 실험에서 확인한 영양소는?',
     ]);
   });
@@ -100,13 +104,15 @@ describe('시험지 덩이 (examLayout)', () => {
   });
 
   it('수학: (가)(나) 조건은 한 줄씩, 수식 안의 마침표는 문장 끝이 아니다', () => {
-    const p = '다음 조건을 만족시키는 함수 $f(x)$에 대하여 $f(2)$의 값은? (가) $f(0)=1$ 이다. (나) 모든 실수 $x$에 대하여 $f\'(x)=2x$ 이다.';
+    const p = "다음 조건을 만족시키는 함수 $f(x)$에 대하여 $f(2)$의 값은? (가) $f(0)=1$ 이다. (나) 모든 실수 $x$에 대하여 $f'(x)=2x$ 이다.";
     expect(show(examLayout(p, 'math').blocks)).toEqual([
       'stem: 다음 조건을 만족시키는 함수 $f(x)$에 대하여 $f(2)$의 값은?',
       "box[(가):$f(0)=1$ 이다. | (나):모든 실수 $x$에 대하여 $f'(x)=2x$ 이다.]",
     ]);
     // 소수점 3.14 · 번호 '1.' 에서 나누지 않는다
-    expect(show(examLayout('원주율을 3.14로 계산한다. 반지름이 2인 원의 넓이는?').blocks)).toEqual(['stem: 원주율을 3.14로 계산한다. 반지름이 2인 원의 넓이는?']);
+    expect(show(examLayout('원주율을 3.14로 계산한다. 반지름이 2인 원의 넓이는?').blocks)).toEqual([
+      'stem: 원주율을 3.14로 계산한다. 반지름이 2인 원의 넓이는?',
+    ]);
   });
 
   it('영어 지문: 묻는 문장(영어)만 아래로', () => {
@@ -121,7 +127,9 @@ describe('시험지 덩이 (examLayout)', () => {
 describe('정답·해설 줄 (explainLines)', () => {
   it("'이름: 내용'이 둘 넘으면 이름마다 한 줄", () => {
     expect(
-      explainLines('혈당량 조절: 혈당량이 낮아지면 이자에서 글루카곤이 분비되어 간에서 글리코젠이 포도당으로 분해되어 혈당량이 높아진다. 체온 조절: 체온이 낮아지면 근육이 떨려 열 발생량이 늘고 피부 근처 혈관이 수축해 열 방출량이 줄어 체온이 올라간다.'),
+      explainLines(
+        '혈당량 조절: 혈당량이 낮아지면 이자에서 글루카곤이 분비되어 간에서 글리코젠이 포도당으로 분해되어 혈당량이 높아진다. 체온 조절: 체온이 낮아지면 근육이 떨려 열 발생량이 늘고 피부 근처 혈관이 수축해 열 방출량이 줄어 체온이 올라간다.',
+      ),
     ).toEqual([
       { label: '혈당량 조절', text: '혈당량이 낮아지면 이자에서 글루카곤이 분비되어 간에서 글리코젠이 포도당으로 분해되어 혈당량이 높아진다.' },
       { label: '체온 조절', text: '체온이 낮아지면 근육이 떨려 열 발생량이 늘고 피부 근처 혈관이 수축해 열 방출량이 줄어 체온이 올라간다.' },
@@ -137,7 +145,9 @@ describe('정답·해설 줄 (explainLines)', () => {
   });
 
   it('보통 해설은 그대로 한 문단, 이미 나뉜 줄은 줄마다, ①② 차례는 칸마다', () => {
-    expect(explainLines('잎의 엽록체에서 광합성이 일어나요. 그래서 정답은 ③이에요.')).toEqual([{ label: null, text: '잎의 엽록체에서 광합성이 일어나요. 그래서 정답은 ③이에요.' }]);
+    expect(explainLines('잎의 엽록체에서 광합성이 일어나요. 그래서 정답은 ③이에요.')).toEqual([
+      { label: null, text: '잎의 엽록체에서 광합성이 일어나요. 그래서 정답은 ③이에요.' },
+    ]);
     expect(explainLines('첫 줄\n\n둘째 줄')).toEqual([
       { label: null, text: '첫 줄' },
       { label: null, text: '둘째 줄' },
@@ -162,7 +172,9 @@ describe('과목마다 시험지 모양 (examStyle)', () => {
 
   it('모르는 이름이면 노트의 자료 종류, 그다음 문제 글', () => {
     expect(examStyle({ subject: '소집면접', material: 'math' })).toBe('math');
-    expect(examStyle({ subject: '기타', material: 'reading', text: '다음 시를 읽고 물음에 답하시오. 나 보기가 역겨워 가실 때에는 말없이 고이 보내 드리우리다.' })).toBe('korean');
+    expect(
+      examStyle({ subject: '기타', material: 'reading', text: '다음 시를 읽고 물음에 답하시오. 나 보기가 역겨워 가실 때에는 말없이 고이 보내 드리우리다.' }),
+    ).toBe('korean');
     expect(examStyle({ text: 'Read the passage below and choose the best title for it. The passage is about trees.' })).toBe('english');
     expect(examStyle({ text: '```python\nprint(1)\n```' })).toBe('code');
     expect(examStyle({ text: '$x^2$ 와 $y^2$ 의 합은?' })).toBe('math');
@@ -195,7 +207,10 @@ describe('접힌 목록 (examSummary)', () => {
   });
 
   it('자료 상자가 있으면 발문 뒤에 자료 첫머리 (길면 줄임)', () => {
-    const s = examSummary(`학생 A: 광합성은 빛이 있어야 일어나요.\n학생 B: ${'그래서 밤에는 '.repeat(12)}일어나지 않아요.\n\n이에 대한 설명으로 옳은 것은?`, 'science');
+    const s = examSummary(
+      `학생 A: 광합성은 빛이 있어야 일어나요.\n학생 B: ${'그래서 밤에는 '.repeat(12)}일어나지 않아요.\n\n이에 대한 설명으로 옳은 것은?`,
+      'science',
+    );
     expect(s.ask).toBe('이에 대한 설명으로 옳은 것은?');
     expect(s.hint.startsWith('학생 A: 광합성은 빛이 있어야 일어나요. 학생 B: 그래서')).toBe(true);
     expect(s.hint.length).toBeLessThanOrEqual(80);
@@ -207,5 +222,83 @@ describe('접힌 목록 (examSummary)', () => {
     const sub = examSummary('다음 실험을 보고 물음에 답하시오. 수조 A에만 빛을 비추었다. (1) 기포가 나온 수조를 쓰시오. (2) 그 까닭을 설명하시오.', 'science');
     expect(sub.ask).not.toContain('\n');
     expect(sub.ask).toContain('(2) 그 까닭을 설명하시오.');
+  });
+});
+
+describe('검토에서 찾은 것 (글을 잘못 나누지 않게)', () => {
+  it('해설의 코드 블록·여러 줄 수식은 나누지 않고, 수식·코드·꾸미기가 든 말은 이름이 아니다', () => {
+    const code = '다음과 같이 고친다.\n```python\nfor i in range(3):\n    print(i)\n```';
+    expect(explainLines(code)).toEqual([{ label: null, text: code }]);
+    const math = '식을 정리하면\n$$\nx = 1\n$$';
+    expect(explainLines(math)).toEqual([{ label: null, text: math }]);
+    expect(explainLines('$f: \\mathbb{R} \\to \\mathbb{R}$ 는 실수 함수다.')).toEqual([
+      { label: null, text: '$f: \\mathbb{R} \\to \\mathbb{R}$ 는 실수 함수다.' },
+    ]);
+    expect(explainLines('`x: int = 3` 은 타입을 적은 것이다.')[0].label).toBeNull();
+    expect(explainLines('**혈당량 조절**: 글루카곤이 나온다. **체온 조절**: 근육이 떨린다.').every((l) => l.label === null)).toBe(true);
+  });
+
+  it('영어: 의문사로 시작한 평서문은 묻는 문장이 아니고, 발문이 먼저인 지문 문제는 발문이 위에', () => {
+    const p = '다음 글의 주제로 가장 적절한 것은?\n\nWhen people sleep, the brain sorts the memories of the day. What we learn is kept.';
+    expect(show(examLayout(p, 'english').blocks)).toEqual([
+      'stem: 다음 글의 주제로 가장 적절한 것은?',
+      'box[p:When people sleep, the brain sorts the memories of the day. What we learn is kept.]',
+    ]);
+    // 이어 쓴 꼴도 같다
+    const run = '다음 글의 주제로 가장 적절한 것은? When people sleep, the brain sorts the memories of the day. What we learn is kept.';
+    expect(show(examLayout(run, 'english').blocks)[0]).toBe('stem: 다음 글의 주제로 가장 적절한 것은?');
+    // 지문 속 물음표 문장보다 한국어 발문이 먼저
+    const q = '다음 글의 요지로 가장 적절한 것은?\n\nWhy do we dream? Scientists think dreams help us remember.';
+    expect(show(examLayout(q, 'english').blocks)[0]).toBe('stem: 다음 글의 요지로 가장 적절한 것은?');
+    // 줄임말에서 문장을 끊지 않는다
+    expect(examLayout('What time does Mr. Smith start work?', 'english').blocks).toEqual([{ kind: 'stem', text: 'What time does Mr. Smith start work?' }]);
+  });
+
+  it('보기를 가리키는 ①②, 밑줄 친 말의 번호, 빈칸 (가)는 칸으로 나누지 않는다', () => {
+    expect(explainLines('광합성은 엽록체에서 일어난다. ①, ②는 세포 호흡에 대한 설명이다.')).toHaveLength(1);
+    expect(explainLines('①과 ②는 옳고 ③은 틀렸다.')).toHaveLength(1);
+    const underline = 'The book ① that I read ② were ③ very interesting to ④ me and ⑤ my friends.\n\n밑줄 친 부분 중 어법상 틀린 것은?';
+    expect(show(examLayout(underline, 'english').blocks)[0]).toBe('box[p:The book ① that I read ② were ③ very interesting to ④ me and ⑤ my friends.]');
+    const proof = '$n=k$일 때 성립한다고 가정하면 (가) 이므로 $n=k+1$일 때 (나) 이다.\n\n(가), (나)에 알맞은 것은?';
+    expect(show(examLayout(proof, 'math').blocks)[0]).toBe('box[p:$n=k$일 때 성립한다고 가정하면 (가) 이므로 $n=k+1$일 때 (나) 이다.]');
+    expect(show(examLayout('(가) 이므로 성립한다.\n\n(가)에 알맞은 식은?', 'math').blocks)[0]).toBe('box[p:(가) 이므로 성립한다.]');
+    // 실험 과정·풀이 단계는 그대로 칸
+    expect(explainLines('① 엽록체는 식물 세포에만 있다. ② 미토콘드리아는 두 세포 모두에 있다.').map((l) => l.label)).toEqual(['①', '②']);
+  });
+
+  it('줄 앞 괄호는 짝이 맞는 한글 이름일 때만 머리 (구간·태그는 글 그대로)', () => {
+    expect(show(examLayout('[0, 1]에서 연속인 함수 $f$가 있다.\n\n$f(1)$의 값은?', 'math').blocks)[0]).toBe('box[p:[0, 1]에서 연속인 함수 $f$가 있다.]');
+    expect(show(examLayout('<p>안녕</p> 을 화면에 그린다.\n\n무엇이 보이는가?', 'code').blocks)[0]).toBe('box[p:<p>안녕</p> 을 화면에 그린다.]');
+    expect(show(examLayout('【자료】 기온이 오른다.\n\n이에 대한 설명으로 옳은 것은?').blocks)[0]).toBe('box[#【자료】 | p:기온이 오른다.]');
+  });
+
+  it('자료 → <보기> → 발문 꼴은 쓴 차례 그대로, 하위 문제 문단은 모두 발문, 이어 쓴 <보기>의 표시는 그대로', () => {
+    const p =
+      '다음은 사람의 혈당량 조절 과정을 나타낸 것이다.\n<보기>\nㄱ. 인슐린이 분비된다.\nㄴ. 글루카곤이 분비된다.\n\n이에 대한 설명으로 옳은 것만을 <보기>에서 있는 대로 고른 것은?';
+    const l = examLayout(p, 'science');
+    expect(show(l.blocks)).toEqual([
+      'text: 다음은 사람의 혈당량 조절 과정을 나타낸 것이다.',
+      'bogi[ㄱ. 인슐린이 분비된다. | ㄴ. 글루카곤이 분비된다.]',
+      'stem: 이에 대한 설명으로 옳은 것만을 <보기>에서 있는 대로 고른 것은?',
+    ]);
+    expect(l.ask).toMatch(/^이에 대한 설명으로/);
+    const sub = '철수는 빛의 세기를 바꾸며 광합성량을 측정하였다.\n\n(1) 조작 변인을 쓰시오.\n\n(2) 광합성량이 일정해진 까닭을 설명하시오.';
+    expect(show(examLayout(sub, 'science').blocks)).toEqual([
+      'box[p:철수는 빛의 세기를 바꾸며 광합성량을 측정하였다.]',
+      'stem: (1) 조작 변인을 쓰시오.\n(2) 광합성량이 일정해진 까닭을 설명하시오.',
+    ]);
+    expect(show(examLayout('(1) 조작 변인을 쓰시오.\n\n(2) 까닭을 설명하시오.', 'science').blocks)).toEqual([
+      'stem: (1) 조작 변인을 쓰시오.\n(2) 까닭을 설명하시오.',
+    ]);
+    const inline = '옳은 것만을 고른 것은? ㄱ) 인슐린은 혈당을 낮춘다. ㄴ) 글루카곤은 혈당을 높인다.';
+    expect(examLayout(inline).blocks.find((b) => b.kind === 'bogi')).toEqual({
+      kind: 'bogi',
+      items: ['ㄱ) 인슐린은 혈당을 낮춘다.', 'ㄴ) 글루카곤은 혈당을 높인다.'],
+    });
+  });
+
+  it('과목 모양은 글이 아닌 값에도 멈추지 않는다', () => {
+    expect(examStyle({ subject: 3 as unknown as string, text: null })).toBe('general');
+    expect(examStyle({ text: 12 as unknown as string })).toBe('general');
   });
 });

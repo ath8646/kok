@@ -16,20 +16,21 @@ export async function PATCH(req: NextRequest, ctx: RouteContext<'/api/admin/repo
     const { admin } = await requireAccount({ admin: true });
     const parsed = Body.safeParse(await readJson(req, 2_000));
     if (!parsed.success) throw new UserFacingError('bad_body', '값이 올바르지 않아요.', 400);
-    const { data: rep } = await admin.from('reports').select('id, target_type, target_id').eq('id', rid).maybeSingle();
+    const { data: rep } = await admin.from('reports').select('id, reporter_id, target_type, target_id').eq('id', rid).maybeSingle();
     if (!rep) throw new UserFacingError('not_found', '신고를 찾을 수 없어요.', 404);
     const { error } = await admin
       .from('reports')
       .update({ status: parsed.data.status, resolved_at: parsed.data.status === 'open' ? null : new Date().toISOString() })
       .eq('id', rid);
     if (error) throw error;
-    if (parsed.data.suspendQuestion && rep.target_type === 'question' && rep.target_id) {
+    if (parsed.data.suspendQuestion && rep.target_type === 'question' && rep.target_id && rep.reporter_id) {
+      // 신고한 사람의 문제만 쉬게 한다 (다른 사람의 문제 번호를 적은 신고로 남의 문제가 멈추지 않게)
       if ((await getFeatures(admin)).restedHidden) {
         // 지금 버전에 없는 문제(hidden)는 숨긴 채로 두고, 그 버전으로 돌아오면 '쉬는 중'이 되게 한다
-        await admin.from('questions').update({ status: 'suspended' }).eq('id', rep.target_id).neq('status', 'hidden');
-        await admin.from('questions').update({ rested_hidden: true }).eq('id', rep.target_id).eq('status', 'hidden');
+        await admin.from('questions').update({ status: 'suspended' }).eq('id', rep.target_id).eq('user_id', rep.reporter_id).neq('status', 'hidden');
+        await admin.from('questions').update({ rested_hidden: true }).eq('id', rep.target_id).eq('user_id', rep.reporter_id).eq('status', 'hidden');
       } else {
-        await admin.from('questions').update({ status: 'suspended' }).eq('id', rep.target_id);
+        await admin.from('questions').update({ status: 'suspended' }).eq('id', rep.target_id).eq('user_id', rep.reporter_id);
       }
     }
     return Response.json({ ok: true });

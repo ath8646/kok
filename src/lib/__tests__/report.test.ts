@@ -148,8 +148,37 @@ describe('문제 신고: 보낼 글 검사·문제 모습', () => {
       '시발점이 틀렸어요',
       'this hit is wrong',
       'ㄱㄴ',
+      // 검토에서 찾은 것: 국어·과학·코딩 공부 글, 기호·숫자 정답
+      '겹받침 ㅄ은 [ㅂ]으로 발음해요',
+      '초성이 ㅈㄹ 이면 지리예요',
+      '씨발아 실험에서 온도가 틀렸어요',
+      '씨(발아 조건)이 빠졌어요',
+      '씨-발아에 필요한 조건이 틀렸어요',
+      '정답이 틀렸어요: ->',
+      '정답이 틀렸어요: !=',
+      '정답이 틀렸어요: ≥',
+      '정답이 틀렸어요: 1111',
+      '정답이 틀렸어요: ㄱ, ㄴ, ㄷ, ㄹ',
+      'ㄱ, ㄴ, ㄷ, ㄹ',
+      '0000 이 아니라 0001 이에요',
+      'java.io 패키지가 아니라 java.nio 예요',
+      'android.app 을 import 해야 해요',
+      'System.Net 이 아니라 System.IO 예요',
+      'ASP.NET 버전이 틀렸어요',
+      'A@B.T 는 행렬 곱이에요',
+      '정답은 1000000000 이에요',
     ])
       expect(reportTextProblem(ok), ok).toBeNull();
+  });
+
+  it('흔한 우회도 막는다 (+82·띄어 쓴 번호·별표 욕설·비슷한 소리)', () => {
+    expect(reportTextProblem('+82 10-1234-5678 로 연락 주세요')).toMatch(/개인정보/);
+    expect(reportTextProblem('010 - 1234 - 5678')).toMatch(/개인정보/);
+    expect(reportTextProblem('f*ck 이게 뭐야')).toMatch(/고운 말/);
+    expect(reportTextProblem('씌발 틀렸네')).toMatch(/고운 말/);
+    expect(reportTextProblem('naver.com 에 정답 있어요')).toMatch(/링크/);
+    expect(reportTextProblem('?!?!?!')).toMatch(/글로/);
+    expect(reportTextProblem('XXXX')).toMatch(/알아볼 수 있게/);
   });
 
   it('링크·개인정보·욕설·알아볼 수 없는 글은 막고 고칠 말을 준다', () => {
@@ -161,6 +190,7 @@ describe('문제 신고: 보낼 글 검사·문제 모습', () => {
     expect(reportTextProblem('ㅅㅂ 틀렸네')).toMatch(/고운 말/);
     expect(reportTextProblem('what the fuck')).toMatch(/고운 말/);
     expect(reportTextProblem('정답이 틀렸어요: ?!?!?!')).toMatch(/글로/);
+    expect(reportTextProblem('->')).toMatch(/글로/);
     expect(reportTextProblem('ㅋㅋㅋㅋㅋㅋ')).toMatch(/알아볼 수 있게/);
     expect(reportTextProblem('ㅁㄴㅇㄹ')).toMatch(/알아볼 수 있게/);
     expect(reportTextProblem('aaaaaa')).toMatch(/알아볼 수 있게/);

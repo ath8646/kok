@@ -57,26 +57,40 @@ const oneLine = (s: string) => s.replace(/\s+/g, ' ').trim();
  * 욕설: 기호·숫자를 끼워 써도 찾는다 (빈칸은 그대로 둔다: '씨 발아'·'영향을 미친 년도'·'불이 꺼져' 같은 공부 글을 막지 않게).
  * '시발점'·'병신년'·'닥쳐오다'처럼 다른 뜻이 흔한 말은 넣지 않는다. 자음 줄임말은 따로 떨어져 있을 때만 ('ㄱㄴㄷㄹㅁㅂㅅ' 은 괜찮다)
  */
-const ABUSE_KO = ['씨발', '씨빨', '좆', '존나', '개새끼', '지랄', '엿먹어', '니애미', '느금마', '애미뒤', '병신같'];
-const ABUSE_JAMO = /(?:^|[^ㄱ-ㅎ])(?:ㅅㅂ|ㅆㅂ|ㅂㅅ|ㅄ|ㅈㄴ|ㅈㄹ)(?:[^ㄱ-ㅎ]|$)/;
-const ABUSE_EN = /\b(?:fuck\w*|shit\w*|bitch\w*|asshole|motherfuck\w*)\b/i;
+const ABUSE_KO = ['씨발', '씨빨', '씌발', '좆', '존나', '개새끼', '지랄', '엿먹어', '니애미', '느금마', '애미뒤', '병신같'];
+/** 자음 욕은 따로 선 말일 때만 ('ㅅㅂ 틀렸네'). 겹받침 'ㅄ'·초성 'ㅈㄹ' 처럼 국어 공부에 나오는 것은 넣지 않는다 */
+const ABUSE_JAMO = /(?:^|[\s\p{P}])(?:ㅅㅂ|ㅆㅂ|ㅈㄴ)(?=[\s\p{P}]|$)/u;
+const ABUSE_EN = /\b(?:fuck\w*|shit\w*|bitch\w*|asshole|motherfuck\w*|f[*@#_.-]ck\w*|sh[*@#_.-]t\w*)/i;
+/** 과학의 '씨 발아'(씨앗이 싹 틈): 띄어 쓰지 않거나 괄호를 끼워도 욕이 아니다 ('씨발아 실험'·'씨(발아 조건)') */
+const SEED_GERMINATION = /씨\s*발아(?=\s*(?:실험|조건|과정|율|률|온도|속도|시간|기간|에|를|은|는|가|와|과|의|도|시|때|하|되|중|후|전|에서|로|부터|까지))/g;
+/** 전화번호 (+82 · 띄어 쓴 것도) 와 메일 주소 (끝은 두 글자 넘는 영어: 'A@B.T' 같은 코드는 아니다) */
+const CONTACT = /(?:\+82[\s-]*0?1[016789]|\b01[016789])\s*[-.]?\s*\d{3,4}\s*[-.]?\s*\d{4}\b|[\w.+-]+@[\w-]+(?:\.[\w-]+)*\.[a-z]{2,}\b/i;
+/** 링크: 주소 머리, 또는 소문자로 쓴 흔한 웹 주소 끝 ('java.io'·'System.Net'·'ASP.NET' 같은 코드 이름은 아니다) */
+const LINK = /https?:\/\/|\bwww\./i;
+const DOMAIN = /\b[a-z0-9-]+\.(?:com|net|org|kr|co|me|ly|gg|xyz|site|link)\b/;
 
 /**
  * 신고 글을 보내도 되는지: 안 되면 고칠 말 (되면 null). 이유 칩만 고른 글도 통과한다.
- * 링크·전화번호·메일(개인정보), 욕설, 알아볼 수 없는 글(기호만·같은 글자 되풀이·자음만)을 막는다
+ * 링크·전화번호·메일(개인정보), 욕설, 알아볼 수 없는 글(기호만·같은 글자 되풀이·자음만)을 막는다.
+ * 이유 칩을 고른 글은 적은 말이 기호·숫자만이어도 된다 (고칠 정답이 '->'·'1111'·'ㄱ, ㄴ, ㄷ' 일 수 있다)
  */
 export function reportTextProblem(text: string): string | null {
   const t = (text ?? '').trim();
   if (!t) return null;
-  if (/\b01[016789][-\s.]?\d{3,4}[-\s.]?\d{4}\b|[\w.+-]+@[\w-]+\.[\w.]+/.test(t)) return '전화번호·메일 주소 같은 개인정보는 빼고 적어 주세요.';
-  if (/https?:\/\/|www\.|\b[a-z0-9-]+\.(?:com|net|org|kr|io|co|me|ly|gg|xyz|app|site|link)\b/i.test(t)) return '링크는 보낼 수 없어요. 무엇이 이상한지만 적어 주세요.';
-  const plain = t.replace(/[\d._*\-~!@#$%^&+=|\\/:;'"`,?()[\]{}<>]/g, '');
+  if (CONTACT.test(t)) return '전화번호·메일 주소 같은 개인정보는 빼고 적어 주세요.';
+  if (LINK.test(t) || DOMAIN.test(t)) return '링크는 보낼 수 없어요. 무엇이 이상한지만 적어 주세요.';
+  const plain = t.replace(/[\d._*\-~!@#$%^&+=|\\/:;'"`,?()[\]{}<>]/g, '').replace(SEED_GERMINATION, '');
   if (ABUSE_KO.some((w) => plain.includes(w)) || ABUSE_JAMO.test(t) || ABUSE_EN.test(t)) return '고운 말로 적어 주세요. 욕설은 보낼 수 없어요.';
-  // 고른 이유('…: ') 뒤의 적은 말만 본다
-  const own = t.includes(': ') ? t.slice(t.indexOf(': ') + 2).trim() : t;
-  const letters = own.replace(/[^\p{L}\p{N}]/gu, '');
-  if (own && !letters) return '무엇이 이상한지 글로 적어 주세요.';
-  if (letters.length >= 4 && (/^(.)\1+$/u.test(letters) || /^[ㄱ-ㅎㅏ-ㅣ]+$/.test(letters))) return '무엇이 이상한지 알아볼 수 있게 적어 주세요.';
+  // 고른 이유('…: ') 뒤의 적은 말: 문장 부호만('?!?!')이 아니면 된다
+  if (t.includes(': ')) {
+    const own = t.slice(t.indexOf(': ') + 2).trim();
+    return /^[?!.,~…\s]+$/.test(own) ? '무엇이 이상한지 글로 적어 주세요.' : null;
+  }
+  const letters = t.replace(/[^\p{L}\p{N}]/gu, '');
+  if (!letters) return '무엇이 이상한지 글로 적어 주세요.';
+  // 같은 글자 되풀이('ㅋㅋㅋㅋ'·'aaaa', 숫자는 빼고)·자음만('ㅁㄴㅇㄹ', 'ㄱ, ㄴ, ㄷ'처럼 쉼표로 띄운 보기 조합은 된다)
+  if (letters.length >= 4 && (/^(\p{L})\1+$/u.test(letters) || (/^[ㄱ-ㅎㅏ-ㅣ]+$/.test(letters) && !/^[ㄱ-ㅎ](?:\s*[,，·]\s*[ㄱ-ㅎ])+$/.test(t))))
+    return '무엇이 이상한지 알아볼 수 있게 적어 주세요.';
   return null;
 }
 

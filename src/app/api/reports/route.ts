@@ -123,14 +123,16 @@ export async function POST(req: NextRequest) {
     if ((count ?? 0) >= REPORTS_PER_DAY) throw new UserFacingError('too_many_reports', '오늘은 신고를 더 보낼 수 없어요. 내일 다시 보내 주세요.', 429);
 
     const { targetId, snapshot } = await resolve(admin, acc.userId, kind, target, given);
-    // 같은 것을 같은 이유로 하루에 두 번, 한 것을 하루에 다섯 번 넘게 받지 않는다 (확인은 한 번이면 된다)
-    if (targetId) {
+    // 같은 것을 같은 이유로 하루에 두 번, 한 것을 하루에 다섯 번 넘게 받지 않는다 (아직 확인하지 않은 신고만: 확인은 한 번이면 된다).
+    // 번호가 하나를 가리킬 때만: 홈 채팅('home', 답마다 다르다)·레슨(한 레슨 안의 여러 문제)은 같은 번호여도 다른 것이다
+    if (targetId && targetId !== 'home' && kind !== 'course') {
       const { data: same } = await admin
         .from('reports')
         .select('reason')
         .eq('reporter_id', acc.userId)
         .eq('target_type', kind)
         .eq('target_id', targetId)
+        .eq('status', 'open')
         .gte('created_at', since)
         .limit(5);
       if (same && (same.length >= 5 || same.some((r) => r.reason === reason)))

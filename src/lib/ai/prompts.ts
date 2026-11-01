@@ -359,7 +359,7 @@ const BOGI_RULE =
  * 문제 만들기·채팅 문제가 같이 쓴다
  */
 const EXAM_LAYOUT_RULE = [
-  '- Lay out each prompt like a question printed on a real exam paper. When it needs material (a passage, data, a dialogue, conditions or experiment steps), write the material first, then an empty line, then the question sentence itself as the last paragraph (like "㉠의 상황에서 항상성을 유지하는 과정을 설명하시오." or "이에 대한 설명으로 옳은 것은?"). Put each step (① …), condition ((가) …), speaker ("학생 A: …") and table row on its own line, and a heading like "[실험 과정]" or "[실험 결과]" on its own line before its part. A question without material stays one line.',
+  '- Lay out each prompt like a question printed on a real exam paper. When it needs material (a passage, data, a dialogue, conditions or experiment steps), write the material first, then an empty line, then the question sentence itself as the last paragraph (like "㉠의 상황에서 항상성을 유지하는 과정을 설명하시오." or "이에 대한 설명으로 옳은 것은?"); in the <보기> form the "<보기>" lines come right after that question sentence. Put each step (① …), condition ((가) …), speaker ("학생 A: …") and table row on its own line, and a heading like "[실험 과정]" or "[실험 결과]" on its own line before its part. A question without material stays one line.',
   '- When an answer or an explanation has several parts (like (가) and (나), or two processes), write each part on its own line, starting with its label (like "(가) …" or "혈당량 조절: …"), in at most 2 sentences.',
 ].join('\n');
 

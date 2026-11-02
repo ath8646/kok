@@ -45,10 +45,11 @@ export function LoginButton({
     }
   };
 
-  // 버튼은 크기·모양이 같다 (Apple 안내: 다른 로그인 버튼보다 작지 않게). 모서리는 카카오 안내(12px)에 모두 맞춘다
-  const cls = 'w-full min-w-64 rounded-xl! shadow-[0_8px_24px_var(--shadow-strong)]';
+  // 버튼은 크기·모양이 같다 (Apple 안내: 다른 로그인 버튼보다 작지 않게). 모서리는 카카오 안내(12px)에 모두 맞춘다.
+  // 너비는 감싼 칸을 꽉 채운다 (첫 화면이 폭을 정한다). 그림자 없이
+  const cls = 'w-full rounded-xl!';
   return (
-    <div className="grid justify-items-center gap-2">
+    <div className="grid gap-2">
       <div className="grid gap-2.5">
         <Button size={size} variant="ink" busy={busy === 'google'} disabled={busy !== null} className={cls} onClick={() => signIn('google')}>
           <GoogleLogo />

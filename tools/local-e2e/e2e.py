@@ -2582,6 +2582,17 @@ async def main():
         # 카카오 버튼 (NEXT_PUBLIC_KAKAO_LOGIN=1 로 빌드). Apple 은 꺼져 있다
         await expect(page.get_by_role("button", name="카카오 로그인")).to_be_visible()
         assert await page.get_by_role("button", name="Apple로 계속하기").count() == 0
+
+        # 앱 화면 캡처 두 장(public/landing, 빌드할 때 있어야 한다): 화면 밝기에 맞는 그림만 보이고, 내려 보면 모두 읽힌다
+        async def landing_images(mode):
+            visible = "[...document.querySelectorAll('main img')].filter(i => i.offsetParent !== null)"
+            await page.evaluate("() => window.scrollTo(0, document.body.scrollHeight)")
+            await page.wait_for_function(f"() => {{ const v = {visible}; return v.length === 2 && v.every(i => i.complete && i.naturalWidth > 0) }}", timeout=10000)
+            srcs = await page.evaluate(f"() => {visible}.map(i => i.getAttribute('src'))")
+            assert all(s.endswith(f"-{mode}.webp") for s in srcs), srcs
+            await page.evaluate("() => window.scrollTo(0, 0)")
+
+        await landing_images("light")
         await shot(page, "01-landing-phone")
         await no_hscroll(page, "landing")
         await page.goto(BASE + "/home")
@@ -2599,6 +2610,8 @@ async def main():
         await ctx.close()
         ctx, page = await new_ctx(browser, width=1280, scheme="dark")
         await page.goto(BASE + "/")
+        await landing_images("dark")
+        await no_hscroll(page, "landing desktop")
         await shot(page, "04-landing-desktop-dark")
         await ctx.close()
 
